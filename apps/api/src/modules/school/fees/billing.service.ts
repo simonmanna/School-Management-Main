@@ -1,11 +1,18 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { dec, round, ZERO } from '../../../kernel/common/money';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
+import { PaymentService } from '../../invoicing/payment/payment.service';
+// DmsTypeResolver comes from the @Global DocumentsModule, which documents its
+// vertical injectors (invoicing, recurring, rental, school) explicitly — no
+// module import edge is required.
+import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto } from './dto.types';
 
@@ -37,6 +44,7 @@ export class BillingService {
     private readonly documentBuilder: DocumentBuilderService,
     private readonly posting: PostingService,
     private readonly determination: AccountDeterminationService,
+    private readonly dmsTypes: DmsTypeResolver,
   ) {}
 
   /**
@@ -146,50 +154,39 @@ export class BillingService {
           });
           if (existing) return { _skipped: true, documentId: existing.id } as any;
 
-          const documentNumber = await this.sequence.next(
-            `feeinvoice:${issueDate.getUTCFullYear()}`,
-            { prefix: 'FEE-', padding: 6 },
+          // P2A: build the invoice through the invoicing DocumentBuilderService
+          // rather than a raw create. The raw path omitted `documentTypeId`,
+          // which became a required FK when the DMS registry landed — so the
+          // ported billing run would throw on every invoice. The builder also
+          // resolves the document number, computes line/tax/totals, and sets
+          // amountResidual + paymentStatus, replacing the hand-rolled versions.
+          const createdDoc = await this.documentBuilder.createDocument(
             tx,
-          );
-          const createdDoc = await tx.document.create({
-            data: {
-              organizationId,
-              documentNumber,
-              documentType: 'sales_invoice',
+            'sales_invoice',
+            {
               partnerId: s.partnerId,
-              issueDate,
-              dueDate: schedule.dueDate,
-              status: 'draft',
+              issueDate: issueDate.toISOString(),
+              dueDate: schedule.dueDate ? new Date(schedule.dueDate).toISOString() : undefined,
               reference,
               notes: `Term fee for ${s.admissionNo}`,
               sourceType: 'school_fee',
-              sourceId: schedule.id,
-              subtotal: 0,
-              totalAmount: 0,
-              amountResidual: 0,
-              amountPaid: 0,
             },
+            lines.map((l) => ({
+              productId: l.productId,
+              description: l.description,
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              discountPercent: l.discountPercent,
+            })),
+          );
+          // The header input carries sourceType but not sourceId; set it so the
+          // (org, sourceType, sourceId, reference) dedup key is unique per
+          // schedule and the penalty run can trace invoices back to it.
+          await tx.document.update({
+            where: { id: createdDoc.id },
+            data: { sourceId: schedule.id },
           });
-          // Create each DocumentLine explicitly (in the same tx).
-          for (let i = 0; i < lines.length; i++) {
-            const l = lines[i];
-            await tx.documentLine.create({
-              data: {
-                organizationId,
-                documentId: createdDoc.id,
-                productId: l.productId,
-                description: l.description,
-                quantity: l.quantity,
-                unitPrice: l.unitPrice,
-                discountPercent: l.discountPercent,
-                lineNumber: i + 1,
-                subtotal: l.unitPrice * (1 - l.discountPercent / 100),
-                total: l.unitPrice * (1 - l.discountPercent / 100),
-                taxAmount: 0,
-              },
-            });
-          }
-          // Re-load to get the lines (for the post + total).
+          // Re-load with lines + partner for the GL post below.
           const full = await tx.document.findFirst({
             where: { id: createdDoc.id },
             include: { lines: true, partner: true },
@@ -399,11 +396,16 @@ export class BillingService {
         );
 
         // ── Create the penalty Document (with a DocumentLine) ──
+        // This stays a raw create (not documentBuilder.createDocument) because a
+        // late fee has no product line for the builder to price. It must still
+        // set documentTypeId — the required DMS-registry FK the fork predated —
+        // resolved via the @Global DmsTypeResolver.
         const penaltyDoc = await tx.document.create({
           data: {
             organizationId,
             documentNumber,
             documentType: 'sales_invoice',
+            documentTypeId: await this.dmsTypes.resolveIdByCode('sales_invoice', tx),
             partnerId: doc.partnerId,
             issueDate: new Date(),
             dueDate: new Date(),
@@ -522,10 +524,21 @@ export class BillingService {
 }
 
 /**
- * SchoolPaymentService — collects a payment against a student's open invoices.
- * Uses the existing PaymentService.record pattern via a raw Document+Payment
- * composition (the kernel module PaymentService is reserved for invoice → payment
- * relations which we use directly here).
+ * SchoolPaymentService — collects a fee payment and allocates it to a student's
+ * open fee invoices.
+ *
+ * P2A/B1: this delegates to the platform's single payment writer,
+ * `PaymentService.createReceipt`, instead of hand-rolling Payment + GL +
+ * allocations. That was a ledger-integrity hole: the old code mutated
+ * `Document.amountResidual`/`paymentStatus` directly (forbidden by ADR-011 §4),
+ * did money math in floats, and — despite accepting `cashSessionId` — never
+ * wrote the `CashMovement`, so school fee collections never appeared on the
+ * bursar's cash-session Z-report or in bank reconciliation.
+ *
+ * The school-specific part that stays here is *which* invoices to settle
+ * (open school-fee documents, oldest first) and the mobile-money replay guard.
+ * Everything downstream of the allocation list — the GL post, the Document
+ * updates, the CashMovement, the audit row — is the payment engine's job.
  */
 @Injectable()
 export class SchoolPaymentService {
@@ -533,17 +546,13 @@ export class SchoolPaymentService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
-    private readonly sequence: SequenceService,
-    private readonly posting: PostingService,
-    private readonly determination: AccountDeterminationService,
+    private readonly payments: PaymentService,
   ) {}
 
   /**
-   * Collect a payment and allocate it to the student's open fee invoices.
-   * Returns the Payment row and the allocations.
-   *
-   * Posts the cash/bank leg to the GL via PostingService, mirroring the
-   * existing InvoicingModule's payment flow.
+   * Collect a payment and allocate it, oldest-first, to the student's open fee
+   * invoices. Returns the Payment row (with allocations) and the unallocated
+   * remainder.
    */
   async collect(dto: CollectFeePaymentDto) {
     const organizationId = this.tenant.organizationId;
@@ -555,12 +564,16 @@ export class SchoolPaymentService {
 
       const partnerId = student.partnerId;
       const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
+      const method = dto.paymentMethod ?? 'cash';
 
-      // Idempotency: if a PaymentNumber was provided as reference, check we don't duplicate.
-      // (Mobile-money providers commonly retry with the same external transaction id.)
+      // Idempotency: mobile-money providers retry with the same external
+      // transaction id. A replayed reference returns the original receipt
+      // rather than collecting twice. Scoped to inbound receipts for this
+      // partner so an unrelated payment can't shadow it.
       if (dto.reference) {
         const existing = await tx.payment.findFirst({
-          where: { organizationId, reference: dto.reference },
+          where: { organizationId, reference: dto.reference, direction: 'inbound', partnerId },
+          include: { allocations: true },
         });
         if (existing) {
           return {
@@ -572,137 +585,80 @@ export class SchoolPaymentService {
         }
       }
 
-      // Resolve target invoices.
-      let docs: any[];
-      if (dto.documentIds?.length) {
-        docs = await tx.document.findMany({
-          where: { id: { in: dto.documentIds }, organizationId, partnerId },
-          orderBy: { issueDate: 'asc' },
-        });
-      } else {
-        // P0-1 (C1): auto-allocation must include freshly-posted invoices.
-        // Fresh invoices from `generateForTerm` are written with
-        // `paymentStatus: 'not_paid'`. The previous filter
-        //   { in: ['partial', 'paid'] }
-        // excluded them entirely, so a parent paying without `documentIds`
-        // had their Payment post to the GL but the matching Document stayed
-        // unpaid and `unallocated` carried the full amount.
-        // The correct set is open-but-not-settled: ['not_paid', 'partial'].
-        docs = await tx.document.findMany({
-          where: {
-            organizationId,
-            partnerId,
-            documentType: 'sales_invoice',
-            paymentStatus: { in: ['not_paid', 'partial'] },
-            sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
-            amountResidual: { gt: 0 },
-          },
-          orderBy: { issueDate: 'asc' },
-        });
+      // Choose the invoices to settle. Explicit documentIds win; otherwise
+      // every open school-sourced invoice, oldest issue date first. Fresh
+      // invoices from generateForTerm carry paymentStatus 'not_paid', so the
+      // open set is ['not_paid','partial'] with a positive residual.
+      const docs = dto.documentIds?.length
+        ? await tx.document.findMany({
+            where: { id: { in: dto.documentIds }, organizationId, partnerId },
+            orderBy: { issueDate: 'asc' },
+          })
+        : await tx.document.findMany({
+            where: {
+              organizationId,
+              partnerId,
+              documentType: 'sales_invoice',
+              paymentStatus: { in: ['not_paid', 'partial'] },
+              sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+              amountResidual: { gt: 0 },
+            },
+            orderBy: { issueDate: 'asc' },
+          });
+
+      // Build oldest-first allocations up to the payment amount, in Decimal.
+      let remaining = round(dec(dto.amount), 6);
+      const allocations: Array<{ documentId: string; amount: number }> = [];
+      for (const doc of docs) {
+        if (remaining.lessThanOrEqualTo(ZERO)) break;
+        const residual = dec(doc.amountResidual);
+        if (residual.lessThanOrEqualTo(ZERO)) continue;
+        const take = Prisma.Decimal.min(remaining, residual);
+        allocations.push({ documentId: doc.id, amount: take.toNumber() });
+        remaining = remaining.minus(take);
       }
 
-      // Resolve GL accounts.
-      const partner = await tx.partner.findFirst({ where: { id: partnerId } });
-      const method = dto.paymentMethod ?? 'cash';
-      const cashAccount =
-        dto.bankAccountId ?? (await this.determination.mapped(method === 'bank' ? 'default_bank' : 'default_cash', tx));
-      const counterAccount = await this.determination.receivableAccount(partner!, tx);
-
-      // Create Payment.
-      const paymentNumber = await this.sequence.next(`payment:${paymentDate.getUTCFullYear()}`, { prefix: 'PAY-', padding: 6 }, tx);
-      const payment = await tx.payment.create({
-        data: {
-          organizationId,
-          paymentNumber,
-          direction: 'inbound',
-          partnerId,
-          paymentDate,
-          paymentMethod: method,
-          accountId: cashAccount,
-          amount: dto.amount,
-          allocatedAmount: 0,
-          unallocatedAmount: dto.amount,
-          reference: dto.reference ?? null,
-          notes: dto.notes ?? null,
-          cashSessionId: dto.cashSessionId ?? null,
-          bankAccountId: dto.bankAccountId ?? null,
-          status: 'posted',
-        },
-      });
-
-      // Post the GL entry.
-      const entry = await this.posting.post(
+      // Delegate to the single payment writer. It posts the GL leg, updates
+      // each Document's residual/status, writes the CashMovement when this is a
+      // cash payment on an open session (accountId omitted so that path runs),
+      // records the audit row, and emits payment.received/allocated/invoice.paid
+      // — all inside this same transaction.
+      const receipt: any = await this.payments.createReceipt(
         {
-          journalCode: method === 'bank' ? 'BANK' : 'CASH',
-          date: paymentDate,
-          description: `School fee receipt · ${paymentNumber}`,
-          sourceType: 'payment',
-          sourceId: payment.id,
-          lines: [
-            { accountId: cashAccount, debit: dto.amount.toString() },
-            { accountId: counterAccount, credit: dto.amount.toString(), partnerId },
-          ],
+          partnerId,
+          paymentDate: paymentDate.toISOString(),
+          amount: dto.amount,
+          paymentMethod: method,
+          // A bank deposit posts to a specific bank GL account and has no cash
+          // drawer movement; cash / mobile-money / card let determination pick
+          // the default account (and, for cash, keep the CashMovement path live).
+          accountId: method === 'bank' ? dto.bankAccountId : undefined,
+          reference: dto.reference,
+          cashSessionId: dto.cashSessionId,
+          allocations,
         },
         tx,
       );
-      await tx.payment.updateMany({ where: { id: payment.id }, data: { journalEntryId: entry.id } });
 
-      // Allocate oldest-first.
-      let remaining = Number(dto.amount);
-      const allocations: Array<{ documentId: string; amount: number }> = [];
-      for (const doc of docs) {
-        if (remaining <= 0) break;
-        const outstanding = Number(doc.amountResidual);
-        const take = Math.min(remaining, outstanding);
-        await tx.paymentAllocation.create({
-          data: {
-            organizationId,
-            paymentId: payment.id,
-            documentId: doc.id,
-            amount: take,
-          },
-        });
-        const newPaid = Number(doc.amountPaid) + take;
-        const newResidual = Number(doc.amountResidual) - take;
-        const newStatus = newResidual <= 0.005 ? 'paid' : newPaid > 0 ? 'partial' : doc.status;
-        await tx.document.updateMany({
-          where: { id: doc.id },
-          data: {
-            amountPaid: newPaid,
-            amountResidual: newResidual,
-            paymentStatus: newResidual <= 0.005 ? 'paid' : 'partial',
-            status: newStatus,
-          },
-        });
-        allocations.push({ documentId: doc.id, amount: take });
-        remaining -= take;
-      }
-
-      await tx.payment.updateMany({
-        where: { id: payment.id },
-        data: {
-          allocatedAmount: Number(dto.amount) - remaining,
-          unallocatedAmount: remaining,
-        },
-      });
-
-      // Emit per-invoice events for downstream listeners.
+      // School-domain signal, in addition to the engine's generic events, so
+      // fee-specific subscribers (statements, guardian notifications) can react.
       for (const a of allocations) {
         this.events.publish(EVENTS.SchoolFeePaymentRecorded, {
           organizationId,
-          paymentId: payment.id,
+          paymentId: receipt.id,
           documentId: a.documentId,
           amount: a.amount.toString(),
         });
       }
 
+      const payment = await tx.payment.findFirst({
+        where: { id: receipt.id },
+        include: { allocations: true },
+      });
       return {
-        payment: await tx.payment.findFirst({
-          where: { id: payment.id },
-          include: { allocations: true },
-        }),
+        payment,
         allocations,
-        unallocated: remaining,
+        unallocated: remaining.toNumber(),
         replayed: false,
       };
     });

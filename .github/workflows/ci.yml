@@ -90,5 +90,12 @@ jobs:
 
       # Unit + kernel + module specs (excludes the drifted test/integration
       # harnesses — see the scope note at the top of this file).
-      - name: Test
+      - name: Test (unit + module)
         run: pnpm --filter @erp/api exec jest --testPathIgnorePatterns test/integration --forceExit
+
+      # The school vertical's own integration specs DO run against the CI
+      # Postgres — they're self-contained (seed their own currency) and the CI
+      # DB role bypasses RLS. --runInBand avoids the cross-suite DB contention
+      # that makes the parallel run flaky.
+      - name: Test (school integration)
+        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation --runInBand --forceExit

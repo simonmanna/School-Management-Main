@@ -34,6 +34,7 @@ function makeService(): { service: BillingService; mocks: MockContext } {
       $transaction: jest.fn(),
     },
   };
+  const dmsTypes = { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') };
   const service = new BillingService(
     prisma as any,
     tenant as any,
@@ -42,6 +43,7 @@ function makeService(): { service: BillingService; mocks: MockContext } {
     documentBuilder as any,
     posting as any,
     determination as any,
+    dmsTypes as any,
   );
   return { service, mocks: { prisma, tenant, events, sequence, documentBuilder, posting, determination } };
 }

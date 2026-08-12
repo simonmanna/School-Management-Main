@@ -108,6 +108,7 @@ function makeService() {
     { groupForPosting: documentBuilderGroup } as any,
     { post: postingPost } as any,
     { mapped: jest.fn(), receivableAccount: jest.fn() } as any,
+    { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') } as any,
   );
 
   const mocks: Mocks = {
