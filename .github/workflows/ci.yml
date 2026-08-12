@@ -98,4 +98,4 @@ jobs:
       # DB role bypasses RLS. --runInBand avoids the cross-suite DB contention
       # that makes the parallel run flaky.
       - name: Test (school integration)
-        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation --runInBand --forceExit
+        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine --runInBand --forceExit

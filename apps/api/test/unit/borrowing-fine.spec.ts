@@ -23,7 +23,18 @@ describe('BorrowingService — overdue fine calculation', () => {
     const tenant = { organizationId: 'org_test' };
     const events = { publish: jest.fn() };
     const sequence = { next: jest.fn().mockResolvedValue('LFINE-000001') };
-    const service = new BorrowingService(prisma as any, tenant as any, events as any, sequence as any);
+    const documentBuilder = { groupForPosting: jest.fn().mockResolvedValue({ counterAccount: 'acc_ar', itemByAccount: new Map() }) };
+    const posting = { post: jest.fn().mockResolvedValue({ id: 'je_1' }) };
+    const dmsTypes = { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') };
+    const service = new BorrowingService(
+      prisma as any,
+      tenant as any,
+      events as any,
+      sequence as any,
+      documentBuilder as any,
+      posting as any,
+      dmsTypes as any,
+    );
     return { service, prisma, events };
   }
 

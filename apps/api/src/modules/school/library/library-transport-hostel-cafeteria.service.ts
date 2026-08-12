@@ -24,6 +24,9 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventBus } from '../../../kernel/events/event-bus';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
+import { PostingService } from '../../accounting/posting/posting.service';
+import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -58,6 +61,9 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
     private readonly sequence: SequenceService,
+    private readonly documentBuilder: DocumentBuilderService,
+    private readonly posting: PostingService,
+    private readonly dmsTypes: DmsTypeResolver,
   ) {
     super(prisma.client.borrowing as unknown as CrudDelegate);
   }
@@ -110,17 +116,26 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
         data: { status: 'available' },
       });
 
-      // If overdue + has a student + has a fine, create a sales_invoice.
+      // If overdue + has a student + has a fine, raise a posted AR invoice so
+      // the fine can be collected through SchoolPaymentService like any fee.
       let invoiceId: string | null = null;
       if (overdue && borrowing.studentProfileId && fineAmount > 0) {
         const student = await tx.studentProfile.findFirst({ where: { id: borrowing.studentProfileId } });
         if (student) {
+          const organizationId = this.tenant.organizationId;
           const number = await this.sequence.next(`libraryfine:${new Date().getUTCFullYear()}`, { prefix: 'LFINE-', padding: 6 }, tx);
+          // H1: set documentTypeId (the required DMS FK the fork dropped — the
+          // raw create used to throw) and post to the GL. The old code left the
+          // fine as a never-posted 'draft', so collecting it later credited AR
+          // with no offsetting debit and the books drifted. A fine has no
+          // product line, so it follows the penalty pattern (raw doc + line +
+          // groupForPosting), not documentBuilder.createDocument.
           const invoice = await tx.document.create({
             data: {
-              organizationId: this.tenant.organizationId,
+              organizationId,
               documentNumber: number,
               documentType: 'sales_invoice',
+              documentTypeId: await this.dmsTypes.resolveIdByCode('sales_invoice', tx),
               partnerId: student.partnerId,
               issueDate: now,
               dueDate: now,
@@ -135,12 +150,52 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
             },
           });
           invoiceId = invoice.id;
+          await tx.documentLine.create({
+            data: {
+              organizationId,
+              documentId: invoice.id,
+              description: `Library overdue fine · ${borrowing.id}`,
+              quantity: 1,
+              unitPrice: fineAmount,
+              discountPercent: 0,
+              lineNumber: 1,
+              subtotal: fineAmount,
+              total: fineAmount,
+              taxAmount: 0,
+            },
+          });
+
+          // Post Dr Receivable / Cr fine income, then promote to 'posted'.
+          const full = await tx.document.findFirst({ where: { id: invoice.id }, include: { lines: true, partner: true } });
+          const { counterAccount, itemByAccount } = await this.documentBuilder.groupForPosting(tx, full, 'sales');
+          const journalLines: any[] = [
+            { accountId: counterAccount, debit: fineAmount.toString(), partnerId: student.partnerId, description: `Library fine ${number}` },
+          ];
+          for (const [accountId, amount] of itemByAccount) {
+            journalLines.push({ accountId, credit: amount.toString(), description: 'Library fine income' });
+          }
+          const entry = await this.posting.post(
+            {
+              journalCode: 'SALES',
+              date: now,
+              description: `Library fine · ${number}`,
+              sourceType: 'library_fine_invoice',
+              sourceId: invoice.id,
+              lines: journalLines,
+            },
+            tx,
+          );
+          await tx.document.update({
+            where: { id: invoice.id },
+            data: { status: 'posted', paymentStatus: 'not_paid', journalEntryId: entry.id, postedAt: now },
+          });
+
           await tx.borrowing.updateMany({
             where: { id: borrowingId },
             data: { fineInvoiceId: invoiceId },
           });
           this.events.publish(EVENTS.SchoolBookOverdueFined, {
-            organizationId: this.tenant.organizationId,
+            organizationId,
             borrowingId,
             fineAmount: fineAmount.toString(),
           });
