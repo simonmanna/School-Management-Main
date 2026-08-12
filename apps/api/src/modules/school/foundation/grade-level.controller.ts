@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { GradeLevelService } from './grade-level.service';
-import type { CreateGradeLevelDto, UpdateGradeLevelDto } from './dto.types';
+import { CreateGradeLevelDto, UpdateGradeLevelDto } from './dto.types';
 
 @Controller('school/grade-levels')
 export class GradeLevelController {

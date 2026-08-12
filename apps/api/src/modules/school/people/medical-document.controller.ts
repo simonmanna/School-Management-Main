@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { MedicalRecordService } from './medical-record.service';
 import { StudentDocumentService } from './student-document.service';
-import type { CreateStudentDocumentDto, UpsertMedicalRecordDto } from './dto.types';
+import { CreateStudentDocumentDto, UpsertMedicalRecordDto } from './dto.types';
 
 @Controller('school/students/:studentProfileId/medical-record')
 export class MedicalRecordController {

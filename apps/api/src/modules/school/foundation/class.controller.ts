@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { SchoolClassService, SectionService } from './class.service';
-import type {
+import {
   CreateSchoolClassDto,
   CreateSectionDto,
   UpdateSchoolClassDto,

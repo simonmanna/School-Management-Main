@@ -8,7 +8,7 @@ import {
   TeacherAssignmentService,
   TimetableService,
 } from './academics.service';
-import type {
+import {
   BulkTimetableDto,
   CreateCurriculumDto,
   CreateLessonPlanDto,

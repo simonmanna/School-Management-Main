@@ -1,92 +1,78 @@
-/** DTOs for the Admissions + Academics sprint. */
+/**
+ * DTOs for the Admissions + Academics module.
+ *
+ * H2/B6: class-validator classes (were bare interfaces). Import as values.
+ */
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-export interface CreateApplicationDto {
-  academicYearId: string;
-  applicantFirstName: string;
-  applicantLastName: string;
-  applicantDob?: Date | string;
-  applicantGender?: 'male' | 'female' | 'other';
-  applyingForClassId?: string;
-  parentContactId?: string;
-  customFields?: Record<string, unknown>;
-}
-export type UpdateApplicationDto = Partial<CreateApplicationDto>;
+const GENDERS = ['male', 'female', 'other'] as const;
+const RESIDENCE = ['day', 'boarder'] as const;
 
-export interface AddExamScoreDto {
-  applicationId: string;
-  subjectId: string;
-  score: number;
-  maxScore?: number;
-  grade?: string;
-  notes?: string;
-}
-
-export interface EnrollApplicationDto {
-  applicationId: string;
-  classId: string;
-  sectionId?: string;
-  termId: string;
-  rollNumber: string;
-  /** Partner-level data required to create the student. */
-  student: {
-    name: string;
-    email?: string;
-    phone?: string;
-    dateOfBirth?: Date | string;
-    gender?: 'male' | 'female' | 'other';
-    nationality?: string;
-    religion?: string;
-    house?: string;
-    residenceType?: 'day' | 'boarder';
-  };
+export class CreateApplicationDto {
+  @IsString() @IsNotEmpty() academicYearId!: string;
+  @IsString() @IsNotEmpty() applicantFirstName!: string;
+  @IsString() @IsNotEmpty() applicantLastName!: string;
+  @IsOptional() @IsString() applicantDob?: string;
+  @IsOptional() @IsIn([...GENDERS]) applicantGender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() applyingForClassId?: string;
+  @IsOptional() @IsString() parentContactId?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
-export interface CreateCurriculumDto {
-  classId: string;
-  academicYearId: string;
-  name: string;
-  description?: string;
-  subjects: Array<{ subjectId: string; periodsPerWeek: number; isCore?: boolean }>;
-}
-export interface UpdateCurriculumDto extends Partial<Omit<CreateCurriculumDto, 'subjects'>> {
-  subjects?: Array<{ subjectId: string; periodsPerWeek: number; isCore?: boolean }>;
+export class UpdateApplicationDto {
+  @IsOptional() @IsString() @IsNotEmpty() academicYearId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() applicantFirstName?: string;
+  @IsOptional() @IsString() @IsNotEmpty() applicantLastName?: string;
+  @IsOptional() @IsString() applicantDob?: string;
+  @IsOptional() @IsIn([...GENDERS]) applicantGender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() applyingForClassId?: string;
+  @IsOptional() @IsString() parentContactId?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
-export interface CreateLessonPlanDto {
-  subjectId: string;
-  classId?: string;
-  termId?: string;
-  teacherPartnerId?: string;
-  weekOf: Date | string;
-  title: string;
-  objectives?: string;
-  materials?: string;
+export class AddExamScoreDto {
+  @IsString() @IsNotEmpty() applicationId!: string;
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsNumber() @Min(0) score!: number;
+  @IsOptional() @IsNumber() @Min(0) maxScore?: number;
+  @IsOptional() @IsString() grade?: string;
+  @IsOptional() @IsString() notes?: string;
 }
-export type UpdateLessonPlanDto = Partial<CreateLessonPlanDto>;
 
-export interface CreateTeacherAssignmentDto {
-  teacherPartnerId: string;
-  subjectId: string;
-  classId: string;
-  sectionId?: string;
-  termId?: string;
-  periodsPerWeek?: number;
+export class EnrollStudentInput {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() dateOfBirth?: string;
+  @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsString() religion?: string;
+  @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
 }
-export type UpdateTeacherAssignmentDto = Partial<CreateTeacherAssignmentDto>;
 
-export interface CreateTimetableSlotDto {
-  classId: string;
-  sectionId?: string;
-  dayOfWeek: number; // 1=Mon ... 7=Sun
-  periodId: string;
-  subjectId: string;
-  teacherPartnerId?: string;
-  campusId?: string;
-  room?: string;
+export class EnrollApplicationDto {
+  @IsString() @IsNotEmpty() applicationId!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsString() @IsNotEmpty() rollNumber!: string;
+
+  @ValidateNested()
+  @Type(() => EnrollStudentInput)
+  student!: EnrollStudentInput;
 }
-export interface BulkTimetableDto {
-  classId: string;
-  sectionId?: string;
-  slots: Omit<CreateTimetableSlotDto, 'classId' | 'sectionId'>[];
-}
-export type UpdateTimetableSlotDto = Partial<CreateTimetableSlotDto>;

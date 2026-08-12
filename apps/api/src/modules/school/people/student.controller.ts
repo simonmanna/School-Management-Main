@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentService } from './student.service';
-import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
+import { CreateStudentDto, UpdateStudentDto } from './dto.types';
 
 @Controller('school/students')
 export class StudentController {

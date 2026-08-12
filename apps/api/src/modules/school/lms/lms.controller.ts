@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AnnouncementService, HomeworkService, LearningResourceService, SubmissionService } from './lms.service';
-import type {
+import {
   CreateAnnouncementDto,
   CreateHomeworkDto,
   CreateLearningResourceDto,

@@ -1,111 +1,185 @@
-/** DTOs for the People sprint. */
-export interface CreateStudentDto {
-  /** Partner row data. */
-  name: string;
-  code?: string; // auto-generated if omitted
-  email?: string;
-  phone?: string;
-  isCompany?: boolean;
+/**
+ * DTOs for the People module.
+ *
+ * H2/B6: converted from bare interfaces to class-validator classes so the
+ * global ValidationPipe (whitelist + forbidNonWhitelisted + transform) actually
+ * enforces them. Controllers must import these as values, not `import type`.
+ */
+import {
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsObject,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-  /** StudentProfile data. */
-  admissionNo: string;
-  enrollmentDate: Date | string;
-  currentClassId?: string;
-  currentSectionId?: string;
-  dateOfBirth?: Date | string;
-  gender?: 'male' | 'female' | 'other';
-  nationality?: string;
-  religion?: string;
-  residenceType?: 'day' | 'boarder';
-  house?: string;
-  customFields?: Record<string, unknown>;
-}
-export type UpdateStudentDto = Partial<CreateStudentDto> & {
-  status?: 'active' | 'suspended' | 'transferred' | 'withdrawn' | 'alumni';
-  reason?: string;
-};
+const GENDERS = ['male', 'female', 'other'] as const;
+const RESIDENCE = ['day', 'boarder'] as const;
+const STUDENT_STATUS = ['active', 'suspended', 'transferred', 'withdrawn', 'alumni'] as const;
+const STAFF_STATUS = ['active', 'on_leave', 'suspended', 'terminated', 'retired'] as const;
+const RELATIONSHIP = ['father', 'mother', 'uncle', 'aunt', 'sibling', 'grandparent', 'guardian', 'other'] as const;
+const CONTRACT = ['permanent', 'contract', 'temporary', 'probation'] as const;
+const STAFF_CATEGORY = ['teaching', 'non_teaching', 'admin', 'support'] as const;
+const STAFF_ATT_STATUS = ['present', 'absent', 'late', 'leave', 'off_duty'] as const;
 
-export interface CreateGuardianDto {
-  studentProfileId: string;
-  /** Contact row to create or reuse. */
-  guardian: {
-    firstName: string;
-    lastName?: string;
-    email?: string;
-    phone?: string;
-    position?: string;
-  };
-  relationship: 'father' | 'mother' | 'uncle' | 'aunt' | 'sibling' | 'grandparent' | 'guardian' | 'other';
-  isPrimary?: boolean;
-  canPickup?: boolean;
-  receivesStatements?: boolean;
-}
-export interface UpdateGuardianDto {
-  relationship?: 'father' | 'mother' | 'uncle' | 'aunt' | 'sibling' | 'grandparent' | 'guardian' | 'other';
-  isPrimary?: boolean;
-  canPickup?: boolean;
-  receivesStatements?: boolean;
-}
+export class CreateStudentDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsBoolean() isCompany?: boolean;
 
-export interface UpsertMedicalRecordDto {
-  studentProfileId: string;
-  bloodGroup?: string;
-  allergies?: string[];
-  conditions?: string[];
-  medications?: string[];
-  emergencyNotes?: string;
-  doctorName?: string;
-  doctorPhone?: string;
+  @IsString() @IsNotEmpty() admissionNo!: string;
+  @IsString() @IsNotEmpty() enrollmentDate!: string;
+  @IsOptional() @IsString() currentClassId?: string;
+  @IsOptional() @IsString() currentSectionId?: string;
+  @IsOptional() @IsString() dateOfBirth?: string;
+  @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsString() religion?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
-export interface CreateStudentDocumentDto {
-  studentProfileId: string;
-  type: 'birth_cert' | 'report_card' | 'transfer_letter' | 'photo' | 'medical' | 'other';
-  title: string;
+export class UpdateStudentDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsBoolean() isCompany?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() admissionNo?: string;
+  @IsOptional() @IsString() enrollmentDate?: string;
+  @IsOptional() @IsString() currentClassId?: string;
+  @IsOptional() @IsString() currentSectionId?: string;
+  @IsOptional() @IsString() dateOfBirth?: string;
+  @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsString() religion?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+  @IsOptional() @IsIn([...STUDENT_STATUS]) status?: (typeof STUDENT_STATUS)[number];
+  @IsOptional() @IsString() reason?: string;
+}
+
+export class GuardianContactInput {
+  @IsString() @IsNotEmpty() firstName!: string;
+  @IsOptional() @IsString() lastName?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() position?: string;
+}
+
+export class CreateGuardianDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+
+  @ValidateNested()
+  @Type(() => GuardianContactInput)
+  guardian!: GuardianContactInput;
+
+  @IsIn([...RELATIONSHIP]) relationship!: (typeof RELATIONSHIP)[number];
+  @IsOptional() @IsBoolean() isPrimary?: boolean;
+  @IsOptional() @IsBoolean() canPickup?: boolean;
+  @IsOptional() @IsBoolean() receivesStatements?: boolean;
+}
+
+export class UpdateGuardianDto {
+  @IsOptional() @IsIn([...RELATIONSHIP]) relationship?: (typeof RELATIONSHIP)[number];
+  @IsOptional() @IsBoolean() isPrimary?: boolean;
+  @IsOptional() @IsBoolean() canPickup?: boolean;
+  @IsOptional() @IsBoolean() receivesStatements?: boolean;
+}
+
+export class UpsertMedicalRecordDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsOptional() @IsString() bloodGroup?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) allergies?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) conditions?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) medications?: string[];
+  @IsOptional() @IsString() emergencyNotes?: string;
+  @IsOptional() @IsString() doctorName?: string;
+  @IsOptional() @IsString() doctorPhone?: string;
+}
+
+export class CreateStudentDocumentDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsIn(['birth_cert', 'report_card', 'transfer_letter', 'photo', 'medical', 'other'])
+  type!: 'birth_cert' | 'report_card' | 'transfer_letter' | 'photo' | 'medical' | 'other';
+  @IsString() @IsNotEmpty() title!: string;
   // P0/B10: id of a platform File row (see File model) rather than a raw URL.
-  fileId: string;
-  expiresAt?: Date | string;
+  @IsString() @IsNotEmpty() fileId!: string;
+  @IsOptional() @IsString() expiresAt?: string;
 }
 
-export interface CreateStaffDto {
-  /** Partner row data. */
-  name: string;
-  code?: string;
-  email?: string;
-  phone?: string;
-  isCompany?: boolean;
+export class CreateStaffDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsBoolean() isCompany?: boolean;
 
-  /** StaffProfile data. */
-  employeeNo: string;
-  departmentId?: string;
-  positionId?: string;
-  campusId?: string;
-  joinDate: Date | string;
-  contractType?: 'permanent' | 'contract' | 'temporary' | 'probation';
-  contractEndDate?: Date | string;
-  compensation?: Record<string, unknown>;
-  staffCategory?: 'teaching' | 'non_teaching' | 'admin' | 'support';
-  customFields?: Record<string, unknown>;
+  @IsString() @IsNotEmpty() employeeNo!: string;
+  @IsOptional() @IsString() departmentId?: string;
+  @IsOptional() @IsString() positionId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsString() @IsNotEmpty() joinDate!: string;
+  @IsOptional() @IsIn([...CONTRACT]) contractType?: (typeof CONTRACT)[number];
+  @IsOptional() @IsString() contractEndDate?: string;
+  @IsOptional() @IsObject() compensation?: Record<string, unknown>;
+  @IsOptional() @IsIn([...STAFF_CATEGORY]) staffCategory?: (typeof STAFF_CATEGORY)[number];
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateStaffDto = Partial<CreateStaffDto> & {
-  status?: 'active' | 'on_leave' | 'suspended' | 'terminated' | 'retired';
-  reason?: string;
-};
 
-export interface CreatePositionDto {
-  name: string;
-  isTeaching?: boolean;
-  defaultPermissions?: string[];
+export class UpdateStaffDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() code?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsBoolean() isCompany?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() employeeNo?: string;
+  @IsOptional() @IsString() departmentId?: string;
+  @IsOptional() @IsString() positionId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() joinDate?: string;
+  @IsOptional() @IsIn([...CONTRACT]) contractType?: (typeof CONTRACT)[number];
+  @IsOptional() @IsString() contractEndDate?: string;
+  @IsOptional() @IsObject() compensation?: Record<string, unknown>;
+  @IsOptional() @IsIn([...STAFF_CATEGORY]) staffCategory?: (typeof STAFF_CATEGORY)[number];
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+  @IsOptional() @IsIn([...STAFF_STATUS]) status?: (typeof STAFF_STATUS)[number];
+  @IsOptional() @IsString() reason?: string;
 }
-export type UpdatePositionDto = Partial<CreatePositionDto>;
 
-export interface MarkStaffAttendanceDto {
-  date: Date | string;
-  entries: Array<{
-    staffProfileId: string;
-    status: 'present' | 'absent' | 'late' | 'leave' | 'off_duty';
-    checkIn?: Date | string;
-    checkOut?: Date | string;
-    notes?: string;
-  }>;
+export class CreatePositionDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsBoolean() isTeaching?: boolean;
+  @IsOptional() @IsArray() @IsString({ each: true }) defaultPermissions?: string[];
+}
+
+export class UpdatePositionDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsBoolean() isTeaching?: boolean;
+  @IsOptional() @IsArray() @IsString({ each: true }) defaultPermissions?: string[];
+}
+
+export class StaffAttendanceEntry {
+  @IsString() @IsNotEmpty() staffProfileId!: string;
+  @IsIn([...STAFF_ATT_STATUS]) status!: (typeof STAFF_ATT_STATUS)[number];
+  @IsOptional() @IsString() checkIn?: string;
+  @IsOptional() @IsString() checkOut?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class MarkStaffAttendanceDto {
+  @IsString() @IsNotEmpty() date!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StaffAttendanceEntry)
+  entries!: StaffAttendanceEntry[];
 }

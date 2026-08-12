@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentAttendanceService } from './student-attendance.service';
-import type { BulkMarkAttendanceDto } from './dto.types';
+import { BulkMarkAttendanceDto } from './dto.types';
 
 @Controller('school/attendance')
 export class StudentAttendanceController {

@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { PositionService } from './position.service';
-import type { CreatePositionDto, UpdatePositionDto } from './dto.types';
+import { CreatePositionDto, UpdatePositionDto } from './dto.types';
 
 @Controller('school/positions')
 export class PositionController {

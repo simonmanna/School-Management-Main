@@ -1,62 +1,27 @@
-/** DTOs for Attendance + LMS sprint. */
+/**
+ * DTOs for the Attendance module.
+ *
+ * H2/B6: class-validator classes (were bare interfaces). Import as values.
+ */
+import { IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
-export interface BulkMarkAttendanceDto {
-  date: Date | string;
-  classId: string;
-  sectionId?: string;
-  entries: Array<{
-    studentProfileId: string;
-    status: 'present' | 'absent' | 'late' | 'excused';
-    minutesLate?: number;
-    reason?: string;
-  }>;
-}
+const ATT_STATUS = ['present', 'absent', 'late', 'excused'] as const;
 
-export interface CreateHomeworkDto {
-  classId: string;
-  sectionId?: string;
-  subjectId: string;
-  termId?: string;
-  title: string;
-  description?: string;
-  dueDate: Date | string;
-  attachments?: Array<{ name: string; url: string }>;
-  maxScore?: number;
-}
-export type UpdateHomeworkDto = Partial<CreateHomeworkDto>;
-
-export interface SubmitHomeworkDto {
-  assignmentId: string;
-  content?: string;
-  attachments?: Array<{ name: string; url: string }>;
-}
-export interface GradeSubmissionDto {
-  submissionId: string;
-  score: number;
-  feedback?: string;
+export class AttendanceEntry {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsIn([...ATT_STATUS]) status!: (typeof ATT_STATUS)[number];
+  @IsOptional() @IsInt() @Min(0) minutesLate?: number;
+  @IsOptional() @IsString() reason?: string;
 }
 
-export interface CreateLearningResourceDto {
-  classId?: string;
-  subjectId?: string;
-  title: string;
-  type: 'note' | 'video' | 'link' | 'file' | 'slide';
-  url?: string;
-  fileUrl?: string;
-  tags?: string[];
-  description?: string;
-}
-export type UpdateLearningResourceDto = Partial<CreateLearningResourceDto>;
+export class BulkMarkAttendanceDto {
+  @IsString() @IsNotEmpty() date!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
 
-export interface CreateAnnouncementDto {
-  scope: 'school' | 'campus' | 'department' | 'class' | 'staff';
-  scopeId?: string;
-  classId?: string;
-  title: string;
-  body: string;
-  priority?: 'normal' | 'urgent' | 'info';
-  audience?: Array<'all' | 'parents' | 'students' | 'staff'>;
-  publishedAt?: Date | string;
-  expiresAt?: Date | string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AttendanceEntry)
+  entries!: AttendanceEntry[];
 }
-export type UpdateAnnouncementDto = Partial<CreateAnnouncementDto>;

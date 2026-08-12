@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AcademicYearService, TermService } from './academic-year.service';
-import type {
+import {
   CreateAcademicYearDto,
   CreateTermDto,
   SetCurrentYearDto,

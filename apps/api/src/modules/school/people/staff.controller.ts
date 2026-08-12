@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StaffService } from './staff.service';
-import type { CreateStaffDto, UpdateStaffDto } from './dto.types';
+import { CreateStaffDto, UpdateStaffDto } from './dto.types';
 
 @Controller('school/staff')
 export class StaffController {

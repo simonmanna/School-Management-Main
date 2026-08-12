@@ -1,59 +1,129 @@
-/** DTOs for Examinations sprint. */
+/**
+ * DTOs for the Examinations module.
+ *
+ * H2/B6: class-validator classes (were bare interfaces). Import as values.
+ */
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-export interface CreateExamTypeDto {
-  name: string;
-  weight: number;
-  isFinal?: boolean;
+export class CreateExamTypeDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsNumber() @Min(0) weight!: number;
+  @IsOptional() @IsBoolean() isFinal?: boolean;
 }
-export type UpdateExamTypeDto = Partial<CreateExamTypeDto>;
 
-export interface CreateExamDto {
-  termId: string;
-  examTypeId: string;
-  name: string;
-  startDate: Date | string;
-  endDate: Date | string;
+export class UpdateExamTypeDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsNumber() @Min(0) weight?: number;
+  @IsOptional() @IsBoolean() isFinal?: boolean;
+}
+
+export class CreateExamDto {
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsString() @IsNotEmpty() examTypeId!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() startDate!: string;
+  @IsString() @IsNotEmpty() endDate!: string;
+
   /** Class IDs the exam applies to. */
-  classes: string[];
-}
-export type UpdateExamDto = Partial<CreateExamDto>;
-
-export interface CreateExamScheduleDto {
-  examId: string;
-  classId: string;
-  subjectId: string;
-  date: Date | string;
-  startTime: string; // 'HH:mm'
-  durationMinutes?: number;
-  invigilatorId?: string;
-  maxMarks?: number;
-}
-export type UpdateExamScheduleDto = Partial<CreateExamScheduleDto>;
-
-export interface BulkGradeEntryDto {
-  examScheduleId: string;
-  entries: Array<{
-    studentProfileId: string;
-    marksObtained: number;
-    maxMarks?: number;
-    remarks?: string;
-  }>;
-}
-export interface GradeEntryUpdateDto {
-  marksObtained?: number;
-  maxMarks?: number;
-  remarks?: string;
+  @IsArray()
+  @IsString({ each: true })
+  classes!: string[];
 }
 
-export interface CreateGradingScaleDto {
-  name: string;
-  /** [{min:0, max:39, grade:'F', gpa:0}, ...] */
-  bands: Array<{ min: number; max: number; grade: string; gpa: number; remark?: string }>;
-  isDefault?: boolean;
+export class UpdateExamDto {
+  @IsOptional() @IsString() @IsNotEmpty() termId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() examTypeId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() startDate?: string;
+  @IsOptional() @IsString() endDate?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) classes?: string[];
 }
-export type UpdateGradingScaleDto = Partial<CreateGradingScaleDto>;
 
-export interface GenerateReportCardDto {
-  studentProfileId: string;
-  termId: string;
+export class CreateExamScheduleDto {
+  @IsString() @IsNotEmpty() examId!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsString() @IsNotEmpty() date!: string;
+  @IsString() @IsNotEmpty() startTime!: string; // 'HH:mm'
+  @IsOptional() @IsInt() @Min(1) durationMinutes?: number;
+  @IsOptional() @IsString() invigilatorId?: string;
+  @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+}
+
+export class UpdateExamScheduleDto {
+  @IsOptional() @IsString() @IsNotEmpty() examId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() classId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() subjectId?: string;
+  @IsOptional() @IsString() date?: string;
+  @IsOptional() @IsString() startTime?: string;
+  @IsOptional() @IsInt() @Min(1) durationMinutes?: number;
+  @IsOptional() @IsString() invigilatorId?: string;
+  @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+}
+
+export class GradeEntryInput {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsNumber() @Min(0) marksObtained!: number;
+  @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+  @IsOptional() @IsString() remarks?: string;
+}
+
+export class BulkGradeEntryDto {
+  @IsString() @IsNotEmpty() examScheduleId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GradeEntryInput)
+  entries!: GradeEntryInput[];
+}
+
+export class GradeEntryUpdateDto {
+  @IsOptional() @IsNumber() @Min(0) marksObtained?: number;
+  @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+  @IsOptional() @IsString() remarks?: string;
+}
+
+export class GradingBand {
+  @IsNumber() min!: number;
+  @IsNumber() max!: number;
+  @IsString() @IsNotEmpty() grade!: string;
+  @IsNumber() @Min(0) gpa!: number;
+  @IsOptional() @IsString() remark?: string;
+}
+
+export class CreateGradingScaleDto {
+  @IsString() @IsNotEmpty() name!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GradingBand)
+  bands!: GradingBand[];
+
+  @IsOptional() @IsBoolean() isDefault?: boolean;
+}
+
+export class UpdateGradingScaleDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GradingBand)
+  bands?: GradingBand[];
+  @IsOptional() @IsBoolean() isDefault?: boolean;
+}
+
+export class GenerateReportCardDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsString() @IsNotEmpty() termId!: string;
 }

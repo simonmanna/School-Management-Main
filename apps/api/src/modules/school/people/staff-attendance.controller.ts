@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StaffAttendanceService } from './staff-attendance.service';
-import type { MarkStaffAttendanceDto } from './dto.types';
+import { MarkStaffAttendanceDto } from './dto.types';
 
 @Controller('school/staff-attendance')
 export class StaffAttendanceController {

@@ -1,50 +1,128 @@
-/** DTOs for Academics sprint. */
-export interface CreateCurriculumDto {
-  classId: string;
-  academicYearId: string;
-  name: string;
-  description?: string;
-  subjects: Array<{ subjectId: string; periodsPerWeek: number; isCore?: boolean }>;
-}
-export type UpdateCurriculumDto = Partial<Omit<CreateCurriculumDto, 'subjects'>> & {
-  subjects?: Array<{ subjectId: string; periodsPerWeek: number; isCore?: boolean }>;
-};
+/**
+ * DTOs for the Academics module.
+ *
+ * H2/B6: class-validator classes (were bare interfaces). Import as values.
+ */
+import {
+  IsArray,
+  IsBoolean,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
-export interface CreateLessonPlanDto {
-  subjectId: string;
-  classId?: string;
-  termId?: string;
-  teacherPartnerId?: string;
-  weekOf: Date | string;
-  title: string;
-  objectives?: string;
-  materials?: string;
+export class CurriculumSubjectInput {
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsInt() @Min(1) periodsPerWeek!: number;
+  @IsOptional() @IsBoolean() isCore?: boolean;
 }
-export type UpdateLessonPlanDto = Partial<CreateLessonPlanDto>;
 
-export interface CreateTeacherAssignmentDto {
-  teacherPartnerId: string;
-  subjectId: string;
-  classId: string;
-  sectionId?: string;
-  termId?: string;
-  periodsPerWeek?: number;
-}
-export type UpdateTeacherAssignmentDto = Partial<CreateTeacherAssignmentDto>;
+export class CreateCurriculumDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() academicYearId!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() description?: string;
 
-export interface CreateTimetableSlotDto {
-  classId: string;
-  sectionId?: string;
-  dayOfWeek: number;
-  periodId: string;
-  subjectId: string;
-  teacherPartnerId?: string;
-  campusId?: string;
-  room?: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CurriculumSubjectInput)
+  subjects!: CurriculumSubjectInput[];
 }
-export interface BulkTimetableDto {
-  classId: string;
-  sectionId?: string;
-  slots: Omit<CreateTimetableSlotDto, 'classId' | 'sectionId'>[];
+
+export class UpdateCurriculumDto {
+  @IsOptional() @IsString() @IsNotEmpty() classId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() academicYearId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CurriculumSubjectInput)
+  subjects?: CurriculumSubjectInput[];
 }
-export type UpdateTimetableSlotDto = Partial<CreateTimetableSlotDto>;
+
+export class CreateLessonPlanDto {
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsOptional() @IsString() classId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() teacherPartnerId?: string;
+  @IsString() @IsNotEmpty() weekOf!: string;
+  @IsString() @IsNotEmpty() title!: string;
+  @IsOptional() @IsString() objectives?: string;
+  @IsOptional() @IsString() materials?: string;
+}
+
+export class UpdateLessonPlanDto {
+  @IsOptional() @IsString() @IsNotEmpty() subjectId?: string;
+  @IsOptional() @IsString() classId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() teacherPartnerId?: string;
+  @IsOptional() @IsString() weekOf?: string;
+  @IsOptional() @IsString() @IsNotEmpty() title?: string;
+  @IsOptional() @IsString() objectives?: string;
+  @IsOptional() @IsString() materials?: string;
+}
+
+export class CreateTeacherAssignmentDto {
+  @IsString() @IsNotEmpty() teacherPartnerId!: string;
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsInt() @Min(1) periodsPerWeek?: number;
+}
+
+export class UpdateTeacherAssignmentDto {
+  @IsOptional() @IsString() @IsNotEmpty() teacherPartnerId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() subjectId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() classId?: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsInt() @Min(1) periodsPerWeek?: number;
+}
+
+export class CreateTimetableSlotDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsInt() @Min(1) @Max(7) dayOfWeek!: number; // 1=Mon ... 7=Sun
+  @IsString() @IsNotEmpty() periodId!: string;
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsOptional() @IsString() teacherPartnerId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() room?: string;
+}
+
+export class BulkTimetableSlot {
+  @IsInt() @Min(1) @Max(7) dayOfWeek!: number;
+  @IsString() @IsNotEmpty() periodId!: string;
+  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsOptional() @IsString() teacherPartnerId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() room?: string;
+}
+
+export class BulkTimetableDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BulkTimetableSlot)
+  slots!: BulkTimetableSlot[];
+}
+
+export class UpdateTimetableSlotDto {
+  @IsOptional() @IsString() @IsNotEmpty() classId?: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(7) dayOfWeek?: number;
+  @IsOptional() @IsString() @IsNotEmpty() periodId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() subjectId?: string;
+  @IsOptional() @IsString() teacherPartnerId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() room?: string;
+}

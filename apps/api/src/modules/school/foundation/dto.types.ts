@@ -1,109 +1,170 @@
 /**
- * Reusable DTOs for the school foundation sprint.
- * Each entity uses the BaseCrudService pattern (list/findOne/create/update/remove),
- * so DTOs are minimal — just the create/update shapes.
+ * Reusable DTOs for the school foundation module.
+ *
+ * H2/B6: class-validator classes (were bare interfaces) so the global
+ * ValidationPipe enforces them. Controllers import these as values.
  */
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsObject, IsOptional, IsString, Min } from 'class-validator';
 
 // ── Campus ──────────────────────────────────────────────────────────────────
-export interface CreateCampusDto {
-  code: string;
-  name: string;
-  addressId?: string;
-  phone?: string;
-  email?: string;
-  isActive?: boolean;
-  customFields?: Record<string, unknown>;
+export class CreateCampusDto {
+  @IsString() @IsNotEmpty() code!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() addressId?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateCampusDto = Partial<CreateCampusDto>;
+export class UpdateCampusDto {
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() addressId?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
 
 // ── AcademicYear + Term ────────────────────────────────────────────────────
-export interface CreateAcademicYearDto {
-  name: string;
-  startDate: Date | string;
-  endDate: Date | string;
-  isCurrent?: boolean;
+export class CreateAcademicYearDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() startDate!: string;
+  @IsString() @IsNotEmpty() endDate!: string;
+  @IsOptional() @IsBoolean() isCurrent?: boolean;
 }
-export type UpdateAcademicYearDto = Partial<CreateAcademicYearDto>;
+export class UpdateAcademicYearDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() startDate?: string;
+  @IsOptional() @IsString() endDate?: string;
+  @IsOptional() @IsBoolean() isCurrent?: boolean;
+}
 
-export interface CreateTermDto {
-  academicYearId: string;
-  name: string;
-  startDate: Date | string;
-  endDate: Date | string;
-  isCurrent?: boolean;
+export class CreateTermDto {
+  @IsString() @IsNotEmpty() academicYearId!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() startDate!: string;
+  @IsString() @IsNotEmpty() endDate!: string;
+  @IsOptional() @IsBoolean() isCurrent?: boolean;
 }
-export type UpdateTermDto = Partial<CreateTermDto>;
+export class UpdateTermDto {
+  @IsOptional() @IsString() @IsNotEmpty() academicYearId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() startDate?: string;
+  @IsOptional() @IsString() endDate?: string;
+  @IsOptional() @IsBoolean() isCurrent?: boolean;
+}
 
 // ── Department ──────────────────────────────────────────────────────────────
-export interface CreateDepartmentDto {
-  name: string;
-  headId?: string;
-  description?: string;
-  customFields?: Record<string, unknown>;
+export class CreateDepartmentDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() headId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateDepartmentDto = Partial<CreateDepartmentDto>;
+export class UpdateDepartmentDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() headId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
 
 // ── GradeLevel ──────────────────────────────────────────────────────────────
-export interface CreateGradeLevelDto {
-  name: string;
-  order: number;
+export class CreateGradeLevelDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsInt() @Min(0) order!: number;
 }
-export type UpdateGradeLevelDto = Partial<CreateGradeLevelDto>;
+export class UpdateGradeLevelDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+}
 
 // ── SchoolClass + Section ───────────────────────────────────────────────────
-export interface CreateSchoolClassDto {
-  name: string;
-  gradeLevelId: string;
-  campusId?: string;
-  homeroomTeacherId?: string;
-  capacity?: number;
-  customFields?: Record<string, unknown>;
+export class CreateSchoolClassDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() gradeLevelId!: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() homeroomTeacherId?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateSchoolClassDto = Partial<CreateSchoolClassDto>;
+export class UpdateSchoolClassDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() @IsNotEmpty() gradeLevelId?: string;
+  @IsOptional() @IsString() campusId?: string;
+  @IsOptional() @IsString() homeroomTeacherId?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
 
-export interface CreateSectionDto {
-  classId: string;
-  name: string;
-  capacity?: number;
+export class CreateSectionDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
 }
-export type UpdateSectionDto = Partial<CreateSectionDto>;
+export class UpdateSectionDto {
+  @IsOptional() @IsString() @IsNotEmpty() classId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+}
 
 // ── Subject ─────────────────────────────────────────────────────────────────
-export interface CreateSubjectDto {
-  code: string;
-  name: string;
-  departmentId?: string;
-  isCore?: boolean;
-  customFields?: Record<string, unknown>;
+export class CreateSubjectDto {
+  @IsString() @IsNotEmpty() code!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() departmentId?: string;
+  @IsOptional() @IsBoolean() isCore?: boolean;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateSubjectDto = Partial<CreateSubjectDto>;
+export class UpdateSubjectDto {
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() departmentId?: string;
+  @IsOptional() @IsBoolean() isCore?: boolean;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
 
 // ── Period ──────────────────────────────────────────────────────────────────
-export interface CreatePeriodDto {
-  name: string;
-  startTime: string; // 'HH:mm'
-  endTime: string;
-  order: number;
-  campusId?: string;
+export class CreatePeriodDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() startTime!: string; // 'HH:mm'
+  @IsString() @IsNotEmpty() endTime!: string;
+  @IsInt() @Min(0) order!: number;
+  @IsOptional() @IsString() campusId?: string;
 }
-export type UpdatePeriodDto = Partial<CreatePeriodDto>;
+export class UpdatePeriodDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() startTime?: string;
+  @IsOptional() @IsString() endTime?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+  @IsOptional() @IsString() campusId?: string;
+}
 
 // ── CalendarEvent ───────────────────────────────────────────────────────────
-export interface CreateCalendarEventDto {
-  title: string;
-  type: 'holiday' | 'exam' | 'event' | 'meeting' | 'trip' | 'sports' | 'ceremony';
-  startDate: Date | string;
-  endDate: Date | string;
-  termId?: string;
-  description?: string;
-  customFields?: Record<string, unknown>;
+const CAL_TYPE = ['holiday', 'exam', 'event', 'meeting', 'trip', 'sports', 'ceremony'] as const;
+export class CreateCalendarEventDto {
+  @IsString() @IsNotEmpty() title!: string;
+  @IsIn([...CAL_TYPE]) type!: (typeof CAL_TYPE)[number];
+  @IsString() @IsNotEmpty() startDate!: string;
+  @IsString() @IsNotEmpty() endDate!: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
-export type UpdateCalendarEventDto = Partial<CreateCalendarEventDto>;
+export class UpdateCalendarEventDto {
+  @IsOptional() @IsString() @IsNotEmpty() title?: string;
+  @IsOptional() @IsIn([...CAL_TYPE]) type?: (typeof CAL_TYPE)[number];
+  @IsOptional() @IsString() startDate?: string;
+  @IsOptional() @IsString() endDate?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
 
 // ── Bulk term activation ────────────────────────────────────────────────────
-export interface SetCurrentYearDto {
-  academicYearId: string;
+export class SetCurrentYearDto {
+  @IsString() @IsNotEmpty() academicYearId!: string;
 }
-export interface SetCurrentTermDto {
-  termId: string;
+export class SetCurrentTermDto {
+  @IsString() @IsNotEmpty() termId!: string;
 }

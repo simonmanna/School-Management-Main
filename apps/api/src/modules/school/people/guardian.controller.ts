@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@ne
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { GuardianService } from './guardian.service';
-import type { CreateGuardianDto, UpdateGuardianDto } from './dto.types';
+import { CreateGuardianDto, UpdateGuardianDto } from './dto.types';
 
 @Controller('school/guardians')
 export class GuardianController {

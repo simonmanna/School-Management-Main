@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { SubjectService } from './subject.service';
-import type { CreateSubjectDto, UpdateSubjectDto } from './dto.types';
+import { CreateSubjectDto, UpdateSubjectDto } from './dto.types';
 
 @Controller('school/subjects')
 export class SubjectController {
