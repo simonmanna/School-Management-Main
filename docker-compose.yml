@@ -1,0 +1,101 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: cafe-pos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cafe-pos
+      POSTGRES_PASSWORD: cafe-pos
+      POSTGRES_DB: cafe-pos
+    # Host port 5433 to avoid clashing with a locally-installed PostgreSQL on 5432.
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cafe-pos -d cafe-pos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cafe-pos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: cafe-pos-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cafe-pos:cafe-pos@db:5432/cafe-pos?schema=public
+      REDIS_URL: redis://redis:6379
+      # No defaults on purpose. `:?` makes compose refuse to start when unset,
+      # which is the only reliable way to stop a shared placeholder secret from
+      # reaching production. Generate with: openssl rand -base64 48
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      JWT_POS_SECRET: ${JWT_POS_SECRET:?set JWT_POS_SECRET in .env}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 7d
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGINS: http://localhost:5173
+      LOG_LEVEL: info
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: /app/var/uploads
+      BODY_LIMIT: 5mb
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@cafe-pos.local}
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/var/uploads
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+      args:
+        VITE_API_URL: http://localhost:3000
+    container_name: cafe-pos-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+  adminer:
+    image: adminer:latest
+    container_name: cafe-pos-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:

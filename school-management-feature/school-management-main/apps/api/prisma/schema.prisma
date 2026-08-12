@@ -1,0 +1,2997 @@
+// =============================================================================
+// Generic ERP Platform — Prisma schema (Phase 0 kernel + Phase 1 master data)
+//
+// Conventions (see docs/adr):
+//  - Tenant tables carry `organizationId` (ADR-004). Tenancy is enforced in the
+//    app layer by a Prisma Client Extension + AsyncLocalStorage context.
+//  - Standard columns on business tables: id, organizationId, createdAt,
+//    updatedAt, createdBy, updatedBy, deletedAt (soft delete).
+//  - System/global tables (Organization, Permission, Currency) have NO
+//    organizationId.
+//  - Industry concepts (Student/Patient/...) do NOT appear here (ADR-008).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------- Enums ----------------------------------------
+
+enum OrganizationStatus {
+  active
+  suspended
+  archived
+}
+
+enum PartnerStatus {
+  active
+  inactive
+  archived
+}
+
+enum ProductType {
+  stockable
+  consumable
+  service
+  fee
+  subscription
+  asset
+}
+
+/// Per-product inventory costing policy (M3). AVCO is the Odoo-style default;
+/// FIFO consumes batches in (expiry, received) order; STANDARD uses a fixed
+/// Product.costPrice. See apps/api/src/modules/inventory/costing/.
+enum CostingMethod {
+  AVCO
+  FIFO
+  STANDARD
+}
+
+enum TaxType {
+  vat
+  gst
+  sales_tax
+  withholding
+}
+
+enum FiscalPeriodStatus {
+  open
+  closed
+  locked
+}
+
+enum AddressType {
+  billing
+  shipping
+  office
+  branch
+  home
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  login
+  logout
+  approve
+  reject
+  post
+  cancel
+  receive
+  issue
+  adjust
+  transfer
+}
+
+// ------------------------- System / global tables ---------------------------
+
+/// Tenant root. This table IS the tenant, so it has no organizationId.
+model Organization {
+  id           String             @id @default(uuid())
+  code         String             @unique
+  name         String
+  timezone     String             @default("UTC")
+  currencyCode String             @default("USD")
+  /// Phase C: FK to Currency for the org's base. Defaults to "USD" via seed.
+  /// Renamed relation name avoids ambiguity with other Currency refs.
+  baseCurrency Currency?          @relation("OrgBaseCurrency", fields: [currencyCode], references: [code])
+  status       OrganizationStatus @default(active)
+  settings     Json               @default("{}")
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  deletedAt    DateTime?
+}
+
+/// Global permission catalog (resource:action). Seeded from @erp/shared.
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+/// Global ISO-4217 currency catalog (ADR-004: currency is global).
+model Currency {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  symbol        String
+  name          String
+  decimalPlaces Int      @default(2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  /// Phase C: this currency IS the org's base for these organizations.
+  baseForOrganizations Organization[] @relation("OrgBaseCurrency")
+  /// Phase C: FX rates where this currency is the FROM side.
+  ratesFrom            CurrencyRate[] @relation("CurrencyRateFrom")
+  /// Phase C: FX rates where this currency is the TO side.
+  ratesTo              CurrencyRate[] @relation("CurrencyRateTo")
+}
+
+/// Phase C: FX rate between two currencies on a given date. Rates are
+/// denominated in the TO currency per 1 unit of FROM currency. We use the
+/// "as-of" lookup semantics: posting a 2024-01-15 invoice reads the rate
+/// whose `asOf` is the most recent ≤ postingDate (per IFRS IAS 21).
+model CurrencyRate {
+  id        String   @id @default(uuid())
+  fromCode  String
+  toCode    String
+  asOf      DateTime
+  rate      Decimal  @db.Decimal(18, 8)
+  /// Where this rate came from: 'manual' (operator entry), 'ecb' (European
+  /// Central Bank daily reference), 'fed' (US Fed), 'import' (CSV upload).
+  source    String   @default("manual")
+  createdAt DateTime @default(now())
+
+  from Currency @relation("CurrencyRateFrom", fields: [fromCode], references: [code], onDelete: Cascade)
+  to   Currency @relation("CurrencyRateTo", fields: [toCode], references: [code], onDelete: Cascade)
+
+  @@unique([fromCode, toCode, asOf])
+  @@index([fromCode, toCode, asOf])
+}
+
+/// Phase C: unrealized FX gain/loss on monetary balances in foreign currency.
+/// Written by `RevaluationService.runPeriod(periodId)` at period close.
+model FxRevaluation {
+  id              String   @id @default(uuid())
+  organizationId  String
+  fiscalPeriodId  String
+  asOf            DateTime
+  accountId       String
+  currencyCode    String
+  /// Book balance in the foreign currency.
+  bookBalance     Decimal  @db.Decimal(20, 6)
+  /// Balance valued at closing rate (in org base currency).
+  revaluedBalance Decimal  @db.Decimal(20, 6)
+  /// Gain (positive) or loss (negative) posted to the FX adjustment account.
+  fxGain          Decimal  @db.Decimal(20, 6)
+  rate            Decimal  @db.Decimal(18, 8)
+  createdAt       DateTime @default(now())
+
+  @@unique([organizationId, fiscalPeriodId, accountId])
+  @@index([organizationId, fiscalPeriodId])
+}
+
+// =============================================================================
+// Phase D — Bank reconciliation
+// =============================================================================
+
+/// Bank statement imported from a CSV / MT940 / OFX file. Each row is a
+/// single transaction on the bank side.
+model BankStatementLine {
+  id               String   @id @default(uuid())
+  organizationId   String
+  bankAccountId    String // -> BankAccount.id
+  postedAt         DateTime
+  /// Bank's reference (often a transaction ID, check #, etc.).
+  externalRef      String?
+  description      String
+  /// Positive = money in, negative = money out (in the bank's currency).
+  amount           Decimal  @db.Decimal(20, 6)
+  currencyCode     String
+  /// Status: 'unmatched' | 'matched' | 'ignored'.
+  status           String   @default("unmatched")
+  /// Linked payment (null until matched).
+  matchedPaymentId String?
+  /// Linked bank reconciliation run.
+  matchedRunId     String?
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, bankAccountId, postedAt])
+  @@index([status])
+}
+
+/// Reconciliation run — a single attempt to match a chunk of statement lines
+/// against payments. Stores summary stats for audit.
+model BankReconciliationRun {
+  id             String    @id @default(uuid())
+  organizationId String
+  bankAccountId  String
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  matched        Int       @default(0)
+  unmatched      Int       @default(0)
+  totalAmount    Decimal   @db.Decimal(20, 6)
+  notes          String?
+  createdById    String?
+
+  @@index([organizationId, bankAccountId, startedAt])
+}
+
+// ------------------------------- Auth / RBAC --------------------------------
+
+model User {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  email              String
+  passwordHash       String
+  firstName          String
+  lastName           String?
+  isActive           Boolean   @default(true)
+  lastLoginAt        DateTime?
+  /// Phase B1: TOTP secret (encrypted at rest by the app via field-level
+  /// encryption in the service). `null` means MFA is not enrolled.
+  mfaSecret          String?
+  /// Phase B1: when MFA was enrolled. Used by the UI to show "MFA active since X".
+  mfaEnrolledAt      DateTime?
+  /// Phase B1: number of consecutive failed login attempts. Reset on success.
+  /// When ≥ 10, the account is locked and requires admin intervention.
+  failedLoginCount   Int       @default(0)
+  /// Phase B1: when the account was locked.
+  lockedUntil        DateTime?
+  /// Phase F: the user's home branch. Optional; null = access to all branches
+  /// the org has marked "all-access". Used by branch-scoped queries.
+  defaultBranchId    String?
+  /// P0-11: set to true when a user is created with a temporary password
+  /// (e.g. seed admin, future invite flow). The web app redirects them to
+  /// change-password until the flag is cleared. Defaults to false for
+  /// existing users; new seeded users start at true.
+  mustChangePassword Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  createdBy          String?
+  updatedBy          String?
+  deletedAt          DateTime?
+
+  roles         Role[]         @relation("UserRoles")
+  refreshTokens RefreshToken[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([mustChangePassword])
+}
+
+model Role {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  isSystem       Boolean   @default(false)
+  permissions    String[]  @default([])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  users User[] @relation("UserRoles")
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model RefreshToken {
+  id             String    @id @default(uuid())
+  organizationId String
+  userId         String
+  tokenHash      String
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  /// D4-4: when this token is rotated, the new refresh token's id goes here.
+  /// Allows audit chains ("this token replaced by X, which replaced by Y").
+  replacedById   String?
+  /// Optional human-readable device label for the active-sessions UI.
+  deviceLabel    String?
+  /// IP and user-agent captured at login. Audit-friendly.
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, tokenHash])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+/// Idempotency cache (M-Day1-2). Stores the response of money-mutating POSTs
+/// keyed on the caller's `Idempotency-Key` header. A retry with the same key
+/// + same body returns the cached response without re-running the handler,
+/// preventing duplicate invoices / duplicate GL posts / duplicate stock issues.
+model IdempotencyRecord {
+  id             String    @id @default(uuid())
+  organizationId String
+  key            String
+  requestHash    String
+  method         String
+  path           String
+  statusCode     Int
+  responseJson   Json
+  /// `pending` while the handler is running; `completed` once we stored the
+  /// response. A second request that finds `pending` returns 409 (the first
+  /// request is still in flight).
+  status         String    @default("pending")
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
+
+  @@unique([organizationId, key])
+  @@index([organizationId, createdAt])
+}
+
+// ------------------------------- Kernel -------------------------------------
+
+model AuditLog {
+  id             String      @id @default(uuid())
+  organizationId String
+  entity         String
+  entityId       String
+  action         AuditAction
+  oldValues      Json?
+  newValues      Json?
+  actorId        String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime    @default(now())
+
+  @@index([organizationId, entity, entityId])
+  @@index([organizationId, createdAt])
+}
+
+/// Phase B1: tracks every login attempt for brute-force detection and
+/// forensic review. Persists even failed attempts.
+model LoginAttempt {
+  id             String   @id @default(uuid())
+  organizationId String?
+  email          String
+  success        Boolean
+  /// When MFA was required but not yet verified.
+  mfaRequired    Boolean  @default(false)
+  ipAddress      String?
+  userAgent      String?
+  /// Failure reason if `success = false`.
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
+/// Settings at system (organizationId null), organization, or module scope.
+model Setting {
+  id             String   @id @default(uuid())
+  organizationId String?
+  scope          String   @default("organization")
+  module         String?
+  key            String
+  value          Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, scope, key])
+  @@index([organizationId])
+}
+
+// ---------------------------- Master data -----------------------------------
+
+model Partner {
+  id                  String        @id @default(uuid())
+  organizationId      String
+  code                String
+  name                String
+  isCompany           Boolean       @default(false)
+  isCustomer          Boolean       @default(false)
+  isSupplier          Boolean       @default(false)
+  isEmployee          Boolean       @default(false)
+  email               String?
+  phone               String?
+  website             String?
+  taxNumber           String?
+  receivableAccountId String?
+  payableAccountId    String?
+  status              PartnerStatus @default(active)
+  categoryId          String?
+  notes               String?
+  customFields        Json          @default("{}")
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  createdBy           String?
+  updatedBy           String?
+  deletedAt           DateTime?
+
+  category  PartnerCategory? @relation(fields: [categoryId], references: [id])
+  contacts  Contact[]
+  addresses Address[]
+  documents Document[]
+  payments  Payment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, name])
+}
+
+model PartnerCategory {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  parentId       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  parent   PartnerCategory?  @relation("PartnerCategoryTree", fields: [parentId], references: [id])
+  children PartnerCategory[] @relation("PartnerCategoryTree")
+  partners Partner[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Contact {
+  id             String    @id @default(uuid())
+  organizationId String
+  partnerId      String
+  firstName      String
+  lastName       String?
+  position       String?
+  email          String?
+  phone          String?
+  isPrimary      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([partnerId])
+}
+
+model Address {
+  id             String      @id @default(uuid())
+  organizationId String
+  partnerId      String
+  type           AddressType @default(billing)
+  line1          String
+  line2          String?
+  city           String?
+  state          String?
+  postalCode     String?
+  country        String?
+  isPrimary      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([partnerId])
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  organizationId String
+  code           String
+  sku            String?
+  name           String
+  description    String?
+  productType    ProductType   @default(stockable)
+  costingMethod  CostingMethod @default(AVCO)
+  categoryId     String?
+  uomId          String?
+  taxId          String?
+  salesPrice     Decimal?      @db.Decimal(18, 6)
+  costPrice      Decimal?      @db.Decimal(18, 6)
+  trackInventory Boolean       @default(true)
+  batchTracking  Boolean       @default(false)
+  minQuantity    Decimal       @default(0) @db.Decimal(20, 6)
+  isActive       Boolean       @default(true)
+  customFields   Json          @default("{}")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  category     ProductCategory?  @relation(fields: [categoryId], references: [id])
+  uom          UnitOfMeasure?    @relation(fields: [uomId], references: [id])
+  tax          Tax?              @relation(fields: [taxId], references: [id])
+  stockItems   StockItem[]
+  stockBatches InventoryBatch[]
+  stockLedger  InventoryLedger[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, name])
+}
+
+model ProductCategory {
+  id               String    @id @default(uuid())
+  organizationId   String
+  name             String
+  parentId         String?
+  incomeAccountId  String?
+  expenseAccountId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  parent   ProductCategory?  @relation("ProductCategoryTree", fields: [parentId], references: [id])
+  children ProductCategory[] @relation("ProductCategoryTree")
+  products Product[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model UnitOfMeasure {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  category       String    @default("unit")
+  ratio          Decimal   @default(1) @db.Decimal(18, 6)
+  isBase         Boolean   @default(false)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  products Product[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Tax {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  code           String?
+  type           TaxType   @default(vat)
+  rate           Decimal   @default(0) @db.Decimal(9, 6)
+  isInclusive    Boolean   @default(false)
+  isCompound     Boolean   @default(false)
+  accountId      String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  products Product[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model FiscalPeriod {
+  id             String             @id @default(uuid())
+  organizationId String
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  status         FiscalPeriodStatus @default(open)
+  /// D2-2: timestamp set by PeriodCloseService.close().
+  closedAt       DateTime?
+  /// User who closed the period.
+  closedBy       String?
+  /// D2-2: timestamp set by PeriodCloseService.lock(). After this point
+  /// PostingService.assertOpen rejects any date in the period.
+  lockedAt       DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Branch {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  timezone       String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+// =============================================================================
+// Phase 2 — General Ledger engine
+// =============================================================================
+
+enum AccountType {
+  asset
+  liability
+  equity
+  revenue
+  expense
+  cost_of_goods_sold
+  bank
+  cash
+  receivable
+  payable
+  tax
+  contra_asset
+  contra_liability
+}
+
+enum JournalType {
+  general
+  sales
+  purchase
+  cash
+  bank
+  adjustment
+  opening
+  closing
+}
+
+enum JournalEntryStatus {
+  draft
+  posted
+  reversed
+}
+
+/// Chart of accounts. `isGroup` accounts are summary nodes and cannot be posted to.
+model Account {
+  id               String      @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  accountType      AccountType
+  parentAccountId  String?
+  currencyId       String?
+  isGroup          Boolean     @default(false)
+  isActive         Boolean     @default(true)
+  description      String?
+  /// M6 — Cash Flow classification (operating | investing | financing | null).
+  /// Only meaningful for asset / liability / equity accounts; revenue and
+  /// expense accounts are always operating.
+  cashFlowCategory String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  parent        Account?       @relation("AccountTree", fields: [parentAccountId], references: [id])
+  children      Account[]      @relation("AccountTree")
+  journalLines  JournalLine[]
+  documentLines DocumentLine[]
+  bankAccount   BankAccount?
+  cashRegisters CashRegister[] @relation("CashRegisterDefaultAccount")
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, accountType])
+}
+
+model Journal {
+  id                     String      @id @default(uuid())
+  organizationId         String
+  code                   String
+  name                   String
+  journalType            JournalType @default(general)
+  defaultDebitAccountId  String?
+  defaultCreditAccountId String?
+  sequencePrefix         String?
+  isActive               Boolean     @default(true)
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  createdBy              String?
+  updatedBy              String?
+  deletedAt              DateTime?
+
+  entries JournalEntry[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+/// Immutable once posted. Corrections are made via reversing entries (ADR-009).
+model JournalEntry {
+  id              String             @id @default(uuid())
+  organizationId  String
+  journalId       String
+  entryNumber     String
+  postingDate     DateTime
+  description     String?
+  status          JournalEntryStatus @default(draft)
+  currencyId      String?
+  sourceType      String?
+  sourceId        String?
+  reversedEntryId String? // the reversal entry that voids this one
+  reversalOfId    String? // set when this entry IS a reversal of another
+  postedAt        DateTime?
+  postedBy        String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  createdBy       String?
+
+  journal Journal       @relation(fields: [journalId], references: [id])
+  lines   JournalLine[]
+
+  @@unique([organizationId, entryNumber])
+  @@index([organizationId])
+  @@index([organizationId, postingDate])
+  @@index([sourceType, sourceId])
+}
+
+model JournalLine {
+  id             String   @id @default(uuid())
+  organizationId String
+  journalEntryId String
+  accountId      String
+  partnerId      String?
+  description    String?
+  debit          Decimal  @default(0) @db.Decimal(20, 6)
+  credit         Decimal  @default(0) @db.Decimal(20, 6)
+  currencyId     String?
+  exchangeRate   Decimal  @default(1) @db.Decimal(18, 8)
+  baseDebit      Decimal  @default(0) @db.Decimal(20, 6)
+  baseCredit     Decimal  @default(0) @db.Decimal(20, 6)
+  lineNumber     Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id])
+
+  @@index([organizationId])
+  @@index([journalEntryId])
+  @@index([organizationId, accountId])
+}
+
+/// Org-level account determination defaults (key -> account). See ADR-009.
+model AccountMapping {
+  id             String    @id @default(uuid())
+  organizationId String
+  key            String
+  accountId      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+/// Removed in D1-1 — replaced by Postgres-native SEQUENCE objects.
+/// Sequence numbers are now generated via `SELECT nextval('seq_<orgId>_<key>')`
+/// inside the active transaction (see kernel/sequence/sequence.service.ts).
+/// This eliminates the row-level upsert race that could crash concurrent first-time
+/// callers and removes the hot-row bottleneck under load.
+
+model BankAccount {
+  id             String    @id @default(uuid())
+  organizationId String
+  accountId      String    @unique
+  name           String
+  bankName       String?
+  accountNumber  String?
+  currencyId     String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([organizationId])
+}
+
+// =============================================================================
+// Phase 3 — Document framework + Accounts Receivable
+// =============================================================================
+
+enum DocumentType {
+  sales_invoice
+  credit_note
+  vendor_bill
+  debit_note
+  proforma_invoice
+}
+
+enum DocumentStatus {
+  draft
+  submitted
+  approved
+  posted
+  paid
+  cancelled
+}
+
+enum PaymentStatus {
+  not_paid
+  partial
+  paid
+  overpaid
+}
+
+enum PaymentDirection {
+  inbound
+  outbound
+}
+
+/// Universal financial document. POS/School/Hotel etc. create these; the
+/// accounting engine posts them. Residual lives here (NOT a separate ledger).
+model Document {
+  id                 String         @id @default(uuid())
+  organizationId     String
+  documentNumber     String
+  documentType       DocumentType   @default(sales_invoice)
+  partnerId          String
+  currencyId         String?
+  exchangeRate       Decimal        @default(1) @db.Decimal(18, 8)
+  issueDate          DateTime
+  dueDate            DateTime?
+  status             DocumentStatus @default(draft)
+  reference          String?
+  notes              String?
+  subtotal           Decimal        @default(0) @db.Decimal(20, 6)
+  discountTotal      Decimal        @default(0) @db.Decimal(20, 6)
+  taxAmount          Decimal        @default(0) @db.Decimal(20, 6)
+  totalAmount        Decimal        @default(0) @db.Decimal(20, 6)
+  amountPaid         Decimal        @default(0) @db.Decimal(20, 6)
+  amountResidual     Decimal        @default(0) @db.Decimal(20, 6)
+  paymentStatus      PaymentStatus  @default(not_paid)
+  journalEntryId     String?
+  reversedDocumentId String? // credit note -> original invoice
+  /// Phase F: the branch this document was created from. Used by
+  /// branch-scoped reports + permissions. Optional for backward compat.
+  branchId           String?
+  sourceType         String?
+  sourceId           String?
+  postedAt           DateTime?
+  postedBy           String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  createdBy          String?
+  updatedBy          String?
+
+  partner         Partner             @relation(fields: [partnerId], references: [id])
+  lines           DocumentLine[]
+  allocations     PaymentAllocation[]
+  /// P0-2: documents that this row is a penalty for (source side).
+  penaltyAsSource PenaltyAssessment[] @relation("PenaltySource")
+  /// P0-2: documents that this row IS (the penalty invoice itself).
+  penaltyDocument PenaltyAssessment?  @relation("PenaltyDocument")
+
+  @@unique([organizationId, documentNumber])
+  /// P0-2 + P0-6: prevent duplicate school/penalty/library invoices.
+  /// PostgreSQL allows multiple NULLs in a unique constraint by default,
+  /// so this only constrains Documents that have all four values set
+  /// (i.e. the school/penalty/library source documents). Manual
+  /// invoices without sourceType/sourceId/reference remain unaffected.
+  @@unique([organizationId, sourceType, sourceId, reference])
+  @@index([organizationId])
+  @@index([organizationId, partnerId])
+  @@index([organizationId, documentType, status])
+  @@index([organizationId, branchId])
+  @@index([organizationId, sourceType, sourceId])
+}
+
+model DocumentLine {
+  id              String  @id @default(uuid())
+  organizationId  String
+  documentId      String
+  productId       String?
+  accountId       String?
+  description     String
+  quantity        Decimal @default(1) @db.Decimal(20, 6)
+  unitPrice       Decimal @default(0) @db.Decimal(20, 6)
+  discountPercent Decimal @default(0) @db.Decimal(9, 4)
+  taxId           String?
+  subtotal        Decimal @default(0) @db.Decimal(20, 6)
+  taxAmount       Decimal @default(0) @db.Decimal(20, 6)
+  total           Decimal @default(0) @db.Decimal(20, 6)
+  lineNumber      Int     @default(0)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  account  Account? @relation(fields: [accountId], references: [id])
+
+  @@index([organizationId])
+  @@index([documentId])
+}
+
+model Payment {
+  id                String           @id @default(uuid())
+  organizationId    String
+  paymentNumber     String
+  direction         PaymentDirection @default(inbound)
+  partnerId         String
+  paymentDate       DateTime
+  paymentMethod     String           @default("cash")
+  journalId         String?
+  accountId         String?
+  currencyId        String?
+  exchangeRate      Decimal          @default(1) @db.Decimal(18, 8)
+  amount            Decimal          @default(0) @db.Decimal(20, 6)
+  allocatedAmount   Decimal          @default(0) @db.Decimal(20, 6)
+  unallocatedAmount Decimal          @default(0) @db.Decimal(20, 6)
+  reference         String?
+  status            DocumentStatus   @default(posted)
+  /// Phase F: branch this payment was made at.
+  branchId          String?
+  journalEntryId    String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  createdBy         String?
+  updatedBy         String?
+
+  partner       Partner             @relation(fields: [partnerId], references: [id])
+  allocations   PaymentAllocation[]
+  cashMovements CashMovement[]
+
+  @@unique([organizationId, paymentNumber])
+  @@index([organizationId])
+  @@index([organizationId, partnerId])
+  @@index([organizationId, branchId])
+}
+
+model PaymentAllocation {
+  id             String   @id @default(uuid())
+  organizationId String
+  paymentId      String
+  documentId     String
+  amount         Decimal  @default(0) @db.Decimal(20, 6)
+  createdAt      DateTime @default(now())
+
+  payment  Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@index([organizationId])
+  @@index([paymentId])
+  @@index([documentId])
+}
+
+// =============================================================================
+// Phase 4 — Inventory (stock of Products; optional batch/expiry, kept simple)
+// =============================================================================
+
+enum LocationType {
+  warehouse
+  store
+  virtual
+}
+
+enum StockMoveType {
+  receipt
+  issue
+  adjustment_in
+  adjustment_out
+  transfer_in
+  transfer_out
+  opening_balance
+}
+
+model InventoryLocation {
+  id             String       @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  type           LocationType @default(warehouse)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  stockItems    StockItem[]
+  batches       InventoryBatch[]
+  ledgerEntries InventoryLedger[]
+  cashRegisters CashRegister[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+/// On-hand quantity per product per location (the "quant").
+model StockItem {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  productId          String
+  locationId         String
+  quantity           Decimal  @default(0) @db.Decimal(20, 6)
+  /// Running weighted-average cost per unit. Updated on every receipt (AVCO
+  /// products only). For FIFO products this stays 0; for STANDARD products this
+  /// stays 0 (the cost is Product.costPrice). See CostResolverService.
+  runningAverageCost Decimal  @default(0) @db.Decimal(20, 6)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  product  Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location InventoryLocation @relation(fields: [locationId], references: [id])
+
+  @@unique([organizationId, productId, locationId])
+  @@index([organizationId])
+  @@index([productId])
+  @@index([locationId])
+}
+
+/// Optional batch/lot with optional expiry — only used when product.batchTracking.
+model InventoryBatch {
+  id             String    @id @default(uuid())
+  organizationId String
+  productId      String
+  locationId     String
+  batchNumber    String
+  quantity       Decimal   @default(0) @db.Decimal(20, 6)
+  unitCost       Decimal?  @db.Decimal(20, 6)
+  expiryDate     DateTime?
+  receivedAt     DateTime  @default(now())
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  product       Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location      InventoryLocation @relation(fields: [locationId], references: [id])
+  ledgerEntries InventoryLedger[]
+
+  @@index([organizationId])
+  @@index([productId, locationId])
+  @@index([expiryDate])
+}
+
+/// Immutable stock ledger — every movement (receipt/issue/adjustment/transfer).
+model InventoryLedger {
+  id             String        @id @default(uuid())
+  organizationId String
+  ledgerCode     String
+  productId      String
+  locationId     String
+  batchId        String?
+  type           StockMoveType
+  quantityChange Decimal       @db.Decimal(20, 6)
+  balanceAfter   Decimal       @db.Decimal(20, 6)
+  unitCost       Decimal       @default(0) @db.Decimal(20, 6)
+  totalValue     Decimal       @default(0) @db.Decimal(20, 6)
+  referenceType  String?
+  referenceId    String?
+  notes          String?
+  performedBy    String?
+  createdAt      DateTime      @default(now())
+
+  product  Product           @relation(fields: [productId], references: [id])
+  location InventoryLocation @relation(fields: [locationId], references: [id])
+  batch    InventoryBatch?   @relation(fields: [batchId], references: [id])
+
+  @@unique([organizationId, ledgerCode])
+  @@index([organizationId])
+  @@index([productId])
+  @@index([locationId])
+  @@index([organizationId, createdAt])
+}
+
+// =============================================================================
+// M5 — Cash sessions / cash registers (foundation for POS + School canteen)
+// =============================================================================
+
+enum CashSessionStatus {
+  open
+  closed
+  reconciled
+}
+
+enum CashMovementType {
+  sale
+  refund
+  pay_in
+  pay_out
+  adjustment
+}
+
+/// Metadata about a till. `defaultAccountId` is the cash GL account used for
+/// the session's opening float and movements. `locationId` is optional and
+/// links the till to a physical InventoryLocation (e.g. a store).
+model CashRegister {
+  id               String    @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  locationId       String?
+  defaultAccountId String
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  defaultAccount Account            @relation("CashRegisterDefaultAccount", fields: [defaultAccountId], references: [id])
+  location       InventoryLocation? @relation(fields: [locationId], references: [id])
+  sessions       CashSession[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([locationId])
+}
+
+/// An open shift at a CashRegister. `openingFloat` is the starting cash;
+/// `closingCounted` is what was actually counted; `closingExpected` is what
+/// the system computed (= opening + sales + pay-ins − pay-outs − refunds);
+/// `closingDifference = counted − expected` and is the variance.
+model CashSession {
+  id                String            @id @default(uuid())
+  organizationId    String
+  cashRegisterId    String
+  /// Phase F: redundant cache of the register's branch, for branch-scoped
+  /// reports without joining back to the register.
+  branchId          String?
+  userId            String
+  status            CashSessionStatus @default(open)
+  openedAt          DateTime          @default(now())
+  closedAt          DateTime?
+  openingFloat      Decimal           @default(0) @db.Decimal(20, 6)
+  closingCounted    Decimal?          @db.Decimal(20, 6)
+  closingExpected   Decimal?          @db.Decimal(20, 6)
+  closingDifference Decimal?          @db.Decimal(20, 6)
+  notes             String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  cashRegister CashRegister   @relation(fields: [cashRegisterId], references: [id])
+  movements    CashMovement[]
+
+  @@index([organizationId])
+  @@index([cashRegisterId])
+  @@index([userId])
+  @@index([status])
+  @@index([organizationId, branchId])
+}
+
+/// Every in/out during a session. For sales/refunds the corresponding
+/// `Payment` is linked via `paymentId` so the cash session reconciles with the
+/// ledger.
+model CashMovement {
+  id             String           @id @default(uuid())
+  organizationId String
+  cashSessionId  String
+  movementType   CashMovementType
+  amount         Decimal          @db.Decimal(20, 6)
+  paymentId      String?
+  reason         String?
+  performedBy    String?
+  createdAt      DateTime         @default(now())
+
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  payment     Payment?    @relation(fields: [paymentId], references: [id])
+
+  @@index([organizationId])
+  @@index([cashSessionId])
+  @@index([paymentId])
+}
+
+// =============================================================================
+// D3 � Reporting snapshots (Trial Balance / P&L / Balance Sheet / AP Aging)
+// =============================================================================
+
+/// Trial Balance snapshot. One row per (organization, asOf, account) carrying
+/// the running debit / credit / balance from posted entries. Reports read from
+/// this instead of live JournalLine so a 1M-row tenant returns in <500ms.
+model ReportTrialBalanceSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  asOf           DateTime
+  accountId      String
+  accountCode    String
+  accountName    String
+  accountType    String
+  debit          Decimal  @db.Decimal(20, 6)
+  credit         Decimal  @db.Decimal(20, 6)
+  balance        Decimal  @db.Decimal(20, 6)
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, asOf, accountId])
+  @@index([organizationId, asOf])
+}
+
+/// Profit & Loss snapshot. One row per (organization, asOf) carrying the
+/// revenue / contra-revenue / cogs / expense / net-income totals.
+model ReportPnLSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  asOf           DateTime
+  revenue        Decimal  @db.Decimal(20, 6)
+  contraRevenue  Decimal  @db.Decimal(20, 6)
+  cogs           Decimal  @db.Decimal(20, 6)
+  expense        Decimal  @db.Decimal(20, 6)
+  netIncome      Decimal  @db.Decimal(20, 6)
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, asOf])
+  @@index([organizationId, asOf])
+}
+
+/// Balance Sheet snapshot. One row per (organization, asOf, account) carrying the
+/// cumulative balance for balance-sheet accounts. Reports sum revenue/expense
+/// lines through retained earnings automatically.
+model ReportBalanceSheetSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  asOf           DateTime
+  accountId      String
+  accountCode    String
+  accountName    String
+  accountType    String
+  balance        Decimal  @db.Decimal(20, 6)
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, asOf, accountId])
+  @@index([organizationId, asOf])
+}
+
+/// AP Aging snapshot. One row per (organization, asOf, partner) with the unpaid
+/// vendor-bill balances bucketed by age.
+model ReportApAgingSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  asOf           DateTime
+  partnerId      String
+  partnerName    String
+  total          Decimal  @db.Decimal(20, 6)
+  current        Decimal  @db.Decimal(20, 6)
+  b1_30          Decimal  @db.Decimal(20, 6)
+  b31_60         Decimal  @db.Decimal(20, 6)
+  b61_90         Decimal  @db.Decimal(20, 6)
+  b90p           Decimal  @db.Decimal(20, 6)
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, asOf, partnerId])
+  @@index([organizationId, asOf])
+}
+
+/// AR/AP tie-out snapshot � written nightly by TieOutService. Compares the GL
+/// AR/AP control account balance to the sum of open invoice/bill residuals. A
+/// variance > .01 means the books are out of sync.
+model ReportTieoutSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  asOf           DateTime
+  arBalanced     Boolean
+  arVariance     Decimal  @db.Decimal(20, 6)
+  apBalanced     Boolean
+  apVariance     Decimal  @db.Decimal(20, 6)
+  arDetails      Json
+  apDetails      Json
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, asOf])
+  @@index([organizationId, asOf])
+}
+
+// =============================================================================
+// D4-3 — Transactional outbox for domain events
+// =============================================================================
+
+/// Outbox row written inside the same $transaction as the business write, so
+/// events never get lost on commit failure and never fire on rollback. The
+/// OutboxWorker polls pending rows and dispatches them to handlers.
+model EventOutbox {
+  id             String    @id @default(uuid())
+  organizationId String
+  eventName      String
+  payload        Json
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  lastError      String?
+  createdAt      DateTime  @default(now())
+  shippedAt      DateTime?
+
+  @@index([status, createdAt])
+  @@index([organizationId, status])
+}
+
+// =============================================================================
+// School Vertical — Foundation / People / Admissions / Academics / Attendance
+//   LMS / Examinations / Fees / Portals / Communication / Library / Transport
+//   Hostel / Cafeteria / Reports
+//
+// Architectural rules (ROADMAP §8 + ADR-011):
+//   - All tables are org-scoped and added to ORG_SCOPED in tenancy.extension.ts.
+//   - Money effects go through DocumentBuilderService + PostingService.
+//   - State changes go through WorkflowService.
+//   - School-specific attributes that have no relationship → Partner.customFields.
+// =============================================================================
+
+// ── Sprint 1: Foundation ────────────────────────────────────────────────────
+
+model Campus {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  addressId      String?
+  phone          String?
+  email          String?
+  isActive       Boolean   @default(true)
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  classes        SchoolClass[]
+  periods        Period[]
+  staffProfiles  StaffProfile[]
+  timetableSlots TimetableSlot[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model SchoolProfile {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  name           String
+  motto          String?
+  logoUrl        String?
+  address        String?
+  phone          String?
+  email          String?
+  website        String?
+  /// Country-specific config (Uganda defaults: UGX currency, primary/secondary cycle).
+  country        String   @default("UG")
+  currencyCode   String   @default("UGX")
+  /// School system: 'primary' | 'secondary' | 'mixed' | 'tertiary'.
+  educationLevel String   @default("mixed")
+  /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
+  gradingSystem  String   @default("UCE")
+  contacts       Json     @default("{}")
+  customFields   Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+model AcademicYear {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  isCurrent      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  terms         Term[]
+  feeStructures FeeStructure[]
+  curriculums   Curriculum[]
+  admissions    AdmissionApplication[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Term {
+  id             String    @id @default(uuid())
+  organizationId String
+  academicYearId String
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  isCurrent      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  academicYear       AcademicYear           @relation(fields: [academicYearId], references: [id])
+  feeSchedules       FeeSchedule[]
+  enrollments        Enrollment[]
+  lessonPlans        LessonPlan[]
+  teacherAssignments TeacherAssignment[]
+  exams              Exam[]
+  feeAssignments     StudentFeeAssignment[]
+  installmentPlans   InstallmentPlan[]
+
+  @@unique([organizationId, academicYearId, name])
+  @@index([organizationId])
+  @@index([academicYearId])
+}
+
+model Department {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  headId         String?
+  description    String?
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  subjects      Subject[]
+  staffProfiles StaffProfile[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model GradeLevel {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  /// Display order (e.g. P1=1, P7=7, S1=8, S6=13).
+  order          Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  classes SchoolClass[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model SchoolClass {
+  id                String    @id @default(uuid())
+  organizationId    String
+  campusId          String?
+  gradeLevelId      String
+  name              String
+  homeroomTeacherId String?
+  capacity          Int       @default(40)
+  customFields      Json      @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
+
+  campus             Campus?              @relation(fields: [campusId], references: [id])
+  gradeLevel         GradeLevel           @relation(fields: [gradeLevelId], references: [id])
+  sections           Section[]
+  teacherAssignments TeacherAssignment[]
+  timetableSlots     TimetableSlot[]
+  studentProfiles    StudentProfile[]
+  studentAttendance  StudentAttendance[]
+  enrollments        Enrollment[]
+  homeworks          HomeworkAssignment[]
+  announcements      Announcement[]
+  examSchedules      ExamSchedule[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([campusId])
+  @@index([gradeLevelId])
+}
+
+model Section {
+  id             String    @id @default(uuid())
+  organizationId String
+  classId        String
+  name           String
+  capacity       Int       @default(40)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  schoolClass        SchoolClass          @relation(fields: [classId], references: [id])
+  studentProfiles    StudentProfile[]
+  enrollments        Enrollment[]
+  teacherAssignments TeacherAssignment[]
+  timetableSlots     TimetableSlot[]
+  studentAttendance  StudentAttendance[]
+  homeworks          HomeworkAssignment[]
+
+  @@unique([organizationId, classId, name])
+  @@index([organizationId])
+  @@index([classId])
+}
+
+model Subject {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  departmentId   String?
+  isCore         Boolean   @default(true)
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  department         Department?          @relation(fields: [departmentId], references: [id])
+  curriculumSubjects CurriculumSubject[]
+  teacherAssignments TeacherAssignment[]
+  timetableSlots     TimetableSlot[]
+  homeworks          HomeworkAssignment[]
+  examSchedules      ExamSchedule[]
+  lessonPlans        LessonPlan[]
+  entranceExams      EntranceExam[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([departmentId])
+}
+
+model Period {
+  id             String    @id @default(uuid())
+  organizationId String
+  campusId       String?
+  name           String
+  startTime      String // 'HH:mm'
+  endTime        String // 'HH:mm'
+  /// Display order within a day.
+  order          Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  campus         Campus?         @relation(fields: [campusId], references: [id])
+  timetableSlots TimetableSlot[]
+
+  @@unique([organizationId, campusId, name])
+  @@index([organizationId])
+}
+
+model SchoolCalendarEvent {
+  id             String    @id @default(uuid())
+  organizationId String
+  termId         String?
+  title          String
+  /// 'holiday' | 'exam' | 'event' | 'meeting' | 'trip' | 'sports' | 'ceremony'
+  type           String    @default("event")
+  startDate      DateTime
+  endDate        DateTime
+  description    String?
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  @@index([organizationId])
+  @@index([termId])
+  @@index([organizationId, startDate])
+}
+
+// ── Sprint 2: People (Students / Guardians / Staff) ─────────────────────────
+
+enum StudentStatus {
+  active
+  suspended
+  transferred
+  withdrawn
+  alumni
+}
+
+enum StaffStatus {
+  active
+  on_leave
+  suspended
+  terminated
+  retired
+}
+
+model StudentProfile {
+  id               String        @id @default(uuid())
+  organizationId   String
+  /// UNIQUE FK to Partner. The Partner row carries name/email/phone/etc.
+  partnerId        String        @unique
+  admissionNo      String
+  currentClassId   String?
+  currentSectionId String?
+  enrollmentDate   DateTime
+  status           StudentStatus @default(active)
+  /// Date-of-birth mirror for fast filtering (also stored on Partner customFields).
+  dateOfBirth      DateTime?
+  gender           String?
+  nationality      String?
+  religion         String?
+  /// 'day' | 'boarder'
+  residenceType    String        @default("day")
+  /// House assignment (Red/Blue/etc.).
+  house            String?
+  customFields     Json          @default("{}")
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  currentClass        SchoolClass?                 @relation(fields: [currentClassId], references: [id])
+  currentSection      Section?                     @relation(fields: [currentSectionId], references: [id])
+  guardians           StudentGuardian[]
+  medicalRecord       MedicalRecord?
+  documents           StudentDocument[]
+  statusHistory       StudentStatusHistory[]
+  attendances         StudentAttendance[]
+  homeworks           HomeworkSubmission[]
+  enrollments         Enrollment[]
+  gradeEntries        GradeEntry[]
+  feeAssignments      StudentFeeAssignment[]
+  scholarships        Scholarship[]
+  mealAccount         MealAccount?
+  transportAssignment StudentTransportAssignment[]
+  hostelAllocation    HostelAllocation[]
+  installmentPlans    InstallmentPlan[]
+
+  @@unique([organizationId, admissionNo])
+  @@index([organizationId])
+  @@index([currentClassId])
+  @@index([currentSectionId])
+}
+
+model StudentStatusHistory {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  fromStatus       String?
+  toStatus         String
+  reason           String?
+  changedById      String?
+  changedAt        DateTime @default(now())
+
+  student StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model StudentGuardian {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  studentProfileId   String
+  /// FK to Contact (the guardian's contact row).
+  guardianContactId  String
+  /// 'father' | 'mother' | 'uncle' | 'aunt' | 'sibling' | 'grandparent' | 'guardian' | 'other'.
+  relationship       String
+  isPrimary          Boolean   @default(false)
+  canPickup          Boolean   @default(true)
+  receivesStatements Boolean   @default(true)
+  customFields       Json      @default("{}")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([studentProfileId, guardianContactId])
+  @@index([organizationId])
+  @@index([guardianContactId])
+}
+
+model MedicalRecord {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String   @unique
+  bloodGroup       String?
+  allergies        Json     @default("[]")
+  conditions       Json     @default("[]")
+  medications      Json     @default("[]")
+  emergencyNotes   String?
+  /// Family doctor info.
+  doctorName       String?
+  doctorPhone      String?
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+model StudentDocument {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  /// 'birth_cert' | 'report_card' | 'transfer_letter' | 'photo' | 'medical' | 'other'.
+  type             String
+  title            String
+  fileUrl          String
+  uploadedAt       DateTime  @default(now())
+  expiresAt        DateTime?
+  verified         Boolean   @default(false)
+  verifiedById     String?
+  verifiedAt       DateTime?
+  customFields     Json      @default("{}")
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model StaffProfile {
+  id              String      @id @default(uuid())
+  organizationId  String
+  /// UNIQUE FK to Partner.
+  partnerId       String      @unique
+  employeeNo      String
+  departmentId    String?
+  positionId      String?
+  campusId        String?
+  joinDate        DateTime
+  contractType    String      @default("permanent") // 'permanent' | 'contract' | 'temporary' | 'probation'
+  contractEndDate DateTime?
+  status          StaffStatus @default(active)
+  /// Compensation is JSONB for now (payroll is a deferred satellite).
+  compensation    Json        @default("{}")
+  /// 'teaching' | 'non_teaching' | 'admin' | 'support'.
+  staffCategory   String      @default("teaching")
+  customFields    Json        @default("{}")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  createdBy       String?
+  updatedBy       String?
+  deletedAt       DateTime?
+
+  department         Department?          @relation(fields: [departmentId], references: [id])
+  campus             Campus?              @relation(fields: [campusId], references: [id])
+  position           Position?            @relation(fields: [positionId], references: [id])
+  statusHistory      StaffStatusHistory[]
+  attendance         StaffAttendance[]
+  teacherAssignments TeacherAssignment[]
+  lessonPlans        LessonPlan[]
+  homeworks          HomeworkAssignment[]
+  timetableSlots     TimetableSlot[]
+  gradeEntries       GradeEntry[]
+  messages           Message[]            @relation("MessageSender")
+
+  @@unique([organizationId, employeeNo])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([campusId])
+}
+
+model StaffStatusHistory {
+  id             String   @id @default(uuid())
+  organizationId String
+  staffProfileId String
+  fromStatus     String?
+  toStatus       String
+  reason         String?
+  changedById    String?
+  changedAt      DateTime @default(now())
+
+  staff StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([staffProfileId])
+}
+
+model Position {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  name               String
+  isTeaching         Boolean   @default(false)
+  defaultPermissions Json      @default("[]")
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  createdBy          String?
+  updatedBy          String?
+  deletedAt          DateTime?
+
+  staff StaffProfile[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model StaffAttendance {
+  id             String    @id @default(uuid())
+  organizationId String
+  staffProfileId String
+  date           DateTime
+  checkIn        DateTime?
+  checkOut       DateTime?
+  /// 'present' | 'absent' | 'late' | 'leave' | 'off_duty'.
+  status         String    @default("present")
+  notes          String?
+  markedById     String?
+  createdAt      DateTime  @default(now())
+
+  staff StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, staffProfileId, date])
+  @@index([organizationId])
+  @@index([staffProfileId])
+  @@index([organizationId, date])
+}
+
+// ── Sprint 3: Admissions & Academics ───────────────────────────────────────
+
+enum AdmissionStatus {
+  submitted
+  under_review
+  exam_scheduled
+  accepted
+  rejected
+  enrolled
+  withdrawn
+}
+
+enum ExamStatus {
+  draft
+  scheduled
+  published
+  closed
+}
+
+model AdmissionApplication {
+  id                 String          @id @default(uuid())
+  organizationId     String
+  academicYearId     String
+  applicationNumber  String
+  applicantFirstName String
+  applicantLastName  String
+  applicantDob       DateTime?
+  applicantGender    String?
+  applyingForClassId String?
+  /// FK to Contact (parent/guardian contact for this application).
+  parentContactId    String?
+  status             AdmissionStatus @default(submitted)
+  submittedAt        DateTime        @default(now())
+  reviewedById       String?
+  reviewedAt         DateTime?
+  decisionNotes      String?
+  customFields       Json            @default("{}")
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  createdBy          String?
+  updatedBy          String?
+  deletedAt          DateTime?
+
+  academicYear  AcademicYear          @relation(fields: [academicYearId], references: [id])
+  documents     ApplicationDocument[]
+  entranceExams EntranceExam[]
+  waitingList   WaitingList?
+  enrollment    Enrollment?
+
+  @@unique([organizationId, applicationNumber])
+  @@index([organizationId])
+  @@index([academicYearId])
+  @@index([status])
+}
+
+model ApplicationDocument {
+  id             String    @id @default(uuid())
+  organizationId String
+  applicationId  String
+  /// 'birth_cert' | 'report_card' | 'recommendation' | 'photo' | 'other'.
+  type           String
+  fileUrl        String
+  uploadedAt     DateTime  @default(now())
+  verified       Boolean   @default(false)
+  verifiedById   String?
+  verifiedAt     DateTime?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+model EntranceExam {
+  id             String    @id @default(uuid())
+  organizationId String
+  applicationId  String
+  subjectId      String
+  scheduledAt    DateTime?
+  score          Decimal?  @db.Decimal(8, 2)
+  maxScore       Decimal   @default(100) @db.Decimal(8, 2)
+  grade          String?
+  notes          String?
+  enteredById    String?
+  enteredAt      DateTime?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  subject     Subject              @relation(fields: [subjectId], references: [id])
+
+  @@unique([applicationId, subjectId])
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+model WaitingList {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  classId        String
+  position       Int
+  addedAt        DateTime @default(now())
+  notes          String?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([classId, position])
+}
+
+model Enrollment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  applicationId    String?  @unique
+  studentProfileId String
+  classId          String
+  sectionId        String?
+  termId           String
+  rollNumber       String
+  enrolledAt       DateTime @default(now())
+  /// 'enrolled' | 'completed' | 'transferred_out' | 'withdrawn'.
+  status           String   @default("enrolled")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  application AdmissionApplication? @relation(fields: [applicationId], references: [id])
+  student     StudentProfile        @relation(fields: [studentProfileId], references: [id])
+  schoolClass SchoolClass           @relation(fields: [classId], references: [id])
+  section     Section?              @relation(fields: [sectionId], references: [id])
+  term        Term                  @relation(fields: [termId], references: [id])
+
+  @@unique([organizationId, studentProfileId, termId])
+  @@index([organizationId])
+  @@index([classId])
+  @@index([termId])
+}
+
+model Curriculum {
+  id             String    @id @default(uuid())
+  organizationId String
+  classId        String
+  academicYearId String
+  name           String
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  academicYear AcademicYear        @relation(fields: [academicYearId], references: [id])
+  subjects     CurriculumSubject[]
+
+  @@unique([organizationId, classId, academicYearId, name])
+  @@index([organizationId])
+}
+
+model CurriculumSubject {
+  id             String  @id @default(uuid())
+  curriculumId   String
+  subjectId      String
+  periodsPerWeek Int     @default(4)
+  isCore         Boolean @default(true)
+
+  curriculum Curriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  subject    Subject    @relation(fields: [subjectId], references: [id])
+
+  @@unique([curriculumId, subjectId])
+  @@index([subjectId])
+}
+
+model LessonPlan {
+  id               String    @id @default(uuid())
+  organizationId   String
+  subjectId        String
+  classId          String?
+  termId           String?
+  teacherPartnerId String?
+  weekOf           DateTime
+  title            String
+  objectives       String?
+  materials        String?
+  /// 'draft' | 'published'.
+  status           String    @default("draft")
+  publishedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  subject Subject       @relation(fields: [subjectId], references: [id])
+  term    Term?         @relation(fields: [termId], references: [id])
+  teacher StaffProfile? @relation(fields: [teacherPartnerId], references: [id])
+
+  @@index([organizationId])
+  @@index([subjectId])
+  @@index([teacherPartnerId])
+}
+
+model TeacherAssignment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  teacherPartnerId String
+  subjectId        String
+  classId          String
+  sectionId        String?
+  termId           String?
+  periodsPerWeek   Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  teacher     StaffProfile @relation(fields: [teacherPartnerId], references: [id], onDelete: Cascade)
+  subject     Subject      @relation(fields: [subjectId], references: [id])
+  schoolClass SchoolClass  @relation(fields: [classId], references: [id])
+  section     Section?     @relation(fields: [sectionId], references: [id])
+  term        Term?        @relation(fields: [termId], references: [id])
+
+  @@unique([organizationId, teacherPartnerId, subjectId, classId, sectionId, termId])
+  @@index([organizationId])
+  @@index([teacherPartnerId])
+  @@index([classId])
+}
+
+model TimetableSlot {
+  id               String   @id @default(uuid())
+  organizationId   String
+  classId          String
+  sectionId        String?
+  dayOfWeek        Int // 1=Monday ... 7=Sunday
+  periodId         String
+  subjectId        String
+  teacherPartnerId String?
+  room             String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  schoolClass SchoolClass   @relation(fields: [classId], references: [id])
+  section     Section?      @relation(fields: [sectionId], references: [id])
+  period      Period        @relation(fields: [periodId], references: [id])
+  subject     Subject       @relation(fields: [subjectId], references: [id])
+  campus      Campus?       @relation(fields: [campusId], references: [id])
+  teacher     StaffProfile? @relation(fields: [teacherPartnerId], references: [id])
+  campusId    String?
+
+  @@index([organizationId])
+  @@index([classId, dayOfWeek])
+  @@index([teacherPartnerId, dayOfWeek])
+  @@index([periodId, dayOfWeek])
+}
+
+// ── Sprint 4: Attendance + LMS ─────────────────────────────────────────────
+
+enum AttendanceStatus {
+  present
+  absent
+  late
+  excused
+}
+
+model StudentAttendance {
+  id               String           @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  classId          String
+  sectionId        String?
+  date             DateTime
+  status           AttendanceStatus @default(present)
+  minutesLate      Int              @default(0)
+  reason           String?
+  markedById       String?
+  markedAt         DateTime         @default(now())
+  customFields     Json             @default("{}")
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  schoolClass    SchoolClass    @relation(fields: [classId], references: [id])
+  section        Section?       @relation(fields: [sectionId], references: [id])
+
+  @@unique([organizationId, studentProfileId, date])
+  @@index([organizationId])
+  @@index([classId, date])
+  @@index([organizationId, date])
+}
+
+model HomeworkAssignment {
+  id               String    @id @default(uuid())
+  organizationId   String
+  teacherPartnerId String
+  classId          String
+  sectionId        String?
+  subjectId        String
+  termId           String?
+  title            String
+  description      String?
+  dueDate          DateTime
+  attachments      Json      @default("[]")
+  maxScore         Decimal?  @db.Decimal(8, 2)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  teacher     StaffProfile         @relation(fields: [teacherPartnerId], references: [id])
+  schoolClass SchoolClass          @relation(fields: [classId], references: [id])
+  section     Section?             @relation(fields: [sectionId], references: [id])
+  subject     Subject              @relation(fields: [subjectId], references: [id])
+  submissions HomeworkSubmission[]
+
+  @@index([organizationId])
+  @@index([classId, dueDate])
+  @@index([subjectId])
+}
+
+model HomeworkSubmission {
+  id               String    @id @default(uuid())
+  organizationId   String
+  assignmentId     String
+  studentProfileId String
+  submittedAt      DateTime?
+  content          String?
+  attachments      Json      @default("[]")
+  score            Decimal?  @db.Decimal(8, 2)
+  gradedById       String?
+  gradedAt         DateTime?
+  feedback         String?
+  status           String    @default("assigned") // 'assigned' | 'submitted' | 'late' | 'graded'
+
+  assignment     HomeworkAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile     @relation(fields: [studentProfileId], references: [id])
+
+  @@unique([assignmentId, studentProfileId])
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model LearningResource {
+  id             String    @id @default(uuid())
+  organizationId String
+  classId        String?
+  subjectId      String?
+  title          String
+  /// 'note' | 'video' | 'link' | 'file' | 'slide'.
+  type           String
+  url            String?
+  fileUrl        String?
+  tags           String[]  @default([])
+  description    String?
+  publishedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@index([organizationId])
+  @@index([classId])
+  @@index([subjectId])
+}
+
+model Announcement {
+  id             String    @id @default(uuid())
+  organizationId String
+  /// 'school' | 'campus' | 'department' | 'class' | 'staff'.
+  scope          String    @default("school")
+  scopeId        String?
+  classId        String?
+  title          String
+  body           String
+  authorId       String?
+  publishedAt    DateTime?
+  expiresAt      DateTime?
+  /// 'normal' | 'urgent' | 'info'.
+  priority       String    @default("normal")
+  /// Audience: ['all', 'parents', 'students', 'staff'].
+  audience       String[]  @default(["all"])
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  schoolClass SchoolClass? @relation(fields: [classId], references: [id])
+
+  @@index([organizationId])
+  @@index([scope, scopeId])
+  @@index([organizationId, publishedAt])
+}
+
+// ── Sprint 5: Examinations & Grading ───────────────────────────────────────
+
+enum GradeEntryStatus {
+  draft
+  submitted
+  approved
+  rejected
+}
+
+model ExamType {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  /// Weight in overall term score (e.g. CAT1=10, Midterm=30, Final=40).
+  weight         Decimal   @db.Decimal(5, 2)
+  isFinal        Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  exams Exam[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Exam {
+  id             String     @id @default(uuid())
+  organizationId String
+  termId         String
+  examTypeId     String
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  /// Class IDs the exam applies to (JSON array for flexibility).
+  classes        Json       @default("[]")
+  status         ExamStatus @default(draft)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime?
+
+  term      Term           @relation(fields: [termId], references: [id])
+  examType  ExamType       @relation(fields: [examTypeId], references: [id])
+  schedules ExamSchedule[]
+
+  @@index([organizationId])
+  @@index([termId])
+  @@index([status])
+}
+
+model ExamSchedule {
+  id              String   @id @default(uuid())
+  organizationId  String
+  examId          String
+  classId         String
+  subjectId       String
+  date            DateTime
+  startTime       String // 'HH:mm'
+  durationMinutes Int      @default(60)
+  invigilatorId   String?
+  maxMarks        Decimal  @default(100) @db.Decimal(8, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  exam         Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  schoolClass  SchoolClass  @relation(fields: [classId], references: [id])
+  subject      Subject      @relation(fields: [subjectId], references: [id])
+  gradeEntries GradeEntry[]
+
+  @@unique([examId, classId, subjectId])
+  @@index([organizationId])
+  @@index([classId, date])
+}
+
+model GradeEntry {
+  id               String           @id @default(uuid())
+  organizationId   String
+  examScheduleId   String
+  studentProfileId String
+  marksObtained    Decimal?         @db.Decimal(8, 2)
+  maxMarks         Decimal          @db.Decimal(8, 2)
+  /// Computed grade letter (A/B/C/...).
+  grade            String?
+  /// Computed grade point (GPA).
+  gradePoint       Decimal?         @db.Decimal(4, 2)
+  remarks          String?
+  status           GradeEntryStatus @default(draft)
+  enteredById      String?
+  enteredAt        DateTime?
+  approvedById     String?
+  approvedAt       DateTime?
+  customFields     Json             @default("{}")
+
+  examSchedule   ExamSchedule   @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id])
+  enteredBy      StaffProfile?  @relation(fields: [enteredById], references: [id])
+
+  @@unique([examScheduleId, studentProfileId])
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([status])
+}
+
+model GradingScale {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  /// Bands: [{min:80, max:100, grade:'A', gpa:4.0, remark:'Distinction'}, ...]
+  bands          Json
+  isDefault      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model ReportCard {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  termId           String
+  generatedAt      DateTime  @default(now())
+  /// Full report card payload (subjects, grades, GPA, rank, comments).
+  payload          Json
+  pdfUrl           String?
+  publishedAt      DateTime?
+  customFields     Json      @default("{}")
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([termId])
+}
+
+model AcademicTranscript {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  generatedAt      DateTime @default(now())
+  payload          Json
+  pdfUrl           String?
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+// ── Sprint 6: School Fees (keystone) ───────────────────────────────────────
+
+enum DiscountType {
+  percent
+  fixed
+}
+
+model FeeStructure {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  academicYearId String
+  /// JSON array of {code:'TUITION', productId, amount, isOptional}
+  components     Json
+  /// JSON filter: {gradeLevelIds:[...], classIds:[...]}.
+  applicableTo   Json      @default("{}")
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  academicYear AcademicYear           @relation(fields: [academicYearId], references: [id])
+  schedules    FeeSchedule[]
+  assignments  StudentFeeAssignment[]
+
+  @@unique([organizationId, name, academicYearId])
+  @@index([organizationId])
+}
+
+model FeeSchedule {
+  id             String   @id @default(uuid())
+  organizationId String
+  feeStructureId String
+  termId         String
+  dueDate        DateTime
+  /// JSON: {type:'percent'|'fixed', value:Number, graceDays:Int}
+  lateFeePolicy  Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  feeStructure       FeeStructure        @relation(fields: [feeStructureId], references: [id])
+  term               Term                @relation(fields: [termId], references: [id])
+  penaltyRules       PenaltyRule[]
+  penaltyRuns        PenaltyRun[]
+  penaltyAssessments PenaltyAssessment[]
+
+  @@unique([organizationId, feeStructureId, termId])
+  @@index([organizationId])
+  @@index([termId])
+}
+
+model StudentFeeAssignment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  feeStructureId   String
+  termId           String
+  /// Per-student override of components: {code: amount} or null to use defaults.
+  customDiscount   Json     @default("{}")
+  /// Optional JSON: [{code,type,value}]
+  extraDiscounts   Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  feeStructure   FeeStructure   @relation(fields: [feeStructureId], references: [id])
+  term           Term           @relation(fields: [termId], references: [id])
+
+  @@unique([organizationId, studentProfileId, feeStructureId, termId])
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model Discount {
+  id             String       @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  type           DiscountType
+  value          Decimal      @db.Decimal(18, 6)
+  /// JSON filter: {gradeLevelIds, classIds, feeCodes:[...]}
+  appliesTo      Json         @default("{}")
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Scholarship {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  code             String
+  name             String
+  /// 'percent' | 'fixed'.
+  type             String
+  value            Decimal   @db.Decimal(18, 6)
+  validFrom        DateTime
+  validTo          DateTime?
+  awardedBy        String?
+  notes            String?
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model InstallmentPlan {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  termId           String
+  totalAmount      Decimal  @db.Decimal(20, 6)
+  /// JSON: [{number, dueDate, amount}]
+  installments     Json
+  customFields     Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  term           Term           @relation(fields: [termId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model PenaltyRule {
+  id             String   @id @default(uuid())
+  organizationId String
+  feeScheduleId  String
+  /// 'percent' | 'fixed'.
+  type           String
+  value          Decimal  @db.Decimal(18, 6)
+  graceDays      Int      @default(7)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  feeSchedule FeeSchedule         @relation(fields: [feeScheduleId], references: [id], onDelete: Cascade)
+  assessments PenaltyAssessment[]
+
+  @@index([organizationId])
+}
+
+model PenaltyRun {
+  id              String   @id @default(uuid())
+  organizationId  String
+  runAt           DateTime @default(now())
+  /// P0-2: the date the cron was scheduled to run (UTC, date-only).
+  /// Combined with the unique constraint below, this prevents the
+  /// daily penalty cron from creating two PenaltyRun rows for the
+  /// same schedule on the same day.
+  cronDate        DateTime @db.Date
+  scheduleId      String
+  totalAssessed   Decimal  @db.Decimal(20, 6)
+  /// JSON array of created penalty-document IDs.
+  createdInvoices Json     @default("[]")
+  notes           String?
+
+  schedule    FeeSchedule         @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  assessments PenaltyAssessment[]
+
+  @@unique([organizationId, scheduleId, cronDate])
+  @@index([organizationId])
+  @@index([scheduleId])
+}
+
+/// P0-2: one row per penalty applied to an overdue invoice. Enforces
+/// "no duplicate penalty for the same source document in the same
+/// PenaltyRun" — the most common case of the silent compounding bug
+/// where a daily cron tick would mint a new penalty invoice every
+/// 24 h.
+model PenaltyAssessment {
+  id                String   @id @default(uuid())
+  organizationId    String
+  penaltyRunId      String
+  sourceDocumentId  String
+  scheduleId        String
+  ruleId            String
+  amount            Decimal  @db.Decimal(20, 6)
+  /// P0-2: the penalty invoice that was created for this assessment.
+  /// Unique because each PenaltyAssessment produces at most one Document
+  /// (and Document is the inverse side of a 1:1 relation).
+  penaltyDocumentId String?  @unique
+  /// When the assessment was created (audit / debugging).
+  createdAt         DateTime @default(now())
+
+  penaltyRun      PenaltyRun  @relation(fields: [penaltyRunId], references: [id], onDelete: Cascade)
+  sourceDocument  Document    @relation("PenaltySource", fields: [sourceDocumentId], references: [id], onDelete: Cascade)
+  schedule        FeeSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  rule            PenaltyRule @relation(fields: [ruleId], references: [id])
+  penaltyDocument Document?   @relation("PenaltyDocument", fields: [penaltyDocumentId], references: [id])
+
+  @@unique([sourceDocumentId, penaltyRunId])
+  @@index([organizationId])
+  @@index([penaltyRunId])
+  @@index([sourceDocumentId])
+  @@index([scheduleId])
+}
+
+// ── Sprint 8: Communication ────────────────────────────────────────────────
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
+}
+
+enum NotificationChannel {
+  sms
+  email
+  push
+  in_app
+}
+
+model NotificationTemplate {
+  id             String              @id @default(uuid())
+  organizationId String
+  channel        NotificationChannel
+  code           String
+  subject        String?
+  body           String
+  /// JSON array of placeholder names, e.g. ['studentName','dueDate'].
+  variables      Json                @default("[]")
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([organizationId, channel, code])
+  @@index([organizationId])
+}
+
+model Notification {
+  id                String              @id @default(uuid())
+  organizationId    String
+  /// 'partner' | 'contact' | 'user'.
+  recipientType     String
+  recipientId       String
+  channel           NotificationChannel
+  templateCode      String?
+  payload           Json                @default("{}")
+  status            NotificationStatus  @default(queued)
+  sentAt            DateTime?
+  providerMessageId String?
+  error             String?
+  attempts          Int                 @default(0)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([recipientType, recipientId])
+}
+
+model MessageThread {
+  id             String    @id @default(uuid())
+  organizationId String
+  participantIds Json      @default("[]") // array of {type:'user'|'contact'|'partner', id}
+  subject        String?
+  lastMessageAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  messages Message[]
+
+  @@index([organizationId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  organizationId String
+  threadId       String
+  senderId       String
+  body           String
+  attachments    Json     @default("[]")
+  sentAt         DateTime @default(now())
+  readBy         Json     @default("[]") // array of participant refs
+
+  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender StaffProfile  @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([organizationId])
+  @@index([threadId])
+}
+
+// ── Sprint 9: Library + Transport ──────────────────────────────────────────
+
+model BookMetadata {
+  id             String  @id @default(uuid())
+  organizationId String
+  /// FK to Product (stockable, trackInventory=true). One row per ISBN.
+  productId      String  @unique
+  author         String?
+  isbn           String?
+  publisher      String?
+  edition        String?
+  /// 'reference' | 'textbook' | 'novel' | 'journal' | 'magazine'.
+  category       String  @default("textbook")
+  shelfLocation  String?
+  /// Total copies owned across the library.
+  totalCopies    Int     @default(1)
+  customFields   Json    @default("{}")
+
+  copies     BookCopy[]
+  borrowings Borrowing[]
+
+  @@index([organizationId])
+  @@index([isbn])
+}
+
+model BookCopy {
+  id             String   @id @default(uuid())
+  organizationId String
+  bookMetadataId String
+  copyNumber     String
+  /// 'available' | 'borrowed' | 'lost' | 'damaged' | 'reserved'.
+  status         String   @default("available")
+  condition      String   @default("good")
+  acquiredAt     DateTime @default(now())
+  customFields   Json     @default("{}")
+
+  book       BookMetadata @relation(fields: [bookMetadataId], references: [id], onDelete: Cascade)
+  borrowings Borrowing[]
+
+  @@unique([organizationId, bookMetadataId, copyNumber])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model Borrowing {
+  id               String    @id @default(uuid())
+  organizationId   String
+  bookMetadataId   String
+  bookCopyId       String
+  studentProfileId String?
+  staffProfileId   String?
+  borrowedAt       DateTime  @default(now())
+  dueAt            DateTime
+  returnedAt       DateTime?
+  /// 'borrowed' | 'returned' | 'overdue' | 'lost'.
+  status           String    @default("borrowed")
+  fineAmount       Decimal   @default(0) @db.Decimal(18, 6)
+  fineInvoiceId    String? // FK to Document if a fine was issued
+  notes            String?
+
+  book     BookMetadata @relation(fields: [bookMetadataId], references: [id])
+  bookCopy BookCopy     @relation(fields: [bookCopyId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([status])
+  @@index([dueAt])
+}
+
+model Vehicle {
+  id              String    @id @default(uuid())
+  organizationId  String
+  code            String
+  plateNumber     String
+  capacity        Int       @default(14)
+  /// 'bus' | 'van' | 'car'.
+  type            String    @default("bus")
+  driverPartnerId String?
+  isActive        Boolean   @default(true)
+  customFields    Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  routeAssignments RouteAssignment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([plateNumber])
+}
+
+model Route {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  monthlyFee     Decimal   @default(0) @db.Decimal(18, 6)
+  /// FK to Product (service) used when invoicing the transport fee.
+  feeProductId   String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  stops            Stop[]
+  assignments      StudentTransportAssignment[]
+  routeAssignments RouteAssignment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Stop {
+  id             String   @id @default(uuid())
+  organizationId String
+  routeId        String
+  name           String
+  /// Pickup order (1 = first stop).
+  order          Int      @default(1)
+  pickupTime     String? // 'HH:mm'
+  dropoffTime    String? // 'HH:mm'
+  feeOverride    Decimal? @db.Decimal(18, 6)
+  /// Geo: {lat, lng}
+  location       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  route       Route                        @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  assignments StudentTransportAssignment[]
+
+  @@unique([organizationId, routeId, name])
+  @@index([organizationId])
+}
+
+model RouteAssignment {
+  id             String  @id @default(uuid())
+  organizationId String
+  routeId        String
+  vehicleId      String
+  /// Day of week 1..7 (1=Monday).
+  dayOfWeek      Int
+  pickupTime     String? // 'HH:mm'
+  dropoffTime    String? // 'HH:mm'
+  isActive       Boolean @default(true)
+
+  route   Route   @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+
+  @@unique([organizationId, routeId, vehicleId, dayOfWeek])
+  @@index([organizationId])
+}
+
+model StudentTransportAssignment {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  routeId          String
+  stopId           String
+  termId           String?
+  startDate        DateTime
+  endDate          DateTime?
+  monthlyFee       Decimal   @default(0) @db.Decimal(18, 6)
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  student StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  route   Route          @relation(fields: [routeId], references: [id])
+  stop    Stop           @relation(fields: [stopId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+// ── Sprint 10: Hostel + Cafeteria ─────────────────────────────────────────
+
+model Dormitory {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  /// 'boys' | 'girls' | 'mixed'.
+  gender          String    @default("mixed")
+  capacity        Int       @default(40)
+  wardenPartnerId String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  rooms Room[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Room {
+  id             String    @id @default(uuid())
+  organizationId String
+  dormitoryId    String
+  number         String
+  /// 'single' | 'double' | 'triple' | 'quad'.
+  type           String    @default("double")
+  capacity       Int       @default(2)
+  monthlyFee     Decimal   @default(0) @db.Decimal(18, 6)
+  /// FK to Product (service) for invoicing.
+  feeProductId   String?
+  customFields   Json      @default("{}")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  dormitory Dormitory @relation(fields: [dormitoryId], references: [id], onDelete: Cascade)
+  beds      Bed[]
+
+  @@unique([organizationId, dormitoryId, number])
+  @@index([organizationId])
+}
+
+model Bed {
+  id             String   @id @default(uuid())
+  organizationId String
+  roomId         String
+  number         String
+  /// 'available' | 'occupied' | 'reserved' | 'maintenance'.
+  status         String   @default("available")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  allocation HostelAllocation?
+
+  @@unique([organizationId, roomId, number])
+  @@index([organizationId])
+  @@index([status])
+}
+
+model HostelAllocation {
+  id               String    @id @default(uuid())
+  organizationId   String
+  bedId            String    @unique
+  studentProfileId String
+  termId           String?
+  startDate        DateTime
+  endDate          DateTime?
+  checkOutDate     DateTime?
+  /// 'active' | 'ended' | 'cancelled'.
+  status           String    @default("active")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  bed     Bed            @relation(fields: [bedId], references: [id])
+  student StudentProfile @relation(fields: [studentProfileId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+model MealPlan {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  /// 'full' | 'half' | 'lunch_only' | 'breakfast_only'.
+  type           String    @default("full")
+  /// FK to Product (service) for invoicing.
+  feeProductId   String?
+  pricePerTerm   Decimal   @db.Decimal(18, 6)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  accounts MealAccount[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model MealAccount {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String   @unique
+  mealPlanId       String
+  balance          Decimal  @default(0) @db.Decimal(20, 6)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  student   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  mealPlan  MealPlan       @relation(fields: [mealPlanId], references: [id])
+  purchases MealPurchase[]
+
+  @@index([organizationId])
+}
+
+model MealPurchase {
+  id             String   @id @default(uuid())
+  organizationId String
+  mealAccountId  String
+  amount         Decimal  @db.Decimal(18, 6)
+  description    String?
+  paymentId      String?
+  purchasedAt    DateTime @default(now())
+
+  mealAccount MealAccount @relation(fields: [mealAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mealAccountId])
+}
+
+// ── Sprint 11: Reports (denormalized counters for fast dashboards) ─────────
+
+model SchoolDashboardCache {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// 'admin' | 'academic' | 'finance' | 'operational'.
+  kind           String
+  /// Date this snapshot covers (end-of-day).
+  asOf           DateTime
+  payload        Json
+  builtAt        DateTime @default(now())
+
+  @@unique([organizationId, kind, asOf])
+  @@index([organizationId, asOf])
+}

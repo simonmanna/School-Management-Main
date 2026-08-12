@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "RentalAgreement" ADD COLUMN     "damageTotal" DECIMAL(20,6) NOT NULL DEFAULT 0,
+ADD COLUMN     "depositApplied" DECIMAL(20,6) NOT NULL DEFAULT 0,
+ADD COLUMN     "lateFeeTotal" DECIMAL(20,6) NOT NULL DEFAULT 0,
+ADD COLUMN     "settlementTotal" DECIMAL(20,6) NOT NULL DEFAULT 0;

@@ -1,0 +1,49 @@
+{
+  "name": "POS-CAFE",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cafe POS — modular point-of-sale platform built on the generic ERP kernel (Phases 0–7: kernel + finance + accounting + inventory + invoicing + receipts/payments + expenses/procurement + reporting + cash sessions). Cafe vertical: P3 receipts, P4 modifiers/combos, P5 KDS, P6 hardware, P7 loyalty/credit/tabs, P9 stock policy, P11 offline, Digital Menu.",
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "shared:build": "pnpm --filter @erp/shared build",
+    "dev:api": "pnpm --filter @erp/shared build && pnpm --filter @erp/api start:dev",
+    "dev:web": "pnpm --filter @erp/web dev",
+    "db:up": "docker compose up -d db",
+    "db:generate": "pnpm --filter @erp/api db:generate",
+    "db:migrate": "pnpm --filter @erp/api db:migrate",
+    "db:seed": "pnpm --filter @erp/api db:seed",
+    "db:reset": "pnpm --filter @erp/api db:reset",
+    "lint": "pnpm -r lint",
+    "lint:arch": "depcruise \"apps/api/src/**/*.ts\" --config .dependency-cruiser.cjs",
+    "gen:vertical": "node scripts/gen-vertical.mjs",
+    "test": "pnpm -r test",
+    "test:e2e": "vitest run tests/e2e",
+    "typecheck": "pnpm -r typecheck",
+    "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@nestjs/core"
+    ]
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.2",
+    "dependency-cruiser": "^17.4.3",
+    "dotenv": "^16.6.1",
+    "pg": "^8.22.0",
+    "tsx": "^4.23.1",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "web": "^0.0.2",
+    "web-push": "^3.6.7"
+  }
+}

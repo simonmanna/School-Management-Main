@@ -1,0 +1,42 @@
+# Multi-stage Dockerfile for the API (Node 20+).
+# Build stage compiles TS; production stage runs the compiled JS as non-root.
+
+FROM node:20-alpine AS deps
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/shared/package.json packages/shared/package.json
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+FROM node:20-alpine AS build
+WORKDIR /app
+RUN corepack enable
+COPY --from=deps /app /app
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY apps/api apps/api
+RUN pnpm --filter @erp/shared build
+RUN pnpm --filter @erp/api db:generate
+RUN pnpm --filter @erp/api build
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+RUN corepack enable && \
+    addgroup -S cafe-pos && adduser -S cafe-pos -G cafe-pos && \
+    apk add --no-cache tini
+COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
+COPY --from=build /app/packages/shared packages/shared
+COPY --from=build /app/apps/api/package.json apps/api/package.json
+COPY --from=build /app/apps/api/dist apps/api/dist
+COPY --from=build /app/apps/api/prisma apps/api/prisma
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts && pnpm --filter @erp/shared build
+RUN mkdir -p /app/var/uploads && chown -R cafe-pos:cafe-pos /app
+USER cafe-pos
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget -qO- http://localhost:3000/api/v1/health/live || exit 1
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "apps/api/dist/main.js"]

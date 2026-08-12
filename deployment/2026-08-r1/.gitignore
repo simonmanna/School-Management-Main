@@ -1,0 +1,15 @@
+# Runtime state, not source. `upgrade.ps1` writes state.json as its resume
+# journal; committing it would make a fresh machine think steps already ran.
+state.json
+state.rolled-back-*.json
+
+# Raw `prisma migrate diff` output. It is the drafting input for
+# phaseA-additive.sql / phaseC-contract.sql, which ARE committed. Keeping the
+# draft out avoids ambiguity about which file is authoritative.
+draft.sql
+
+# Captured before the upgrade, machine-specific.
+baseline-before.json
+
+# MigrationReport.{json,md} are deliberately NOT ignored — they are the
+# deployment evidence for what the account mapping did, and belong in history.

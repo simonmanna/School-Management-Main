@@ -1,0 +1,314 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────────────────────────────────
+   POS Cafe — Modern design tokens
+   A vibrant, friendly theme that works for restaurants, cafes, bars and
+   fast-casual venues. Cool blues + warm orange accents + soft gradients.
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    /* Backgrounds — slightly cool off-white that lifts cards off the canvas */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary — vibrant cafe blue (logo / buttons / focus rings) */
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 40% 98%;
+
+    /* Secondary — soft sky tint */
+    --secondary: 214 95% 93%;
+    --secondary-foreground: 222 47% 11%;
+
+    /* Muted — quiet text & chips */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent — warm orange pop (used sparingly for CTAs and totals) */
+    --accent: 24 95% 53%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Borders — cooler than slate, more cyan tinted */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    /* Brand-specific tokens (consumed by tailwind.config + inline styles) */
+    --brand-grad-from: 217 91% 60%;
+    --brand-grad-to:   230 90% 56%;
+    --brand-warm:      24 95% 53%;
+    --brand-success:   142 71% 45%;
+    --brand-warning:   38 92% 50%;
+    --brand-danger:    0 84% 60%;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 10%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 65%;
+    --primary-foreground: 222 47% 7%;
+
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217 33% 18%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 24 95% 60%;
+    --accent-foreground: 222 47% 7%;
+
+    --destructive: 0 73% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217 33% 18%;
+    --input: 217 33% 18%;
+    --ring: 217 91% 65%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+  }
+  /* Nicer default focus ring */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Reusable utility components
+   ────────────────────────────────────────────────────────────────────────── */
+@layer components {
+
+  /* Glass card — used on hero sections / dashboard tiles */
+  .glass-card {
+    @apply rounded-2xl border border-white/40 bg-white/70 backdrop-blur-md shadow-[0_8px_32px_-12px_rgba(15,23,42,0.18)];
+  }
+
+  /* Gradient hero strip — for page headers */
+  .hero-strip {
+    background: linear-gradient(135deg,
+      hsl(var(--brand-grad-from)) 0%,
+      hsl(var(--brand-grad-to))   55%,
+      hsl(var(--brand-warm))      100%);
+  }
+
+  /* Subtle gradient text */
+  .text-gradient {
+    background: linear-gradient(135deg,
+      hsl(var(--brand-grad-from)),
+      hsl(var(--brand-grad-to)));
+    -webkit-background-clip: text;
+            background-clip: text;
+    color: transparent;
+  }
+
+  /* "Pill" badge base */
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold tracking-wide;
+  }
+
+  /* Sparkline-friendly card border that lifts on hover */
+  .lift-on-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_18px_40px_-12px_rgba(15,23,42,0.22)];
+  }
+
+  /* KPI tile with gradient accent on the left edge */
+  .kpi-tile {
+    @apply relative overflow-hidden rounded-xl border border-border/60 bg-card p-3 lift-on-hover;
+  }
+  .kpi-tile::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: linear-gradient(180deg, hsl(var(--brand-grad-from)), hsl(var(--brand-grad-to)));
+  }
+
+  /* Section heading used across page headers */
+  .section-title {
+    @apply text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  /* Buttons — extra polish on hover */
+  .btn-shine {
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-shine::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(120deg,
+      transparent 30%,
+      rgba(255,255,255,0.35) 50%,
+      transparent 70%);
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+  }
+  .btn-shine:hover::after { transform: translateX(100%); }
+
+  /* Pretty empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center text-muted-foreground py-10 gap-2;
+  }
+
+  /* Animated gradient background for the login screen */
+  .animated-gradient {
+    background:
+      radial-gradient(at 20% 10%, hsl(217 91% 60% / .18) 0, transparent 50%),
+      radial-gradient(at 80% 0%,  hsl(24 95% 53% / .16) 0, transparent 50%),
+      radial-gradient(at 60% 80%, hsl(230 90% 56% / .18) 0, transparent 50%),
+      hsl(var(--background));
+    background-size: 200% 200%;
+    animation: gradient-shift 18s ease infinite;
+  }
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 0%; }
+    50%      { background-position: 100% 100%; }
+  }
+
+  /* Soft floating decoration */
+  .float-slow { animation: float-slow 6s ease-in-out infinite; }
+  @keyframes float-slow {
+    0%, 100% { transform: translateY(0px); }
+    50%      { transform: translateY(-8px); }
+  }
+
+  /* Subtle pulse for live indicators */
+  .pulse-dot::before {
+    content: '';
+    @apply absolute inset-0 rounded-full;
+    background: currentColor;
+    opacity: 0.4;
+    animation: pulse-ring 1.6s ease-out infinite;
+  }
+  @keyframes pulse-ring {
+    0%   { transform: scale(1);   opacity: 0.45; }
+    100% { transform: scale(2.4); opacity: 0;    }
+  }
+
+  /* Skeleton shimmer */
+  .shimmer {
+    background: linear-gradient(90deg,
+      hsl(var(--muted))   0%,
+      hsl(var(--muted) / .5) 50%,
+      hsl(var(--muted))   100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Page wrapper — uniform gutter */
+  .page-wrap {
+    @apply mx-auto w-full max-w-[1800px] px-2 py-3 md:px-3 md:py-4;
+  }
+
+  /* Hero header for content pages */
+  .page-hero {
+    @apply relative overflow-hidden rounded-2xl text-white shadow-lg shadow-blue-500/20 mb-4;
+  }
+  .page-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(at 90% 0%,  hsl(0 0% 100% / .18) 0, transparent 50%),
+      radial-gradient(at 0% 100%, hsl(0 0% 100% / .12) 0, transparent 50%);
+    pointer-events: none;
+  }
+  .page-hero-inner {
+    @apply relative flex flex-wrap items-center justify-between gap-4 px-4 py-3;
+  }
+
+  /* ────────────────────────────────────────────────────────────────────────
+     AdminLTE-inspired "sky blue" widgets
+     ──────────────────────────────────────────────────────────────────────── */
+
+  /* Sky-blue gradient hero (AdminLTE light-blue skin) */
+  .hero-sky {
+    background: linear-gradient(135deg,
+      hsl(207 90% 54%) 0%,
+      hsl(199 98% 48%) 55%,
+      hsl(190 95% 55%) 100%);
+  }
+
+  /* small-box KPI widget — solid color, big number, watermark icon, footer */
+  .small-box {
+    @apply relative overflow-hidden rounded-xl text-white shadow-[0_8px_24px_-8px_rgba(2,132,199,0.45)]
+           transition-all duration-200 hover:-translate-y-0.5
+           hover:shadow-[0_16px_36px_-10px_rgba(2,132,199,0.6)];
+  }
+  .small-box .sb-inner { @apply relative z-10 px-4 pt-4 pb-2; }
+  .small-box .sb-value { @apply text-3xl md:text-[2rem] leading-none font-extrabold tracking-tight; }
+  .small-box .sb-label { @apply mt-1 text-sm font-semibold text-white/90; }
+  .small-box .sb-icon {
+    @apply absolute right-2 top-1 z-0 text-white/25 transition-transform duration-300;
+    transform: scale(1);
+  }
+  .small-box:hover .sb-icon { transform: scale(1.12) rotate(-6deg); opacity: 0.9; }
+  .small-box .sb-footer {
+    @apply relative z-10 flex items-center justify-center gap-1 bg-black/15 py-1.5
+           text-xs font-semibold text-white/90 transition-colors;
+  }
+  .small-box:hover .sb-footer { @apply bg-black/25 text-white; }
+
+  /* info-box — white card, colored icon panel on the left */
+  .info-box {
+    @apply flex items-stretch overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm
+           transition-all duration-200 hover:-translate-y-0.5
+           hover:shadow-[0_16px_36px_-12px_rgba(2,132,199,0.35)];
+  }
+  .info-box-icon {
+    @apply flex w-16 shrink-0 items-center justify-center text-white;
+  }
+  .info-box-content { @apply flex-1 px-3 py-2.5; }
+
+  /* box with a sky top-accent border (AdminLTE .box.box-info) */
+  .box-sky {
+    @apply relative rounded-xl border border-border/60 bg-card shadow-sm;
+    border-top: 3px solid hsl(199 98% 48%);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Print styles
+   ────────────────────────────────────────────────────────────────────────── */
+@media print {
+  body { background: #fff; color: #000; }
+  main  { padding: 0 !important; overflow: visible !important; }
+  .no-print { display: none !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Scrollbars
+   ────────────────────────────────────────────────────────────────────────── */
+@layer utilities {
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
+  .scroll-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .5); }
+}

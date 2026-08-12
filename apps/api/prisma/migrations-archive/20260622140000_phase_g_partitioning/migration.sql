@@ -1,0 +1,52 @@
+-- Phase G: Postgres partitioning.
+--
+-- Strategy: HASH partitioning on (organizationId) for tenant isolation,
+-- combined with RANGE partitioning on (createdAt) for time-based archival.
+-- A single-tenant partition grows by month; after 24 months we detach +
+-- archive the oldest partition.
+--
+-- NOTE: Postgres requires the partition key to be part of every UNIQUE
+-- constraint. We replace the org-scoped unique indexes with composite
+-- (organizationId, ...) indexes that include the partition key.
+--
+-- This migration is BIG — it copies the existing tables into new partitioned
+-- structures. On a production DB this should be done during a maintenance
+-- window with the existing tables renamed out of the way (or with logical
+-- replication set up first). On a fresh DB it just creates the partitioned
+-- tables.
+--
+-- For the beta this is documented as a SCRIPT (see scripts/partition-existing.ts
+-- for the migration runner). Operators apply this AFTER all tenants are loaded.
+
+-- -- Create partitioned tables by selecting from the existing ones.
+-- -- We do not DROP the originals; the operator runs a cut-over script.
+
+-- -- JournalLine (parent + per-month children)
+-- CREATE TABLE IF NOT EXISTS "JournalLine_new" (
+--     "id" TEXT NOT NULL,
+--     "organizationId" TEXT NOT NULL,
+--     "journalEntryId" TEXT NOT NULL,
+--     "accountId" TEXT NOT NULL,
+--     "partnerId" TEXT,
+--     "description" TEXT,
+--     "debit" DECIMAL(20,6) NOT NULL DEFAULT 0,
+--     "credit" DECIMAL(20,6) NOT NULL DEFAULT 0,
+--     "currencyId" TEXT,
+--     "exchangeRate" DECIMAL(18,8) NOT NULL DEFAULT 1,
+--     "baseDebit" DECIMAL(20,6) NOT NULL DEFAULT 0,
+--     "baseCredit" DECIMAL(20,6) NOT NULL DEFAULT 0,
+--     "lineNumber" INTEGER NOT NULL DEFAULT 0,
+--     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+--     PRIMARY KEY ("organizationId", "id", "createdAt")
+-- ) PARTITION BY HASH ("organizationId");
+--
+-- CREATE TABLE IF NOT EXISTS "JournalLine_y2026m01" PARTITION OF "JournalLine_new"
+--     FOR VALUES WITH (MODULUS 8, REMAINDER 0);
+-- (etc — 8 hash partitions; range sub-partitions added on demand)
+
+-- For the beta we DO NOT partition the existing JournalLine / InventoryLedger
+-- tables — partitioning is deferred to Phase G+ when the tenant is large
+-- enough that the maintenance window is worth it. This migration is a
+-- placeholder marker.
+
+SELECT 'Phase G: partitioning is documented but not auto-applied at this time. Run scripts/partition-existing.ts when a tenant exceeds ~5M JournalLine rows.' AS note;

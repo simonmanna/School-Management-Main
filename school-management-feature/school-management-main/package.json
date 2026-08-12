@@ -1,0 +1,39 @@
+{
+  "name": "generic-erp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Modular ERP platform (modular monolith). Phases 0–7 complete (kernel + finance + accounting + inventory + invoicing + receipts/payments + expenses/procurement + reporting + cash sessions). Ready for verticals (POS, School…).",
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "shared:build": "pnpm --filter @erp/shared build",
+    "dev:api": "pnpm --filter @erp/shared build && pnpm --filter @erp/api start:dev",
+    "dev:web": "pnpm --filter @erp/web dev",
+    "db:up": "docker compose up -d db",
+    "db:generate": "pnpm --filter @erp/api db:generate",
+    "db:migrate": "pnpm --filter @erp/api db:migrate",
+    "db:seed": "pnpm --filter @erp/api db:seed",
+    "db:reset": "pnpm --filter @erp/api db:reset",
+    "lint": "pnpm -r lint",
+    "lint:arch": "depcruise \"apps/api/src/**/*.ts\" --config .dependency-cruiser.cjs",
+    "gen:vertical": "node scripts/gen-vertical.mjs",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "@nestjs/core"
+    ]
+  },
+  "devDependencies": {
+    "dependency-cruiser": "18.0.0-beta-1"
+  }
+}
