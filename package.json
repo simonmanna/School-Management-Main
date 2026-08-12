@@ -16,6 +16,7 @@
     "db:generate": "pnpm --filter @erp/api db:generate",
     "db:migrate": "pnpm --filter @erp/api db:migrate",
     "db:seed": "pnpm --filter @erp/api db:seed",
+    "seed:school": "pnpm --filter @erp/api exec tsx ../../scripts/seed-school.ts",
     "db:reset": "pnpm --filter @erp/api db:reset",
     "lint": "pnpm -r lint",
     "lint:arch": "depcruise \"apps/api/src/**/*.ts\" --config .dependency-cruiser.cjs",

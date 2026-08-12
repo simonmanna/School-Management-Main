@@ -26,8 +26,7 @@ import { RepairModule } from './modules/repair/repair.module';
 import { HrModule } from './modules/hr/hr.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { CommunicationModule } from './modules/communication/communication.module';
-// SchoolModule is ported in P1 and wired behind ENABLE_SCHOOL alongside the
-// other opt-in verticals below. The previous 312-LOC stub was removed in P0.
+import { SchoolModule } from './modules/school/school.module';
 
 /**
  * Opt-in modules. A café upgrading to this schema gets every table, but should
@@ -86,6 +85,7 @@ const enabled = (flag: string): boolean => process.env[flag] === 'true';
     ...(enabled('ENABLE_HR') ? [HrModule] : []),
         ...(enabled('ENABLE_ORDERS') ? [OrdersModule] : []),
     ...(enabled('ENABLE_COMMUNICATION') ? [CommunicationModule] : []),
+    ...(enabled('ENABLE_SCHOOL') ? [SchoolModule] : []),
       ],
   controllers: [AppController, MetricsController],
 })
