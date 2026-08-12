@@ -251,9 +251,11 @@ async function bootstrap(): Promise<void> {
     const server = app.getHttpServer() as any;
     server.maxHeadersCount = 1000;
     server.headersTimeout = 60000;
-    // @ts-ignore - maxHeaderSize is not in the types but works
+    // Not in the Node types but honoured at runtime. `server` is `any`, so
+    // these need no suppression comment — a @ts-expect-error here would itself
+    // be reported as unused.
     server.maxHeaderSize = 65536; // 64KB instead of default ~8KB
-    // @ts-ignore - Increase max request line size for long URLs with tokens in query string
+    // Raises the max request line size for long URLs with tokens in the query string.
     server.maxRequestLineSize = 262144; // 256KB for very long URLs
   }
 

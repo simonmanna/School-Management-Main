@@ -174,6 +174,61 @@ export const EVENTS = {
   CommunicationMessageDelivered: 'communication.message.delivered',
   CommunicationMessageFailed: 'communication.message.failed',
   CommunicationChannelStatusChanged: 'communication.channel.status_changed',
+
+  // ─── School vertical ──────────────────────────────────────────────────────
+  // The school module never talks to a notification provider. It publishes
+  // these facts; `CommunicationRule` rows decide who hears about them and on
+  // which channel. Any event that should be able to drive a rule must also be
+  // listed in RULE_EVENTABLE (communication.subscriber.ts) — the rule engine
+  // validates `CommunicationRule.eventName` against that catalog on write, so
+  // an event missing from it can never fire a rule.
+  //
+  // Foundation
+  SchoolProfileUpdated: 'school.profile.updated',
+  SchoolAcademicYearSetCurrent: 'school.academic_year.set_current',
+  SchoolTermSetCurrent: 'school.term.set_current',
+  // People
+  SchoolStudentCreated: 'school.student.created',
+  SchoolStudentStatusChanged: 'school.student.status.changed',
+  SchoolStaffCreated: 'school.staff.created',
+  SchoolStaffStatusChanged: 'school.staff.status.changed',
+  // Admissions
+  SchoolAdmissionSubmitted: 'school.admission.submitted',
+  SchoolAdmissionUnderReview: 'school.admission.under_review',
+  SchoolAdmissionExamScheduled: 'school.admission.exam_scheduled',
+  SchoolAdmissionAccepted: 'school.admission.accepted',
+  SchoolAdmissionRejected: 'school.admission.rejected',
+  SchoolAdmissionEnrolled: 'school.admission.enrolled',
+  SchoolAdmissionWithdrawn: 'school.admission.withdrawn',
+  // Academics
+  SchoolLessonPlanPublished: 'school.lesson_plan.published',
+  // Attendance + LMS
+  SchoolAttendanceMarked: 'school.attendance.marked',
+  SchoolAttendanceCorrectionRequested: 'school.attendance.correction_requested',
+  SchoolHomeworkAssigned: 'school.homework.assigned',
+  SchoolHomeworkGraded: 'school.homework.graded',
+  SchoolAnnouncementPublished: 'school.announcement.published',
+  // Examinations
+  SchoolExamScheduled: 'school.exam.scheduled',
+  SchoolExamPublished: 'school.exam.published',
+  SchoolExamClosed: 'school.exam.closed',
+  SchoolGradePosted: 'school.grade.posted',
+  SchoolGradeApproved: 'school.grade.approved',
+  SchoolReportCardGenerated: 'school.reportcard.generated',
+  // Fees — the money flows through Document/Payment; these are observers.
+  SchoolFeeInvoiceDrafted: 'school.fee.invoice.drafted',
+  SchoolFeeInvoicePosted: 'school.fee.invoice.posted',
+  SchoolFeeInvoiceOverdue: 'school.fee.invoice.overdue',
+  SchoolFeePaymentRecorded: 'school.fee.payment.recorded',
+  SchoolPenaltyRunCompleted: 'school.fee.penalty.run',
+  // Library + transport
+  SchoolBookBorrowed: 'school.library.borrowed',
+  SchoolBookReturned: 'school.library.returned',
+  SchoolBookOverdueFined: 'school.library.overdue',
+  SchoolTransportAssigned: 'school.transport.assigned',
+  // Hostel + cafeteria
+  SchoolHostelAllocated: 'school.hostel.allocated',
+  SchoolMealTopUp: 'school.meal.topup',
 } as const;
 
 /** Payload emitted for a created/updated/deleted tenant entity. */
@@ -390,6 +445,171 @@ export interface DomainEventMap {
   'communication.message.delivered': CommunicationDeliveryEventPayload;
   'communication.message.failed': CommunicationDeliveryEventPayload;
   'communication.channel.status_changed': CommunicationChannelEventPayload;
+
+  // School vertical. Every payload carries organizationId because subscribers
+  // run inside the outbox worker with no tenant context and must re-establish
+  // one before touching the DB (see communication.subscriber.ts).
+  'school.profile.updated': { organizationId: string; profileId: string };
+  'school.academic_year.set_current': { organizationId: string; academicYearId: string };
+  'school.term.set_current': { organizationId: string; termId: string };
+  'school.student.created': {
+    organizationId: string;
+    studentProfileId: string;
+    partnerId: string;
+    admissionNo: string;
+  };
+  'school.student.status.changed': {
+    organizationId: string;
+    studentProfileId: string;
+    fromStatus: string;
+    toStatus: string;
+  };
+  'school.staff.created': {
+    organizationId: string;
+    staffProfileId: string;
+    partnerId: string;
+    employeeNo: string;
+  };
+  'school.staff.status.changed': {
+    organizationId: string;
+    staffProfileId: string;
+    fromStatus: string;
+    toStatus: string;
+  };
+  'school.admission.submitted': {
+    organizationId: string;
+    applicationId: string;
+    applicationNumber: string;
+  };
+  'school.admission.under_review': { organizationId: string; applicationId: string };
+  'school.admission.exam_scheduled': { organizationId: string; applicationId: string };
+  'school.admission.accepted': { organizationId: string; applicationId: string };
+  'school.admission.rejected': {
+    organizationId: string;
+    applicationId: string;
+    reason?: string;
+  };
+  'school.admission.enrolled': {
+    organizationId: string;
+    applicationId: string;
+    studentProfileId: string;
+    classId: string;
+    termId: string;
+  };
+  'school.admission.withdrawn': { organizationId: string; applicationId: string };
+  'school.lesson_plan.published': {
+    organizationId: string;
+    lessonPlanId: string;
+    subjectId: string;
+    classId?: string;
+  };
+  'school.attendance.marked': {
+    organizationId: string;
+    date: string;
+    classId: string;
+    present: number;
+    absent: number;
+    late: number;
+  };
+  'school.attendance.correction_requested': {
+    organizationId: string;
+    studentProfileId: string;
+    date: string;
+    requestedStatus: string;
+  };
+  'school.homework.assigned': {
+    organizationId: string;
+    assignmentId: string;
+    classId: string;
+    subjectId: string;
+  };
+  'school.homework.graded': {
+    organizationId: string;
+    submissionId: string;
+    assignmentId: string;
+    studentProfileId: string;
+  };
+  'school.announcement.published': {
+    organizationId: string;
+    announcementId: string;
+    scope: string;
+    classId?: string;
+  };
+  'school.exam.scheduled': { organizationId: string; examId: string; termId: string };
+  'school.exam.published': { organizationId: string; examId: string };
+  'school.exam.closed': { organizationId: string; examId: string };
+  'school.grade.posted': {
+    organizationId: string;
+    examScheduleId: string;
+    studentProfileId: string;
+  };
+  'school.grade.approved': {
+    organizationId: string;
+    examScheduleId: string;
+    approvedById: string;
+  };
+  'school.reportcard.generated': {
+    organizationId: string;
+    reportCardId: string;
+    studentProfileId: string;
+    termId: string;
+  };
+  'school.fee.invoice.drafted': {
+    organizationId: string;
+    documentId: string;
+    studentProfileId: string;
+    amount: string;
+  };
+  'school.fee.invoice.posted': {
+    organizationId: string;
+    documentId: string;
+    studentProfileId: string;
+    amount: string;
+  };
+  'school.fee.invoice.overdue': {
+    organizationId: string;
+    documentId: string;
+    studentProfileId: string;
+    amount: string;
+  };
+  'school.fee.payment.recorded': {
+    organizationId: string;
+    paymentId: string;
+    documentId: string;
+    amount: string;
+  };
+  'school.fee.penalty.run': {
+    organizationId: string;
+    scheduleId: string;
+    totalAssessed: string;
+    invoiceIds: string[];
+    penaltyRunId: string;
+  };
+  'school.library.borrowed': {
+    organizationId: string;
+    borrowingId: string;
+    bookCopyId: string;
+    studentProfileId?: string;
+  };
+  'school.library.returned': { organizationId: string; borrowingId: string };
+  'school.library.overdue': {
+    organizationId: string;
+    borrowingId: string;
+    fineAmount: string;
+  };
+  'school.transport.assigned': {
+    organizationId: string;
+    assignmentId: string;
+    studentProfileId: string;
+    routeId: string;
+  };
+  'school.hostel.allocated': {
+    organizationId: string;
+    allocationId: string;
+    studentProfileId: string;
+    bedId: string;
+  };
+  'school.meal.topup': { organizationId: string; mealAccountId: string; amount: string };
 }
 
 /** A message was created (outbound) or received (inbound). */

@@ -278,7 +278,7 @@ const KdsPage: React.FC = () => {
     transition.mutate({ ticketId, action, reason });
   };
   const cyclePriority = (t: KdsTicketFE) => setPriority.mutate({ ticketId: t.id, priority: nextPriority[t.priority] });
-  const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const runBulk = (action: KdsAction) => {
     if (selected.size === 0) return;
     let reason: string | undefined;

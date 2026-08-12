@@ -26,7 +26,8 @@ import { RepairModule } from './modules/repair/repair.module';
 import { HrModule } from './modules/hr/hr.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { CommunicationModule } from './modules/communication/communication.module';
-// import { SchoolModule } from './modules/school/school.module'; // disabled: DI wiring issues, not needed for POS testing
+// SchoolModule is ported in P1 and wired behind ENABLE_SCHOOL alongside the
+// other opt-in verticals below. The previous 312-LOC stub was removed in P0.
 
 /**
  * Opt-in modules. A café upgrading to this schema gets every table, but should

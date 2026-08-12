@@ -5,8 +5,12 @@ import type { TenantContextService } from '../tenancy/tenant-context.service';
  * Models that carry a (non-null) organizationId and must be auto-scoped.
  * NOTE: Setting has a nullable organizationId and is handled manually in
  * SettingsService, so it is intentionally excluded here.
+ *
+ * Exported so `tenancy-registration.spec.ts` can prove this set stays in sync
+ * with schema.prisma. A model missing from here is a silent cross-tenant leak,
+ * not an error — the spec is what turns that into a red build.
  */
-const ORG_SCOPED = new Set<string>([
+export const ORG_SCOPED = new Set<string>([
   'User',
   'Role',
   'RefreshToken',
@@ -300,10 +304,83 @@ const ORG_SCOPED = new Set<string>([
   'MessageTemplate',
   'CommunicationRule',
   'CommunicationDispatch',
+  // School vertical (P0.4). Kept in schema declaration order so the list can be
+  // diffed against the schema block by eye; `tenancy-registration.spec.ts`
+  // proves it mechanically.
+  'Campus',
+  'SchoolProfile',
+  'AcademicYear',
+  'Term',
+  'Department',
+  'GradeLevel',
+  'SchoolClass',
+  'Section',
+  'Subject',
+  'Period',
+  'SchoolCalendarEvent',
+  'StudentProfile',
+  'StudentStatusHistory',
+  'StudentGuardian',
+  'MedicalRecord',
+  'StudentDocument',
+  'StaffProfile',
+  'StaffStatusHistory',
+  'Position',
+  'StaffAttendance',
+  'AdmissionApplication',
+  'ApplicationDocument',
+  'EntranceExam',
+  'WaitingList',
+  'Enrollment',
+  'Curriculum',
+  'CurriculumSubject',
+  'LessonPlan',
+  'TeacherAssignment',
+  'TimetableSlot',
+  'StudentAttendance',
+  'HomeworkAssignment',
+  'HomeworkSubmission',
+  'LearningResource',
+  'Announcement',
+  'ExamType',
+  'Exam',
+  'ExamSchedule',
+  'GradeEntry',
+  'GradingScale',
+  'ReportCard',
+  'AcademicTranscript',
+  'FeeStructure',
+  'FeeSchedule',
+  'StudentFeeAssignment',
+  'Discount',
+  'Scholarship',
+  'InstallmentPlan',
+  'PenaltyRule',
+  'PenaltyRun',
+  'PenaltyAssessment',
+  'BookMetadata',
+  'BookCopy',
+  'Borrowing',
+  'Vehicle',
+  'Route',
+  'Stop',
+  'RouteAssignment',
+  'StudentTransportAssignment',
+  'Dormitory',
+  'Room',
+  'Bed',
+  'HostelAllocation',
+  'MealPlan',
+  'MealAccount',
+  'MealPurchase',
+  'SchoolDashboardCache',
 ]);
 
-/** Models with a `deletedAt` column → soft-delete filtering on reads/writes. */
-const SOFT_DELETE = new Set<string>([
+/**
+ * Models with a `deletedAt` column → soft-delete filtering on reads/writes.
+ * Exported for the same reason as ORG_SCOPED — see `tenancy-registration.spec.ts`.
+ */
+export const SOFT_DELETE = new Set<string>([
   'User',
   'Role',
   'Partner',
@@ -421,6 +498,40 @@ const SOFT_DELETE = new Set<string>([
   // use status columns / hard cascade, not soft delete.
   'Conversation',
   'Message',
+  // School vertical (P0.4) — configuration and roster entities are soft-deleted
+  // so historical enrollments, invoices and grades keep resolving their names.
+  // Transactional rows (attendance, grade entries, payments, penalty runs) are
+  // not soft-deleted: they are corrected, not removed.
+  'Campus',
+  'AcademicYear',
+  'Term',
+  'Department',
+  'GradeLevel',
+  'SchoolClass',
+  'Section',
+  'Subject',
+  'Period',
+  'SchoolCalendarEvent',
+  'StudentProfile',
+  'StudentGuardian',
+  'StaffProfile',
+  'Position',
+  'AdmissionApplication',
+  'Curriculum',
+  'HomeworkAssignment',
+  'LearningResource',
+  'Announcement',
+  'ExamType',
+  'Exam',
+  'GradingScale',
+  'FeeStructure',
+  'Discount',
+  'Scholarship',
+  'Vehicle',
+  'Route',
+  'Dormitory',
+  'Room',
+  'MealPlan',
 ]);
 
 const WHERE_OPS = new Set<string>([

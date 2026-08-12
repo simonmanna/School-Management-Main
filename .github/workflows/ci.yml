@@ -1,0 +1,85 @@
+name: CI
+
+# The ADRs describe several rules as "CI-enforced" (ADR-011's boundary contract
+# most of all), but until this file existed nothing enforced them except a
+# developer remembering to run `pnpm verify`. That matters most for
+# `tenancy-registration.spec.ts`, whose failure mode — a model missing from
+# ORG_SCOPED — leaks rows across tenants silently.
+#
+# KNOWN RED — one step. `typecheck` fails on two pre-existing errors in
+# apps/api/test/integration/{invoice-to-payment,pos-print-lifecycle}.spec.ts.
+# Both create a `Document` without `documentTypeId`, which became required when
+# the DMS registry landed, so neither spec has compiled (or run) since. They are
+# unrelated to the school vertical and are tracked separately. Fix them and this
+# workflow goes green; every other step passes today.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://cafe-pos:cafe-pos@localhost:5432/cafe-pos?schema=public
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cafe-pos
+          POSTGRES_PASSWORD: cafe-pos
+          POSTGRES_DB: cafe-pos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cafe-pos"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The generated client is an input to both typecheck and the specs.
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      # ADR-011: no upward or cross-vertical imports. Runs in ~3s and is the
+      # cheapest signal, so it goes first.
+      - name: Architecture boundaries
+        run: pnpm lint:arch
+
+      - name: Build shared contracts
+        run: pnpm shared:build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # Applies migrations so the integration specs (which self-skip when
+      # DATABASE_URL is unset) actually run rather than silently passing.
+      - name: Apply migrations
+        run: pnpm --filter @erp/api exec prisma migrate deploy
+
+      - name: Test
+        run: pnpm --filter @erp/api test
