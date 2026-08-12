@@ -12,7 +12,9 @@ import {
   ScholarshipService,
   StudentFeeAssignmentService,
 } from './catalog.service';
-import type {
+// Value imports (not `import type`): the global ValidationPipe reads
+// class-validator metadata off the runtime class, which `import type` erases.
+import {
   CreateDiscountDto,
   CreateFeeScheduleDto,
   CreateFeeStructureDto,

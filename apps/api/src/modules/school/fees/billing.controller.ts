@@ -4,7 +4,9 @@ import { RequirePermissions } from '../../../kernel/auth/decorators/require-perm
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { BillingService, SchoolPaymentService } from './billing.service';
-import type { CollectFeePaymentDto, GenerateBillingDto } from './dto.types';
+// Value import (not `import type`): the global ValidationPipe needs the runtime
+// class to read class-validator metadata; `import type` would erase it.
+import { CollectFeePaymentDto, GenerateBillingDto } from './dto.types';
 
 /**
  * Bursar endpoints. All money-mutating endpoints are idempotent: the
