@@ -30,6 +30,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   BookOpen,
+  GraduationCap,
   BookText,
   ScrollText,
   Smartphone,
@@ -137,7 +138,7 @@ interface NavItem {
   permission?: string;
   badge?: string;
   /** Per-item feature gate, resolved the same way as section flags. */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL';
 }
 
 interface NavSection {
@@ -150,7 +151,7 @@ interface NavSection {
    * here without gating the module server-side would leave its routes, crons
    * and boot hooks live.
    */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL';
 }
 
 const flagEnabled = (flag?: string): boolean =>
@@ -214,6 +215,15 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
+    ],
+  },
+  {
+    title: 'School',
+    icon: GraduationCap,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
+      { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
     ],
   },
   {
@@ -417,6 +427,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   'Master Data': 'nav.masterData',
   Sales: 'nav.sales',
   CRM: 'nav.crm',
+  School: 'nav.school',
   Inventory: 'nav.inventory',
   'Beverage Control': 'nav.beverageControl',
   Rentals: 'nav.rentals',
