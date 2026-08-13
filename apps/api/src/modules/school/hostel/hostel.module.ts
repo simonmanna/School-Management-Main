@@ -1,19 +1,13 @@
 import { Module } from '@nestjs/common';
+// Only the hostel + cafeteria services this module actually provides. (The file
+// also exports library/transport services; those belong to their own modules.)
 import {
-  BookCopyService,
-  BookMetadataService,
-  BorrowingService,
   DormitoryService,
   HostelAllocationService,
   MealAccountService,
   MealPlanService,
-  RouteAssignmentService,
-  RouteService,
   RoomService,
   BedService,
-  StopService,
-  StudentTransportAssignmentService,
-  VehicleService,
 } from '../library/library-transport-hostel-cafeteria.service';
 import {
   BedController,

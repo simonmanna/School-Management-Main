@@ -11,6 +11,7 @@ import { EnrollApplicationDto } from '../../src/modules/school/admissions/dto.ty
 import { BulkMarkAttendanceDto } from '../../src/modules/school/attendance/dto.types';
 import { BulkGradeEntryDto, CreateGradingScaleDto } from '../../src/modules/school/examinations/dto.types';
 import { CreateTimetableSlotDto } from '../../src/modules/school/academics/dto.types';
+import { MealTopUpDto, TransportAssignDto, CreateRouteDto } from '../../src/modules/school/library/dto.types';
 
 const errs = (o: object) => validateSync(o, { whitelist: true });
 const props = (o: object) => errs(o).map((e) => e.property);
@@ -77,5 +78,20 @@ describe('Academics — CreateTimetableSlotDto', () => {
   it('rejects a dayOfWeek outside 1..7', () => {
     const d = plainToInstance(CreateTimetableSlotDto, { classId: 'c1', dayOfWeek: 9, periodId: 'p1', subjectId: 'sub1' });
     expect(props(d)).toContain('dayOfWeek');
+  });
+});
+
+describe('Library/Transport/Cafeteria — money DTOs (H3)', () => {
+  it('MealTopUpDto rejects a negative amount', () => {
+    const d = plainToInstance(MealTopUpDto, { studentProfileId: 's1', mealPlanId: 'm1', amount: -5 });
+    expect(props(d)).toContain('amount');
+  });
+  it('TransportAssignDto requires route + stop + fee', () => {
+    const d = plainToInstance(TransportAssignDto, { studentProfileId: 's1' });
+    expect(props(d)).toEqual(expect.arrayContaining(['routeId', 'stopId', 'startDate', 'monthlyFee']));
+  });
+  it('CreateRouteDto accepts a valid route and rejects a missing name', () => {
+    expect(errs(plainToInstance(CreateRouteDto, { name: 'Route A', monthlyFee: 50000 }))).toHaveLength(0);
+    expect(props(plainToInstance(CreateRouteDto, { monthlyFee: 50000 }))).toContain('name');
   });
 });

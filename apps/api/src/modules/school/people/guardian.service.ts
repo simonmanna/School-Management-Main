@@ -78,9 +78,13 @@ export class GuardianService {
   }
 
   async listByStudent(studentProfileId: string) {
-    return this.prisma.client.studentGuardian.findMany({
+    const links = await this.prisma.client.studentGuardian.findMany({
       where: { studentProfileId },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      // H3: include the guardian's Contact so the UI can show a name/phone.
+      // Aliased to `contact` below to match the create() response shape.
+      include: { guardianContact: true },
     });
+    return links.map(({ guardianContact, ...link }) => ({ ...link, contact: guardianContact }));
   }
 }

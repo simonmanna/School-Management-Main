@@ -28,13 +28,19 @@ import { DocumentBuilderService } from '../../invoicing/document/document-builde
 import { PostingService } from '../../accounting/posting/posting.service';
 import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
+import type {
+  CreateBookMetadataDto, UpdateBookMetadataDto, CreateBookCopyDto, UpdateBookCopyDto,
+  CreateVehicleDto, UpdateVehicleDto, CreateRouteDto, UpdateRouteDto, CreateStopDto, UpdateStopDto,
+  CreateRouteAssignmentDto, UpdateRouteAssignmentDto, CreateDormitoryDto, UpdateDormitoryDto,
+  CreateRoomDto, UpdateRoomDto, CreateBedDto, UpdateBedDto, CreateMealPlanDto, UpdateMealPlanDto,
+} from './dto.types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Library
 // ═══════════════════════════════════════════════════════════════════════════
 
 @Injectable()
-export class BookMetadataService extends BaseCrudService<BookMetadata, Partial<BookMetadata>, Partial<BookMetadata>> {
+export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBookMetadataDto, UpdateBookMetadataDto> {
   protected readonly entityName = 'BookMetadata';
   protected readonly searchFields = ['isbn'];
   constructor(private readonly prisma: PrismaService) {
@@ -43,7 +49,7 @@ export class BookMetadataService extends BaseCrudService<BookMetadata, Partial<B
 }
 
 @Injectable()
-export class BookCopyService extends BaseCrudService<BookCopy, Partial<BookCopy>, Partial<BookCopy>> {
+export class BookCopyService extends BaseCrudService<BookCopy, CreateBookCopyDto, UpdateBookCopyDto> {
   protected readonly entityName = 'BookCopy';
   protected readonly searchFields: string[] = [];
   constructor(private readonly prisma: PrismaService) {
@@ -215,7 +221,7 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
 // ═══════════════════════════════════════════════════════════════════════════
 
 @Injectable()
-export class VehicleService extends BaseCrudService<Vehicle, Partial<Vehicle>, Partial<Vehicle>> {
+export class VehicleService extends BaseCrudService<Vehicle, CreateVehicleDto, UpdateVehicleDto> {
   protected readonly entityName = 'Vehicle';
   protected readonly searchFields = ['code', 'plateNumber'];
   constructor(private readonly prisma: PrismaService) {
@@ -224,7 +230,7 @@ export class VehicleService extends BaseCrudService<Vehicle, Partial<Vehicle>, P
 }
 
 @Injectable()
-export class RouteService extends BaseCrudService<Route, Partial<Route>, Partial<Route>> {
+export class RouteService extends BaseCrudService<Route, CreateRouteDto, UpdateRouteDto> {
   protected readonly entityName = 'Route';
   protected readonly searchFields = ['name'];
   protected readonly defaultInclude = { stops: { orderBy: { order: 'asc' } }, assignments: true };
@@ -235,7 +241,7 @@ export class RouteService extends BaseCrudService<Route, Partial<Route>, Partial
 }
 
 @Injectable()
-export class StopService extends BaseCrudService<Stop, Partial<Stop>, Partial<Stop>> {
+export class StopService extends BaseCrudService<Stop, CreateStopDto, UpdateStopDto> {
   protected readonly entityName = 'Stop';
   protected readonly searchFields = ['name'];
   constructor(private readonly prisma: PrismaService) {
@@ -244,7 +250,7 @@ export class StopService extends BaseCrudService<Stop, Partial<Stop>, Partial<St
 }
 
 @Injectable()
-export class RouteAssignmentService extends BaseCrudService<RouteAssignment, Partial<RouteAssignment>, Partial<RouteAssignment>> {
+export class RouteAssignmentService extends BaseCrudService<RouteAssignment, CreateRouteAssignmentDto, UpdateRouteAssignmentDto> {
   protected readonly entityName = 'RouteAssignment';
   protected readonly searchFields: string[] = [];
   constructor(private readonly prisma: PrismaService) {
@@ -291,7 +297,7 @@ export class StudentTransportAssignmentService extends BaseCrudService<StudentTr
 // ═══════════════════════════════════════════════════════════════════════════
 
 @Injectable()
-export class DormitoryService extends BaseCrudService<Dormitory, Partial<Dormitory>, Partial<Dormitory>> {
+export class DormitoryService extends BaseCrudService<Dormitory, CreateDormitoryDto, UpdateDormitoryDto> {
   protected readonly entityName = 'Dormitory';
   protected readonly searchFields = ['name'];
   protected readonly defaultInclude = { rooms: true };
@@ -301,7 +307,7 @@ export class DormitoryService extends BaseCrudService<Dormitory, Partial<Dormito
 }
 
 @Injectable()
-export class RoomService extends BaseCrudService<Room & { beds: Bed[] }, Partial<Room>, Partial<Room>> {
+export class RoomService extends BaseCrudService<Room & { beds: Bed[] }, CreateRoomDto, UpdateRoomDto> {
   protected readonly entityName = 'Room';
   protected readonly searchFields: string[] = [];
   protected readonly defaultInclude = { beds: true };
@@ -311,7 +317,7 @@ export class RoomService extends BaseCrudService<Room & { beds: Bed[] }, Partial
 }
 
 @Injectable()
-export class BedService extends BaseCrudService<Bed, Partial<Bed>, Partial<Bed>> {
+export class BedService extends BaseCrudService<Bed, CreateBedDto, UpdateBedDto> {
   protected readonly entityName = 'Bed';
   protected readonly searchFields: string[] = [];
   constructor(private readonly prisma: PrismaService) {
@@ -375,7 +381,7 @@ export class HostelAllocationService extends BaseCrudService<HostelAllocation, P
 // ═══════════════════════════════════════════════════════════════════════════
 
 @Injectable()
-export class MealPlanService extends BaseCrudService<MealPlan, Partial<MealPlan>, Partial<MealPlan>> {
+export class MealPlanService extends BaseCrudService<MealPlan, CreateMealPlanDto, UpdateMealPlanDto> {
   protected readonly entityName = 'MealPlan';
   protected readonly searchFields = ['name'];
   constructor(private readonly prisma: PrismaService) {

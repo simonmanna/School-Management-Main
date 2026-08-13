@@ -712,6 +712,8 @@ model Contact {
   deletedAt      DateTime?
 
   partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  // H3: school guardianships that point at this Contact (see StudentGuardian).
+  guardianships StudentGuardian[] @relation("GuardianContact")
 
   @@index([organizationId])
   @@index([partnerId])
@@ -10084,6 +10086,10 @@ model StudentGuardian {
   deletedAt          DateTime?
 
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  // H3: the guardian's Contact row was a bare FK (guardianContactId) with no
+  // relation, so the guardian list could not include it and the UI showed blank
+  // names. Formalized here.
+  guardianContact Contact @relation("GuardianContact", fields: [guardianContactId], references: [id])
 
   @@unique([studentProfileId, guardianContactId])
   @@index([organizationId])
