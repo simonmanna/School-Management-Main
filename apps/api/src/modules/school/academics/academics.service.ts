@@ -91,9 +91,11 @@ export class LessonPlanService extends BaseCrudService<LessonPlan, CreateLessonP
       await this.audit.recordInTx(tx, {
         entity: 'LessonPlan',
         entityId: id,
-        action: 'publish' as any,
+        // 'publish' is not an AuditAction enum value — that write would throw and
+        // roll back the publish. Publishing is a status update.
+        action: 'update',
         oldValues: { status: before.status },
-        newValues: { status: 'published' },
+        newValues: { status: 'published', action: 'publish' },
       });
       this.events.publish(EVENTS.SchoolLessonPlanPublished, {
         organizationId: this.tenant.organizationId,

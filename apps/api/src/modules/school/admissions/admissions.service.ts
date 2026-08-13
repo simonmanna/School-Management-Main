@@ -218,8 +218,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       await this.audit.recordInTx(tx, {
         entity: 'AdmissionApplication',
         entityId: app.id,
-        action: 'enroll' as any,
-        newValues: { studentProfileId: profile.id, enrollmentId: enrollment.id },
+        // 'enroll' is not an AuditAction enum value (that write threw and rolled
+        // back the enrollment). Enrolling creates a student → 'create'.
+        action: 'create',
+        newValues: { action: 'enroll', studentProfileId: profile.id, enrollmentId: enrollment.id },
       });
       this.events.publish(EVENTS.SchoolAdmissionEnrolled, {
         organizationId,
@@ -309,12 +311,19 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       });
       if (updated.count === 0) throw new NotFoundException(`Application ${applicationId} not found`);
       const after = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
+      // Map the admission transition to a valid AuditAction enum value — the
+      // raw action ('review'/'accept'/...) is not one, so the audit write threw
+      // a Prisma validation error and rolled back the whole transition. The
+      // domain action is preserved in newValues.
+      const auditAction: 'update' | 'approve' | 'reject' | 'cancel' = (
+        { review: 'update', accept: 'approve', reject: 'reject', schedule_exam: 'update', withdraw: 'cancel' } as const
+      )[action];
       await this.audit.recordInTx(tx, {
         entity: 'AdmissionApplication',
         entityId: applicationId,
-        action: action as any,
+        action: auditAction,
         oldValues: { status: before.status },
-        newValues: { status: newStatus, notes },
+        newValues: { status: newStatus, action, notes },
       });
       this.events.publish(
         ({
