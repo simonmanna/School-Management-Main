@@ -195,3 +195,143 @@ export function useCreateGuardian() {
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'guardians', v.studentProfileId] }),
   });
 }
+
+/* ───────────────────────── Fees — structures & schedules ───────────────────────── */
+
+export interface FeeComponent {
+  code: string;
+  productId: string;
+  amount: number;
+  isOptional?: boolean;
+}
+
+export interface FeeStructure {
+  id: string;
+  name: string;
+  academicYearId: string;
+  components: FeeComponent[];
+  applicableTo?: { classIds?: string[]; gradeLevelIds?: string[] } | null;
+}
+
+export interface FeeSchedule {
+  id: string;
+  feeStructureId: string;
+  termId: string;
+  dueDate: string;
+  feeStructure?: { name: string } | null;
+}
+
+export interface ServiceProduct {
+  id: string;
+  code: string;
+  name: string;
+  productType: string;
+  salesPrice: string | null;
+}
+
+export function useFeeStructures() {
+  return useQuery({
+    queryKey: ['school', 'fee-structures'],
+    queryFn: async () => (await api.get<Paginated<FeeStructure>>(`${S}/fee-structures`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function useCreateFeeStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; academicYearId: string; components: FeeComponent[]; applicableTo?: { classIds?: string[] } }) =>
+      (await api.post<FeeStructure>(`${S}/fee-structures`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] }),
+  });
+}
+
+export function useFeeSchedules() {
+  return useQuery({
+    queryKey: ['school', 'fee-schedules'],
+    queryFn: async () => (await api.get<Paginated<FeeSchedule>>(`${S}/fee-schedules`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function useCreateFeeSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { feeStructureId: string; termId: string; dueDate: string }) =>
+      (await api.post<FeeSchedule>(`${S}/fee-schedules`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-schedules'] }),
+  });
+}
+
+/** Service products usable as fee components. */
+export function useServiceProducts() {
+  return useQuery({
+    queryKey: ['school', 'service-products'],
+    queryFn: async () =>
+      (await api.get<Paginated<ServiceProduct>>('/products', { params: { pageSize: 200, productType: 'service' } })).data,
+  });
+}
+
+/* ───────────────────────── Billing run + collection ───────────────────────── */
+
+export interface BillingResult {
+  count: number;
+  skipped: Array<{ studentProfileId: string; reason: string }>;
+}
+
+export function useGenerateBilling() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { termId: string; classId?: string }) =>
+      (await api.post<BillingResult>(`${S}/billing/generate`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'statement'] });
+      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+    },
+  });
+}
+
+export interface CollectResult {
+  payment: { id: string; paymentNumber?: string; amount: string } | null;
+  allocations: Array<{ documentId: string; amount: number }>;
+  unallocated: number;
+  replayed: boolean;
+}
+
+export function useCollectPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string;
+      amount: number;
+      paymentMethod: 'cash' | 'bank' | 'mobile_money' | 'card';
+      cashSessionId?: string;
+      reference?: string;
+    }) => (await api.post<CollectResult>(`${S}/payments/collect`, dto)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
+      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+    },
+  });
+}
+
+/* ───────────────────────── Reports ───────────────────────── */
+
+export interface ClassArrears {
+  classId: string;
+  className: string;
+  outstanding: number;
+  studentCount: number;
+}
+
+export function useArrearsByClass() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'arrears'],
+    queryFn: async () => (await api.get<ClassArrears[]>(`${S}/reports/outstanding-by-class`)).data,
+  });
+}
+
+export function useDailyCollections() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'collections'],
+    queryFn: async () => (await api.get<Array<{ date: string; total: number }>>(`${S}/reports/daily-collections`)).data,
+  });
+}

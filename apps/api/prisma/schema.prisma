@@ -638,6 +638,11 @@ model Partner {
   rentalAgreements RentalAgreement[]
   rentalDeposits   RentalDeposit[]
   rentalScores     RentalCustomerScore[]
+  // School vertical (H): the 1:1 back-relations to the profile that treats this
+  // Partner as its AR account. The FK already lived on the profile as a bare
+  // scalar; these formalize it so `include: { partner: true }` works.
+  schoolStudent    StudentProfile?       @relation("StudentPartner")
+  schoolStaff      StaffProfile?         @relation("StaffPartner")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -10001,6 +10006,7 @@ model StudentProfile {
   organizationId   String
   /// UNIQUE FK to Partner. The Partner row carries name/email/phone/etc.
   partnerId        String        @unique
+  partner          Partner       @relation("StudentPartner", fields: [partnerId], references: [id])
   admissionNo      String
   currentClassId   String?
   currentSectionId String?
@@ -10130,6 +10136,7 @@ model StaffProfile {
   organizationId  String
   /// UNIQUE FK to Partner.
   partnerId       String      @unique
+  partner         Partner     @relation("StaffPartner", fields: [partnerId], references: [id])
   employeeNo      String
   departmentId    String?
   positionId      String?

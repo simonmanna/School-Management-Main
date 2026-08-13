@@ -470,6 +470,56 @@ async function assertSafeToSeed() {
   }
 }
 
+/**
+ * Minimal accounting so the billing/collection loop works out of the box.
+ * The school vertical rides on the platform's GL, but a fresh org has no chart
+ * of accounts. Create the three accounts + journals + mappings that
+ * BillingService.generateForTerm and SchoolPaymentService.collect resolve
+ * (accounts_receivable, default_cash, sales_revenue). Idempotent.
+ */
+async function ensureAccounting() {
+  const catBy = async (key: string) => {
+    const c = await prisma.accountCategory.findFirst({ where: { key } });
+    if (!c) throw new Error(`AccountCategory '${key}' missing — run the base db:seed first`);
+    return c.id;
+  };
+  const [cashCat, arCat, revCat] = await Promise.all([catBy('cash'), catBy('receivable'), catBy('revenue')]);
+
+  const account = async (code: string, name: string, categoryId: string, normal: 'debit' | 'credit') =>
+    prisma.account.upsert({
+      where: { organizationId_code: { organizationId: ORG_ID, code } },
+      update: {},
+      create: { organizationId: ORG_ID, code, name, categoryId, normalBalance: normal },
+    });
+  const cash = await account('1000', 'Cash', cashCat, 'debit');
+  const ar = await account('1100', 'Fees Receivable', arCat, 'debit');
+  const rev = await account('4000', 'Tuition & Fee Income', revCat, 'credit');
+
+  for (const [code, name, journalType] of [
+    ['SALES', 'Sales', 'sales'],
+    ['CASH', 'Cash', 'cash'],
+    ['GEN', 'General', 'general'],
+  ] as const) {
+    await prisma.journal.upsert({
+      where: { organizationId_code: { organizationId: ORG_ID, code } },
+      update: {},
+      create: { organizationId: ORG_ID, code, name, journalType },
+    });
+  }
+
+  for (const [key, accountId] of [
+    ['accounts_receivable', ar.id],
+    ['default_cash', cash.id],
+    ['sales_revenue', rev.id],
+  ] as const) {
+    await prisma.accountMapping.upsert({
+      where: { organizationId_key: { organizationId: ORG_ID, key } },
+      update: { accountId },
+      create: { organizationId: ORG_ID, key, accountId },
+    });
+  }
+}
+
 async function main() {
   console.log('🏫 Seeding Sunrise Academy…');
   await assertSafeToSeed();
@@ -480,6 +530,7 @@ async function main() {
   // `organizationId = app.org_id` — all satisfied because the seed uses ORG_ID.
   await prisma.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, ORG_ID);
   await ensureOrganization();
+  await ensureAccounting();
   await ensureProfile();
   const campuses = await ensureCampuses();
   const { year, terms } = await ensureAcademicYear();

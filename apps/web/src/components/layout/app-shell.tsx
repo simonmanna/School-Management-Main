@@ -224,6 +224,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
     ],
   },
   {

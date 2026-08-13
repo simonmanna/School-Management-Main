@@ -49,6 +49,8 @@ export function SchoolDashboardPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3 text-sm">
           <Link className="text-primary hover:underline" to="/school/students">Students &amp; guardians</Link>
+          <span className="text-muted-foreground">·</span>
+          <Link className="text-primary hover:underline" to="/school/fees">Fees &amp; billing</Link>
         </CardContent>
       </Card>
     </div>

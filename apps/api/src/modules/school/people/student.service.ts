@@ -22,6 +22,9 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   protected readonly entityName = 'StudentProfile';
   protected readonly searchFields: string[] = ['admissionNo'];
   protected readonly defaultInclude = {
+    // partner carries the student's name/email/phone (the AR account); the UI
+    // roster and every dropdown needs it, so include it by default.
+    partner: true,
     currentClass: { include: { gradeLevel: true } },
     currentSection: true,
     guardians: true,
@@ -275,6 +278,51 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     });
     if (!profile) throw new NotFoundException(`Student ${studentProfileId} not found`);
     const partner = await this.prisma.client.partner.findFirst({ where: { id: profile.partnerId } });
-    return { profile, partner };
+
+    // H: the fee statement was a stub (profile + partner only). Aggregate the
+    // student's actual fee invoices and receipts so the bursar UI and guardian
+    // portal show a real balance. Billed = sum of fee-document totals; balance =
+    // sum of their residuals; paid is the difference (derived from the invoices
+    // themselves, so it always reconciles).
+    const invoices = await this.prisma.client.document.findMany({
+      where: {
+        partnerId: profile.partnerId,
+        documentType: 'sales_invoice',
+        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+      },
+      orderBy: { issueDate: 'desc' },
+      select: {
+        id: true,
+        documentNumber: true,
+        issueDate: true,
+        dueDate: true,
+        totalAmount: true,
+        amountResidual: true,
+        paymentStatus: true,
+        sourceType: true,
+      },
+    });
+    const payments = await this.prisma.client.payment.findMany({
+      where: { partnerId: profile.partnerId, direction: 'inbound' },
+      orderBy: { paymentDate: 'desc' },
+      select: { id: true, paymentNumber: true, amount: true, paymentDate: true, paymentMethod: true },
+    });
+
+    const totalBilled = invoices.reduce((s, d) => s + Number(d.totalAmount), 0);
+    const balance = invoices.reduce((s, d) => s + Number(d.amountResidual), 0);
+    const totalPaid = totalBilled - balance;
+
+    return {
+      studentId: profile.id,
+      studentName: partner?.name ?? null,
+      admissionNo: profile.admissionNo,
+      profile,
+      partner,
+      totalBilled,
+      totalPaid,
+      balance,
+      invoices,
+      payments,
+    };
   }
 }

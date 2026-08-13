@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 
@@ -67,10 +68,21 @@ export class ReportingService {
     return { staff, teacherAssignments: totalAssignments, avgPeriodsPerWeek: Math.round(Number(avgPeriods) * 100) / 100 };
   }
 
-  /** Total outstanding across all fee invoices. */
+  // Every school-sourced AR document a student still owes on. The old filter was
+  // paymentStatus in ['partial','paid'], which excluded 'not_paid' — i.e. a
+  // freshly-billed, entirely-unpaid invoice (the largest arrears) was dropped
+  // and 'paid' (zero residual) added nothing. The open set is
+  // ['not_paid','partial'] with a positive residual.
+  private static readonly OPEN_FEE_WHERE: Prisma.DocumentWhereInput = {
+    sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+    paymentStatus: { in: ['not_paid', 'partial'] },
+    amountResidual: { gt: 0 },
+  };
+
+  /** Total outstanding across all open fee invoices. */
   async outstandingFeesTotal(): Promise<number> {
     const docs = await this.prisma.client.document.findMany({
-      where: { sourceType: 'school_fee', paymentStatus: { in: ['partial', 'paid'] } },
+      where: ReportingService.OPEN_FEE_WHERE,
       select: { amountResidual: true },
     });
     return docs.reduce((s, d) => s + Number(d.amountResidual), 0);
@@ -78,26 +90,35 @@ export class ReportingService {
 
   /** Outstanding fees grouped by class. */
   async outstandingByClass() {
-    const docs: any[] = await this.prisma.client.document.findMany({
-      where: { sourceType: 'school_fee', paymentStatus: { in: ['partial', 'paid'] } },
+    const docs = await this.prisma.client.document.findMany({
+      where: ReportingService.OPEN_FEE_WHERE,
+      select: { partnerId: true, amountResidual: true },
     });
+    if (docs.length === 0) return [];
+
+    // Resolve partner → class in one query instead of two per document.
+    const partnerIds = [...new Set(docs.map((d) => d.partnerId).filter(Boolean) as string[])];
+    const students = await this.prisma.client.studentProfile.findMany({
+      where: { partnerId: { in: partnerIds } },
+      include: { currentClass: { include: { gradeLevel: true } } },
+    });
+    const classByPartner = new Map(students.map((s) => [s.partnerId, s.currentClass]));
+
     const byClass: Record<string, { className: string; outstanding: number; studentCount: number }> = {};
     for (const d of docs) {
-      const partner = await this.prisma.client.partner.findFirst({ where: { id: (d as any).partnerId } });
-      const studentProfile = partner ? await this.prisma.client.studentProfile.findFirst({
-        where: { partnerId: partner.id },
-        include: { currentClass: { include: { gradeLevel: true } } },
-      }) : null;
-      const c = studentProfile?.currentClass;
+      const c = d.partnerId ? classByPartner.get(d.partnerId) : null;
       if (!c) continue;
-      const key = c.id;
-      if (!byClass[key]) byClass[key] = { className: c.name, outstanding: 0, studentCount: 0 };
-      byClass[key].outstanding += Number((d as any).amountResidual);
+      if (!byClass[c.id]) byClass[c.id] = { className: c.name, outstanding: 0, studentCount: 0 };
+      byClass[c.id].outstanding += Number(d.amountResidual);
     }
-    // Add student counts per class.
-    const classRows = await this.prisma.client.schoolClass.findMany({ where: { id: { in: Object.keys(byClass) } } });
-    for (const c of classRows) {
-      byClass[c.id].studentCount = await this.prisma.client.studentProfile.count({ where: { currentClassId: c.id, status: 'active' } });
+
+    const counts = await this.prisma.client.studentProfile.groupBy({
+      by: ['currentClassId'],
+      where: { currentClassId: { in: Object.keys(byClass) }, status: 'active' },
+      _count: true,
+    });
+    for (const gc of counts) {
+      if (gc.currentClassId && byClass[gc.currentClassId]) byClass[gc.currentClassId].studentCount = gc._count;
     }
     return Object.entries(byClass).map(([id, v]) => ({ classId: id, ...v }));
   }

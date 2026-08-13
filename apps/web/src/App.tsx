@@ -31,6 +31,7 @@ import { ModulesPage } from '@/pages/modules';
 import { CrmDashboardPage } from '@/pages/crm/dashboard';
 import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolStudentsPage } from '@/pages/school/students';
+import { SchoolFeesPage } from '@/pages/school/fees';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -364,6 +365,7 @@ export function App() {
           <Route path="/crm" element={<CrmDashboardPage />} />
           <Route path="/school" element={<SchoolDashboardPage />} />
           <Route path="/school/students" element={<SchoolStudentsPage />} />
+          <Route path="/school/fees" element={<SchoolFeesPage />} />
           <Route path="/crm/deals" element={<DealsPage />} />
           <Route path="/crm/deals/:id" element={<DealDetailPage />} />
 
