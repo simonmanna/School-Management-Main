@@ -191,7 +191,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     return this.prisma.client.gradeEntry.findMany({
       where: { examScheduleId },
       orderBy: { marksObtained: 'desc' },
-      include: { studentProfile: true },
+      include: { studentProfile: { include: { partner: true } } },
     });
   }
 }

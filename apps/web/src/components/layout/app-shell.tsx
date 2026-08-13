@@ -224,6 +224,9 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.takeAttendance },
+      { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
+      { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
     ],
   },

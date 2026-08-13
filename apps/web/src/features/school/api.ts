@@ -335,3 +335,200 @@ export function useDailyCollections() {
     queryFn: async () => (await api.get<Array<{ date: string; total: number }>>(`${S}/reports/daily-collections`)).data,
   });
 }
+
+/* ───────────────────────── Subjects (foundation) ───────────────────────── */
+
+export interface Subject { id: string; code: string; name: string; isCore: boolean }
+
+export function useSubjects() {
+  return useQuery({
+    queryKey: ['school', 'subjects'],
+    queryFn: async () => (await api.get<Paginated<Subject>>(`${S}/subjects`, { params: { pageSize: 200 } })).data,
+  });
+}
+
+/* ───────────────────────── Attendance ───────────────────────── */
+
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
+
+export interface RosterStudent {
+  id: string;
+  admissionNo: string;
+  partner?: { name: string } | null;
+}
+
+export function useClassRoster(classId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'roster', classId],
+    enabled: !!classId,
+    queryFn: async () => (await api.get<RosterStudent[]>(`${S}/students/by-class/${classId}`)).data,
+  });
+}
+
+export interface AttendanceRow {
+  id: string;
+  studentProfileId: string;
+  status: AttendanceStatus;
+  minutesLate: number;
+  reason?: string | null;
+}
+
+export function useAttendanceRegister(classId: string | undefined, date: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'register', classId, date],
+    enabled: !!classId && !!date,
+    queryFn: async () => (await api.get<AttendanceRow[]>(`${S}/attendance/register`, { params: { classId, date } })).data,
+  });
+}
+
+export function useMarkAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      date: string;
+      classId: string;
+      sectionId?: string;
+      entries: Array<{ studentProfileId: string; status: AttendanceStatus; minutesLate?: number; reason?: string }>;
+    }) => (await api.post(`${S}/attendance/mark`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'register', v.classId, v.date] }),
+  });
+}
+
+/* ───────────────────────── Timetable ───────────────────────── */
+
+export interface TimetableSlot {
+  id: string;
+  classId: string;
+  dayOfWeek: number;
+  periodId: string;
+  subjectId: string;
+  teacherPartnerId?: string | null;
+  room?: string | null;
+  subject?: { name: string; code: string } | null;
+  period?: { name: string; startTime: string; endTime: string } | null;
+}
+
+export function useClassTimetable(classId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'timetable', classId],
+    enabled: !!classId,
+    queryFn: async () => (await api.get<TimetableSlot[]>(`${S}/timetable/class/${classId}`)).data,
+  });
+}
+
+export interface Period { id: string; name: string; startTime: string; endTime: string; order: number }
+
+export function usePeriods() {
+  return useQuery({
+    queryKey: ['school', 'periods'],
+    queryFn: async () => (await api.get<Paginated<Period>>(`${S}/periods`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function useCreateSlot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { classId: string; dayOfWeek: number; periodId: string; subjectId: string; room?: string; teacherPartnerId?: string }) =>
+      (await api.post<TimetableSlot>(`${S}/timetable/slots`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'timetable', v.classId] }),
+  });
+}
+
+/* ───────────────────────── Examinations ───────────────────────── */
+
+export interface ExamType { id: string; name: string; weight: string; isFinal: boolean }
+export interface Exam { id: string; termId: string; examTypeId: string; name: string; status: string; startDate: string; endDate: string }
+export interface ExamSchedule { id: string; examId: string; classId: string; subjectId: string; date: string; startTime: string; maxMarks?: number | null; subject?: { name: string } | null; schoolClass?: { name: string } | null }
+export interface GradeEntry {
+  id: string;
+  examScheduleId: string;
+  studentProfileId: string;
+  marksObtained: string;
+  maxMarks: string;
+  grade?: string | null;
+  status: string;
+  studentProfile?: { admissionNo: string; partner?: { name: string } | null } | null;
+}
+
+export function useExamTypes() {
+  return useQuery({ queryKey: ['school', 'exam-types'], queryFn: async () => (await api.get<Paginated<ExamType>>(`${S}/exam-types`, { params: { pageSize: 100 } })).data });
+}
+export function useCreateExamType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; weight: number; isFinal?: boolean }) => (await api.post(`${S}/exam-types`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'exam-types'] }),
+  });
+}
+
+export function useExams() {
+  return useQuery({ queryKey: ['school', 'exams'], queryFn: async () => (await api.get<Paginated<Exam>>(`${S}/exams`, { params: { pageSize: 100 } })).data });
+}
+export function useCreateExam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { termId: string; examTypeId: string; name: string; startDate: string; endDate: string; classes: string[] }) =>
+      (await api.post(`${S}/exams`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'exams'] }),
+  });
+}
+export function useExamAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: 'publish' | 'close' }) => (await api.post(`${S}/exams/${id}/${action}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'exams'] }),
+  });
+}
+
+export function useExamSchedules() {
+  return useQuery({ queryKey: ['school', 'exam-schedules'], queryFn: async () => (await api.get<Paginated<ExamSchedule>>(`${S}/exam-schedules`, { params: { pageSize: 200 } })).data });
+}
+export function useCreateExamSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string; subjectId: string; date: string; startTime: string; maxMarks?: number }) =>
+      (await api.post(`${S}/exam-schedules`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'exam-schedules'] }),
+  });
+}
+
+export function useGradesByClass(examScheduleId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'grades', examScheduleId],
+    enabled: !!examScheduleId,
+    queryFn: async () => (await api.get<GradeEntry[]>(`${S}/grades/by-class/${examScheduleId}`)).data,
+  });
+}
+export function useBulkGrades() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examScheduleId: string; entries: Array<{ studentProfileId: string; marksObtained: number; maxMarks?: number; remarks?: string }> }) =>
+      (await api.post(`${S}/grades/bulk-upsert`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'grades', v.examScheduleId] }),
+  });
+}
+export function useGradeAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ examScheduleId, action }: { examScheduleId: string; action: 'submit' | 'approve' }) =>
+      (await api.post(`${S}/grades/${action}/${examScheduleId}`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'grades', v.examScheduleId] }),
+  });
+}
+
+export interface ReportCard { id: string; studentProfileId: string; termId: string; pdfUrl?: string | null; publishedAt?: string | null }
+
+export function useReportCards(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'report-cards', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<ReportCard[]>(`${S}/report-cards/by-student/${studentProfileId}`)).data,
+  });
+}
+export function useGenerateReportCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; termId: string }) => (await api.post<ReportCard>(`${S}/report-cards/generate`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'report-cards', v.studentProfileId] }),
+  });
+}

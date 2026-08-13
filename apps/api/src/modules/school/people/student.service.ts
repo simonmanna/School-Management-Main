@@ -194,7 +194,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       return this.prisma.client.studentProfile.findMany({
         where: { currentClassId: classId, status: 'active' },
         orderBy: { admissionNo: 'asc' },
-        include: { currentSection: true },
+        include: { currentSection: true, partner: true },
       });
     }
 

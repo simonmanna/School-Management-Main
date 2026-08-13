@@ -32,6 +32,9 @@ import { CrmDashboardPage } from '@/pages/crm/dashboard';
 import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolStudentsPage } from '@/pages/school/students';
 import { SchoolFeesPage } from '@/pages/school/fees';
+import { SchoolAttendancePage } from '@/pages/school/attendance';
+import { SchoolTimetablePage } from '@/pages/school/timetable';
+import { SchoolExamsPage } from '@/pages/school/exams';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -366,6 +369,9 @@ export function App() {
           <Route path="/school" element={<SchoolDashboardPage />} />
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
+          <Route path="/school/attendance" element={<SchoolAttendancePage />} />
+          <Route path="/school/timetable" element={<SchoolTimetablePage />} />
+          <Route path="/school/exams" element={<SchoolExamsPage />} />
           <Route path="/crm/deals" element={<DealsPage />} />
           <Route path="/crm/deals/:id" element={<DealDetailPage />} />
 
