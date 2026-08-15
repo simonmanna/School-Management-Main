@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
@@ -94,8 +94,13 @@ export class StudentAttendanceService {
 
   /** Per-student summary: attendance % over a date range. */
   async byStudent(studentProfileId: string, from: Date | string, to: Date | string) {
+    const start = from ? new Date(from) : new Date(Date.now() - 90 * 86400000);
+    const end = to ? new Date(to) : new Date();
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('Invalid from/to date');
+    }
     const rows = await this.prisma.client.studentAttendance.findMany({
-      where: { studentProfileId, date: { gte: new Date(from), lte: new Date(to) } },
+      where: { studentProfileId, date: { gte: start, lte: end } },
     });
     const total = rows.length;
     const present = rows.filter((r) => r.status === 'present').length;

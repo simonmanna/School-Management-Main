@@ -375,8 +375,12 @@ export function useStudentAttendance(studentProfileId: string | undefined, from?
   return useQuery({
     queryKey: ['school', 'attendance', 'by-student', studentProfileId, from, to],
     enabled: !!studentProfileId,
-    queryFn: async () =>
-      (await api.get<AttendanceRecord[]>(`${S}/attendance/by-student/${studentProfileId}`, { params: { from, to } })).data,
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (from) params.from = from;
+      if (to) params.to = to;
+      return (await api.get<AttendanceRecord[]>(`${S}/attendance/by-student/${studentProfileId}`, { params })).data;
+    },
   });
 }
 export interface StudentDocumentMeta {
