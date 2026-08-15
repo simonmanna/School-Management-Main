@@ -484,8 +484,156 @@ async function main() {
   }
   ok(`activities log: ${behaviorCount} behavior notes, ${commsCount} comms, ${activityCount} co-curricular (shared Activity store)`);
 
-  console.log('\n\x1b[32m✅ School demo seed complete (A0–A8 + Student 360 modules).\x1b[0m');
-  console.log('   Open the web app → School → Students → click a student → 360° profile.\n');
+  // ── Per-student sample data so EVERY Student 360 tab shows content ──────────
+  const currency = await prisma.currency.findUniqueOrThrow({ where: { code: 'UGX' } });
+  const feeDocType = await prisma.documentTypeDef.upsert({
+    where: { code: 'SCHOOL_FEE_INV' },
+    update: { name: 'School Fee Invoice', category: 'school' },
+    create: { code: 'SCHOOL_FEE_INV', name: 'School Fee Invoice', category: 'school', isSystem: false },
+  });
+
+  const firstNamesG = ['James', 'Florence', 'Robert', 'Gladys', 'William', 'Aida', 'Charles', 'Rose', 'George', 'Beatrice'];
+  const rels = ['father', 'mother', 'uncle', 'aunt', 'guardian', 'grandparent'];
+
+  for (const st of students) {
+    const sp = await prisma.studentProfile.findUniqueOrThrow({ where: { id: st.id }, include: { partner: true } });
+    const last = (sp.partner.name.split(' ')[1] ?? 'Parent');
+
+    // Profile customFields (DOB, nationality, religion, emergency, siblings).
+    await prisma.studentProfile.update({
+      where: { id: st.id },
+      data: {
+        customFields: {
+          dateOfBirth: '2009-' + String(1 + (counter % 12)).padStart(2, '0') + '-' + String(1 + (counter % 27)).padStart(2, '0'),
+          nationality: 'Ugandan',
+          religion: ['Christianity', 'Islam', 'Christianity'][counter % 3],
+          emergencyContact: `+256-7${String(10000000 + counter * 12345).slice(0, 8)} (${last} Family)`,
+          siblings: String(counter % 4),
+          house: sp.house,
+        } as any,
+      },
+    });
+
+    // Guardians: 1 primary + a second ~50% of the time.
+    const g1Rel = counter % 2 ? 'mother' : 'father';
+    const g1FirstName = counter % 2 ? firstNamesG[counter % firstNamesG.length] : 'Mr. ' + last;
+    const contact1 = await prisma.contact.create({
+      data: { organizationId: O, partnerId: sp.partnerId, firstName: g1FirstName, lastName: last, email: `guardian${counter}@hilltop.ac.ug`, phone: `+256-7${String(20000000 + counter * 321).slice(0, 8)}` },
+    });
+    await prisma.studentGuardian.create({ data: { organizationId: O, studentProfileId: st.id, guardianContactId: contact1.id, relationship: g1Rel, isPrimary: true, canPickup: true, receivesStatements: true } });
+    if (counter % 2 === 0) {
+      const contact2 = await prisma.contact.create({
+        data: { organizationId: O, partnerId: sp.partnerId, firstName: 'Mr. ' + last, lastName: last, email: `guardian2_${counter}@hilltop.ac.ug`, phone: `+256-7${String(30000000 + counter * 211).slice(0, 8)}` },
+      });
+      await prisma.studentGuardian.create({ data: { organizationId: O, studentProfileId: st.id, guardianContactId: contact2.id, relationship: rels[counter % rels.length], isPrimary: false, canPickup: true, receivesStatements: false } });
+    }
+
+    // Attendance: ~40 school days up to today (mostly present, some late/absent).
+    for (let d = 0; d < 40; d++) {
+      const date = new Date(Date.now() - d * 86400000);
+      if (date.getDay() === 0 || date.getDay() === 6) continue; // skip weekends
+      const r = Math.random();
+      const status = r > 0.9 ? 'absent' : r > 0.82 ? 'late' : 'present';
+      await prisma.studentAttendance.create({
+        data: { organizationId: O, studentProfileId: st.id, classId: st.classId, sectionId: st.classId === classEast.id ? secA.id : null, date, status, minutesLate: status === 'late' ? 5 + (counter % 10) : 0, markedById: teacherPartnerOf('MAT') },
+      });
+    }
+
+    // Health: medical record.
+    const bg = ['O+', 'A+', 'B+', 'AB+', 'O-'][counter % 5];
+    await prisma.medicalRecord.create({
+      data: {
+        organizationId: O, studentProfileId: st.id, bloodGroup: bg,
+        allergies: (counter % 5 === 0 ? ['Peanuts'] : []) as any,
+        conditions: (counter % 7 === 0 ? ['Mild asthma'] : []) as any,
+        medications: [] as any,
+        emergencyNotes: `Carry inhaler if needed. Emergency: ${last} Family.`,
+        doctorName: 'Dr. Okello', doctorPhone: '+256-414-555001',
+      },
+    });
+
+    // Documents: birth certificate + report card (each needs a File row).
+    for (const doc of [
+      { type: 'birth_cert', title: 'Birth Certificate' },
+      { type: 'report_card', title: 'Term 1 Report Card' },
+    ]) {
+      const file = await prisma.file.create({
+        data: { organizationId: O, filename: doc.title + '.pdf', contentType: 'application/pdf', byteSize: 12345, storageKey: `doc-${st.id}-${doc.type}-${counter}` },
+      });
+      await prisma.studentDocument.create({
+        data: { organizationId: O, studentProfileId: st.id, type: doc.type, title: doc.title, fileId: file.id, verified: counter % 3 !== 0, verifiedAt: counter % 3 !== 0 ? new Date() : null },
+      });
+    }
+
+    // Fees: a school-fee invoice (partial) + a payment.
+    const total = D(450000);
+    const paid = D(300000);
+    const invNo = `FEE-${String(counter).padStart(4, '0')}`;
+    await prisma.document.create({
+      data: {
+        organizationId: O, documentTypeId: feeDocType.id, documentType: 'sales_invoice', documentNumber: invNo,
+        partnerId: sp.partnerId, currencyId: currency.id, issueDate: new Date('2026-02-05'), dueDate: new Date('2026-03-05'),
+        status: 'posted', subtotal: total, totalAmount: total, amountPaid: paid, amountResidual: total.minus(paid),
+        paymentStatus: 'partial', sourceType: 'school_fee', notes: 'Term 2 school fees', version: 1,
+      },
+    });
+    await prisma.payment.create({
+      data: { organizationId: O, paymentNumber: `PAY-${String(counter).padStart(4, '0')}`, direction: 'inbound', partnerId: sp.partnerId, paymentDate: new Date('2026-02-10'), paymentMethod: 'mobile_money', currencyId: currency.id, amount: paid, allocatedAmount: paid, unallocatedAmount: D(0), status: 'posted', reference: 'MTN-' + String(counter) },
+    });
+  }
+  ok(`per-student: guardians, 40-day attendance, medical, 2 documents, fee invoice + payment (×${students.length})`);
+
+  // ── Extend result spine + homework to S3 West so Academics/Assessments fill for all ──
+  const westStudents = students.filter((s) => s.classId === classWest.id);
+  const rosterWest = await prisma.academicRoster.create({
+    data: { organizationId: O, termId: term.id, scopeType: 'class', classId: classWest.id, name: 'S3 West — Term 2 (frozen)', source: 'derived_current_class', capturedAt: new Date('2026-05-06'), frozenAt: new Date('2026-05-06'), frozenById: teacherPartnerOf('ENG') },
+  });
+  await Promise.all(westStudents.map((s) => prisma.academicRosterMember.create({
+    data: { organizationId: O, rosterId: rosterWest.id, studentProfileId: s.id, classId: classWest.id, gradeLevelId: gl.id },
+  })));
+  const resultSetWest = await prisma.resultSet.create({
+    data: {
+      organizationId: O, runId: run.id, termId: term.id, scopeType: 'class', scopeId: classWest.id, rosterId: rosterWest.id,
+      revision: 1, status: 'published', calculationVersion: 'v1', gradingSystem: 'UCE',
+      policySnapshot: { passMark: 50, weights: { ca: 40, exam: 60 } } as any, gradingScaleSnapshot: gradingScale.bands as any,
+      rankingPolicySnapshot: { rankOn: 'meanPercent' }, aggregationSnapshot: { ca: 'mean', exam: 'mean' },
+      studentCount: westStudents.length, publishedAt: new Date(), publishedById: teacherPartnerOf('ENG'),
+    },
+  });
+  for (const st of westStudents) {
+    let total = D(0); let count = 0; let passed = 0;
+    for (const code of ['MAT', 'ENG', 'PHY', 'BIO', 'HIS', 'GEO']) {
+      const ca = D(40 * (0.5 + Math.random() * 0.45));
+      const ex = D(60 * (0.45 + Math.random() * 0.5));
+      const final = ca.add(ex);
+      const grade = final.gte(80) ? 'A' : final.gte(75) ? 'B' : final.gte(65) ? 'C' : final.gte(50) ? 'D' : 'F';
+      if (final.gte(50)) passed++;
+      await prisma.studentSubjectResult.create({
+        data: { organizationId: O, resultSetId: resultSetWest.id, studentProfileId: st.id, subjectId: subj(code).id, classId: classWest.id, gradeLevelId: gl.id, termId: term.id, caScore: ca.toDecimalPlaces(3), examScore: ex.toDecimalPlaces(3), finalPercent: final.toDecimalPlaces(3), grade, gradePoint: D(final.gte(80) ? 4 : final.gte(75) ? 3.5 : final.gte(65) ? 3 : final.gte(50) ? 2 : 0), componentBreakdown: [{ ca: +ca.toFixed(2), exam: +ex.toFixed(2) }] },
+      });
+      total = total.add(final); count++;
+    }
+    const mean = total.div(count).toDecimalPlaces(3);
+    await prisma.studentTermResult.create({
+      data: { organizationId: O, resultSetId: resultSetWest.id, studentProfileId: st.id, classId: classWest.id, gradeLevelId: gl.id, termId: term.id, meanPercent: mean, gpa: mean.div(25).toDecimalPlaces(2), subjectsCount: count, eligible: passed >= 5, promotionRecommendation: passed >= 5 ? 'promote' : 'repeat', classRank: null },
+    });
+    await prisma.reportCard.create({
+      data: { organizationId: O, studentProfileId: st.id, termId: term.id, generatedAt: new Date(), publishedAt: new Date(), payload: { student: st.name, admissionNo: st.no, class: 'S3 West', meanPercent: +mean.toString(), grade: passed >= 5 ? 'promote' : 'repeat', subjectResults: 6 } },
+    });
+  }
+  const westResults = await prisma.studentTermResult.findMany({ where: { resultSetId: resultSetWest.id }, orderBy: { meanPercent: 'desc' } });
+  for (let i = 0; i < westResults.length; i++) await prisma.studentTermResult.update({ where: { id: westResults[i].id }, data: { classRank: i + 1 } });
+  // Homework assignment for S3 West (feeds the Assessments tab).
+  const hwWest = await prisma.homeworkAssignment.create({
+    data: { organizationId: O, teacherPartnerId: teacherOf('ENG'), classId: classWest.id, subjectId: subj('ENG').id, termId: term.id, title: 'Essay — My Community (West)', description: '300 words', dueDate: new Date('2026-05-25'), maxScore: D(20) },
+  });
+  for (const st of westStudents.slice(0, 16)) {
+    await prisma.homeworkSubmission.create({ data: { organizationId: O, assignmentId: hwWest.id, studentProfileId: st.id, submittedAt: new Date('2026-05-24'), content: 'Submitted', score: D(Math.round(20 * (0.6 + Math.random() * 0.35))), status: 'graded', feedback: 'Good' } });
+  }
+  ok(`result spine + homework extended to S3 West (${westStudents.length} students) → Academics/Assessments populate for all`);
+
+  console.log('\n\x1b[32m✅ School demo seed complete (A0–A8 + full Student 360 sample data for every student).\x1b[0m');
+  console.log('   Open the web app → School → Students → click a student → 360° profile (all 14 tabs populated).\n');
 }
 
 main()
