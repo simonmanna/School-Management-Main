@@ -1,14 +1,21 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState } from 'react';
 import {
   useStudent, useStudentPortal, useGuardians, useStudentStatement, useStudentAttendance,
   useStudentDocuments, useStudentMedical,
   useStudentLibrary, useStudentMeals, useStudentTransport, useStudentActivities,
+  useCreateGuardian, useUpdateGuardian, useDeleteGuardian,
   type Student, type FeeStatement, type Guardian,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Trash2, Pencil, Plus } from 'lucide-react';
 
 const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
 const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
@@ -26,7 +33,6 @@ export function SchoolStudent360Page() {
   const navigate = useNavigate();
   const { data: student, isLoading } = useStudent(id);
   const { data: portal } = useStudentPortal(id);
-  const { data: guardians } = useGuardians(id);
   const { data: statement } = useStudentStatement(id);
   const { data: attendance } = useStudentAttendance(id);
   const { data: documents } = useStudentDocuments(id);
@@ -71,7 +77,7 @@ export function SchoolStudent360Page() {
           {TABS.map((t) => <TabsTrigger key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</TabsTrigger>)}
         </TabsList>
 
-        <TabsContent value="profile" className="pt-4"><ProfileTab student={student} guardians={guardians} cf={cf} /></TabsContent>
+        <TabsContent value="profile" className="pt-4"><ProfileTab student={student} cf={cf} /></TabsContent>
         <TabsContent value="academics" className="pt-4"><AcademicsTab portal={portal} /></TabsContent>
         <TabsContent value="attendance" className="pt-4"><AttendanceTab rows={attendance} /></TabsContent>
         <TabsContent value="assessments" className="pt-4"><AssessmentsTab portal={portal} /></TabsContent>
@@ -92,7 +98,7 @@ export function SchoolStudent360Page() {
 
 const TABS = ['profile', 'academics', 'attendance', 'assessments', 'behavior', 'fees', 'payments', 'transport', 'meals', 'library', 'communication', 'documents', 'health', 'activities'] as const;
 
-function ProfileTab({ student, guardians, cf }: { student: Student; guardians?: Guardian[]; cf: any }) {
+function ProfileTab({ student, cf }: { student: Student; cf: any }) {
   const rows: [string, string][] = [
     ['Admission no.', student.admissionNo],
     ['Student ID', student.id],
@@ -116,21 +122,143 @@ function ProfileTab({ student, guardians, cf }: { student: Student; guardians?: 
         </dl></CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-base">Guardians & emergency contacts</CardTitle></CardHeader>
+        <CardHeader className="flex items-center justify-between">
+          <CardTitle className="text-base">Parents / guardians</CardTitle>
+          <GuardianManager studentProfileId={student.id} />
+        </CardHeader>
         <CardContent>
-          <ul className="space-y-2 text-sm">
-            {(guardians ?? []).length === 0 && <li className="text-muted-foreground">No guardians linked.</li>}
-            {(guardians ?? []).map((g) => (
-              <li key={g.id} className="rounded-md border p-2">
-                <div className="font-medium">{g.contact?.firstName} {g.contact?.lastName ?? ''}</div>
-                <div className="text-xs text-muted-foreground capitalize">{g.relationship}{g.isPrimary ? ' · primary' : ''} · {g.contact?.phone ?? 'no phone'}</div>
-              </li>
-            ))}
-          </ul>
-          {cf.emergencyContact && <p className="mt-3 text-xs text-muted-foreground">Emergency: {cf.emergencyContact}</p>}
+          {cf.emergencyContact && <p className="mt-1 text-xs text-muted-foreground">Emergency: {cf.emergencyContact}</p>}
           {cf.siblings && <p className="mt-1 text-xs text-muted-foreground">Siblings on roll: {cf.siblings}</p>}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+const RELATIONSHIPS = ['father', 'mother', 'uncle', 'aunt', 'sibling', 'grandparent', 'guardian', 'other'] as const;
+
+function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
+  const { data: guardians, isLoading } = useGuardians(studentProfileId);
+  const createG = useCreateGuardian();
+  const updateG = useUpdateGuardian();
+  const deleteG = useDeleteGuardian();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Guardian | null>(null);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [relationship, setRelationship] = useState<string>('father');
+  const [isPrimary, setIsPrimary] = useState(false);
+  const [canPickup, setCanPickup] = useState(true);
+  const [receivesStatements, setReceivesStatements] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const openAdd = () => {
+    setEditing(null);
+    setFirstName(''); setLastName(''); setEmail(''); setPhone('');
+    setRelationship('father'); setIsPrimary(false); setCanPickup(true); setReceivesStatements(true);
+    setOpen(true);
+  };
+  const openEdit = (g: Guardian) => {
+    setEditing(g);
+    setFirstName(g.contact?.firstName ?? '');
+    setLastName(g.contact?.lastName ?? '');
+    setEmail(g.contact?.email ?? '');
+    setPhone(g.contact?.phone ?? '');
+    setRelationship(g.relationship);
+    setIsPrimary(g.isPrimary);
+    setCanPickup(g.canPickup);
+    setReceivesStatements(g.receivesStatements);
+    setOpen(true);
+  };
+
+  const save = async () => {
+    if (!firstName.trim()) return;
+    setBusy(true);
+    try {
+      if (editing) {
+        await updateG.mutateAsync({
+          id: editing.id, studentProfileId,
+          relationship, isPrimary, canPickup, receivesStatements,
+          guardian: { firstName: firstName.trim(), lastName: lastName.trim() || undefined, email: email.trim() || undefined, phone: phone.trim() || undefined },
+        });
+      } else {
+        await createG.mutateAsync({
+          studentProfileId, relationship, isPrimary, canPickup, receivesStatements,
+          guardian: { firstName: firstName.trim(), lastName: lastName.trim() || undefined, email: email.trim() || undefined, phone: phone.trim() || undefined },
+        });
+      }
+      setOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (g: Guardian) => {
+    if (!confirm(`Remove ${g.contact?.firstName} ${g.contact?.lastName ?? ''} as guardian?`)) return;
+    await deleteG.mutateAsync({ id: g.id, studentProfileId });
+  };
+
+  return (
+    <div className="space-y-2">
+      {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+      <ul className="space-y-2 text-sm">
+        {(guardians ?? []).length === 0 && !isLoading && <li className="text-muted-foreground">No parents/guardians linked yet.</li>}
+        {(guardians ?? []).map((g) => (
+          <li key={g.id} className="rounded-md border p-2">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-medium">{g.contact?.firstName} {g.contact?.lastName ?? ''}</div>
+                <div className="text-xs text-muted-foreground capitalize">
+                  {g.relationship}{g.isPrimary ? ' · primary' : ''}{g.canPickup ? ' · pickup' : ''}{g.receivesStatements ? ' · statements' : ''}
+                </div>
+                <div className="text-xs text-muted-foreground">{g.contact?.phone ?? 'no phone'}{g.contact?.email ? ` · ${g.contact.email}` : ''}</div>
+              </div>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(g)} title="Edit"><Pencil className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-600" onClick={() => remove(g)} title="Remove"><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <Button size="sm" variant="outline" onClick={openAdd}><Plus className="mr-1 h-4 w-4" />Add parent / guardian</Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? 'Edit parent / guardian' : 'Add parent / guardian'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>First name</Label><Input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="e.g. John" /></div>
+              <div><Label>Last name</Label><Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="e.g. Okello" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+256…" /></div>
+              <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@email.com" /></div>
+            </div>
+            <div><Label>Relationship</Label>
+              <Select value={relationship} onValueChange={setRelationship}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RELATIONSHIPS.map((r) => <SelectItem key={r} value={r} className="capitalize">{r}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="flex items-center gap-2"><input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} /> Primary</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={canPickup} onChange={(e) => setCanPickup(e.target.checked)} /> Can pick up</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={receivesStatements} onChange={(e) => setReceivesStatements(e.target.checked)} /> Receives statements</label>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+            <Button onClick={save} disabled={busy || !firstName.trim()}>{busy ? 'Saving…' : editing ? 'Save changes' : 'Add guardian'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

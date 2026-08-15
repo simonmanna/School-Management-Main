@@ -335,6 +335,34 @@ export function useCreateGuardian() {
   });
 }
 
+export interface UpdateGuardianInput {
+  id: string;
+  studentProfileId: string;
+  relationship?: string;
+  isPrimary?: boolean;
+  canPickup?: boolean;
+  receivesStatements?: boolean;
+  guardian?: { firstName?: string; lastName?: string; email?: string; phone?: string };
+}
+export function useUpdateGuardian() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: UpdateGuardianInput) => {
+      const { id, studentProfileId, ...body } = dto;
+      return (await api.patch<Guardian>(`${S}/guardians/${id}`, body)).data;
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'guardians', v.studentProfileId] }),
+  });
+}
+export function useDeleteGuardian() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { id: string; studentProfileId: string }) =>
+      (await api.delete(`${S}/guardians/${dto.id}`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'guardians', v.studentProfileId] }),
+  });
+}
+
 /* ───────────────────────── Student 360 (per-student reads) ───────────────────────── */
 
 export interface AttendanceRecord {

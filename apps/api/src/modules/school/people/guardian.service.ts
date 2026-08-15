@@ -64,9 +64,36 @@ export class GuardianService {
 
   async update(id: string, dto: UpdateGuardianDto) {
     return this.prisma.client.$transaction(async (tx: any) => {
-      const res = await tx.studentGuardian.updateMany({ where: { id }, data: dto as any });
-      if (res.count === 0) throw new NotFoundException(`Guardian ${id} not found`);
-      return tx.studentGuardian.findFirst({ where: { id } });
+      const existing = await tx.studentGuardian.findFirst({ where: { id } });
+      if (!existing) throw new NotFoundException(`Guardian ${id} not found`);
+
+      // Patch the linked Contact (parent) details when supplied.
+      if (dto.guardian) {
+        const g = dto.guardian;
+        await tx.contact.updateMany({
+          where: { id: existing.guardianContactId },
+          data: {
+            firstName: g.firstName ?? undefined,
+            lastName: g.lastName ?? undefined,
+            email: g.email ?? undefined,
+            phone: g.phone ?? undefined,
+            position: g.position ?? undefined,
+          },
+        });
+      }
+
+      const linkData: any = {};
+      if (dto.relationship !== undefined) linkData.relationship = dto.relationship;
+      if (dto.isPrimary !== undefined) linkData.isPrimary = dto.isPrimary;
+      if (dto.canPickup !== undefined) linkData.canPickup = dto.canPickup;
+      if (dto.receivesStatements !== undefined) linkData.receivesStatements = dto.receivesStatements;
+      if (Object.keys(linkData).length > 0) {
+        await tx.studentGuardian.updateMany({ where: { id }, data: linkData });
+      }
+      return tx.studentGuardian.findFirst({
+        where: { id },
+        include: { guardianContact: true },
+      }).then(({ guardianContact, ...link }: any) => ({ ...link, contact: guardianContact }));
     });
   }
 

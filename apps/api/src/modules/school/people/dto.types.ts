@@ -93,6 +93,10 @@ export class UpdateGuardianDto {
   @IsOptional() @IsBoolean() isPrimary?: boolean;
   @IsOptional() @IsBoolean() canPickup?: boolean;
   @IsOptional() @IsBoolean() receivesStatements?: boolean;
+
+  /// Editable contact (parent) details — name / email / phone.
+  @IsOptional() @ValidateNested() @Type(() => GuardianContactInput)
+  guardian?: GuardianContactInput;
 }
 
 export class UpsertMedicalRecordDto {
