@@ -365,11 +365,12 @@ export function useDeleteGuardian() {
 
 /* ───────────────────────── Student 360 (per-student reads) ───────────────────────── */
 
-export interface AttendanceRecord {
-  date: string;
-  status: string;
-  minutesLate?: number;
-  reason?: string;
+export interface AttendanceSummary {
+  total: number;
+  present: number;
+  late: number;
+  absent: number;
+  attendanceRate: number;
 }
 export function useStudentAttendance(studentProfileId: string | undefined, from?: string, to?: string) {
   return useQuery({
@@ -379,7 +380,7 @@ export function useStudentAttendance(studentProfileId: string | undefined, from?
       const params: Record<string, string> = {};
       if (from) params.from = from;
       if (to) params.to = to;
-      return (await api.get<AttendanceRecord[]>(`${S}/attendance/by-student/${studentProfileId}`, { params })).data;
+      return (await api.get<AttendanceSummary>(`${S}/attendance/by-student/${studentProfileId}`, { params })).data;
     },
   });
 }

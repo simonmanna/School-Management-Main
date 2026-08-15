@@ -79,7 +79,7 @@ export function SchoolStudent360Page() {
 
         <TabsContent value="profile" className="pt-4"><ProfileTab student={student} cf={cf} /></TabsContent>
         <TabsContent value="academics" className="pt-4"><AcademicsTab portal={portal} /></TabsContent>
-        <TabsContent value="attendance" className="pt-4"><AttendanceTab rows={attendance} /></TabsContent>
+        <TabsContent value="attendance" className="pt-4"><AttendanceTab summary={attendance} /></TabsContent>
         <TabsContent value="assessments" className="pt-4"><AssessmentsTab portal={portal} /></TabsContent>
         <TabsContent value="behavior" className="pt-4"><BehaviorTab activities={activities} /></TabsContent>
         <TabsContent value="fees" className="pt-4"><FeesTab statement={statement} /></TabsContent>
@@ -293,20 +293,24 @@ function AssessmentsTab({ portal }: { portal?: any }) {
   );
 }
 
-function AttendanceTab({ rows }: { rows?: any[] }) {
-  if (!rows) return <Empty label="No attendance records in range." />;
-  const present = rows.filter((r) => r.status === 'present').length;
-  const pct = rows.length ? ((present / rows.length) * 100).toFixed(1) : '0';
+function AttendanceTab({ summary }: { summary?: any }) {
+  if (!summary) return <Empty label="No attendance records in range." />;
+  // API returns an aggregate: { total, present, late, absent, attendanceRate }
+  const total = summary.total ?? 0;
+  const present = summary.present ?? 0;
+  const late = summary.late ?? 0;
+  const absent = summary.absent ?? 0;
+  const rate = typeof summary.attendanceRate === 'number' ? summary.attendanceRate : (total ? ((present + late * 0.5) / total) * 100 : 0);
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Attendance — {rows.length} records · {pct}% present</CardTitle></CardHeader>
-      <CardContent className="max-h-96 overflow-y-auto">
-        <table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Date</th><th className="px-2 py-1">Status</th><th className="px-2 py-1">Late</th></tr></thead>
-          <tbody>{rows.slice(0, 60).map((r, i) => (
-            <tr key={i} className="border-b last:border-0"><td className="px-2 py-1">{new Date(r.date).toLocaleDateString()}</td><td className="px-2 py-1 capitalize">{r.status}</td><td className="px-2 py-1">{r.minutesLate ? `${r.minutesLate}m` : '—'}</td></tr>
-          ))}</tbody>
-        </table>
+      <CardHeader><CardTitle className="text-base">Attendance · last 90 days</CardTitle></CardHeader>
+      <CardContent className="grid grid-cols-4 gap-3 text-center">
+        <Stat label="Present" value={String(present)} />
+        <Stat label="Late" value={String(late)} />
+        <Stat label="Absent" value={String(absent)} />
+        <Stat label="Rate" value={`${Number(rate).toFixed(1)}%`} tone={rate >= 75 ? 'emerald' : 'rose'} />
       </CardContent>
+      <CardContent className="text-xs text-muted-foreground">Total marked days: {total}. Rate weights late as half-present.</CardContent>
     </Card>
   );
 }
