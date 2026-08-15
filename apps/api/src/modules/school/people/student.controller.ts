@@ -33,6 +33,12 @@ export class StudentController {
     return this.students.statement(id);
   }
 
+  @Get(':id/activities')
+  @RequirePermissions(PERMISSIONS.school.read)
+  activities(@Param('id') id: string) {
+    return this.students.activitiesForStudent(id);
+  }
+
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageStudents)
   create(@Body() dto: CreateStudentDto) {

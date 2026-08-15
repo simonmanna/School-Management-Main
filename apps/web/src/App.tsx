@@ -31,6 +31,7 @@ import { ModulesPage } from '@/pages/modules';
 import { CrmDashboardPage } from '@/pages/crm/dashboard';
 import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolStudentsPage } from '@/pages/school/students';
+import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
 import { SchoolAttendancePage } from '@/pages/school/attendance';
 import { SchoolTimetablePage } from '@/pages/school/timetable';
@@ -41,6 +42,14 @@ import { SchoolAdmissionsPage } from '@/pages/school/admissions';
 import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
+import { SchoolAssessmentPage } from '@/pages/school/assessment';
+import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
+import { SchoolResultsPage } from '@/pages/school/results';
+import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
+import { SchoolCbtPage } from '@/pages/school/cbt';
+import { SchoolCertificationPage } from '@/pages/school/certification';
+import { SchoolAnalyticsPage } from '@/pages/school/analytics';
+import { SchoolPortalsPage } from '@/pages/school/portals';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -374,6 +383,7 @@ export function App() {
           <Route path="/crm" element={<CrmDashboardPage />} />
           <Route path="/school" element={<SchoolDashboardPage />} />
           <Route path="/school/students" element={<SchoolStudentsPage />} />
+          <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
           <Route path="/school/attendance" element={<SchoolAttendancePage />} />
           <Route path="/school/timetable" element={<SchoolTimetablePage />} />
@@ -384,6 +394,14 @@ export function App() {
           <Route path="/school/staff" element={<SchoolStaffPage />} />
           <Route path="/school/campuses" element={<SchoolCampusesPage />} />
           <Route path="/school/subjects" element={<SchoolSubjectsPage />} />
+          <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
+          <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
+          <Route path="/school/results" element={<SchoolResultsPage />} />
+          <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
+          <Route path="/school/cbt" element={<SchoolCbtPage />} />
+          <Route path="/school/certification" element={<SchoolCertificationPage />} />
+          <Route path="/school/analytics" element={<SchoolAnalyticsPage />} />
+          <Route path="/school/portals" element={<SchoolPortalsPage />} />
           <Route path="/crm/deals" element={<DealsPage />} />
           <Route path="/crm/deals/:id" element={<DealDetailPage />} />
 

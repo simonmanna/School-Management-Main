@@ -224,6 +224,21 @@ export class MealWalletService {
     });
   }
 
+  /** Student wallet summary: account + recent ledger (for the 360° profile). */
+  async byStudent(studentProfileId: string) {
+    const account = await this.prisma.client.mealAccount.findFirst({
+      where: { studentProfileId },
+      include: { mealPlan: true },
+    });
+    if (!account) return { exists: false, balance: 0, transactions: [] };
+    const transactions = await this.prisma.client.mealAccountTransaction.findMany({
+      where: { mealAccountId: account.id },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return { exists: true, balance: account.balance, mealPlan: account.mealPlan, transactions };
+  }
+
   /** Reconciliation: opening + Σ ledger = cached balance (must tie exactly). */
   async reconcile(mealAccountId: string) {
     const acc = await this.prisma.client.mealAccount.findFirst({ where: { id: mealAccountId } });

@@ -73,6 +73,9 @@ export class BorrowingController {
   constructor(private readonly service: BorrowingService) {}
   @Get() @RequirePermissions(PERMISSIONS.school.read) list(@Query() q: PaginationDto) { return this.service.list(q); }
   @Get(':id') @RequirePermissions(PERMISSIONS.school.read) findOne(@Param('id') id: string) { return this.service.findOne(id); }
+  @Get('by-student/:studentProfileId') @RequirePermissions(PERMISSIONS.school.read) byStudent(@Param('studentProfileId') studentProfileId: string) {
+    return this.service.byStudent(studentProfileId);
+  }
   @Post('borrow') @RequirePermissions(PERMISSIONS.school.manageLibrary) borrow(@Body() dto: BorrowDto) {
     return this.service.borrow(dto.bookCopyId, dto.studentProfileId, new Date(dto.dueAt), dto.notes);
   }
@@ -121,6 +124,9 @@ export class RouteAssignmentController {
 export class StudentTransportAssignmentController {
   constructor(private readonly service: StudentTransportAssignmentService) {}
   @Get() @RequirePermissions(PERMISSIONS.school.read) list(@Query() q: PaginationDto) { return this.service.list(q); }
+  @Get('by-student/:studentProfileId') @RequirePermissions(PERMISSIONS.school.read) byStudent(@Param('studentProfileId') studentProfileId: string) {
+    return this.service.byStudent(studentProfileId);
+  }
   @Post('assign') @RequirePermissions(PERMISSIONS.school.manageTransport) assign(@Body() dto: TransportAssignDto) {
     return this.service.assign(dto.studentProfileId, dto.routeId, dto.stopId, new Date(dto.startDate), dto.monthlyFee);
   }

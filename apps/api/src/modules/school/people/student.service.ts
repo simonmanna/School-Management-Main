@@ -288,6 +288,13 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       return { created: created.length, skipped };
     }
 
+  async activitiesForStudent(studentProfileId: string) {
+    return this.prisma.client.activity.findMany({
+      where: { subjectType: 'student', subjectId: studentProfileId },
+      orderBy: { occurredAt: 'desc' },
+    });
+  }
+
   async statement(studentProfileId: string) {
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },

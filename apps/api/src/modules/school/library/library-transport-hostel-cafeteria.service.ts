@@ -101,6 +101,15 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
     });
   }
 
+  /** List all borrowings for a student (current + historical), newest first. */
+  async byStudent(studentProfileId: string) {
+    return this.prisma.client.borrowing.findMany({
+      where: { studentProfileId },
+      orderBy: { borrowedAt: 'desc' },
+      include: { book: true, bookCopy: true },
+    });
+  }
+
   /** Return a borrowed copy. If overdue, generates a fine invoice (sales_invoice). */
   async return(borrowingId: string) {
     return this.prisma.client.$transaction(async (tx: any) => {
@@ -289,6 +298,15 @@ export class StudentTransportAssignmentService extends BaseCrudService<StudentTr
       routeId,
     });
     return row;
+  }
+
+  /** Current + historical transport assignments for a student, newest first. */
+  async byStudent(studentProfileId: string) {
+    return this.prisma.client.studentTransportAssignment.findMany({
+      where: { studentProfileId },
+      orderBy: { startDate: 'desc' },
+      include: { route: true, stop: true },
+    });
   }
 }
 

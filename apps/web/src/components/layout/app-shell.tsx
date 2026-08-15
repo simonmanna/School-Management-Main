@@ -67,6 +67,8 @@ import {
   Zap,
   CalendarClock,
   ChevronDown,
+  FileQuestion,
+  FileBadge,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -230,9 +232,16 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.takeAttendance },
       { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
       { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
+      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+      { to: '/school/assessment-ops', label: 'Rosters & Assignments', icon: ClipboardList, permission: PERMISSIONS.school.read },
+      { to: '/school/results', label: 'Result Spine', icon: ScrollText, permission: PERMISSIONS.school.read },
+      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.read },
+      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.read },
+      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read },
+      { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/portals', label: 'Portals & Promotion', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
-      { to: '/school/meals', label: 'Meals', icon: UtensilsCrossed, permission: PERMISSIONS.school.read },
     ],
   },
   {

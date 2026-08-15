@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, GraduationCap, UserPlus, X } from 'lucide-react';
 import {
   useStudents,
@@ -143,9 +144,9 @@ export function SchoolStudentsPage() {
                 <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40">
                   <td className="px-4 py-2 font-mono text-xs">{s.admissionNo}</td>
                   <td className="px-4 py-2">
-                    <button className="font-medium text-primary hover:underline" onClick={() => setDetail(s)}>
+                    <Link className="font-medium text-primary hover:underline" to={`/school/students/${s.id}`}>
                       {s.partner?.name ?? '—'}
-                    </button>
+                    </Link>
                   </td>
                   <td className="px-4 py-2">{s.currentClassId ? classNameById[s.currentClassId] ?? '—' : '—'}</td>
                   <td className="px-4 py-2 capitalize">{s.residenceType ?? '—'}</td>
@@ -154,6 +155,7 @@ export function SchoolStudentsPage() {
                   </td>
                   <td className="px-4 py-2 text-right">
                     <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>Edit</Button>
+                    <Link to={`/school/students/${s.id}`}><Button variant="ghost" size="sm">View</Button></Link>
                   </td>
                 </tr>
               ))}

@@ -335,6 +335,118 @@ export function useCreateGuardian() {
   });
 }
 
+/* ───────────────────────── Student 360 (per-student reads) ───────────────────────── */
+
+export interface AttendanceRecord {
+  date: string;
+  status: string;
+  minutesLate?: number;
+  reason?: string;
+}
+export function useStudentAttendance(studentProfileId: string | undefined, from?: string, to?: string) {
+  return useQuery({
+    queryKey: ['school', 'attendance', 'by-student', studentProfileId, from, to],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<AttendanceRecord[]>(`${S}/attendance/by-student/${studentProfileId}`, { params: { from, to } })).data,
+  });
+}
+export interface StudentDocumentMeta {
+  id: string;
+  name?: string;
+  type?: string;
+  url?: string;
+  verified?: boolean;
+  uploadedAt?: string;
+}
+export function useStudentDocuments(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'student-docs', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<StudentDocumentMeta[]>(`${S}/students/${studentProfileId}/documents`)).data,
+  });
+}
+export interface MedicalInfo {
+  bloodGroup?: string;
+  allergies?: string[];
+  conditions?: string[];
+  notes?: string;
+}
+export function useStudentMedical(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'medical', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<MedicalInfo>(`${S}/students/${studentProfileId}/medical-record`)).data,
+  });
+}
+
+/* Student 360 — modules without a dedicated list page (library, meals, transport,
+   behavior/communication/activities). Each reads the new per-student GET endpoint. */
+
+export interface BorrowingRow {
+  id: string;
+  bookMetadata?: { title?: string; author?: string; isbn?: string } | null;
+  borrowedAt: string;
+  dueAt: string;
+  returnedAt?: string | null;
+  status: string;
+  fineAmount?: number | string;
+}
+export function useStudentLibrary(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'library', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<BorrowingRow[]>(`${S}/library/borrowings/by-student/${studentProfileId}`)).data,
+  });
+}
+
+export interface MealWalletSummary {
+  exists: boolean;
+  balance?: number | string;
+  mealPlan?: { name?: string; type?: string } | null;
+  transactions?: Array<{ id: string; type: string; amount: number | string; balanceAfter?: number | string; notes?: string; createdAt: string }>;
+}
+export function useStudentMeals(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'meals', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<MealWalletSummary>(`${S}/meals/wallet/by-student/${studentProfileId}`)).data,
+  });
+}
+
+export interface TransportRow {
+  id: string;
+  route?: { name?: string; monthlyFee?: number | string } | null;
+  stop?: { name?: string; pickupTime?: string; dropoffTime?: string } | null;
+  startDate: string;
+  isActive?: boolean;
+  monthlyFee?: number | string;
+}
+export function useStudentTransport(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'transport', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<TransportRow[]>(`${S}/transport/assignments/by-student/${studentProfileId}`)).data,
+  });
+}
+
+export interface StudentActivity {
+  id: string;
+  type: string;
+  title: string;
+  body?: string | null;
+  occurredAt: string;
+  duration?: number | null;
+  completed?: boolean;
+}
+export function useStudentActivities(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'activities', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<StudentActivity[]>(`${S}/students/${studentProfileId}/activities`)).data,
+  });
+}
+
 /* ───────────────────────── Fees — structures & schedules ───────────────────────── */
 
 export interface FeeComponent {
@@ -983,5 +1095,606 @@ export function useRecordWaste() {
     mutationFn: async (dto: { id: string; productId?: string; quantity: number; reason: string; notes?: string }) =>
       (await api.post(`${MEALS}/production/${dto.id}/waste`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'meal-production'] }),
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * A0–A8: Assessment / Exam operations / CBT / Certification / Analytics
+ * Wired to the school vertical's assessment, CBT, certification & analytics
+ * controllers. Every hook mirrors the existing P0–P4 convention.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const AS = `${S}/assessment-policies`;
+const AC = `${S}/assessment-components`;
+const A = `${S}/assessments`;
+const MK = `${S}/marking`;
+const RO = `${S}/rosters`;
+const RB = `${S}/rubrics`;
+const ASG = `${S}/assignments`;
+const RES = `${S}/results`;
+const EV = `${S}/exam-venues`;
+const ER = `${S}/exam-registrations`;
+const QB = `${S}/question-banks`;
+const Q = `${S}/questions`;
+const PP = `${S}/papers`;
+const CBT = `${S}/cbt`;
+const TR = `${S}/transcripts`;
+const EXT = `${S}/external-results`;
+const CERT = `${S}/certificates`;
+const AN = `${S}/analytics`;
+
+/* ── A1 Assessment policy + components + instances ────────────────────────── */
+
+export interface AssessmentPolicy { id: string; name: string; gradeLevelId?: string | null; classId?: string | null; subjectId?: string | null; termId?: string | null; passMark?: number | null; caCap?: number | null; roundingMode?: string; decimalPlaces?: number | null; isActive: boolean; version: number }
+export interface AssessmentComponent { id: string; policyId: string; name: string; kind: string; weight: number; aggregation?: string | null; bestN?: number | null; countsAbsentAsZero?: boolean; examTypeId?: string | null; order?: number | null }
+export interface Assessment { id: string; subjectId: string; classId: string; termId: string; componentId?: string | null; title: string; maxScore?: number | null; weightInComponent?: number | null; sourceType?: string; status: string; component?: { name: string; kind: string } | null }
+
+export function useAssessmentPolicies() {
+  return useQuery({ queryKey: ['school', 'assessment-policies'], queryFn: async () => (await api.get<Paginated<AssessmentPolicy>>(AS, { params: { pageSize: 200 } })).data });
+}
+export function useCreateAssessmentPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; gradeLevelId?: string; classId?: string; subjectId?: string; termId?: string; passMark?: number; caCap?: number; roundingMode?: string; decimalPlaces?: number }) =>
+      (await api.post<AssessmentPolicy>(AS, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assessment-policies'] }),
+  });
+}
+export function useResolvePolicy(subjectId?: string, classId?: string, gradeLevelId?: string, termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment-policy-resolve', subjectId, classId, gradeLevelId, termId],
+    enabled: !!(subjectId || classId || gradeLevelId || termId),
+    queryFn: async () => (await api.get<AssessmentPolicy | null>(`${AS}/resolve`, { params: { subjectId, classId, gradeLevelId, termId } })).data,
+  });
+}
+
+export function useAssessmentComponents(policyId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment-components', policyId],
+    enabled: !!policyId,
+    queryFn: async () => (await api.get<AssessmentComponent[]>(`${AC}/by-policy/${policyId}`)).data,
+  });
+}
+export function useValidateComponents(policyId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'assessment-components-validate', policyId],
+    enabled: !!policyId,
+    queryFn: async () => (await api.get<{ valid: boolean; totalWeight: number; message?: string }>(`${AC}/validate/${policyId}`)).data,
+  });
+}
+export function useCreateAssessmentComponent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { policyId: string; name: string; kind: string; weight: number; aggregation?: string; bestN?: number; countsAbsentAsZero?: boolean; examTypeId?: string; order?: number }) =>
+      (await api.post<AssessmentComponent>(AC, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'assessment-components', v.policyId] }),
+  });
+}
+
+export function useAssessments(classId?: string, termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessments', classId, termId],
+    enabled: !!(classId && termId),
+    queryFn: async () => (await api.get<Assessment[]>(`${A}/by-class/${classId}/term/${termId}`)).data,
+  });
+}
+export function useCreateAssessment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { subjectId: string; classId: string; termId: string; title: string; componentId?: string; maxScore?: number; weightInComponent?: number; sourceType?: string; dueAt?: string }) =>
+      (await api.post<Assessment>(A, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'assessments', v.classId, v.termId] }),
+  });
+}
+export function useAssessmentTransition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { id: string; action: 'schedule' | 'publish' | 'open' | 'close' | 'grade' | 'archive' }) =>
+      (await api.post(`${A}/${v.id}/transition`, { action: v.action })).data,
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['school', 'assessments'] }); qc.invalidateQueries({ queryKey: ['school', 'marking', v.id] }); },
+  });
+}
+
+/* ── A1 Marking (SoD: enter vs approve) ────────────────────────────────────── */
+
+export interface MarkRow {
+  studentAssessmentId: string; studentProfileId: string; studentName: string; admissionNo?: string | null;
+  participation: string; score?: number | null; firstMark?: number | null; secondMark?: number | null;
+  adjustedScore?: number | null; status: string; round?: string; comment?: string | null;
+}
+export function useMarksByAssessment(assessmentId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'marking', assessmentId],
+    enabled: !!assessmentId,
+    queryFn: async () => (await api.get<MarkRow[]>(`${MK}/by-assessment/${assessmentId}`)).data,
+  });
+}
+export function useRecordMark() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentAssessmentId: string; score: number; round?: string; comment?: string }) =>
+      (await api.post(`${MK}/mark`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'marking', v.studentAssessmentId] }),
+  });
+}
+export function useSetParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assessmentId: string; studentProfileId: string; participation: string; classId?: string; sectionId?: string; gradeLevelId?: string; termId?: string }) =>
+      (await api.post(`${MK}/participation`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'marking', v.assessmentId] }),
+  });
+}
+export function useAppendAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentAssessmentId: string; kind: string; delta?: number; replacementScore?: number; reason: string }) =>
+      (await api.post(`${MK}/adjustment`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'marking', v.studentAssessmentId] }),
+  });
+}
+export function useSubmitMarks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (assessmentId: string) => (await api.post(`${MK}/submit`, { assessmentId })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'marking', v] }),
+  });
+}
+export function useMarkingApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assessmentId: string; action: 'submit' | 'approve' | 'reject'; reason?: string }) =>
+      (await api.post(`${MK}/approval`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'marking', v.assessmentId] }),
+  });
+}
+
+/* ── A2 Rosters ───────────────────────────────────────────────────────────── */
+
+export interface Roster { id: string; termId: string; name?: string | null; scopeType: string; classId?: string | null; sectionId?: string | null; subjectId?: string | null; status: string; memberCount?: number | null }
+export interface RosterMember { studentProfileId: string; name: string; admissionNo?: string | null; status: string; classId?: string | null; sectionId?: string | null }
+
+export function useRosters() {
+  return useQuery({ queryKey: ['school', 'rosters'], queryFn: async () => (await api.get<Paginated<Roster>>(RO, { params: { pageSize: 200 } })).data });
+}
+export function useRosterMembers(rosterId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'roster-members', rosterId],
+    enabled: !!rosterId,
+    queryFn: async () => (await api.get<RosterMember[]>(`${RO}/${rosterId}/members`)).data,
+  });
+}
+export function useCaptureRoster() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { termId: string; scopeType?: string; classId?: string; sectionId?: string; subjectId?: string; name?: string; source?: string }) =>
+      (await api.post<Roster>(`${RO}/capture`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rosters'] }),
+  });
+}
+export function useFreezeRoster() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${RO}/${id}/freeze`)).data,
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['school', 'rosters'] }); qc.invalidateQueries({ queryKey: ['school', 'roster-members', v] }); },
+  });
+}
+export function useAddRosterMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { rosterId: string; studentProfileId: string; classId?: string; sectionId?: string; gradeLevelId?: string; joinReason?: string }) =>
+      (await api.post(`${RO}/${v.rosterId}/members`, { studentProfileId: v.studentProfileId, classId: v.classId, sectionId: v.sectionId, gradeLevelId: v.gradeLevelId, joinReason: v.joinReason })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'roster-members', v.rosterId] }),
+  });
+}
+export function useRemoveRosterMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { rosterId: string; studentProfileId: string }) => (await api.post(`${RO}/${v.rosterId}/members/${v.studentProfileId}`, {}).then(() => null)),
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'roster-members', v.rosterId] }),
+  });
+}
+
+/* ── A2 Rubrics ───────────────────────────────────────────────────────────── */
+
+export interface Rubric { id: string; name: string; description?: string | null; criteria?: RubricCriterion[] }
+export interface RubricCriterion { id: string; name: string; description?: string | null; weight?: number | null; maxScore: number; levels?: RubricLevel[] }
+export interface RubricLevel { id?: string; label: string; score: number; descriptor?: string | null; order?: number }
+
+export function useRubrics() {
+  return useQuery({ queryKey: ['school', 'rubrics'], queryFn: async () => (await api.get<Paginated<Rubric>>(RB, { params: { pageSize: 200 } })).data });
+}
+export function useRubric(id: string | undefined) {
+  return useQuery({ queryKey: ['school', 'rubric', id], enabled: !!id, queryFn: async () => (await api.get<Rubric>(`${RB}/${id}`)).data });
+}
+export function useCreateRubric() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; description?: string; criteria?: Array<{ name: string; description?: string; weight?: number; maxScore: number; order?: number; levels?: Array<{ label: string; score: number; descriptor?: string; order?: number }> }> }) =>
+      (await api.post<Rubric>(RB, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rubrics'] }),
+  });
+}
+export function useForkRubric() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${RB}/${id}/fork`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rubrics'] }),
+  });
+}
+export function useDeleteRubric() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${RB}/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rubrics'] }),
+  });
+}
+
+/* ── A2 Assignments ───────────────────────────────────────────────────────── */
+
+export interface Assignment { id: string; subjectId: string; classId: string; termId: string; title: string; maxScore?: number | null; dueAt?: string | null; rosterId?: string | null; gradingMode?: string; rubricId?: string | null; status: string; publishedAt?: string | null }
+export interface AssignmentSubmission { id: string; assignmentId: string; studentProfileId: string; studentName?: string; status: string; submittedAt?: string | null; rawScore?: number | null }
+
+export function useAssignments(classId?: string, termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assignments', classId, termId],
+    enabled: !!(classId && termId),
+    queryFn: async () => (await api.get<Assignment[]>(`${ASG}/by-class/${classId}/term/${termId}`)).data,
+  });
+}
+export function useCreateAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { subjectId: string; classId: string; termId: string; title: string; maxScore?: number; dueAt?: string; rosterId?: string; instructions?: string; allowLate?: boolean; latePenaltyPercent?: number; lateCutoffAt?: string; maxAttempts?: number; gradingMode?: string; rubricId?: string }) =>
+      (await api.post<Assignment>(ASG, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'assignments', v.classId, v.termId] }),
+  });
+}
+export function usePublishAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${ASG}/${id}/publish`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assignments'] }),
+  });
+}
+export function useSubmitAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; content?: string }) =>
+      (await api.post(`${ASG}/submit`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assignments'] }),
+  });
+}
+export function useGradeAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; rawScore?: number; complete?: boolean; rubricScores?: Array<{ criterionId: string; levelId?: string; score: number; comment?: string }> }) =>
+      (await api.post(`${ASG}/grade`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assignments'] }),
+  });
+}
+
+/* ── A3 Result spine ──────────────────────────────────────────────────────── */
+
+export interface ResultSet {
+  id: string; termId: string; rosterId?: string | null; scopeType: string; scopeId?: string | null;
+  status: string; revision: number; computedAt?: string | null; publishedAt?: string | null;
+  coveragePct?: number | null; allApproved?: boolean | null; weightsSum100?: boolean | null;
+  studentCount?: number | null; checksum?: string | null;
+}
+export interface StudentSubjectResult { subjectId: string; subjectName?: string | null; caScore?: number | null; examScore?: number | null; finalPercent?: number | null; grade?: string | null; position?: number | null }
+export interface StudentTermResult { studentProfileId: string; studentName?: string | null; admissionNo?: string | null; meanPercent?: number | null; gpa?: number | null; classRank?: number | null; eligible?: boolean; promotionRecommendation?: string | null }
+export interface ResultSetDetail { resultSet: ResultSet; subjects: StudentSubjectResult[]; students: StudentTermResult[] }
+
+export function useComputeResults() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { termId: string; rosterId: string; scopeType?: string; scopeId?: string; calculationVersion?: string; idempotencyKey?: string }) =>
+      (await api.post<ResultSet>(`${RES}/compute`, dto)).data,
+    onSuccess: (_d, v) => { qc.invalidateQueries({ queryKey: ['school', 'result-sets', v.termId] }); },
+  });
+}
+export function useResultSets(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'result-sets', termId],
+    enabled: !!termId,
+    queryFn: async () => (await api.get<ResultSet[]>(`${RES}/by-term/${termId}`)).data,
+  });
+}
+/** The most recent published result set for a student-term (portal-facing). */
+export function useStudentResultSet(studentProfileId: string | undefined, termId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'student-result-set', studentProfileId, termId],
+    enabled: !!(studentProfileId && termId),
+    queryFn: async () => (await api.get<ResultSetDetail>(`${RES}/by-student/${studentProfileId}/term/${termId}`)).data,
+  });
+}
+export function useResultSet(id: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'result-set', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<ResultSetDetail>(`${RES}/${id}`)).data,
+  });
+}
+export function usePublishResultSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${RES}/${id}/publish`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'result-set', v] }),
+  });
+}
+export function useRequestAmendment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { resultSetId: string; reason: string }) => (await api.post(`${RES}/amendments`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'amendments'] }),
+  });
+}
+export function useAmendments(resultSetId?: string) {
+  return useQuery({
+    queryKey: ['school', 'amendments', resultSetId],
+    enabled: !!resultSetId,
+    queryFn: async () => (await api.get<Array<{ id: string; resultSetId: string; reason: string; status: string; createdAt: string }>>(`${RES}/amendments/by-result-set/${resultSetId}`)).data,
+  });
+}
+export function useApproveAmendment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${RES}/amendments/${id}/approve`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'amendments'] }),
+  });
+}
+
+/* ── A4 Exam operations ───────────────────────────────────────────────────── */
+
+export interface ExamVenue { id: string; name: string; code?: string | null; campusId?: string | null; capacity?: number | null; isActive: boolean }
+export interface ExamRegistration { id: string; examId: string; studentProfileId: string; classId?: string | null; status: string; venueId?: string | null; seatNumber?: string | null; studentName?: string; admissionNo?: string | null }
+
+export function useExamVenues() {
+  return useQuery({ queryKey: ['school', 'exam-venues'], queryFn: async () => (await api.get<Paginated<ExamVenue>>(EV, { params: { pageSize: 200 } })).data });
+}
+export function useCreateExamVenue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; code?: string; campusId?: string; capacity?: number }) => (await api.post<ExamVenue>(EV, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'exam-venues'] }),
+  });
+}
+export function useExamRegistrations(examId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'exam-registrations', examId],
+    enabled: !!examId,
+    queryFn: async () => (await api.get<ExamRegistration[]>(`${ER}/by-exam/${examId}`)).data,
+  });
+}
+export function useRegisterClass() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string }) => (await api.post(`${ER}/register-class`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'exam-registrations', v.examId] }),
+  });
+}
+export function useRegisterCandidates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; studentProfileIds: string[]; classId?: string }) => (await api.post(`${ER}/register`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'exam-registrations', v.examId] }),
+  });
+}
+export function useAllocateSeats() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; venueId: string }) => (await api.post(`${ER}/allocate-seats`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'exam-registrations', v.examId] }),
+  });
+}
+export function useUpdateRegistration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { id: string; examId: string; status: string; venueId?: string; seatNumber?: string }) =>
+      (await api.patch(`${ER}/${v.id}`, { status: v.status, venueId: v.venueId, seatNumber: v.seatNumber })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'exam-registrations', v.examId] }),
+  });
+}
+
+/* ── A5 CBT engine ────────────────────────────────────────────────────────── */
+
+export interface QuestionBank { id: string; name: string; subjectId?: string | null; description?: string | null }
+export interface Question { id: string; bankId: string; type: string; prompt: string; marks?: number | null; difficulty?: string | null }
+export interface Paper { id: string; name: string; subjectId?: string | null; durationMinutes?: number | null; isRandom?: boolean; questionCount?: number }
+export interface PaperQuestion { id: string; paperId: string; questionId: string; order?: number | null; marks?: number | null; prompt?: string; type?: string }
+export interface QuizAttempt { id: string; paperId: string; studentProfileId: string; status: string; startedAt: string; expiresAt?: string | null; submittedAt?: string | null; score?: number | null; totalMarks?: number | null; autoMarked?: boolean; studentView?: { paperId: string; questions: Array<{ id: string; prompt: string; type: string; options?: Array<{ id: string; label: string }> }> } | null }
+
+export function useQuestionBanks() {
+  return useQuery({ queryKey: ['school', 'question-banks'], queryFn: async () => (await api.get<Paginated<QuestionBank>>(QB, { params: { pageSize: 200 } })).data });
+}
+export function useCreateQuestionBank() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; subjectId?: string; description?: string }) => (await api.post<QuestionBank>(QB, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'question-banks'] }),
+  });
+}
+export function useBankQuestions(bankId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'bank-questions', bankId],
+    enabled: !!bankId,
+    queryFn: async () => (await api.get<Question[]>(`${QB}/${bankId}/questions`)).data,
+  });
+}
+export function useCreateQuestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { bankId: string; type: string; prompt: string; marks?: number; answerKey?: unknown; difficulty?: string; options?: Array<{ label: string; isCorrect?: boolean; order?: number }> }) =>
+      (await api.post<Question>(Q, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'bank-questions', v.bankId] }),
+  });
+}
+export function usePapers() {
+  return useQuery({ queryKey: ['school', 'papers'], queryFn: async () => (await api.get<Paginated<Paper>>(PP, { params: { pageSize: 200 } })).data });
+}
+export function usePaper(id: string | undefined) {
+  return useQuery({ queryKey: ['school', 'paper', id], enabled: !!id, queryFn: async () => (await api.get<Paper & { questions: PaperQuestion[] }>(`${PP}/${id}`)).data });
+}
+export function useCreatePaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; subjectId?: string; durationMinutes?: number; isRandom?: boolean; blueprint?: unknown }) => (await api.post<Paper>(PP, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'papers'] }),
+  });
+}
+export function useAddPaperQuestion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { paperId: string; questionId: string; order?: number; marks?: number }) => (await api.post(`${PP}/${v.paperId}/questions`, v)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'paper', v.paperId] }),
+  });
+}
+export function useStartAttempt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { paperId: string; studentProfileId: string; studentAssessmentId?: string }) => (await api.post<QuizAttempt>(`${CBT}/start`, dto)).data,
+    onSuccess: (d) => qc.invalidateQueries({ queryKey: ['school', 'attempt', (d as QuizAttempt).id] }),
+  });
+}
+export function useAttempt(id: string | undefined) {
+  return useQuery({ queryKey: ['school', 'attempt', id], enabled: !!id, queryFn: async () => (await api.get<QuizAttempt>(`${CBT}/attempts/${id}`)).data, refetchInterval: false });
+}
+export function useSaveResponse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { attemptId: string; questionId: string; clientEventId?: string; sequenceNumber: number; response: Record<string, unknown> }) =>
+      (await api.post(`${CBT}/response`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'attempt', v.attemptId] }),
+  });
+}
+export function useSubmitAttempt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { attemptId: string; idempotencyKey?: string }) => (await api.post<QuizAttempt>(`${CBT}/submit`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'attempt', v.attemptId] }),
+  });
+}
+
+/* ── A6 Certification ─────────────────────────────────────────────────────── */
+
+export interface Transcript { id: string; studentProfileId: string; builtAt: string; cumulativeGpa?: number | null; generatedUrl?: string | null }
+export interface ExternalResult { id: string; studentProfileId: string; board?: string | null; level: string; year: number; indexNumber?: string | null; aggregate?: number | null; division?: string | null; verified?: boolean; subjects?: Array<{ subject: string; grade: string; mark?: string | null; result?: string | null }> }
+export interface Certificate { id: string; studentProfileId: string; type: string; title: string; serial?: string | null; code?: string | null; status: string; issuedAt: string; revokedAt?: string | null; voidedAt?: string | null }
+
+export function useTranscript(studentProfileId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'transcript', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<Transcript>(`${TR}/by-student/${studentProfileId}`)).data });
+}
+export function useBuildTranscript() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (studentProfileId: string) => (await api.post<Transcript>(`${TR}/build/${studentProfileId}`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'transcript', v] }),
+  });
+}
+export function useExternalResults(studentProfileId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'external-results', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<ExternalResult[]>(`${EXT}/by-student/${studentProfileId}`)).data });
+}
+export function useRecordExternalResult() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; level: string; year: number; board?: string; indexNumber?: string; aggregate?: number; division?: string; verified?: boolean; subjects?: Array<{ subject: string; grade: string; mark?: string; result?: string }> }) =>
+      (await api.post<ExternalResult>(EXT, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'external-results', v.studentProfileId] }),
+  });
+}
+export function useCertificates(studentProfileId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'certificates', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<Certificate[]>(`${CERT}/by-student/${studentProfileId}`)).data });
+}
+export function useIssueCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; type: string; title: string; payload?: unknown }) => (await api.post<Certificate>(`${CERT}/issue`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'certificates', v.studentProfileId] }),
+  });
+}
+export function useRevokeCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { id: string; studentProfileId: string; reason: string; void?: boolean }) => (await api.post(`${CERT}/${v.id}/revoke`, { reason: v.reason, void: v.void })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'certificates', v.studentProfileId] }),
+  });
+}
+
+/* ── A7 Analytics ─────────────────────────────────────────────────────────── */
+
+export interface Overview { resultSetId: string; resultSetRevision: number; termId: string; studentCount: number; meanPercent: number; passRate: number; eligibleRate: number; atRiskCount: number; gradeDistribution: Array<{ grade: string; count: number }>; subjects: Array<{ subjectId: string; count: number; mean: number; median: number; passRate: number }> }
+export interface GradeDist { resultSetId: string; resultSetRevision: number; termId: string; distribution: Array<{ grade: string; count: number }> }
+export interface SubjectPerf { resultSetId: string; subjects: Array<{ subjectId: string; count: number; mean: number; median: number; passRate: number }> }
+export interface ClassPerf { resultSetId: string; studentCount: number; meanPercent: number; passRate: number; eligibleRate: number }
+export interface CaExamDiv { resultSetId: string; threshold: number; flagged: Array<{ studentProfileId: string; subjectId: string; caScore: number; examScore: number; gap: number }> }
+export interface AtRisk { resultSetId: string; passMark: number; register: Array<{ studentProfileId: string; meanPercent: number; failingSubjects: number; reasons: string[] }> }
+export interface StudentTrend { studentProfileId: string; points: Array<{ termId: string; resultSetRevision: number; meanPercent: number; gpa: number; classRank?: number | null }> }
+export interface AssignmentMetrics { classId: string; termId: string; totalAssigned: number; submissionRate: number; gradedRate: number; missingRate: number }
+export interface ExamAttendance { examId: string; total: number; byStatus: Record<string, number>; attendanceRate: number; absenceRate: number }
+
+export function useAnalyticsOverview(resultSetId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'overview', resultSetId], enabled: !!resultSetId, queryFn: async () => (await api.get<Overview>(`${AN}/overview/${resultSetId}`)).data });
+}
+export function useGradeDistribution(resultSetId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'grade-dist', resultSetId], enabled: !!resultSetId, queryFn: async () => (await api.get<GradeDist>(`${AN}/grade-distribution/${resultSetId}`)).data });
+}
+export function useSubjectPerformance(resultSetId: string | undefined, passMark?: number) {
+  return useQuery({ queryKey: ['school', 'analytics', 'subject-perf', resultSetId, passMark], enabled: !!resultSetId, queryFn: async () => (await api.get<SubjectPerf>(`${AN}/subject-performance/${resultSetId}`, { params: passMark ? { passMark } : {} })).data });
+}
+export function useClassPerformance(resultSetId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'class-perf', resultSetId], enabled: !!resultSetId, queryFn: async () => (await api.get<ClassPerf>(`${AN}/class-performance/${resultSetId}`)).data });
+}
+export function useCaVsExam(resultSetId: string | undefined, threshold?: number) {
+  return useQuery({ queryKey: ['school', 'analytics', 'ca-exam', resultSetId, threshold], enabled: !!resultSetId, queryFn: async () => (await api.get<CaExamDiv>(`${AN}/ca-vs-exam/${resultSetId}`, { params: threshold ? { threshold } : {} })).data });
+}
+export function useAtRisk(resultSetId: string | undefined, passMark?: number) {
+  return useQuery({ queryKey: ['school', 'analytics', 'at-risk', resultSetId, passMark], enabled: !!resultSetId, queryFn: async () => (await api.get<AtRisk>(`${AN}/at-risk/${resultSetId}`, { params: passMark ? { passMark } : {} })).data });
+}
+export function useStudentTrend(studentProfileId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'trend', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<StudentTrend>(`${AN}/student-trend/${studentProfileId}`)).data });
+}
+export function useAssignmentMetrics(classId: string | undefined, termId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'assignment-metrics', classId, termId], enabled: !!(classId && termId), queryFn: async () => (await api.get<AssignmentMetrics>(`${AN}/assignment-metrics/${classId}/term/${termId}`)).data });
+}
+export function useExamAttendance(examId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'analytics', 'exam-attendance', examId], enabled: !!examId, queryFn: async () => (await api.get<ExamAttendance>(`${AN}/exam-attendance/${examId}`)).data });
+}
+
+/* ── A8 Portals (student / parent / teacher) + Promotion gate ─────────────── */
+
+const POR = `${S}/portals`;
+const PRO = `${S}/promotion`;
+
+export interface StudentPortal {
+  studentProfileId: string;
+  timetable: unknown[];
+  attendance: unknown[];
+  grades: unknown[];
+  assignments: Array<{ id: string; title: string; dueAt?: string | null; status: string }>;
+  announcements: unknown[];
+  publishedResults?: { termId: string; meanPercent?: number | null; classRank?: number | null; promotionRecommendation?: string | null } | null;
+  certificates?: Array<{ id: string; type: string; title: string; code?: string | null; status: string }>;
+}
+export interface TeacherPortal {
+  teacherPartnerId: string;
+  timetable: unknown[];
+  classes: unknown[];
+  markingQueue: Array<{ id: string; title: string; pending: number }>;
+  submissions: unknown[];
+}
+export interface PromotionPlanEntry { studentProfileId: string; fromClassId?: string | null; toClassId?: string | null; outcome: string; reason?: string | null }
+
+export function useStudentPortal(studentProfileId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'portal-student', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<StudentPortal>(`${POR}/student/${studentProfileId}`)).data });
+}
+export function useTeacherPortal(teacherPartnerId: string | undefined) {
+  return useQuery({ queryKey: ['school', 'portal-teacher', teacherPartnerId], enabled: !!teacherPartnerId, queryFn: async () => (await api.get<TeacherPortal>(`${POR}/teacher/${teacherPartnerId}`)).data });
+}
+export function useRolloverPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { fromTermId: string; toTermId: string; dryRun?: boolean }) => (await api.post<{ plan: PromotionPlanEntry[]; dryRun: boolean }>(`${PRO}/rollover`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rollover'] }),
   });
 }

@@ -39,6 +39,12 @@ export class MealWalletController {
     return this.service.history(accountId);
   }
 
+  @Get('by-student/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.mealsRead)
+  byStudent(@Param('studentProfileId') studentProfileId: string) {
+    return this.service.byStudent(studentProfileId);
+  }
+
   @Get(':accountId/reconcile')
   @RequirePermissions(PERMISSIONS.school.mealReports)
   reconcile(@Param('accountId') accountId: string) {
