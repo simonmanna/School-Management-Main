@@ -78,6 +78,7 @@ export function SchoolStudent360Page() {
         </TabsList>
 
         <TabsContent value="profile" className="pt-4"><ProfileTab student={student} cf={cf} /></TabsContent>
+        <TabsContent value="guardians" className="pt-4"><GuardiansTab studentProfileId={student.id} cf={cf} /></TabsContent>
         <TabsContent value="academics" className="pt-4"><AcademicsTab portal={portal} /></TabsContent>
         <TabsContent value="attendance" className="pt-4"><AttendanceTab summary={attendance} /></TabsContent>
         <TabsContent value="assessments" className="pt-4"><AssessmentsTab portal={portal} /></TabsContent>
@@ -96,7 +97,7 @@ export function SchoolStudent360Page() {
   );
 }
 
-const TABS = ['profile', 'academics', 'attendance', 'assessments', 'behavior', 'fees', 'payments', 'transport', 'meals', 'library', 'communication', 'documents', 'health', 'activities'] as const;
+const TABS = ['profile', 'guardians', 'academics', 'attendance', 'assessments', 'behavior', 'fees', 'payments', 'transport', 'meals', 'library', 'communication', 'documents', 'health', 'activities'] as const;
 
 function ProfileTab({ student, cf }: { student: Student; cf: any }) {
   const rows: [string, string][] = [
@@ -121,13 +122,18 @@ function ProfileTab({ student, cf }: { student: Student; cf: any }) {
           {rows.map(([k, v]) => (<div key={k}><dt className="text-xs text-muted-foreground">{k}</dt><dd className="capitalize">{String(v)}</dd></div>))}
         </dl></CardContent>
       </Card>
+    </div>
+  );
+}
+
+function GuardiansTab({ studentProfileId, cf }: { studentProfileId: string; cf: any }) {
+  return (
+    <div className="space-y-4">
       <Card>
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle className="text-base">Parents / guardians</CardTitle>
-          <GuardianManager studentProfileId={student.id} />
-        </CardHeader>
+        <CardHeader><CardTitle className="text-base">Parents / guardians</CardTitle></CardHeader>
         <CardContent>
-          {cf.emergencyContact && <p className="mt-1 text-xs text-muted-foreground">Emergency: {cf.emergencyContact}</p>}
+          <GuardianManager studentProfileId={studentProfileId} />
+          {cf.emergencyContact && <p className="mt-3 text-xs text-muted-foreground">Emergency contact: {cf.emergencyContact}</p>}
           {cf.siblings && <p className="mt-1 text-xs text-muted-foreground">Siblings on roll: {cf.siblings}</p>}
         </CardContent>
       </Card>
