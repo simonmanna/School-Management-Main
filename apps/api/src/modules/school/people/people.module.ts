@@ -12,6 +12,8 @@ import { PositionService } from './position.service';
 import { PositionController } from './position.controller';
 import { StaffAttendanceService } from './staff-attendance.service';
 import { StaffAttendanceController } from './staff-attendance.controller';
+import { PromotionService } from './promotion.service';
+import { PromotionController } from './promotion.controller';
 
 @Module({
   controllers: [
@@ -22,6 +24,7 @@ import { StaffAttendanceController } from './staff-attendance.controller';
     StaffController,
     PositionController,
     StaffAttendanceController,
+    PromotionController,
   ],
   providers: [
     StudentService,
@@ -31,6 +34,7 @@ import { StaffAttendanceController } from './staff-attendance.controller';
     StaffService,
     PositionService,
     StaffAttendanceService,
+    PromotionService,
   ],
   exports: [
     StudentService,
@@ -40,6 +44,7 @@ import { StaffAttendanceController } from './staff-attendance.controller';
     StaffService,
     PositionService,
     StaffAttendanceService,
+    PromotionService,
   ],
 })
 export class PeopleModule {}

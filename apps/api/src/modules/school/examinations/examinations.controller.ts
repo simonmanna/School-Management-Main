@@ -12,17 +12,18 @@ import {
   ReportCardService,
 } from './examinations.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
-import type {
-  BulkGradeEntryDto,
-  CreateExamDto,
-  CreateExamScheduleDto,
-  CreateExamTypeDto,
-  CreateGradingScaleDto,
-  GenerateReportCardDto,
-  UpdateExamDto,
-  UpdateExamScheduleDto,
-  UpdateExamTypeDto,
-  UpdateGradingScaleDto,
+import {
+  RejectGradesDto,
+  type BulkGradeEntryDto,
+  type CreateExamDto,
+  type CreateExamScheduleDto,
+  type CreateExamTypeDto,
+  type CreateGradingScaleDto,
+  type GenerateReportCardDto,
+  type UpdateExamDto,
+  type UpdateExamScheduleDto,
+  type UpdateExamTypeDto,
+  type UpdateGradingScaleDto,
 } from './dto.types';
 
 @Controller('school/exam-types')
@@ -42,20 +43,20 @@ export class ExamTypeController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   create(@Body() dto: CreateExamTypeDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   update(@Param('id') id: string, @Body() dto: UpdateExamTypeDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
@@ -78,32 +79,32 @@ export class ExamController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   create(@Body() dto: CreateExamDto) {
     return this.service.schedule(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   update(@Param('id') id: string, @Body() dto: UpdateExamDto) {
     return this.service.update(id, dto);
   }
 
   @Post(':id/publish')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   publish(@Param('id') id: string) {
     return this.service.publish(id);
   }
 
   @Post(':id/close')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   close(@Param('id') id: string) {
     return this.service.close(id);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
@@ -126,20 +127,20 @@ export class ExamScheduleController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   create(@Body() dto: CreateExamScheduleDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   update(@Param('id') id: string, @Body() dto: UpdateExamScheduleDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
@@ -165,9 +166,15 @@ export class GradeEntryController {
   }
 
   @Post('approve/:examScheduleId')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.approveGrades)
   approve(@Param('examScheduleId') id: string) {
     return this.grades.approve(id);
+  }
+
+  @Post('reject/:examScheduleId')
+  @RequirePermissions(PERMISSIONS.school.approveGrades)
+  reject(@Param('examScheduleId') id: string, @Body() dto: RejectGradesDto) {
+    return this.grades.reject(id, dto.reason);
   }
 
   @Get('by-class/:examScheduleId')
@@ -200,20 +207,20 @@ export class GradingScaleController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   create(@Body() dto: CreateGradingScaleDto) {
     return this.service.create(dto as any);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   update(@Param('id') id: string, @Body() dto: UpdateGradingScaleDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }
@@ -227,19 +234,27 @@ export class ReportCardController {
   ) {}
 
   @Post('generate')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.computeResults)
   generate(@Body() dto: GenerateReportCardDto) {
     return this.service.generate(dto);
+  }
+
+  @Post(':id/publish')
+  @RequirePermissions(PERMISSIONS.school.publishResults)
+  publish(@Param('id') id: string) {
+    return this.service.publish(id);
+  }
+
+  @Post(':id/unpublish')
+  @RequirePermissions(PERMISSIONS.school.publishResults)
+  unpublish(@Param('id') id: string) {
+    return this.service.unpublish(id);
   }
 
   @Get('by-student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
   async byStudent(@Param('studentProfileId') id: string) {
-    const cards = await (this.service as any).prisma.client.reportCard.findMany({
-      where: { studentProfileId: id },
-      orderBy: { generatedAt: 'desc' },
-    });
-    return cards;
+    return this.service.byStudent(id);
   }
 
   /** Download a generated report card as a PDF. */

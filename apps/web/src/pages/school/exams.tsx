@@ -5,7 +5,7 @@ import {
   useExams, useCreateExam, useExamAction,
   useExamSchedules, useCreateExamSchedule,
   useGradesByClass, useBulkGrades, useGradeAction,
-  useReportCards, useGenerateReportCard,
+  useReportCards, useGenerateReportCard, usePublishReportCard,
   useTerms, useClasses, useSubjects, useClassRoster, useStudents,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -227,6 +227,7 @@ function ReportsTab() {
   const [termId, setTermId] = useState('');
   const { data: cards } = useReportCards(studentId || undefined);
   const generate = useGenerateReportCard();
+  const publish = usePublishReportCard();
 
   const openPdf = async (id: string) => {
     try {
@@ -264,8 +265,18 @@ function ReportsTab() {
             {(cards ?? []).length === 0 && <p className="text-sm text-muted-foreground">None yet. Generate one above.</p>}
             {(cards ?? []).map((c) => (
               <div key={c.id} className="flex items-center justify-between rounded border p-2 text-sm">
-                <span>Term {c.termId.slice(0, 6)}… {c.publishedAt ? <Badge>published</Badge> : <Badge>draft</Badge>}</span>
-                <Button size="sm" variant="ghost" onClick={() => openPdf(c.id)}><FileText className="h-4 w-4" /> PDF</Button>
+                <span>Term {c.termId.slice(0, 6)}… {c.publishedAt ? <Badge>published</Badge> : <Badge variant="secondary">draft</Badge>}</span>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" disabled={publish.isPending}
+                    onClick={async () => {
+                      const next = !c.publishedAt;
+                      try { await publish.mutateAsync({ id: c.id, studentProfileId: studentId, publish: next }); notify.success(next ? 'Published to portals' : 'Unpublished'); }
+                      catch { notify.error('Publish failed'); }
+                    }}>
+                    {c.publishedAt ? 'Unpublish' : 'Publish'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => openPdf(c.id)}><FileText className="h-4 w-4" /> PDF</Button>
+                </div>
               </div>
             ))}
           </CardContent>

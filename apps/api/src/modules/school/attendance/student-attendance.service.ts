@@ -21,37 +21,33 @@ export class StudentAttendanceService {
   async mark(dto: BulkMarkAttendanceDto) {
     const organizationId = this.tenant.organizationId;
     const date = new Date(dto.date);
+    const periodId = dto.periodId ?? null;
     const counts = { present: 0, absent: 0, late: 0, excused: 0 };
+
+    // P5: periodId is nullable, so the (student, date, periodId) key can't be a
+    // Prisma compound-unique upsert (null keys aren't upsertable). Find-then-
+    // create/update instead; the DB partial unique indexes are the safety net.
     await this.prisma.client.$transaction(async (tx: any) => {
       for (const e of dto.entries) {
-        await tx.studentAttendance.upsert({
-          where: {
-            organizationId_studentProfileId_date: {
-              organizationId,
-              studentProfileId: e.studentProfileId,
-              date,
-            } as any,
-          },
-          create: {
-            organizationId,
-            studentProfileId: e.studentProfileId,
-            classId: dto.classId,
-            sectionId: dto.sectionId ?? null,
-            date,
-            status: e.status,
-            minutesLate: e.minutesLate ?? 0,
-            reason: e.reason ?? null,
-            markedById: this.tenant.userId ?? null,
-          },
-          update: {
-            classId: dto.classId,
-            sectionId: dto.sectionId ?? null,
-            status: e.status,
-            minutesLate: e.minutesLate ?? 0,
-            reason: e.reason ?? null,
-            markedById: this.tenant.userId ?? null,
-          },
+        const existing = await tx.studentAttendance.findFirst({
+          where: { organizationId, studentProfileId: e.studentProfileId, date, periodId },
+          select: { id: true },
         });
+        const data = {
+          classId: dto.classId,
+          sectionId: dto.sectionId ?? null,
+          status: e.status,
+          minutesLate: e.minutesLate ?? 0,
+          reason: e.reason ?? null,
+          markedById: this.tenant.userId ?? null,
+        };
+        if (existing) {
+          await tx.studentAttendance.updateMany({ where: { id: existing.id }, data });
+        } else {
+          await tx.studentAttendance.create({
+            data: { organizationId, studentProfileId: e.studentProfileId, date, periodId, ...data },
+          });
+        }
         counts[e.status]++;
       }
     });
@@ -68,11 +64,12 @@ export class StudentAttendanceService {
   }
 
   /** Daily register for a class. */
-  async dailyRegister(classId: string, date: Date | string) {
+  async dailyRegister(classId: string, date: Date | string, periodId?: string) {
     const d = new Date(date);
     return this.prisma.client.studentAttendance.findMany({
-      where: { classId, date: d },
-      include: { studentProfile: true },
+      // P5: null periodId → the daily register; a periodId → that period's register.
+      where: { classId, date: d, periodId: periodId ?? null },
+      include: { studentProfile: { include: { partner: true } } },
       orderBy: { studentProfile: { admissionNo: 'asc' } } as any,
     });
   }

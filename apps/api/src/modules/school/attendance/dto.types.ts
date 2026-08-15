@@ -20,6 +20,13 @@ export class BulkMarkAttendanceDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
 
+  /**
+   * P5: period-level attendance. Omit for the daily register (one row per
+   * student/day); set to mark a specific class period (one row per
+   * student/day/period) — for secondary schools with subject teachers.
+   */
+  @IsOptional() @IsString() periodId?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttendanceEntry)

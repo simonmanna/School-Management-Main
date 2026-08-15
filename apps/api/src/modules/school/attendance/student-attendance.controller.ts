@@ -16,8 +16,8 @@ export class StudentAttendanceController {
 
   @Get('register')
   @RequirePermissions(PERMISSIONS.school.read)
-  register(@Query('classId') classId: string, @Query('date') date: string) {
-    return this.attendance.dailyRegister(classId, date);
+  register(@Query('classId') classId: string, @Query('date') date: string, @Query('periodId') periodId?: string) {
+    return this.attendance.dailyRegister(classId, date, periodId || undefined);
   }
 
   @Get('weekly')

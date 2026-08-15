@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Announcement, HomeworkAssignment, HomeworkSubmission, LearningResource } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
+import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import type {
@@ -26,55 +27,84 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
+    private readonly audit: AuditService,
   ) {
     super(prisma.client.homeworkAssignment as unknown as CrudDelegate);
   }
 
   async create(dto: CreateHomeworkDto): Promise<HomeworkAssignment> {
-    const teacherPartnerId = this.tenant.userId;
-    // Default to the logged-in user as the teacher if not provided.
-    const row = await this.prisma.client.homeworkAssignment.create({
-      data: {
-        ...dto,
-        teacherPartnerId: teacherPartnerId ?? '00000000-0000-0000-0000-000000000000',
-        dueDate: new Date(dto.dueDate),
-        attachments: (dto.attachments as any) ?? [],
-      } as any,
+    return this.prisma.client.$transaction(async (tx: any) => {
+      // A0: the teacher is an explicit, validated FK — no id-from-session guess,
+      // no all-zeros fallback that pointed at no StaffProfile.
+      const teacher = await tx.staffProfile.findFirst({ where: { id: dto.teacherPartnerId } });
+      if (!teacher) throw new NotFoundException(`Staff profile ${dto.teacherPartnerId} not found`);
+
+      const klass = await tx.schoolClass.findFirst({ where: { id: dto.classId } });
+      if (!klass) throw new NotFoundException(`Class ${dto.classId} not found`);
+
+      const row = await tx.homeworkAssignment.create({
+        data: {
+          ...dto,
+          dueDate: new Date(dto.dueDate),
+          attachments: (dto.attachments as any) ?? [],
+        } as any,
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HomeworkAssignment',
+        entityId: row.id,
+        action: 'create',
+        newValues: { classId: row.classId, subjectId: row.subjectId, teacherPartnerId: row.teacherPartnerId },
+      });
+      this.events.publish(EVENTS.SchoolHomeworkAssigned, {
+        organizationId: this.tenant.organizationId,
+        assignmentId: row.id,
+        classId: row.classId,
+        subjectId: row.subjectId,
+      });
+      return row;
     });
-    this.events.publish(EVENTS.SchoolHomeworkAssigned, {
-      organizationId: this.tenant.organizationId,
-      assignmentId: row.id,
-      classId: row.classId,
-      subjectId: row.subjectId,
-    });
-    return row;
   }
 
   async submit(dto: SubmitHomeworkDto) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
-      const studentProfileId = this.tenant.userId; // In a real portal the user→student map would resolve this.
+      // A0: the student is validated, and must actually belong to the class the
+      // assignment was set for — a submission can no longer be attributed to a
+      // non-existent (or wrong-class) student.
+      const assignment = await tx.homeworkAssignment.findFirst({ where: { id: dto.assignmentId } });
+      if (!assignment) throw new NotFoundException(`Assignment ${dto.assignmentId} not found`);
+
+      const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
+      if (!student) throw new NotFoundException(`Student profile ${dto.studentProfileId} not found`);
+      if (student.currentClassId !== assignment.classId) {
+        throw new BadRequestException(
+          `Student ${dto.studentProfileId} is not in the class this assignment was set for`,
+        );
+      }
+
       const sub = await tx.homeworkSubmission.upsert({
         where: {
           assignmentId_studentProfileId: {
             assignmentId: dto.assignmentId,
-            studentProfileId: studentProfileId ?? '',
+            studentProfileId: dto.studentProfileId,
           } as any,
         },
         create: {
           organizationId,
           assignmentId: dto.assignmentId,
-          studentProfileId: studentProfileId ?? '',
+          studentProfileId: dto.studentProfileId,
           submittedAt: new Date(),
           content: dto.content ?? null,
           attachments: (dto.attachments as any) ?? [],
-          status: 'submitted',
+          // Late if submitted after the due date — the derived status the CA
+          // engine later reads instead of guessing from a missing row.
+          status: new Date() > assignment.dueDate ? 'late' : 'submitted',
         },
         update: {
           submittedAt: new Date(),
           content: dto.content ?? null,
           attachments: (dto.attachments as any) ?? [],
-          status: 'submitted',
+          status: new Date() > assignment.dueDate ? 'late' : 'submitted',
         },
       });
       return sub;
@@ -85,6 +115,16 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     return this.prisma.client.$transaction(async (tx: any) => {
       const sub = await tx.homeworkSubmission.findFirst({ where: { id: dto.submissionId } });
       if (!sub) throw new NotFoundException(`Submission ${dto.submissionId} not found`);
+
+      // A0: a homework score cannot exceed the assignment's maxScore.
+      const assignment = await tx.homeworkAssignment.findFirst({ where: { id: sub.assignmentId } });
+      const max = assignment?.maxScore != null ? Number(assignment.maxScore) : null;
+      if (dto.score < 0 || (max != null && dto.score > max)) {
+        throw new BadRequestException(
+          `Score ${dto.score} out of range [0, ${max ?? '∞'}] for this assignment`,
+        );
+      }
+
       const updated = await tx.homeworkSubmission.updateMany({
         where: { id: dto.submissionId },
         data: {
@@ -96,6 +136,12 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
         },
       });
       if (updated.count === 0) throw new NotFoundException(`Submission ${dto.submissionId} not found`);
+      await this.audit.recordInTx(tx, {
+        entity: 'HomeworkSubmission',
+        entityId: dto.submissionId,
+        action: 'update',
+        newValues: { score: dto.score, status: 'graded', action: 'grade' },
+      });
       this.events.publish(EVENTS.SchoolHomeworkGraded, {
         organizationId: this.tenant.organizationId,
         submissionId: dto.submissionId,

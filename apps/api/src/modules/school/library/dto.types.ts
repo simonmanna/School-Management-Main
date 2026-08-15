@@ -8,6 +8,7 @@
  */
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -200,6 +201,10 @@ export class CreateMealPlanDto {
   @IsOptional() @IsString() feeProductId?: string;
   @IsNumber() @Min(0) pricePerTerm!: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  // Meals V1: link to a program + charge/funding configuration.
+  @IsOptional() @IsString() mealProgramId?: string;
+  @IsOptional() @IsIn(['term_plan', 'wallet', 'included']) billingModel?: string;
+  @IsOptional() @IsIn(['school_funded', 'parent_funded', 'parent_contribution', 'mixed']) fundingModel?: string;
 }
 export class UpdateMealPlanDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
@@ -207,6 +212,9 @@ export class UpdateMealPlanDto {
   @IsOptional() @IsString() feeProductId?: string;
   @IsOptional() @IsNumber() @Min(0) pricePerTerm?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() mealProgramId?: string;
+  @IsOptional() @IsIn(['term_plan', 'wallet', 'included']) billingModel?: string;
+  @IsOptional() @IsIn(['school_funded', 'parent_funded', 'parent_contribution', 'mixed']) fundingModel?: string;
 }
 
 export class MealTopUpDto {

@@ -600,7 +600,7 @@ export class SchoolPaymentService {
               partnerId,
               documentType: 'sales_invoice',
               paymentStatus: { in: ['not_paid', 'partial'] },
-              sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+              sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
               amountResidual: { gt: 0 },
             },
             orderBy: { issueDate: 'asc' },

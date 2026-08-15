@@ -9761,6 +9761,9 @@ model SchoolProfile {
   educationLevel String   @default("mixed")
   /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
   gradingSystem  String   @default("UCE")
+  /// P5: 'daily' (one register per class per day) or 'period' (per class period,
+  /// for subject-teacher secondary schools). Attendance marking honours this.
+  attendanceMode String   @default("daily")
   contacts       Json     @default("{}")
   customFields   Json     @default("{}")
   createdAt      DateTime @default(now())
@@ -9810,9 +9813,10 @@ model Term {
   enrollments        Enrollment[]
   lessonPlans        LessonPlan[]
   teacherAssignments TeacherAssignment[]
-  exams              Exam[]
-  feeAssignments     StudentFeeAssignment[]
-  installmentPlans   InstallmentPlan[]
+  exams               Exam[]
+  feeAssignments      StudentFeeAssignment[]
+  installmentPlans    InstallmentPlan[]
+  mealPlanAssignments MealPlanAssignment[]
 
   @@unique([organizationId, academicYearId, name])
   @@index([organizationId])
@@ -9958,8 +9962,9 @@ model Period {
   updatedBy      String?
   deletedAt      DateTime?
 
-  campus         Campus?         @relation(fields: [campusId], references: [id])
+  campus         Campus?             @relation(fields: [campusId], references: [id])
   timetableSlots TimetableSlot[]
+  attendances    StudentAttendance[]
 
   @@unique([organizationId, campusId, name])
   @@index([organizationId])
@@ -10043,6 +10048,8 @@ model StudentProfile {
   feeAssignments      StudentFeeAssignment[]
   scholarships        Scholarship[]
   mealAccount         MealAccount?
+  mealPlanAssignments MealPlanAssignment[]
+  mealAttendances     MealAttendance[]
   transportAssignment StudentTransportAssignment[]
   hostelAllocation    HostelAllocation[]
   installmentPlans    InstallmentPlan[]
@@ -10171,7 +10178,6 @@ model StaffProfile {
   lessonPlans        LessonPlan[]
   homeworks          HomeworkAssignment[]
   timetableSlots     TimetableSlot[]
-  gradeEntries       GradeEntry[]
 
   @@unique([organizationId, employeeNo])
   @@index([organizationId])
@@ -10498,6 +10504,12 @@ model StudentAttendance {
   classId          String
   sectionId        String?
   date             DateTime
+  /// P5: null = daily attendance (one row per student/day); set = period
+  /// attendance (one row per student/day/period), for secondary schools with
+  /// subject teachers. Uniqueness is enforced by two partial indexes created in
+  /// the migration (NULLS DISTINCT would otherwise let a student have many null
+  /// daily rows), so this is a plain @@index here, not @@unique.
+  periodId         String?
   status           AttendanceStatus @default(present)
   minutesLate      Int              @default(0)
   reason           String?
@@ -10508,11 +10520,12 @@ model StudentAttendance {
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
   schoolClass    SchoolClass    @relation(fields: [classId], references: [id])
   section        Section?       @relation(fields: [sectionId], references: [id])
+  period         Period?        @relation(fields: [periodId], references: [id])
 
-  @@unique([organizationId, studentProfileId, date])
   @@index([organizationId])
   @@index([classId, date])
   @@index([organizationId, date])
+  @@index([organizationId, studentProfileId, date])
 }
 
 model HomeworkAssignment {
@@ -10622,6 +10635,155 @@ enum GradeEntryStatus {
   rejected
 }
 
+// ─────────────────────────── Assessment core (A1) ───────────────────────────
+// The assessment spine: policy → component → assessment → student assessment →
+// marks. GradeEntry becomes legacy evidence projected into this shape.
+
+enum AssessmentKind {
+  exam
+  cat
+  homework
+  classwork
+  practical
+  project
+  oral
+  attendance
+}
+
+enum AssessmentSourceType {
+  manual
+  assignment
+  exam_session
+  quiz
+}
+
+enum AssessmentStatus {
+  draft
+  scheduled
+  published
+  open
+  closed
+  grading
+  graded
+  archived
+}
+
+/// Exam-day participation fact, distinct from the marking-workflow `status`.
+enum ParticipationStatus {
+  present
+  absent
+  exempt
+  excused
+  malpractice
+  special_consideration
+}
+
+/// Workflow position of one student's work on one assessment.
+enum StudentAssessmentStatus {
+  assigned
+  opened
+  in_progress
+  submitted
+  resubmitted
+  returned
+  resubmission_requested
+  graded
+}
+
+/// Multi-marker support: first mark, blind second mark, agreed reconciliation.
+enum MarkRound {
+  first
+  second_blind
+  reconciliation
+}
+
+enum MarkAdjustmentKind {
+  moderation
+  scaling
+  late_penalty
+  special_consideration
+  correction
+}
+
+/// Where in a computation values are rounded. Snapshotted into results (A3).
+enum RoundingMode {
+  half_up
+  half_even
+  floor
+  ceil
+}
+
+enum AggregationMethod {
+  mean
+  sum
+  best_n
+  last
+  weighted_mean
+}
+
+// ─────────────────── Rosters + assignment evidence (A2) ───────────────────
+
+enum RosterScopeType {
+  class
+  section
+  subject
+  grade
+}
+
+enum RosterSource {
+  derived_current_class
+  enrollment
+  manual_import
+}
+
+enum AssignmentGradingMode {
+  points
+  rubric
+  complete_incomplete
+}
+
+// ─────────────────────────── Result spine (A3) ───────────────────────────
+
+enum ResultScopeType {
+  class
+  section
+  grade
+  campus
+  school
+}
+
+enum RunStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+}
+
+enum ResultSetStatus {
+  draft
+  computing
+  computed
+  approved
+  published
+  locked
+  archived
+}
+
+enum AmendmentStatus {
+  requested
+  approved
+  rejected
+  applied
+}
+
+enum PromotionRecommendation {
+  promote
+  repeat
+  graduate
+  review
+}
+
 model ExamType {
   id             String    @id @default(uuid())
   organizationId String
@@ -10647,22 +10809,29 @@ model Exam {
   name           String
   startDate      DateTime
   endDate        DateTime
-  /// Class IDs the exam applies to (JSON array for flexibility).
+  /// DEPRECATED (A4): class IDs as a JSON array. Superseded by ExamRegistration
+  /// (a real candidate row). Kept for backfill provenance; new code uses
+  /// registrations. Do not read this for coverage.
   classes        Json       @default("[]")
   status         ExamStatus @default(draft)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   deletedAt      DateTime?
 
-  term      Term           @relation(fields: [termId], references: [id])
-  examType  ExamType       @relation(fields: [examTypeId], references: [id])
-  schedules ExamSchedule[]
+  term          Term               @relation(fields: [termId], references: [id])
+  examType      ExamType           @relation(fields: [examTypeId], references: [id])
+  schedules     ExamSchedule[]
+  registrations ExamRegistration[]
 
   @@index([organizationId])
   @@index([termId])
   @@index([status])
 }
 
+/// One exam paper sitting: "Mathematics Paper 1 — 10 Nov 09:00, Room A". Acts
+/// as the exam "session" (A4) — session-level fields (paper number, sitting,
+/// resit, venue) live here rather than in a separate table, to keep the A1
+/// GradeEntry adapter and A3 result flow (which key on examScheduleId) intact.
 model ExamSchedule {
   id              String   @id @default(uuid())
   organizationId  String
@@ -10674,18 +10843,35 @@ model ExamSchedule {
   durationMinutes Int      @default(60)
   invigilatorId   String?
   maxMarks        Decimal  @default(100) @db.Decimal(8, 2)
+  // A4 session detail (all additive/optional).
+  paperNumber     Int?
+  /// 'morning' | 'afternoon'.
+  sitting         String?
+  isResit         Boolean  @default(false)
+  venueId         String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   exam         Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
   schoolClass  SchoolClass  @relation(fields: [classId], references: [id])
   subject      Subject      @relation(fields: [subjectId], references: [id])
+  venue        ExamVenue?   @relation(fields: [venueId], references: [id])
   gradeEntries GradeEntry[]
 
   @@unique([examId, classId, subjectId])
   @@index([organizationId])
   @@index([classId, date])
+  @@index([venueId])
 }
+
+enum ExamRegistrationStatus {
+  registered
+  sat
+  absent
+  withheld
+}
+
+/// A physical exam room. Capacity drives seat allocation + clash detection.
 
 model GradeEntry {
   id               String           @id @default(uuid())
@@ -10700,15 +10886,22 @@ model GradeEntry {
   gradePoint       Decimal?         @db.Decimal(4, 2)
   remarks          String?
   status           GradeEntryStatus @default(draft)
+  /// A0: actor (User) id who entered these marks — a plain actor reference,
+  /// symmetric with `approvedById`. It previously carried a StaffProfile FK
+  /// while the code stored a User id, so the constraint could never be
+  /// satisfied; the FK is dropped.
   enteredById      String?
   enteredAt        DateTime?
   approvedById     String?
   approvedAt       DateTime?
+  /// A0: reason a marks-approval was rejected, so `rejected → resubmit` carries context.
+  rejectionReason  String?
+  /// A0: optimistic-concurrency guard — see kernel/common/optimistic-update.ts.
+  version          Int              @default(0)
   customFields     Json             @default("{}")
 
   examSchedule   ExamSchedule   @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id])
-  enteredBy      StaffProfile?  @relation(fields: [enteredById], references: [id])
 
   @@unique([examScheduleId, studentProfileId])
   @@index([organizationId])
@@ -10759,6 +10952,58 @@ model AcademicTranscript {
   @@index([organizationId])
   @@index([studentProfileId])
 }
+
+// ─────────────────────────── Assessment core (A1) ───────────────────────────
+// Scope ids (gradeLevelId/classId/subjectId/termId/studentProfileId) are loose
+// references with indexes, following the established Curriculum/LearningResource
+// pattern; org-scoping is enforced by the tenancy extension + RLS. FKs are used
+// only *within* the assessment cluster (policy→component→assessment→…→marks),
+// where both ends are new, so cascade + integrity hold across the subsystem.
+
+/// The weighting scheme for a scope. Resolved most-specific-first
+/// (subject+class+term > subject+class > subject+gradeLevel > … > org default).
+
+// ─────────────────────────── CBT engine (A5) ───────────────────────────
+// Question bank → papers → server-authoritative attempts. Questions are
+// versioned (an edit forks) so a historical attempt stays reproducible; the
+// realised question set is frozen onto the attempt at start.
+
+enum QuestionType {
+  mcq_single
+  mcq_multi
+  true_false
+  short_answer
+  numeric
+  matching
+  fill_blank
+  essay
+}
+
+enum QuizAttemptStatus {
+  not_started
+  in_progress
+  submitted
+  auto_submitted
+  abandoned
+  reset
+}
+
+
+// ─────────────────────────── Certification (A6) ───────────────────────────
+
+enum CertificateType {
+  completion
+  leaving
+  testimonial
+  merit
+  award
+}
+
+enum CertificateStatus {
+  draft
+  issued
+  revoked
+  void
 
 model FeeStructure {
   id             String    @id @default(uuid())
@@ -11219,21 +11464,37 @@ model HostelAllocation {
 model MealPlan {
   id             String    @id @default(uuid())
   organizationId String
+  /// Meals V1: optional parent program (Day / Day+Boarding / Custom). Nullable so
+  /// pre-existing wallet-only plans keep working.
+  mealProgramId  String?
   name           String
   /// 'full' | 'half' | 'lunch_only' | 'breakfast_only'.
   type           String    @default("full")
   /// FK to Product (service) for invoicing.
   feeProductId   String?
   pricePerTerm   Decimal   @db.Decimal(18, 6)
+  /// Meals V1: how this plan is charged. 'term_plan' = billed as a term fee via
+  /// Document/AR/GL; 'wallet' = prepaid cafeteria wallet; 'included' = bundled in
+  /// boarding/tuition (no separate charge). MealPlan holds charge CONFIGURATION
+  /// only — posting stays in the services / Document engine.
+  billingModel   String    @default("term_plan")
+  /// 'school_funded' | 'parent_funded' | 'parent_contribution' | 'mixed'.
+  fundingModel   String    @default("parent_funded")
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
   deletedAt      DateTime?
 
-  accounts MealAccount[]
+  mealProgram  MealProgram?          @relation(fields: [mealProgramId], references: [id])
+  accounts     MealAccount[]
+  entitlements MealPlanEntitlement[]
+  assignments  MealPlanAssignment[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
+  @@index([mealProgramId])
 }
 
 model MealAccount {
@@ -11245,9 +11506,10 @@ model MealAccount {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  student   StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
-  mealPlan  MealPlan       @relation(fields: [mealPlanId], references: [id])
-  purchases MealPurchase[]
+  student      StudentProfile          @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  mealPlan     MealPlan                @relation(fields: [mealPlanId], references: [id])
+  purchases    MealPurchase[]
+  transactions MealAccountTransaction[]
 
   @@index([organizationId])
 }
@@ -11260,6 +11522,395 @@ model MealPurchase {
   description    String?
   paymentId      String?
   purchasedAt    DateTime @default(now())
+
+  mealAccount MealAccount @relation(fields: [mealAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mealAccountId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// School Meals module (Meals V1–V3) — programs, entitlements, sessions,
+// attendance, menus, wallet ledger, kitchen production. Reuses Document/Payment/
+// Posting for money and Inventory for stock; adds no new accounting primitives.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum MealAssignmentStatus {
+  active
+  suspended
+  ended
+  cancelled
+}
+
+enum MealAttendanceStatus {
+  served
+  absent
+  excused
+  not_eligible
+}
+
+enum MealAccountTxnType {
+  top_up
+  purchase
+  refund
+  adjustment
+  reversal
+}
+
+enum MealProductionStatus {
+  preparing
+  ready
+  served
+  cancelled
+}
+
+enum MealWasteReason {
+  overproduction
+  spoilage
+  burnt
+  damaged
+  returned
+  other
+}
+
+/// Top-level meal program grouping plans (Day School / Day+Boarding / Custom).
+model MealProgram {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  /// 'day' | 'day_boarding' | 'custom'.
+  kind           String    @default("custom")
+  description    String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  plans MealPlan[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A configurable meal (Breakfast / Lunch / Dinner / Snack). Org-level catalog.
+model MealType {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  order          Int       @default(0)
+  /// 'HH:mm' serving window (optional, display only).
+  startTime      String?
+  endTime        String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  entitlements    MealPlanEntitlement[]
+  sessions        MealSession[]
+  menus           MealMenu[]
+  productionPlans MealProductionPlan[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Which meal types a plan includes (MealPlan × MealType).
+model MealPlanEntitlement {
+  id             String   @id @default(uuid())
+  organizationId String
+  mealPlanId     String
+  mealTypeId     String
+  createdAt      DateTime @default(now())
+
+  mealPlan MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  mealType MealType @relation(fields: [mealTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, mealPlanId, mealTypeId])
+  @@index([organizationId])
+  @@index([mealPlanId])
+}
+
+/// Student ⇄ MealPlan per term. Historical/immutable: suspend/end/re-assign
+/// create or close rows, never rewrite history. Invariant "one ACTIVE plan per
+/// student per term" is enforced by a partial unique index (WHERE status='active')
+/// created in the migration — a plain @@unique can't allow the historical rows.
+model MealPlanAssignment {
+  id               String               @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  mealPlanId       String
+  termId           String
+  startDate        DateTime
+  endDate          DateTime?
+  status           MealAssignmentStatus @default(active)
+  reason           String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  createdBy        String?
+  updatedBy        String?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  mealPlan       MealPlan       @relation(fields: [mealPlanId], references: [id])
+  term           Term           @relation(fields: [termId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([organizationId, termId])
+  @@index([mealPlanId])
+}
+
+/// A dated serving instance for a meal type (optionally scoped to a class).
+model MealSession {
+  id             String    @id @default(uuid())
+  organizationId String
+  mealTypeId     String
+  date           DateTime
+  /// Optional scope. Null = school-wide session for the date/meal.
+  classId        String?
+  sectionId      String?
+  mealPlanId     String?
+  expectedCount  Int       @default(0)
+  servedCount    Int       @default(0)
+  /// 'open' | 'closed'.
+  status         String    @default("open")
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  mealType    MealType         @relation(fields: [mealTypeId], references: [id])
+  attendances MealAttendance[]
+
+  @@index([organizationId])
+  @@index([organizationId, date])
+  @@index([mealTypeId, date])
+}
+
+/// Per (student, session) serving record. No inventory side-effects — records
+/// WHO was served, never moves stock.
+model MealAttendance {
+  id               String               @id @default(uuid())
+  organizationId   String
+  mealSessionId    String
+  studentProfileId String
+  status           MealAttendanceStatus @default(served)
+  reason           String?
+  markedById       String?
+  markedAt         DateTime             @default(now())
+  createdAt        DateTime             @default(now())
+
+  mealSession    MealSession    @relation(fields: [mealSessionId], references: [id], onDelete: Cascade)
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, mealSessionId, studentProfileId])
+  @@index([organizationId])
+  @@index([mealSessionId])
+  @@index([studentProfileId])
+}
+
+/// Menu for a day (or weekday) + meal type, optionally scoped to a plan.
+model MealMenu {
+  id             String    @id @default(uuid())
+  organizationId String
+  mealTypeId     String
+  date           DateTime?
+  /// 0=Sun..6=Sat when the menu is a recurring weekday template.
+  dayOfWeek      Int?
+  mealPlanId     String?
+  title          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  mealType MealType       @relation(fields: [mealTypeId], references: [id])
+  items    MealMenuItem[]
+
+  @@index([organizationId])
+  @@index([mealTypeId])
+}
+
+/// A dish line under a menu. Distinct from the POS `MenuItem`.
+model MealMenuItem {
+  id             String   @id @default(uuid())
+  organizationId String
+  mealMenuId     String
+  name           String
+  notes          String?
+  sortOrder      Int      @default(0)
+  /// Optional link to an imported POS `MenuItem` (same org) so the meal menu
+  /// reuses the cafe catalog instead of duplicating dish data. Plain scalar
+  /// (no Prisma relation) to avoid coupling MenuItem's relation set.
+  posMenuItemId  String?
+  /// Optional link to a recipe (drives kitchen production / inventory in V3).
+  mealRecipeId   String?
+  createdAt      DateTime @default(now())
+
+  mealMenu   MealMenu    @relation(fields: [mealMenuId], references: [id], onDelete: Cascade)
+  mealRecipe MealRecipe? @relation(fields: [mealRecipeId], references: [id])
+
+  @@index([organizationId])
+  @@index([mealMenuId])
+  @@index([posMenuItemId])
+}
+
+/// A recipe (dish) mapping to inventory ingredients. School-owned (parallels the
+/// POS MenuProduct BOM) so meals stay decoupled from POS ordering.
+model MealRecipe {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  portionYield   Int       @default(1)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  ingredients MealRecipeIngredient[]
+  menuItems   MealMenuItem[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// One ingredient line of a recipe: an inventory Product + quantity per portion.
+model MealRecipeIngredient {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  mealRecipeId       String
+  /// FK to inventory Product (kept as a plain scalar, like MealPlan.feeProductId).
+  productId          String
+  quantityPerPortion Decimal  @db.Decimal(20, 6)
+  uomId              String?
+  createdAt          DateTime @default(now())
+
+  mealRecipe MealRecipe @relation(fields: [mealRecipeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mealRecipeId])
+}
+
+/// Kitchen production plan for a date + meal type: expected portions → required
+/// ingredients, with actual issue/consumption/waste tracked on the items.
+model MealProductionPlan {
+  id               String               @id @default(uuid())
+  organizationId   String
+  mealTypeId       String
+  date             DateTime
+  mealSessionId    String?
+  expectedPortions Int                  @default(0)
+  status           MealProductionStatus @default(preparing)
+  notes            String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  mealType     MealType            @relation(fields: [mealTypeId], references: [id])
+  items        MealProductionItem[]
+  consumptions MealConsumption[]
+  wastes       MealWaste[]
+
+  @@index([organizationId])
+  @@index([organizationId, date])
+  @@index([mealTypeId, date])
+}
+
+/// Per-ingredient line of a production plan with full variance columns.
+model MealProductionItem {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  mealProductionPlanId String
+  productId            String
+  uomId                String?
+  plannedQuantity      Decimal  @default(0) @db.Decimal(20, 6)
+  issuedQuantity       Decimal  @default(0) @db.Decimal(20, 6)
+  consumedQuantity     Decimal  @default(0) @db.Decimal(20, 6)
+  wastedQuantity       Decimal  @default(0) @db.Decimal(20, 6)
+  returnedQuantity     Decimal  @default(0) @db.Decimal(20, 6)
+  unitCost             Decimal  @default(0) @db.Decimal(20, 6)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  productionPlan MealProductionPlan @relation(fields: [mealProductionPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mealProductionPlanId])
+}
+
+/// Actual ingredient issue/consume event — the ONLY thing that moves stock (via
+/// StockService.issue). Keeps "served" (attendance) separate from "consumed".
+model MealConsumption {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  mealProductionPlanId String
+  productId            String
+  quantity             Decimal  @db.Decimal(20, 6)
+  unitCost             Decimal  @default(0) @db.Decimal(20, 6)
+  /// Link back to the inventory move that decremented stock.
+  inventoryLedgerId    String?
+  stockLocationId      String?
+  consumedAt           DateTime @default(now())
+  recordedById         String?
+  createdAt            DateTime @default(now())
+
+  productionPlan MealProductionPlan @relation(fields: [mealProductionPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([mealProductionPlanId])
+}
+
+/// Food waste record. Cost is computed from inventory costing, not hand-entered.
+model MealWaste {
+  id                   String          @id @default(uuid())
+  organizationId       String
+  mealProductionPlanId String?
+  mealSessionId        String?
+  productId            String?
+  quantity             Decimal         @db.Decimal(20, 6)
+  uomId                String?
+  cost                 Decimal         @default(0) @db.Decimal(20, 6)
+  reason               MealWasteReason @default(other)
+  notes                String?
+  recordedById         String?
+  recordedAt           DateTime        @default(now())
+  createdAt            DateTime        @default(now())
+
+  productionPlan MealProductionPlan? @relation(fields: [mealProductionPlanId], references: [id])
+
+  @@index([organizationId])
+  @@index([mealProductionPlanId])
+}
+
+/// Immutable cafeteria-wallet ledger. MealAccount.balance is a cached read; this
+/// ledger is the source of truth (safe refunds/reversals/reconciliation).
+model MealAccountTransaction {
+  id             String             @id @default(uuid())
+  organizationId String
+  mealAccountId  String
+  type           MealAccountTxnType
+  amount         Decimal            @db.Decimal(20, 6)
+  balanceAfter   Decimal            @db.Decimal(20, 6)
+  /// Idempotency/replay key (e.g. mobile-money ref). Dedup only when set.
+  reference      String?
+  paymentId      String?
+  sourceType     String?
+  sourceId       String?
+  notes          String?
+  recordedById   String?
+  createdAt      DateTime           @default(now())
 
   mealAccount MealAccount @relation(fields: [mealAccountId], references: [id], onDelete: Cascade)
 

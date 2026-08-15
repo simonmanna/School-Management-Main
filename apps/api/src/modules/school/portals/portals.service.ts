@@ -51,14 +51,17 @@ export class PortalsService {
     });
     if (!profile) return null;
 
-    const [timetable, attendance, grades, assignments, announcements] = await Promise.all([
+    const [timetable, attendance, grades, assignments, announcements, publishedResults, certificates] = await Promise.all([
       this.studentTimetable(profile.currentClassId, profile.id),
       this.recentAttendance(studentProfileId),
       this.recentGrades(studentProfileId),
       this.studentAssignments(studentProfileId),
       this.recentAnnouncements(profile.currentClassId),
+      this.publishedResults(studentProfileId),
+      this.studentCertificates(studentProfileId),
     ]);
-    return { profile, timetable, attendance, grades, assignments, announcements };
+    // A8: published results + certificates read the result spine, not raw marks.
+    return { profile, timetable, attendance, grades, assignments, announcements, publishedResults, certificates };
   }
 
   async teacherDashboard(teacherPartnerId: string) {
@@ -87,7 +90,16 @@ export class PortalsService {
       },
     });
 
-    return { classes, todaySchedule, pendingGrades };
+    // A8: spine-side marking queue — assessments this teacher entered awaiting
+    // approval, plus any open amendment requests to review.
+    const pendingApprovals = await this.prisma.client.studentAssessment.count({
+      where: { enteredById: teacherPartnerId, approvalStatus: 'submitted' },
+    });
+    const draftMarks = await this.prisma.client.studentAssessment.count({
+      where: { enteredById: teacherPartnerId, approvalStatus: 'draft' },
+    });
+
+    return { classes, todaySchedule, pendingGrades, marking: { pendingApprovals, draftMarks } };
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -161,5 +173,34 @@ export class PortalsService {
       include: { subject: true, submissions: { where: { studentProfileId } } },
     });
     return assignments;
+  }
+
+  /** A8: the student's published term results from the A3 result spine. */
+  private async publishedResults(studentProfileId: string) {
+    const terms = await this.prisma.client.studentTermResult.findMany({
+      where: { studentProfileId, resultSet: { status: 'published' } },
+      include: { resultSet: true },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+    });
+    return terms.map((t) => ({
+      termId: t.termId,
+      resultSetRevision: t.resultSet.revision,
+      gpa: t.gpa != null ? String(t.gpa) : null,
+      aggregate: t.aggregate,
+      division: t.division,
+      meanPercent: t.meanPercent != null ? String(t.meanPercent) : null,
+      classRank: t.classRank,
+      promotionRecommendation: t.promotionRecommendation,
+    }));
+  }
+
+  /** A8: issued certificates for the student (A6). */
+  private async studentCertificates(studentProfileId: string) {
+    return this.prisma.client.certificate.findMany({
+      where: { studentProfileId, status: 'issued' },
+      select: { id: true, type: true, title: true, serialNumber: true, verificationCode: true, issuedAt: true },
+      orderBy: { issuedAt: 'desc' },
+    });
   }
 }

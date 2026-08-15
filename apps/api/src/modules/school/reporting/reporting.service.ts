@@ -74,7 +74,7 @@ export class ReportingService {
   // and 'paid' (zero residual) added nothing. The open set is
   // ['not_paid','partial'] with a positive residual.
   private static readonly OPEN_FEE_WHERE: Prisma.DocumentWhereInput = {
-    sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+    sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
     paymentStatus: { in: ['not_paid', 'partial'] },
     amountResidual: { gt: 0 },
   };

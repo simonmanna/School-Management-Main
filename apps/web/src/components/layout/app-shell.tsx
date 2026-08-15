@@ -79,6 +79,7 @@ import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { GlobalSearch } from '@/components/global-search';
 import { PushBootstrap } from '@/components/push-bootstrap';
+import { RouteErrorBoundary } from '@/components/error-boundary';
 import { ThemePicker } from '@/components/theme-picker';
 import { useTranslation } from 'react-i18next';
 import { useSidebarTheme } from '@/lib/sidebar-theme';
@@ -187,15 +188,13 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Master Data',
     icon: Database,
     items: [
-      { to: '/customers', label: 'Customers', icon: Users, permission: PERMISSIONS.partners.view },
-      { to: '/suppliers', label: 'Suppliers', icon: Building2, permission: PERMISSIONS.partners.view },
-      { to: '/products', label: 'Products', icon: Package, permission: PERMISSIONS.products.view },
-      { to: '/uom', label: 'Units of Measure', icon: Ruler, permission: PERMISSIONS.uom.read },
-      { to: '/menu', label: 'Menu', icon: Coffee, permission: PERMISSIONS.menu.view },
-      { to: '/tables', label: 'Tables', icon: Coffee, permission: PERMISSIONS.menu.view },
-      { to: '/menu/modifiers', label: 'Modifiers', icon: Tag, permission: PERMISSIONS.menu.view },
-      { to: '/menu/combos', label: 'Combos', icon: Package, permission: PERMISSIONS.menu.view },
-      { to: '/menu/accompaniments', label: 'Accompaniments', icon: Tag, permission: PERMISSIONS.menu.view },
+      { to: '/suppliers', label: 'Suppliers', icon: Building2 },
+      { to: '/products', label: 'Products', icon: Package },
+      { to: '/uom', label: 'Units of Measure', icon: Ruler },
+      { to: '/menu', label: 'Menu', icon: Coffee },
+      { to: '/menu/modifiers', label: 'Modifiers', icon: Tag },
+      { to: '/menu/combos', label: 'Combos', icon: Package },
+      { to: '/menu/accompaniments', label: 'Accompaniments', icon: Tag },
     ],
   },
   {
@@ -223,11 +222,17 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
+      { to: '/school/admissions', label: 'Admissions', icon: FilePlus2, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/staff', label: 'Staff', icon: Users, permission: PERMISSIONS.school.read },
+      { to: '/school/campuses', label: 'Campuses & Classes', icon: Building2, permission: PERMISSIONS.school.read },
+      { to: '/school/subjects', label: 'Subjects & Terms', icon: BookOpen, permission: PERMISSIONS.school.read },
       { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.takeAttendance },
       { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
       { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
+      { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/meals', label: 'Meals', icon: UtensilsCrossed, permission: PERMISSIONS.school.read },
     ],
   },
   {
@@ -372,11 +377,10 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Fixed Assets',
     icon: Landmark,
-    flag: 'VITE_ENABLE_ASSETS',
     items: [
-      { to: '/fixed-assets', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.fixedAsset.read },
-      { to: '/fixed-assets/register', label: 'Asset Register', icon: Building2, permission: PERMISSIONS.fixedAsset.read },
-      { to: '/fixed-assets/categories', label: 'Categories', icon: Tag, permission: PERMISSIONS.assetCategory.read },
+      { to: '/fixed-assets', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/fixed-assets/register', label: 'Asset Register', icon: Building2 },
+      { to: '/fixed-assets/categories', label: 'Categories', icon: Tag },
     ],
   },
   {
@@ -681,7 +685,7 @@ export function AppShell() {
           {!collapsed && (
             <div className="ml-1 flex flex-1 flex-col leading-none">
               <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, letterSpacing: '-0.3px' }}>
-                {org?.name ?? 'Cafe POS'}
+                {org?.name ?? 'School Management'}
               </span>
               <span
                 style={{
@@ -815,7 +819,9 @@ export function AppShell() {
             location.pathname.startsWith('/pos/terminal') ? 'p-1 md:p-1' : 'p-1 md:p-1'
           }`}
         >
-          <Outlet />
+          <RouteErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </RouteErrorBoundary>
         </main>
       </div>
 

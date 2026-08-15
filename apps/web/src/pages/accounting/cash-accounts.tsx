@@ -86,7 +86,11 @@ export function CashAccountsPage() {
   const [page, setPage] = useState(1);
   const pageSize = 12;
 
-  const allAccounts = (accounts ?? []) as any[];
+  const allAccounts = ((accounts ?? []) as any[]).map((a) => ({
+    ...a,
+    // API returns `categoryKey` (cash/bank/mobile_money/petty_cash); the UI groups by `accountType`.
+    accountType: a.accountType ?? a.categoryKey,
+  }));
 
   const filtered = useMemo(() => {
     let list = allAccounts;
@@ -202,9 +206,20 @@ export function CashAccountsPage() {
           <h1 className="text-2xl font-black text-slate-800 tracking-tight">FINANCIAL ACCOUNTS</h1>
           <p className="text-slate-500 text-sm font-medium">Accounts &amp; payment modes used on receipts and payments</p>
         </div>
-        <Button onClick={openCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200">
-          <Plus className="mr-2 h-4 w-4" /> Add Account
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setCfModal('deposit')} className="border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <ArrowDownToLine className="mr-2 h-4 w-4" /> Deposit
+          </Button>
+          <Button variant="outline" onClick={() => setCfModal('withdraw')} className="border-amber-200 text-amber-700 hover:bg-amber-50">
+            <ArrowUpFromLine className="mr-2 h-4 w-4" /> Withdraw
+          </Button>
+          <Button variant="outline" onClick={() => setCfModal('transfer')} className="border-indigo-200 text-indigo-700 hover:bg-indigo-50">
+            <ArrowRightLeft className="mr-2 h-4 w-4" /> Transfer
+          </Button>
+          <Button onClick={openCreate} className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200">
+            <Plus className="mr-2 h-4 w-4" /> Add Account
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">

@@ -10,9 +10,11 @@ import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
 
 const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
+// 1=Mon … 7=Sun, matching the server's CreateTimetableSlotDto range.
 const DAYS = [
   { n: 1, label: 'Mon' }, { n: 2, label: 'Tue' }, { n: 3, label: 'Wed' },
   { n: 4, label: 'Thu' }, { n: 5, label: 'Fri' }, { n: 6, label: 'Sat' },
+  { n: 7, label: 'Sun' },
 ];
 
 export function SchoolTimetablePage() {
@@ -20,7 +22,7 @@ export function SchoolTimetablePage() {
   const { data: classes } = useClasses();
   const { data: subjects } = useSubjects();
   const { data: periods } = usePeriods();
-  const { data: slots } = useClassTimetable(classId || undefined);
+  const { data: timetable, isLoading } = useClassTimetable(classId || undefined);
   const createSlot = useCreateSlot();
 
   const [form, setForm] = useState<Record<string, string>>({});
@@ -29,8 +31,8 @@ export function SchoolTimetablePage() {
     () => [...(periods?.data ?? [])].sort((a, b) => a.order - b.order),
     [periods],
   );
-  const slotAt = (periodId: string, day: number) =>
-    (slots ?? []).find((s) => s.periodId === periodId && s.dayOfWeek === day);
+  // O(1) via the server's [day][periodId] map, instead of scanning every slot per cell.
+  const slotAt = (periodId: string, day: number) => timetable?.grid?.[day]?.[periodId];
   const subjectName = useMemo(
     () => Object.fromEntries((subjects?.data ?? []).map((s) => [s.id, s.name])),
     [subjects],
@@ -47,8 +49,9 @@ export function SchoolTimetablePage() {
       });
       notify.success('Slot added');
       setForm({});
-    } catch {
-      notify.error('Could not add slot — check for a clash on that day/period');
+    } catch (e: any) {
+      // The server returns the actual clash ("Teacher double-booked (slot …)") — show it.
+      notify.error(e?.response?.data?.message ?? 'Could not add slot — check for a clash on that day/period');
     }
   };
 
@@ -80,7 +83,9 @@ export function SchoolTimetablePage() {
                 </thead>
                 <tbody>
                   {periodRows.length === 0 && (
-                    <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">No periods configured. Add periods under Foundation first.</td></tr>
+                    <tr><td colSpan={DAYS.length + 1} className="px-3 py-6 text-center text-muted-foreground">
+                      {isLoading ? 'Loading…' : 'No periods configured. Add periods under Foundation first.'}
+                    </td></tr>
                   )}
                   {periodRows.map((p) => (
                     <tr key={p.id} className="border-b last:border-0">

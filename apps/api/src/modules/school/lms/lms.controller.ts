@@ -40,32 +40,32 @@ export class HomeworkController {
   }
 
   @Post()
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  @RequirePermissions(PERMISSIONS.school.manageAssignments)
   create(@Body() dto: CreateHomeworkDto) {
     return this.assignments.create(dto);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  @RequirePermissions(PERMISSIONS.school.manageAssignments)
   update(@Param('id') id: string, @Body() dto: UpdateHomeworkDto) {
     return this.assignments.update(id, dto);
   }
 
   @Post('submit')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.submitAssignments)
   submit(@Body() dto: SubmitHomeworkDto) {
     return this.assignments.submit(dto);
   }
 
   @Post('grade')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.gradeAssignments)
   grade(@Body() dto: GradeSubmissionDto) {
     return this.assignments.grade(dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  @RequirePermissions(PERMISSIONS.school.manageAssignments)
   remove(@Param('id') id: string) {
     return this.assignments.remove(id);
   }

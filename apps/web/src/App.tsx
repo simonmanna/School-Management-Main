@@ -35,6 +35,12 @@ import { SchoolFeesPage } from '@/pages/school/fees';
 import { SchoolAttendancePage } from '@/pages/school/attendance';
 import { SchoolTimetablePage } from '@/pages/school/timetable';
 import { SchoolExamsPage } from '@/pages/school/exams';
+import { SchoolPromotionPage } from '@/pages/school/promotion';
+import { SchoolMealsPage } from '@/pages/school/meals';
+import { SchoolAdmissionsPage } from '@/pages/school/admissions';
+import { SchoolStaffPage } from '@/pages/school/staff';
+import { SchoolCampusesPage } from '@/pages/school/campuses';
+import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -372,6 +378,12 @@ export function App() {
           <Route path="/school/attendance" element={<SchoolAttendancePage />} />
           <Route path="/school/timetable" element={<SchoolTimetablePage />} />
           <Route path="/school/exams" element={<SchoolExamsPage />} />
+          <Route path="/school/promotion" element={<SchoolPromotionPage />} />
+          <Route path="/school/meals" element={<SchoolMealsPage />} />
+          <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
+          <Route path="/school/staff" element={<SchoolStaffPage />} />
+          <Route path="/school/campuses" element={<SchoolCampusesPage />} />
+          <Route path="/school/subjects" element={<SchoolSubjectsPage />} />
           <Route path="/crm/deals" element={<DealsPage />} />
           <Route path="/crm/deals/:id" element={<DealDetailPage />} />
 

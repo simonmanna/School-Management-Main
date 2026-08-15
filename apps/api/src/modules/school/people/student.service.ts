@@ -10,6 +10,19 @@ import { EVENTS } from '@erp/shared';
 import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
 
 /**
+ * P5: the student lifecycle. `active` is the working state (enrolled students).
+ * `transferred` and `alumni` (graduated) are terminal. `withdrawn`/`suspended`
+ * can return to `active` (re-admission / reinstatement).
+ */
+const STUDENT_STATUS_TRANSITIONS: Record<string, string[]> = {
+  active: ['suspended', 'transferred', 'withdrawn', 'alumni'],
+  suspended: ['active', 'withdrawn', 'transferred'],
+  withdrawn: ['active', 'transferred'],
+  transferred: [],
+  alumni: [],
+};
+
+/**
  * Student = Partner (the person) + StudentProfile (the school metadata).
  *
  * Per ADR-008 / ADR-011: we DO NOT add a "Student" entity. We reuse the
@@ -130,8 +143,18 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         await tx.partner.updateMany({ where: { id: before.partnerId }, data: partnerUpdates });
       }
 
-      // Status transition?
+      // Status transition? P5: enforce the student lifecycle FSM. The old code
+      // wrote whatever status the caller asked for; now illegal jumps (e.g.
+      // reviving a transferred/alumni record) are rejected. Every legal change
+      // still records StudentStatusHistory + emits the event.
       if (dto.status && dto.status !== before.status) {
+        const allowed = STUDENT_STATUS_TRANSITIONS[before.status] ?? [];
+        if (!allowed.includes(dto.status)) {
+          throw new BadRequestException(
+            `Cannot change student status '${before.status}' → '${dto.status}'. ` +
+              `Allowed from '${before.status}': [${allowed.join(', ') || '(none — terminal)'}].`,
+          );
+        }
         await tx.studentStatusHistory.create({
           data: {
             organizationId: before.organizationId,
@@ -288,7 +311,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       where: {
         partnerId: profile.partnerId,
         documentType: 'sales_invoice',
-        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine'] },
+        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
       },
       orderBy: { issueDate: 'desc' },
       select: {

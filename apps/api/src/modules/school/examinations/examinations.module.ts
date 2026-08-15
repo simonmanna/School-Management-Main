@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AssessmentModule } from '../assessment/assessment.module';
 import {
   ExamService,
   ExamScheduleService,
@@ -10,6 +11,7 @@ import {
 import { ReportCardTemplateService } from './report-card-template.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
 import { GradingService } from './grading.service';
+import { ExamRegistrationService, ExamVenueService } from './exam-ops.service';
 import {
   ExamController,
   ExamScheduleController,
@@ -18,8 +20,10 @@ import {
   GradingScaleController,
   ReportCardController,
 } from './examinations.controller';
+import { ExamRegistrationController, ExamVenueController } from './exam-ops.controller';
 
 @Module({
+  imports: [AssessmentModule],
   controllers: [
     ExamTypeController,
     ExamController,
@@ -27,6 +31,8 @@ import {
     GradeEntryController,
     GradingScaleController,
     ReportCardController,
+    ExamVenueController,
+    ExamRegistrationController,
   ],
   providers: [
     ExamTypeService,
@@ -38,6 +44,8 @@ import {
     ReportCardService,
     ReportCardPdfService,
     ReportCardTemplateService,
+    ExamVenueService,
+    ExamRegistrationService,
   ],
   exports: [
     ExamTypeService,
@@ -49,6 +57,8 @@ import {
     ReportCardService,
     ReportCardPdfService,
     ReportCardTemplateService,
+    ExamVenueService,
+    ExamRegistrationService,
   ],
 })
 export class ExaminationsModule {}
