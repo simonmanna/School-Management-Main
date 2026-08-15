@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Curriculum, LessonPlan, TeacherAssignment, TimetableSlot } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -192,9 +192,47 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   async create(dto: CreateTimetableSlotDto): Promise<TimetableSlot> {
     const conflicts = await this.detectConflicts(dto);
     if (conflicts.length > 0) {
-      throw new (await import('@nestjs/common')).BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
+      throw new BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
     }
     return super.create(dto);
+  }
+
+  /**
+   * Conflict-checked update. `BaseCrudService.update` does no validation, so a
+   * PATCH could previously move a slot on top of an existing teacher/room/class
+   * booking. The incoming patch is merged over the stored row first, because
+   * `detectConflicts` needs the *resulting* slot, not just the changed fields.
+   */
+  async update(id: string, dto: UpdateTimetableSlotDto): Promise<TimetableSlot> {
+    const existing = await this.prisma.client.timetableSlot.findFirst({ where: { id } });
+    if (!existing) throw new NotFoundException(`${this.entityName} ${id} not found`);
+
+    const merged: CreateTimetableSlotDto = {
+      classId: dto.classId ?? existing.classId,
+      sectionId: dto.sectionId ?? existing.sectionId ?? undefined,
+      dayOfWeek: dto.dayOfWeek ?? existing.dayOfWeek,
+      periodId: dto.periodId ?? existing.periodId,
+      subjectId: dto.subjectId ?? existing.subjectId,
+      teacherPartnerId: dto.teacherPartnerId ?? existing.teacherPartnerId ?? undefined,
+      campusId: dto.campusId ?? existing.campusId ?? undefined,
+      room: dto.room ?? existing.room ?? undefined,
+    };
+
+    const conflicts = await this.detectConflicts(merged, id);
+    if (conflicts.length > 0) {
+      throw new BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
+    }
+    return super.update(id, dto);
+  }
+
+  /**
+   * Hard delete. `TimetableSlot` has no `deletedAt` column and is not in the
+   * tenancy extension's SOFT_DELETE set, so the inherited soft-delete `remove`
+   * sent Prisma an unknown argument and 500'd on every DELETE.
+   */
+  async remove(id: string): Promise<void> {
+    const res = await this.prisma.client.timetableSlot.deleteMany({ where: { id } });
+    if (res.count === 0) throw new NotFoundException(`${this.entityName} ${id} not found`);
   }
 
   async bulkUpsert(dto: BulkTimetableDto) {

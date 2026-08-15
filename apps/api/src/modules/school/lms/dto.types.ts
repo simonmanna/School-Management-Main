@@ -26,6 +26,15 @@ export class AttachmentInput {
 }
 
 export class CreateHomeworkDto {
+  /**
+   * The teaching staff profile that owns this assignment. A0: this is now a
+   * required, validated FK. Previously the service silently substituted the
+   * authenticated user's id — or an all-zeros UUID — producing rows whose
+   * `teacherPartnerId` pointed at no StaffProfile. There is no User→StaffProfile
+   * link in the schema yet, so the caller must supply the id explicitly until
+   * that mapping lands.
+   */
+  @IsString() @IsNotEmpty() teacherPartnerId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
   @IsString() @IsNotEmpty() subjectId!: string;
@@ -51,6 +60,13 @@ export class UpdateHomeworkDto {
 
 export class SubmitHomeworkDto {
   @IsString() @IsNotEmpty() assignmentId!: string;
+  /**
+   * The student submitting. A0: required + validated. Previously the service
+   * used `tenant.userId` (an auth-User id) as the `studentProfileId`, so
+   * submissions were attributed to a non-existent student. A validated id is
+   * required until a User→StudentProfile mapping exists.
+   */
+  @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsOptional() @IsString() content?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AttachmentInput) attachments?: AttachmentInput[];
 }

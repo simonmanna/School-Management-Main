@@ -10872,6 +10872,47 @@ enum ExamRegistrationStatus {
 }
 
 /// A physical exam room. Capacity drives seat allocation + clash detection.
+model ExamVenue {
+  id             String    @id @default(uuid())
+  organizationId String
+  campusId       String?
+  name           String
+  code           String?
+  capacity       Int       @default(30)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  schedules     ExamSchedule[]
+  registrations ExamRegistration[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A candidate registered to sit an exam — replaces the untyped Exam.classes
+/// JSON with a real, seat-allocatable, status-tracked row.
+model ExamRegistration {
+  id               String                 @id @default(uuid())
+  organizationId   String
+  examId           String
+  studentProfileId String
+  classId          String?
+  venueId          String?
+  seatNumber       String?
+  status           ExamRegistrationStatus @default(registered)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  exam  Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  venue ExamVenue? @relation(fields: [venueId], references: [id])
+
+  @@unique([examId, studentProfileId])
+  @@index([organizationId])
+  @@index([examId])
+  @@index([organizationId, studentProfileId])
+}
 
 model GradeEntry {
   id               String           @id @default(uuid())
@@ -10962,6 +11003,533 @@ model AcademicTranscript {
 
 /// The weighting scheme for a scope. Resolved most-specific-first
 /// (subject+class+term > subject+class > subject+gradeLevel > … > org default).
+model AssessmentPolicy {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  // Scope — any subset may be null; more non-null fields = more specific.
+  gradeLevelId   String?
+  classId        String?
+  subjectId      String?
+  termId         String?
+  passMark       Decimal   @default(50) @db.Decimal(5, 2)
+  /// Optional ceiling on the total CA (non-exam) contribution, in percent.
+  caCap          Decimal?  @db.Decimal(5, 2)
+  roundingMode   RoundingMode @default(half_up)
+  decimalPlaces  Int       @default(2)
+  /// { tie, scope, inclusion, rankOn } — snapshotted into ResultSet at compute (A3).
+  rankingPolicy     Json   @default("{}")
+  aggregationPolicy Json   @default("{}")
+  isActive       Boolean   @default(true)
+  /// Optimistic concurrency guard — see kernel/common/optimistic-update.ts.
+  version        Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  components AssessmentComponent[]
+
+  @@index([organizationId])
+  @@index([organizationId, subjectId, classId, gradeLevelId, termId])
+}
+
+/// A weighted bucket within a policy (e.g. "Final Exam, 50%, mean").
+model AssessmentComponent {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  policyId           String
+  name               String
+  kind               AssessmentKind
+  /// Weight in percentage points; components under a policy should sum to 100.
+  weight             Decimal  @db.Decimal(6, 3)
+  aggregation        AggregationMethod @default(mean)
+  bestN              Int?
+  /// When true, an `absent` assessment scores zero; when false it is excluded.
+  countsAbsentAsZero Boolean  @default(true)
+  /// Loose bridge to the legacy ExamType this component subsumes (nullable).
+  examTypeId         String?
+  order              Int      @default(0)
+  version            Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+
+  policy      AssessmentPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  assessments Assessment[]
+
+  @@index([organizationId])
+  @@index([policyId])
+  @@index([organizationId, examTypeId])
+}
+
+/// A concrete assessment instance ("Math CAT 2", "Physics Paper 1", "Homework 3").
+model Assessment {
+  id                String   @id @default(uuid())
+  organizationId    String
+  /// Nullable: an adapter-projected exam mark is unattached until a policy maps
+  /// it to a weighting bucket. Manual/assignment/quiz assessments attach on create.
+  componentId       String?
+  subjectId         String
+  classId           String
+  termId            String
+  title             String
+  maxScore          Decimal  @default(100) @db.Decimal(8, 2)
+  /// Relative weight if a component aggregates several assessments (e.g. best-N).
+  weightInComponent Decimal  @default(1) @db.Decimal(6, 3)
+  sourceType        AssessmentSourceType @default(manual)
+  /// FK-less link to the origin row (examScheduleId, assignmentId, quizId).
+  sourceRef         String?
+  status            AssessmentStatus @default(draft)
+  dueAt             DateTime?
+  version           Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
+
+  component          AssessmentComponent? @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  studentAssessments StudentAssessment[]
+  assignment         Assignment?
+
+  /// One assessment per origin row — makes the GradeEntry adapter idempotent.
+  @@unique([organizationId, sourceType, sourceRef])
+  @@index([organizationId])
+  @@index([organizationId, classId, termId, subjectId])
+  @@index([componentId])
+}
+
+/// One student's participation + canonical score on one assessment.
+model StudentAssessment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  assessmentId     String
+  studentProfileId String
+  // Position snapshot captured at write time (A2 rosters refine this).
+  classId          String?
+  sectionId        String?
+  gradeLevelId     String?
+  termId           String?
+  status           StudentAssessmentStatus @default(assigned)
+  participation    ParticipationStatus     @default(present)
+  maxScore         Decimal  @db.Decimal(8, 2)
+  /// Reconciled from MarkEntry rounds (reconciliation ?? first).
+  originalScore    Decimal? @db.Decimal(8, 2)
+  /// originalScore after the ordered MarkAdjustment ledger, clamped to [0, maxScore].
+  effectiveScore   Decimal? @db.Decimal(8, 2)
+  percentage       Decimal? @db.Decimal(6, 3)
+  /// Marking-approval workflow, reusing the GradeEntry enum (draft→submitted→approved/rejected).
+  approvalStatus   GradeEntryStatus @default(draft)
+  enteredById      String?
+  approvedById     String?
+  version          Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  assessment            Assessment             @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  markEntries           MarkEntry[]
+  adjustments           MarkAdjustment[]
+  rubricScores          AssessmentRubricScore[]
+  assignmentSubmissions AssignmentSubmission[]
+
+  @@unique([assessmentId, studentProfileId])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+  @@index([organizationId, studentProfileId, termId])
+}
+
+/// A single marker's score in one marking round. Multiple rounds support
+/// blind double-marking; the reconciliation round is the agreed mark.
+model MarkEntry {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentAssessmentId String
+  markerId            String?
+  round               MarkRound @default(first)
+  score               Decimal  @db.Decimal(8, 2)
+  comment             String?
+  enteredAt           DateTime @default(now())
+
+  studentAssessment StudentAssessment @relation(fields: [studentAssessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentAssessmentId, round])
+  @@index([organizationId])
+}
+
+/// Append-only ledger of non-arithmetic mark changes (moderation, scaling,
+/// penalties, corrections). A DB trigger blocks UPDATE/DELETE.
+model MarkAdjustment {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentAssessmentId String
+  sequence            Int
+  kind                MarkAdjustmentKind
+  /// Additive change...
+  delta               Decimal? @db.Decimal(8, 2)
+  /// ...OR an absolute replacement (exactly one of delta/replacementScore set).
+  replacementScore    Decimal? @db.Decimal(8, 2)
+  reason              String
+  requestedById       String?
+  approvedById        String?
+  createdAt           DateTime @default(now())
+
+  studentAssessment StudentAssessment @relation(fields: [studentAssessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentAssessmentId, sequence])
+  @@index([organizationId])
+  @@index([studentAssessmentId])
+}
+
+// ─────────────────── Rosters + assignment evidence (A2) ───────────────────
+// The AcademicRoster is the enrollment-independent academic cohort: captured
+// (from currentClassId or elsewhere), reviewed, then FROZEN. A frozen roster is
+// immutable and is what assignments fan out over and result runs (A3) bind to.
+// currentClassId is only ever an *input* to capture, never academic truth.
+
+model AcademicRoster {
+  id             String          @id @default(uuid())
+  organizationId String
+  termId         String
+  scopeType      RosterScopeType @default(class)
+  classId        String?
+  sectionId      String?
+  subjectId      String?
+  name           String?
+  source         RosterSource    @default(derived_current_class)
+  capturedById   String?
+  capturedAt     DateTime        @default(now())
+  /// Once set, the roster is immutable — members can no longer change.
+  frozenAt       DateTime?
+  frozenById     String?
+  version        Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+
+  members AcademicRosterMember[]
+
+  @@index([organizationId])
+  @@index([organizationId, termId, classId])
+}
+
+model AcademicRosterMember {
+  id               String    @id @default(uuid())
+  organizationId   String
+  rosterId         String
+  studentProfileId String
+  // Position snapshot captured at roster-capture time.
+  classId          String?
+  sectionId        String?
+  gradeLevelId     String?
+  /// Effective range expresses a mid-term class move without silent re-attribution.
+  effectiveFrom    DateTime  @default(now())
+  effectiveTo      DateTime?
+  joinReason       String?
+  exitReason       String?
+  createdAt        DateTime  @default(now())
+
+  roster AcademicRoster @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+
+  @@unique([rosterId, studentProfileId])
+  @@index([organizationId])
+  @@index([rosterId])
+}
+
+/// A grading rubric. Versioned: editing a rubric forks a new version so work
+/// graded under the old version stays reproducible.
+model Rubric {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  version        Int       @default(1)
+  /// Set on the OLD row when a new version supersedes it.
+  supersededById String?
+  isActive       Boolean   @default(true)
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  criteria RubricCriterion[]
+
+  @@index([organizationId])
+}
+
+model RubricCriterion {
+  id             String   @id @default(uuid())
+  organizationId String
+  rubricId       String
+  name           String
+  description    String?
+  weight         Decimal  @default(1) @db.Decimal(6, 3)
+  maxScore       Decimal  @db.Decimal(8, 2)
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  rubric Rubric        @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  levels RubricLevel[]
+
+  @@index([organizationId])
+  @@index([rubricId])
+}
+
+model RubricLevel {
+  id             String   @id @default(uuid())
+  organizationId String
+  criterionId    String
+  label          String
+  score          Decimal  @db.Decimal(8, 2)
+  descriptor     String?
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  criterion RubricCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([criterionId])
+}
+
+/// Canonical relational rubric grading: one row per (studentAssessment,
+/// criterion). A denormalised JSON snapshot is kept on the submission for
+/// rendering; THIS is the queryable source for "how did the class do on X?".
+model AssessmentRubricScore {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentAssessmentId String
+  criterionId         String
+  levelId             String?
+  score               Decimal  @db.Decimal(8, 2)
+  comment             String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  studentAssessment StudentAssessment @relation(fields: [studentAssessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentAssessmentId, criterionId])
+  @@index([organizationId])
+  @@index([studentAssessmentId])
+}
+
+/// An assignment: the delivery detail for an Assessment of sourceType='assignment'.
+/// 1:1 with its Assessment; publishing fans the roster out into StudentAssessment.
+model Assignment {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  assessmentId       String   @unique
+  rosterId           String?
+  instructions       String?
+  allowLate          Boolean  @default(false)
+  latePenaltyPercent Decimal  @default(0) @db.Decimal(5, 2)
+  lateCutoffAt       DateTime?
+  maxAttempts        Int      @default(1)
+  gradingMode        AssignmentGradingMode @default(points)
+  rubricId           String?
+  rubricVersion      Int?
+  attachments        Json     @default("[]")
+  version            Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+
+  assessment  Assessment             @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  submissions AssignmentSubmission[]
+
+  @@index([organizationId])
+  @@index([rosterId])
+}
+
+/// A student's submitted work for an assignment. Participation truth lives on
+/// StudentAssessment; this is the artefact + per-attempt scoring.
+model AssignmentSubmission {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  assignmentId        String
+  studentAssessmentId String
+  attemptNo           Int      @default(1)
+  submittedAt         DateTime?
+  isLate              Boolean  @default(false)
+  content             String?
+  attachments         Json     @default("[]")
+  /// Raw marker score before the late penalty.
+  rawScore            Decimal? @db.Decimal(8, 2)
+  /// Points deducted for lateness (rawScore − penaltyApplied lands as the mark).
+  penaltyApplied      Decimal? @db.Decimal(8, 2)
+  /// Snapshot of the rubric scores at grade time, for historical rendering.
+  rubricSnapshot      Json?
+  version             Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  assignment        Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  studentAssessment StudentAssessment @relation(fields: [studentAssessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentAssessmentId, attemptNo])
+  @@index([organizationId])
+  @@index([studentAssessmentId])
+}
+
+// ─────────────────────────── Result spine (A3) ───────────────────────────
+// Marks are facts; results are DERIVED. A run computes a ResultSet (a versioned,
+// immutable-once-published snapshot) from a frozen roster under a snapshotted
+// policy. Report cards, transcripts, certificates, promotion and analytics read
+// StudentTermResult / StudentSubjectResult — never raw marks.
+
+/// One operational batch: "what exactly happened when we computed Term 2".
+model ResultProcessingRun {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  termId             String
+  scopeType          ResultScopeType @default(class)
+  scopeId            String?
+  rosterId           String?
+  calculationVersion String    @default("v1")
+  status             RunStatus @default(queued)
+  initiatedById      String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  inputChecksum      String?
+  outputChecksum     String?
+  errorCount         Int       @default(0)
+  report             Json      @default("{}")
+  /// Idempotency key so a retried compute returns the same run, not a duplicate.
+  idempotencyKey     String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  resultSets ResultSet[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([organizationId, termId])
+}
+
+/// A versioned, scoped set of computed results. Immutable once published — a
+/// DB trigger blocks UPDATE/DELETE in published/locked/archived. Corrections go
+/// through an amendment → new revision, never a mutation.
+model ResultSet {
+  id                     String          @id @default(uuid())
+  organizationId         String
+  runId                  String?
+  termId                 String
+  scopeType              ResultScopeType @default(class)
+  scopeId                String?
+  rosterId               String?
+  revision               Int             @default(1)
+  status                 ResultSetStatus @default(draft)
+  calculationVersion     String          @default("v1")
+  roundingMode           RoundingMode    @default(half_up)
+  gradingSystem          String?
+  // Immutable historical snapshots of the config the numbers were produced under.
+  policySnapshot         Json            @default("{}")
+  gradingScaleSnapshot   Json            @default("{}")
+  rankingPolicySnapshot  Json            @default("{}")
+  aggregationSnapshot    Json            @default("{}")
+  inputChecksum          String?
+  outputChecksum         String?
+  studentCount           Int             @default(0)
+  publishedAt            DateTime?
+  publishedById          String?
+  version                Int             @default(0)
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  deletedAt              DateTime?
+
+  run            ResultProcessingRun?   @relation(fields: [runId], references: [id], onDelete: SetNull)
+  subjectResults StudentSubjectResult[]
+  termResults    StudentTermResult[]
+  amendments     AmendmentRequest[]
+
+  @@index([organizationId])
+  @@index([organizationId, termId, scopeType, scopeId])
+}
+
+/// A student's result in one subject within a ResultSet.
+model StudentSubjectResult {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  resultSetId        String
+  studentProfileId   String
+  subjectId          String
+  // Position snapshot.
+  classId            String?
+  sectionId          String?
+  gradeLevelId       String?
+  termId             String?
+  caScore            Decimal? @db.Decimal(8, 3)
+  examScore          Decimal? @db.Decimal(8, 3)
+  finalPercent       Decimal? @db.Decimal(6, 3)
+  grade              String?
+  gradePoint         Decimal? @db.Decimal(4, 2)
+  /// UCE/UACE subject points (lower = better); null for non-points systems.
+  points             Int?
+  subjectRank        Int?
+  /// Per-component contribution breakdown — answers "why this final percent?".
+  componentBreakdown Json     @default("[]")
+  createdAt          DateTime @default(now())
+
+  resultSet ResultSet @relation(fields: [resultSetId], references: [id], onDelete: Cascade)
+
+  @@unique([resultSetId, studentProfileId, subjectId])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+  @@index([resultSetId])
+}
+
+/// A student's overall term result within a ResultSet.
+model StudentTermResult {
+  id                      String   @id @default(uuid())
+  organizationId          String
+  resultSetId             String
+  studentProfileId        String
+  classId                 String?
+  sectionId               String?
+  gradeLevelId            String?
+  termId                  String?
+  gpa                     Decimal? @db.Decimal(4, 2)
+  aggregate               Int?
+  division                String?
+  meanPercent             Decimal? @db.Decimal(6, 3)
+  classRank               Int?
+  sectionRank             Int?
+  subjectsCount           Int      @default(0)
+  eligible                Boolean  @default(true)
+  promotionRecommendation PromotionRecommendation @default(review)
+  incompleteReason        String?
+  createdAt               DateTime @default(now())
+
+  resultSet ResultSet @relation(fields: [resultSetId], references: [id], onDelete: Cascade)
+
+  @@unique([resultSetId, studentProfileId])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+  @@index([resultSetId])
+}
+
+/// A request to change a published ResultSet — the ONLY path back into a
+/// published set. Approval drives a fresh run → a new revision; the old
+/// revision is archived, never edited.
+model AmendmentRequest {
+  id               String          @id @default(uuid())
+  organizationId   String
+  resultSetId      String
+  reason           String
+  detail           Json            @default("{}")
+  status           AmendmentStatus @default(requested)
+  requestedById    String?
+  reviewedById     String?
+  newResultSetId   String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  resultSet ResultSet @relation(fields: [resultSetId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([resultSetId])
+}
 
 // ─────────────────────────── CBT engine (A5) ───────────────────────────
 // Question bank → papers → server-authoritative attempts. Questions are
@@ -10988,6 +11556,174 @@ enum QuizAttemptStatus {
   reset
 }
 
+model QuestionBank {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  subjectId      String?
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  questions Question[]
+
+  @@index([organizationId])
+  @@index([organizationId, subjectId])
+}
+
+model Question {
+  id             String       @id @default(uuid())
+  organizationId String
+  bankId         String
+  type           QuestionType
+  prompt         String
+  marks          Decimal      @default(1) @db.Decimal(8, 2)
+  /// Auto-mark key for non-option types: { value, tolerance, accepted[], pairs }.
+  answerKey      Json         @default("{}")
+  /// topic / bloom / difficulty tags for blueprints + item analysis.
+  tags           Json         @default("[]")
+  difficulty     String?
+  version        Int          @default(1)
+  supersededById String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  bank    QuestionBank     @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  options QuestionOption[]
+
+  @@index([organizationId])
+  @@index([bankId])
+}
+
+model QuestionOption {
+  id             String   @id @default(uuid())
+  organizationId String
+  questionId     String
+  label          String
+  isCorrect      Boolean  @default(false)
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([questionId])
+}
+
+model Paper {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  subjectId       String?
+  totalMarks      Decimal   @default(0) @db.Decimal(8, 2)
+  durationMinutes Int       @default(60)
+  /// Random assembly from a blueprint (draw by tag/difficulty/count) vs a fixed
+  /// question list. When true, `blueprint` drives per-attempt assembly.
+  isRandom        Boolean   @default(false)
+  blueprint       Json      @default("{}")
+  version         Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  questions PaperQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([organizationId])
+}
+
+model PaperQuestion {
+  id             String   @id @default(uuid())
+  organizationId String
+  paperId        String
+  questionId     String
+  order          Int      @default(0)
+  marks          Decimal? @db.Decimal(8, 2)
+  createdAt      DateTime @default(now())
+
+  paper Paper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  @@unique([paperId, questionId])
+  @@index([organizationId])
+  @@index([paperId])
+}
+
+/// One student's sitting of a paper. Server-authoritative timing; the realised
+/// question set is frozen at start and never regenerated.
+model QuizAttempt {
+  id                  String            @id @default(uuid())
+  organizationId      String
+  paperId             String
+  studentProfileId    String
+  /// Optional link to the assessment spine — the auto-marked total lands here.
+  studentAssessmentId String?
+  attemptNumber       Int               @default(1)
+  status              QuizAttemptStatus @default(in_progress)
+  startedAt           DateTime          @default(now())
+  expiresAt           DateTime
+  submittedAt         DateTime?
+  /// The exact questions (ids + marks + answer keys) presented — frozen here.
+  realisedQuestions   Json              @default("[]")
+  autoScore           Decimal?          @db.Decimal(8, 2)
+  manualPending       Int               @default(0)
+  maxScore            Decimal           @default(0) @db.Decimal(8, 2)
+  /// Monotonic server counter — the last accepted client sequence.
+  serverSequence      Int               @default(0)
+  version             Int               @default(0)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  paper     Paper          @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  responses QuizResponse[]
+  events    AttemptEvent[]
+
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+  @@index([paperId])
+}
+
+model QuizResponse {
+  id             String   @id @default(uuid())
+  organizationId String
+  attemptId      String
+  questionId     String
+  /// Client-generated idempotency id for the save event (offline-safe sync).
+  clientEventId  String?
+  /// Client sequence for this question — the highest valid one wins.
+  sequenceNumber Int      @default(0)
+  response       Json     @default("{}")
+  autoScore      Decimal? @db.Decimal(8, 2)
+  isCorrect      Boolean?
+  needsManual    Boolean  @default(false)
+  serverReceivedAt DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  attempt QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([organizationId])
+  @@index([attemptId])
+}
+
+/// Append-only attempt evidence (focus loss, reconnect, submit, reset). A DB
+/// trigger blocks UPDATE/DELETE. Evidence for a human review — never an
+/// automatic cheating verdict.
+model AttemptEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  attemptId      String
+  type           String
+  payload        Json     @default("{}")
+  at             DateTime @default(now())
+
+  attempt QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([attemptId])
+}
 
 // ─────────────────────────── Certification (A6) ───────────────────────────
 
@@ -11004,6 +11740,79 @@ enum CertificateStatus {
   issued
   revoked
   void
+}
+
+/// A national/external board result (UNEB PLE/UCE/UACE) recorded alongside
+/// internal results. Structured subject rows are canonical; importedPayload is
+/// kept only as provenance.
+model ExternalExamResult {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  board            String   @default("UNEB")
+  /// 'PLE' | 'UCE' | 'UACE'.
+  level            String
+  indexNumber      String?
+  year             Int
+  aggregate        Int?
+  division         String?
+  verified         Boolean  @default(false)
+  importedPayload  Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  subjects ExternalExamSubjectResult[]
+
+  @@unique([organizationId, studentProfileId, level, year])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+}
+
+model ExternalExamSubjectResult {
+  id               String   @id @default(uuid())
+  organizationId   String
+  externalResultId String
+  subject          String
+  grade            String
+  mark             String?
+  result           String?
+  createdAt        DateTime @default(now())
+
+  externalResult ExternalExamResult @relation(fields: [externalResultId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([externalResultId])
+}
+
+/// An issued credential. Serial numbers come from SequenceService; verification
+/// codes are cryptographically random. `revoked` = was valid, later invalidated;
+/// `void` = never valid (administrative error).
+model Certificate {
+  id               String            @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  type             CertificateType
+  status           CertificateStatus @default(issued)
+  serialNumber     String
+  verificationCode String
+  title            String
+  /// Snapshot payload (holder name, summary, term/year) at issue time.
+  payload          Json              @default("{}")
+  issuedAt         DateTime?
+  issuedById       String?
+  revokedAt        DateTime?
+  revokeReason     String?
+  voidedAt         DateTime?
+  pdfUrl           String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([organizationId, serialNumber])
+  @@unique([verificationCode])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+}
 
 model FeeStructure {
   id             String    @id @default(uuid())

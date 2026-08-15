@@ -10,12 +10,17 @@ import { AcademicsModule } from './academics/academics.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { LmsModule } from './lms/lms.module';
 import { ExaminationsModule } from './examinations/examinations.module';
+import { AssessmentModule } from './assessment/assessment.module';
+import { CbtModule } from './cbt/cbt.module';
+import { CertificationModule } from './certification/certification.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { FeesModule } from './fees/fees.module';
 import { PortalsModule } from './portals/portals.module';
 import { LibraryModule } from './library/library.module';
 import { TransportModule } from './transport/transport.module';
 import { HostelModule } from './hostel/hostel.module';
 import { CafeteriaModule } from './cafeteria/cafeteria.module';
+import { MealsModule } from './meals/meals.module';
 import { ReportingModule } from './reporting/reporting.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
@@ -38,6 +43,10 @@ import { SchoolController } from './school.controller';
     AttendanceModule,
     LmsModule,
     ExaminationsModule,
+    AssessmentModule,
+    CbtModule,
+    CertificationModule,
+    AnalyticsModule,
     FeesModule,
     PortalsModule,
     // school/communication was dropped in the port (P0/B2): its Notification
@@ -48,6 +57,7 @@ import { SchoolController } from './school.controller';
     TransportModule,
     HostelModule,
     CafeteriaModule,
+    MealsModule,
     ReportingModule,
   ],
   controllers: [SchoolController],
@@ -115,20 +125,21 @@ export class SchoolModule implements OnModuleInit {
       documentType: 'exam',
       initial: 'draft',
       transitions: [
-        { from: 'draft',     to: 'scheduled', action: 'schedule', permission: 'school:grades:write' },
-        { from: 'scheduled', to: 'published', action: 'publish',  permission: 'school:grades:write' },
-        { from: 'published', to: 'closed',    action: 'close',    permission: 'school:grades:write' },
+        { from: 'draft',     to: 'scheduled', action: 'schedule', permission: 'school:exams:write' },
+        { from: 'scheduled', to: 'published', action: 'publish',  permission: 'school:exams:write' },
+        { from: 'published', to: 'closed',    action: 'close',    permission: 'school:exams:write' },
       ],
     });
 
-    // Grade entry approval
+    // Grade entry approval. A0: entry and approval are deliberately different
+    // permissions — the enterer must not be able to approve their own marks.
     this.workflows.register({
       documentType: 'grade_entry',
       initial: 'draft',
       transitions: [
         { from: 'draft',    to: 'submitted', action: 'submit',   permission: 'school:grades:write' },
-        { from: 'submitted',to: 'approved',  action: 'approve',  permission: 'school:grades:write' },
-        { from: 'submitted',to: 'rejected',  action: 'reject',   permission: 'school:grades:write' },
+        { from: 'submitted',to: 'approved',  action: 'approve',  permission: 'school:grades:approve' },
+        { from: 'submitted',to: 'rejected',  action: 'reject',   permission: 'school:grades:approve' },
         { from: 'rejected', to: 'submitted', action: 'resubmit', permission: 'school:grades:write' },
       ],
     });
@@ -140,6 +151,37 @@ export class SchoolModule implements OnModuleInit {
       transitions: [
         { from: 'draft', to: 'approved', action: 'approve', permission: 'school:attendance:write' },
         { from: 'draft', to: 'rejected', action: 'reject',  permission: 'school:attendance:write' },
+      ],
+    });
+
+    // Assessment lifecycle (A1). Services flip status directly (as exam/grade do)
+    // — this definition documents the canonical FSM in one discoverable place.
+    this.workflows.register({
+      documentType: 'assessment',
+      initial: 'draft',
+      transitions: [
+        { from: 'draft',     to: 'scheduled', action: 'schedule', permission: 'school:assessments:write' },
+        { from: 'draft',     to: 'published', action: 'publish',  permission: 'school:assessments:write' },
+        { from: 'scheduled', to: 'published', action: 'publish',  permission: 'school:assessments:write' },
+        { from: 'published', to: 'open',      action: 'open',     permission: 'school:assessments:write' },
+        { from: 'published', to: 'closed',    action: 'close',    permission: 'school:assessments:write' },
+        { from: 'open',      to: 'closed',    action: 'close',    permission: 'school:assessments:write' },
+        { from: 'closed',    to: 'graded',    action: 'grade',    permission: 'school:assessments:write' },
+        { from: 'grading',   to: 'graded',    action: 'grade',    permission: 'school:assessments:write' },
+        { from: 'graded',    to: 'archived',  action: 'archive',  permission: 'school:assessments:write' },
+        { from: 'closed',    to: 'archived',  action: 'archive',  permission: 'school:assessments:write' },
+      ],
+    });
+
+    // Marking approval for a student's assessment marks — same SoD as grade_entry.
+    this.workflows.register({
+      documentType: 'student_assessment_marking',
+      initial: 'draft',
+      transitions: [
+        { from: 'draft',     to: 'submitted', action: 'submit',   permission: 'school:grades:write' },
+        { from: 'submitted', to: 'approved',  action: 'approve',  permission: 'school:grades:approve' },
+        { from: 'submitted', to: 'rejected',  action: 'reject',   permission: 'school:grades:approve' },
+        { from: 'rejected',  to: 'submitted', action: 'resubmit', permission: 'school:grades:write' },
       ],
     });
   }

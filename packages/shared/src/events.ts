@@ -190,6 +190,7 @@ export const EVENTS = {
   // People
   SchoolStudentCreated: 'school.student.created',
   SchoolStudentStatusChanged: 'school.student.status.changed',
+  SchoolStudentPromoted: 'school.student.promoted',
   SchoolStaffCreated: 'school.staff.created',
   SchoolStaffStatusChanged: 'school.staff.status.changed',
   // Admissions
@@ -214,7 +215,30 @@ export const EVENTS = {
   SchoolExamClosed: 'school.exam.closed',
   SchoolGradePosted: 'school.grade.posted',
   SchoolGradeApproved: 'school.grade.approved',
+  SchoolGradeRejected: 'school.grade.rejected',
   SchoolReportCardGenerated: 'school.reportcard.generated',
+  SchoolReportCardPublished: 'school.reportcard.published',
+  // Assessment core (A1)
+  SchoolAssessmentStatusChanged: 'school.assessment.status_changed',
+  SchoolMarksApproved: 'school.marks.approved',
+  SchoolMarksModerated: 'school.marks.moderated',
+  // Rosters + assignments (A2)
+  SchoolRosterFrozen: 'school.roster.frozen',
+  SchoolAssignmentPublished: 'school.assignment.published',
+  SchoolAssignmentSubmitted: 'school.assignment.submitted',
+  SchoolAssignmentGraded: 'school.assignment.graded',
+  // Result spine (A3)
+  SchoolResultsComputed: 'school.results.computed',
+  SchoolResultsPublished: 'school.results.published',
+  SchoolResultsAmended: 'school.results.amended',
+  // CBT engine (A5)
+  SchoolQuizAttemptStarted: 'school.quiz.attempt.started',
+  SchoolQuizAttemptSubmitted: 'school.quiz.attempt.submitted',
+  // Certification (A6)
+  SchoolTranscriptIssued: 'school.transcript.issued',
+  SchoolCertificateIssued: 'school.certificate.issued',
+  SchoolCertificateRevoked: 'school.certificate.revoked',
+  SchoolExternalResultRecorded: 'school.external_result.recorded',
   // Fees — the money flows through Document/Payment; these are observers.
   SchoolFeeInvoiceDrafted: 'school.fee.invoice.drafted',
   SchoolFeeInvoicePosted: 'school.fee.invoice.posted',
@@ -229,6 +253,14 @@ export const EVENTS = {
   // Hostel + cafeteria
   SchoolHostelAllocated: 'school.hostel.allocated',
   SchoolMealTopUp: 'school.meal.topup',
+  // Meals module (V1–V3)
+  SchoolMealPlanAssigned: 'school.meal.plan.assigned',
+  SchoolMealPlanChanged: 'school.meal.plan.changed',
+  SchoolMealSessionOpened: 'school.meal.session.opened',
+  SchoolMealAttendanceRecorded: 'school.meal.attendance.recorded',
+  SchoolMealChargePosted: 'school.meal.charge.posted',
+  SchoolMealWalletLowBalance: 'school.meal.wallet.low_balance',
+  SchoolMealProductionPlanned: 'school.meal.production.planned',
 } as const;
 
 /** Payload emitted for a created/updated/deleted tenant entity. */
@@ -464,6 +496,16 @@ export interface DomainEventMap {
     fromStatus: string;
     toStatus: string;
   };
+  'school.student.promoted': {
+    organizationId: string;
+    studentProfileId: string;
+    outcome: string;
+    fromClassId: string | null;
+    toClassId: string | null;
+    fromTermId: string | null;
+    toTermId: string | null;
+    enrollmentId: string | null;
+  };
   'school.staff.created': {
     organizationId: string;
     staffProfileId: string;
@@ -548,11 +590,122 @@ export interface DomainEventMap {
     examScheduleId: string;
     approvedById: string;
   };
+  'school.grade.rejected': {
+    organizationId: string;
+    examScheduleId: string;
+    rejectedById: string;
+    reason: string;
+  };
   'school.reportcard.generated': {
     organizationId: string;
     reportCardId: string;
     studentProfileId: string;
     termId: string;
+  };
+  'school.reportcard.published': {
+    organizationId: string;
+    reportCardId: string;
+    studentProfileId: string;
+    termId: string;
+    published: boolean;
+  };
+  'school.assessment.status_changed': {
+    organizationId: string;
+    assessmentId: string;
+    status: string;
+  };
+  'school.marks.approved': {
+    organizationId: string;
+    assessmentId: string;
+    approvedById: string;
+    count: number;
+  };
+  'school.marks.moderated': {
+    organizationId: string;
+    studentAssessmentId: string;
+    kind: string;
+    sequence: number;
+  };
+  'school.roster.frozen': {
+    organizationId: string;
+    rosterId: string;
+    memberCount: number;
+  };
+  'school.assignment.published': {
+    organizationId: string;
+    assignmentId: string;
+    assessmentId: string;
+    fannedOut: number;
+  };
+  'school.assignment.submitted': {
+    organizationId: string;
+    assignmentId: string;
+    studentProfileId: string;
+    attemptNo: number;
+    isLate: boolean;
+  };
+  'school.assignment.graded': {
+    organizationId: string;
+    assignmentId: string;
+    studentProfileId: string;
+    score: string;
+  };
+  'school.results.computed': {
+    organizationId: string;
+    resultSetId: string;
+    termId: string;
+    revision: number;
+    studentCount: number;
+  };
+  'school.results.published': {
+    organizationId: string;
+    resultSetId: string;
+    termId: string;
+    revision: number;
+  };
+  'school.results.amended': {
+    organizationId: string;
+    resultSetId: string;
+    previousResultSetId: string;
+    revision: number;
+  };
+  'school.quiz.attempt.started': {
+    organizationId: string;
+    attemptId: string;
+    studentProfileId: string;
+    paperId: string;
+  };
+  'school.quiz.attempt.submitted': {
+    organizationId: string;
+    attemptId: string;
+    studentProfileId: string;
+    autoScore: string;
+    manualPending: number;
+  };
+  'school.transcript.issued': {
+    organizationId: string;
+    transcriptId: string;
+    studentProfileId: string;
+  };
+  'school.certificate.issued': {
+    organizationId: string;
+    certificateId: string;
+    studentProfileId: string;
+    type: string;
+    serialNumber: string;
+  };
+  'school.certificate.revoked': {
+    organizationId: string;
+    certificateId: string;
+    reason: string;
+    voided: boolean;
+  };
+  'school.external_result.recorded': {
+    organizationId: string;
+    externalResultId: string;
+    studentProfileId: string;
+    level: string;
+    year: number;
   };
   'school.fee.invoice.drafted': {
     organizationId: string;
@@ -610,6 +763,51 @@ export interface DomainEventMap {
     bedId: string;
   };
   'school.meal.topup': { organizationId: string; mealAccountId: string; amount: string };
+  'school.meal.plan.assigned': {
+    organizationId: string;
+    assignmentId: string;
+    studentProfileId: string;
+    mealPlanId: string;
+    termId: string;
+  };
+  'school.meal.plan.changed': {
+    organizationId: string;
+    assignmentId: string;
+    studentProfileId: string;
+    status: string;
+  };
+  'school.meal.session.opened': {
+    organizationId: string;
+    mealSessionId: string;
+    mealTypeId: string;
+    date: string;
+    expectedCount: number;
+  };
+  'school.meal.attendance.recorded': {
+    organizationId: string;
+    mealSessionId: string;
+    served: number;
+    absent: number;
+    excused: number;
+  };
+  'school.meal.charge.posted': {
+    organizationId: string;
+    documentId: string;
+    studentProfileId: string;
+    amount: string;
+  };
+  'school.meal.wallet.low_balance': {
+    organizationId: string;
+    mealAccountId: string;
+    balance: string;
+  };
+  'school.meal.production.planned': {
+    organizationId: string;
+    mealProductionPlanId: string;
+    mealTypeId: string;
+    date: string;
+    expectedPortions: number;
+  };
 }
 
 /** A message was created (outbound) or received (inbound). */

@@ -1,5 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+
+const D = Prisma.Decimal;
+type Decimal = Prisma.Decimal;
+
+/** Percentage = marks / maxMarks * 100, in exact Decimal (never JS float). */
+export function percent(marks: Prisma.Decimal.Value, maxMarks: Prisma.Decimal.Value): Decimal {
+  const max = new D(maxMarks);
+  if (max.isZero()) return new D(0);
+  return new D(marks).div(max).mul(100);
+}
 
 /**
  * GradingService — pure functions for letter grade, GPA, class rank.
@@ -38,25 +49,41 @@ export class GradingService {
    * to the legacy 9-point scale.
    */
   async bandFor(
-    marks: number,
-    maxMarks: number,
+    marks: Prisma.Decimal.Value,
+    maxMarks: Prisma.Decimal.Value,
     system?: GradingSystem | string,
   ): Promise<GradeBand | null> {
     const bands = await this.bandsFor(system ?? null);
-    const pct = (marks / maxMarks) * 100;
-    return bands.find((b) => pct >= b.min && pct <= b.max) ?? bands[bands.length - 1];
+    // A0: exact-Decimal percentage — band boundaries are precisely where JS
+    // float error would otherwise flip a grade (e.g. 49.999999999).
+    const pct = percent(marks, maxMarks);
+    return bands.find((b) => pct.gte(b.min) && pct.lte(b.max)) ?? bands[bands.length - 1];
   }
 
-  /** Return the bands for a grading system — from DB if a scale exists, else built-in. */
+  /**
+   * Return the bands for a grading system — from a registered DB scale if one
+   * exists, else the built-in constants.
+   *
+   * A0: the lookup was `name: { contains: system }`, an unanchored substring
+   * match that (a) matched "UCE" inside "UACE", (b) matched any scale whose
+   * name merely *contained* the token, and (c) ignored `isDefault`. It is now
+   * an org-scoped exact-name match, falling back to the org's default scale,
+   * then to the built-in constants. (Org scoping is applied by the Prisma
+   * tenancy extension.)
+   */
   async bandsFor(system?: GradingSystem | string | null): Promise<GradeBand[]> {
-    // Try the DB first if a scale is registered.
     if (system) {
-      const scale = await this.prisma.client.gradingScale.findFirst({
-        where: { name: { contains: system as string } },
+      const exact = await this.prisma.client.gradingScale.findFirst({
+        where: { name: { equals: system as string, mode: 'insensitive' } },
       });
-      if (scale) return scale.bands as unknown as GradeBand[];
+      if (exact) return exact.bands as unknown as GradeBand[];
     }
-    // Fall back to the built-in default for the system.
+    const fallback = await this.prisma.client.gradingScale.findFirst({
+      where: { isDefault: true },
+    });
+    if (fallback) return fallback.bands as unknown as GradeBand[];
+
+    // No registered scale — use the built-in default for the system.
     switch ((system ?? '').toUpperCase()) {
       case 'UACE': return this.defaultUACE();
       case 'CBC': return this.defaultCBC();
@@ -235,25 +262,13 @@ export class GradingService {
     });
     if (entries.length === 0) return { gpa: 0, totalMarks: 0, meanPercent: 0, rank: null };
 
-    const weightById = new Map<string, number>();
-    for (const e of entries) {
-      const id = e.examSchedule.exam.examTypeId;
-      if (!weightById.has(id)) weightById.set(id, Number(e.examSchedule.exam.examType.weight));
-    }
-
-    let weightedSum = 0;
-    let totalWeight = 0;
-    let totalPct = 0;
-    for (const e of entries) {
-      const w = weightById.get(e.examSchedule.exam.examTypeId) ?? 0;
-      const pct = Number(e.marksObtained ?? 0) / Number(e.maxMarks) * 100;
-      const gp = Number(e.gradePoint ?? 0);
-      weightedSum += gp * w;
-      totalWeight += w;
-      totalPct += pct;
-    }
-    const gpa = totalWeight > 0 ? weightedSum / totalWeight : 0;
-    const meanPercent = totalPct / entries.length;
+    // A0: all aggregation in exact Decimal — no float drift through the
+    // weighted GPA, the mean percent, or (critically) the ranking scores that
+    // decide who is first in the class.
+    const gpa = GradingService.weightedGpa(entries);
+    const meanPercent = entries
+      .reduce((acc, e) => acc.add(percent(e.marksObtained ?? 0, e.maxMarks)), new D(0))
+      .div(entries.length);
 
     const allEntries = await this.prisma.client.gradeEntry.findMany({
       where: { examSchedule: { exam: { termId } } },
@@ -263,23 +278,36 @@ export class GradingService {
     const scores = new Map<string, number>();
     for (const sid of studentIds) {
       const myEntries = allEntries.filter((e) => e.studentProfileId === sid);
-      let wSum = 0, wTotal = 0;
-      for (const e of myEntries) {
-        const w = Number(e.examSchedule.exam.examType.weight);
-        const gp = Number(e.gradePoint ?? 0);
-        wSum += gp * w;
-        wTotal += w;
-      }
-      scores.set(sid, wTotal > 0 ? wSum / wTotal : 0);
+      // Rank on the Decimal GPA, materialised to a number only for the sort key.
+      scores.set(sid, GradingService.weightedGpa(myEntries).toNumber());
     }
     const sorted = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
     // P0-5 (C5): use competition ranking so tied students share a rank.
     const rank = GradingService.competitionRank(sorted, studentProfileId);
     return {
-      gpa: Math.round(gpa * 100) / 100,
+      gpa: Number(gpa.toDecimalPlaces(2)),
       totalMarks: entries.length,
-      meanPercent: Math.round(meanPercent * 100) / 100,
+      meanPercent: Number(meanPercent.toDecimalPlaces(2)),
       rank,
     };
+  }
+
+  /**
+   * Weighted GPA = Σ(gradePoint × examTypeWeight) / Σ(examTypeWeight), in exact
+   * Decimal. Shared by both the per-student figure and the ranking scores so
+   * the two can never disagree. Returns 0 when there is no weight.
+   */
+  static weightedGpa(
+    entries: Array<{ gradePoint: Decimal | null; examSchedule: { exam: { examType: { weight: Decimal } } } }>,
+  ): Decimal {
+    let weightedSum = new D(0);
+    let totalWeight = new D(0);
+    for (const e of entries) {
+      const w = new D(e.examSchedule.exam.examType.weight);
+      const gp = new D(e.gradePoint ?? 0);
+      weightedSum = weightedSum.add(gp.mul(w));
+      totalWeight = totalWeight.add(w);
+    }
+    return totalWeight.isZero() ? new D(0) : weightedSum.div(totalWeight);
   }
 }

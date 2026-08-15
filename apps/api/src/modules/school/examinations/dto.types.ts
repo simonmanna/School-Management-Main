@@ -59,6 +59,11 @@ export class CreateExamScheduleDto {
   @IsOptional() @IsInt() @Min(1) durationMinutes?: number;
   @IsOptional() @IsString() invigilatorId?: string;
   @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+  // A4 session detail.
+  @IsOptional() @IsInt() @Min(1) paperNumber?: number;
+  @IsOptional() @IsString() sitting?: string;
+  @IsOptional() @IsBoolean() isResit?: boolean;
+  @IsOptional() @IsString() venueId?: string;
 }
 
 export class UpdateExamScheduleDto {
@@ -70,6 +75,10 @@ export class UpdateExamScheduleDto {
   @IsOptional() @IsInt() @Min(1) durationMinutes?: number;
   @IsOptional() @IsString() invigilatorId?: string;
   @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
+  @IsOptional() @IsInt() @Min(1) paperNumber?: number;
+  @IsOptional() @IsString() sitting?: string;
+  @IsOptional() @IsBoolean() isResit?: boolean;
+  @IsOptional() @IsString() venueId?: string;
 }
 
 export class GradeEntryInput {
@@ -77,6 +86,16 @@ export class GradeEntryInput {
   @IsNumber() @Min(0) marksObtained!: number;
   @IsOptional() @IsNumber() @Min(0) maxMarks?: number;
   @IsOptional() @IsString() remarks?: string;
+  /**
+   * A0: optimistic-concurrency guard. When present, the upsert only overwrites
+   * an existing row whose `version` still matches — a stale editor gets a 409
+   * instead of silently clobbering a concurrent edit. Omitted on first entry.
+   */
+  @IsOptional() @IsInt() @Min(0) version?: number;
+}
+
+export class RejectGradesDto {
+  @IsString() @IsNotEmpty() reason!: string;
 }
 
 export class BulkGradeEntryDto {

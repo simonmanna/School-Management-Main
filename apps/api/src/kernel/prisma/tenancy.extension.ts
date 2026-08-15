@@ -349,6 +349,44 @@ export const ORG_SCOPED = new Set<string>([
   'GradingScale',
   'ReportCard',
   'AcademicTranscript',
+  // Exam operations (A4)
+  'ExamVenue',
+  'ExamRegistration',
+  // Assessment core (A1)
+  'AssessmentPolicy',
+  'AssessmentComponent',
+  'Assessment',
+  'StudentAssessment',
+  'MarkEntry',
+  'MarkAdjustment',
+  // Rosters + assignment evidence (A2)
+  'AcademicRoster',
+  'AcademicRosterMember',
+  'Rubric',
+  'RubricCriterion',
+  'RubricLevel',
+  'AssessmentRubricScore',
+  'Assignment',
+  'AssignmentSubmission',
+  // Result spine (A3)
+  'ResultProcessingRun',
+  'ResultSet',
+  'StudentSubjectResult',
+  'StudentTermResult',
+  'AmendmentRequest',
+  // CBT engine (A5)
+  'QuestionBank',
+  'Question',
+  'QuestionOption',
+  'Paper',
+  'PaperQuestion',
+  'QuizAttempt',
+  'QuizResponse',
+  'AttemptEvent',
+  // Certification (A6)
+  'ExternalExamResult',
+  'ExternalExamSubjectResult',
+  'Certificate',
   'FeeStructure',
   'FeeSchedule',
   'StudentFeeAssignment',
@@ -373,6 +411,21 @@ export const ORG_SCOPED = new Set<string>([
   'MealPlan',
   'MealAccount',
   'MealPurchase',
+  'MealProgram',
+  'MealType',
+  'MealPlanEntitlement',
+  'MealPlanAssignment',
+  'MealSession',
+  'MealAttendance',
+  'MealMenu',
+  'MealMenuItem',
+  'MealRecipe',
+  'MealRecipeIngredient',
+  'MealProductionPlan',
+  'MealProductionItem',
+  'MealConsumption',
+  'MealWaste',
+  'MealAccountTransaction',
   'SchoolDashboardCache',
 ]);
 
@@ -524,6 +577,29 @@ export const SOFT_DELETE = new Set<string>([
   'ExamType',
   'Exam',
   'GradingScale',
+  // Exam operations (A4) — ExamVenue has a deletedAt; ExamRegistration does not.
+  'ExamVenue',
+  // Assessment core (A1) — the four with a deletedAt column. MarkEntry and
+  // MarkAdjustment are append-only ledgers with no deletedAt.
+  'AssessmentPolicy',
+  'AssessmentComponent',
+  'Assessment',
+  'StudentAssessment',
+  // Rosters + assignments (A2) — soft-deletable parents only.
+  'AcademicRoster',
+  'Rubric',
+  'Assignment',
+  // Result spine (A3) — ResultSet is the only soft-deletable one; the child
+  // result rows and the run/amendment ledgers have no deletedAt.
+  'ResultSet',
+  // CBT (A5) — the three authoring parents have deletedAt; attempts/responses/
+  // events do not (attempts are historical records, events are append-only).
+  'QuestionBank',
+  'Question',
+  'Paper',
+  // Certification (A6) — ExternalExamResult has deletedAt; Certificate does not
+  // (a certificate is revoked/voided, never soft-deleted).
+  'ExternalExamResult',
   'FeeStructure',
   'Discount',
   'Scholarship',
@@ -532,6 +608,12 @@ export const SOFT_DELETE = new Set<string>([
   'Dormitory',
   'Room',
   'MealPlan',
+  'MealProgram',
+  'MealType',
+  'MealSession',
+  'MealMenu',
+  'MealRecipe',
+  'MealProductionPlan',
 ]);
 
 const WHERE_OPS = new Set<string>([

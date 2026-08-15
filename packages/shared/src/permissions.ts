@@ -372,13 +372,50 @@ export const PERMISSIONS = {
     manageStaff: 'school:staff:write',
     manageAdmissions: 'school:admissions:write',
     takeAttendance: 'school:attendance:write',
+    /**
+     * Marks ENTRY only. Historically this single grant also covered approving
+     * marks, exam setup and grading-scale edits — a segregation-of-duty failure,
+     * since whoever entered a mark could approve their own mark. A0 narrows it
+     * to entry and splits the rest out below.
+     */
     enterGrades: 'school:grades:write',
+    // ── Assessment (A0+). Action-level grants so marking, approving, moderating
+    // and publishing are separately delegable. Reads stay on `school:read`
+    // except analytics, which is genuinely more sensitive than a class list.
+    manageExams: 'school:exams:write',
+    // Assessment configuration: policies, weighting components, assessment instances.
+    manageAssessments: 'school:assessments:write',
+    approveGrades: 'school:grades:approve',
+    moderateMarks: 'school:marks:moderate',
+    computeResults: 'school:results:compute',
+    approveResults: 'school:results:approve',
+    publishResults: 'school:results:publish',
+    amendResults: 'school:results:amend',
+    manageAssignments: 'school:assignments:write',
+    gradeAssignments: 'school:assignments:grade',
+    submitAssignments: 'school:assignments:submit',
+    manageQuestionBank: 'school:questionbank:write',
+    authorCbt: 'school:cbt:author',
+    takeCbt: 'school:cbt:take',
+    proctorCbt: 'school:cbt:proctor',
+    issueCertificates: 'school:certificates:issue',
+    revokeCertificates: 'school:certificates:revoke',
+    readAnalytics: 'school:analytics:read',
+    exportAnalytics: 'school:analytics:export',
     manageFees: 'school:fees:write',
     collectPayments: 'school:fees:collect',
     manageLibrary: 'school:library:write',
     manageTransport: 'school:transport:write',
     manageHostel: 'school:hostel:write',
     manageCafeteria: 'school:cafeteria:write',
+    // Meals module (finer-grained; kitchen roles must not gain finance access).
+    mealsRead: 'school:meals:read',
+    manageMeals: 'school:meals:write', // programs/types/plans/menus config
+    mealAttendance: 'school:meals:attendance',
+    manageKitchen: 'school:meals:kitchen',
+    mealBilling: 'school:meals:billing',
+    manageWallet: 'school:meals:wallet',
+    mealReports: 'school:meals:reports',
     communicate: 'school:communicate',
     parentPortal: 'school:portal:parent',
     studentPortal: 'school:portal:student',

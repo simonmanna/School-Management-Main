@@ -237,7 +237,7 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  const port = Number(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT ?? 3001);
   // Bind all interfaces by default so POS terminals and Android devices on the
   // cafe LAN can reach the server. Set HOST=127.0.0.1 to restrict to loopback.
   const host = process.env.HOST ?? '0.0.0.0';

@@ -1,12 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Exam, ExamSchedule, ExamType, GradeEntry, GradingScale } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
+import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import { GradingService } from './grading.service';
 import { ReportCardTemplateService } from './report-card-template.service';
+import { AssessmentProjectionService } from '../assessment/assessment-projection.service';
+import { ResultRunService } from '../assessment/result-run.service';
 import type {
   BulkGradeEntryDto,
   CreateExamDto,
@@ -93,6 +96,29 @@ export class ExamScheduleService extends BaseCrudService<ExamSchedule, CreateExa
   constructor(private readonly prisma: PrismaService) {
     super(prisma.client.examSchedule as unknown as CrudDelegate);
   }
+
+  /**
+   * A4: refuse to create a sitting that double-books a venue or invigilator at
+   * the same date + start time. Returns structured conflicts as a 400 body.
+   */
+  async create(dto: CreateExamScheduleDto): Promise<ExamSchedule> {
+    const d = dto as CreateExamScheduleDto & { venueId?: string; invigilatorId?: string; date: string; startTime: string };
+    if (d.venueId || d.invigilatorId) {
+      const day = new Date(d.date);
+      const start = new Date(day); start.setHours(0, 0, 0, 0);
+      const end = new Date(day); end.setHours(23, 59, 59, 999);
+      const sameSlot = await this.prisma.client.examSchedule.findMany({
+        where: { date: { gte: start, lte: end }, startTime: d.startTime },
+      });
+      const conflicts: Array<{ code: string; detail: string }> = [];
+      for (const s of sameSlot) {
+        if (d.venueId && s.venueId === d.venueId) conflicts.push({ code: 'VENUE_CLASH', detail: `venue booked at ${d.startTime}` });
+        if (d.invigilatorId && s.invigilatorId === d.invigilatorId) conflicts.push({ code: 'INVIGILATOR_CLASH', detail: `invigilator busy at ${d.startTime}` });
+      }
+      if (conflicts.length > 0) throw new BadRequestException({ message: 'Exam scheduling clash', conflicts });
+    }
+    return super.create(dto);
+  }
 }
 
 interface GradeBand { min: number; max: number; grade: string; gpa: number; remark?: string }
@@ -113,6 +139,8 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     private readonly tenant: TenantContextService,
     private readonly grading: GradingService,
     private readonly events: EventBus,
+    private readonly audit: AuditService,
+    private readonly projection: AssessmentProjectionService,
   ) {
     super(prisma.client.gradeEntry as unknown as CrudDelegate);
   }
@@ -120,68 +148,195 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
   /**
    * Bulk-upsert grades for a class × exam. After save, recompute letter grade
    * + grade point from the active GradingScale.
+   *
+   * A0 hardening:
+   *   - marks are validated `0 ≤ marksObtained ≤ maxMarks` (a DB CHECK backs this);
+   *   - the grade is resolved under the school's own grading system, not a
+   *     hard-coded default;
+   *   - each write is audited inside the transaction;
+   *   - `SchoolGradePosted` is emitted (it was declared but never fired);
+   *   - an optimistic-concurrency `version` guard stops two markers silently
+   *     overwriting each other.
    */
   async bulkUpsert(dto: BulkGradeEntryDto) {
     const organizationId = this.tenant.organizationId;
+    // Resolve the school's grading system once so every band lookup in this
+    // batch uses the same scale.
+    const profile = await this.prisma.client.schoolProfile.findFirst({
+      where: { organizationId },
+      select: { gradingSystem: true },
+    });
+    const system = profile?.gradingSystem ?? undefined;
+
     return this.prisma.client.$transaction(async (tx: any) => {
       const results: any[] = [];
       for (const e of dto.entries) {
-        const band = await this.grading.bandFor(e.marksObtained, e.maxMarks ?? 100);
-        const row = await tx.gradeEntry.upsert({
-          where: {
-            examScheduleId_studentProfileId: {
+        const maxMarks = e.maxMarks ?? 100;
+        // A0: reject impossible marks rather than store them and compute a
+        // nonsense percentage/grade downstream.
+        if (e.marksObtained < 0 || maxMarks <= 0 || e.marksObtained > maxMarks) {
+          throw new BadRequestException(
+            `Student ${e.studentProfileId}: marks ${e.marksObtained} out of range [0, ${maxMarks}]`,
+          );
+        }
+        const band = await this.grading.bandFor(e.marksObtained, maxMarks, system);
+
+        const existing = await tx.gradeEntry.findFirst({
+          where: { examScheduleId: dto.examScheduleId, studentProfileId: e.studentProfileId },
+        });
+
+        // A0: approved marks are not silently re-writable by a re-upsert; they
+        // must go back through reject → resubmit.
+        if (existing && existing.status === 'approved') {
+          throw new ConflictException(
+            `Grade for student ${e.studentProfileId} is approved; reject it before re-entering marks`,
+          );
+        }
+        // A0: optimistic concurrency — if the caller carries a stale version,
+        // refuse rather than clobber a concurrent edit.
+        if (existing && e.version !== undefined && existing.version !== e.version) {
+          throw new ConflictException(
+            `Grade for student ${e.studentProfileId} was modified concurrently ` +
+              `(expected version ${e.version}, current ${existing.version}). Re-read and retry.`,
+          );
+        }
+
+        const common = {
+          marksObtained: e.marksObtained,
+          maxMarks,
+          grade: band?.grade ?? null,
+          gradePoint: band?.gpa ?? null,
+          remarks: e.remarks ?? null,
+          enteredById: this.tenant.userId ?? null,
+          enteredAt: new Date(),
+        };
+
+        let row: any;
+        if (existing) {
+          await tx.gradeEntry.updateMany({
+            where: { id: existing.id },
+            // Re-entering a mark returns it to draft and bumps the version.
+            data: { ...common, status: 'draft', version: { increment: 1 } },
+          });
+          row = await tx.gradeEntry.findFirst({ where: { id: existing.id } });
+        } else {
+          row = await tx.gradeEntry.create({
+            data: {
+              organizationId,
               examScheduleId: dto.examScheduleId,
               studentProfileId: e.studentProfileId,
-            } as any,
-          },
-          create: {
-            organizationId,
-            examScheduleId: dto.examScheduleId,
-            studentProfileId: e.studentProfileId,
-            marksObtained: e.marksObtained,
-            maxMarks: e.maxMarks ?? 100,
-            grade: band?.grade ?? null,
-            gradePoint: band?.gpa ?? null,
-            remarks: e.remarks ?? null,
-            status: 'draft',
-            enteredById: this.tenant.userId ?? null,
-            enteredAt: new Date(),
-          },
-          update: {
-            marksObtained: e.marksObtained,
-            maxMarks: e.maxMarks ?? 100,
-            grade: band?.grade ?? null,
-            gradePoint: band?.gpa ?? null,
-            remarks: e.remarks ?? null,
-            enteredById: this.tenant.userId ?? null,
-            enteredAt: new Date(),
-          },
+              status: 'draft',
+              ...common,
+            },
+          });
+        }
+
+        await this.audit.recordInTx(tx, {
+          entity: 'GradeEntry',
+          entityId: row.id,
+          action: existing ? 'update' : 'create',
+          newValues: { marksObtained: e.marksObtained, maxMarks, grade: row.grade, status: 'draft' },
+        });
+        // Fire the previously-dead "grade posted" event for each entered mark.
+        this.events.publish(EVENTS.SchoolGradePosted, {
+          organizationId,
+          examScheduleId: dto.examScheduleId,
+          studentProfileId: e.studentProfileId,
         });
         results.push(row);
       }
+      // A1: project the just-written marks into the assessment spine, atomically.
+      await this.projection.projectExamSchedule(tx, dto.examScheduleId);
       return { count: results.length, results };
     });
   }
 
   async submit(examScheduleId: string) {
-    const res = await this.prisma.client.gradeEntry.updateMany({
-      where: { examScheduleId, status: 'draft' },
-      data: { status: 'submitted' },
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const res = await tx.gradeEntry.updateMany({
+        where: { examScheduleId, status: 'draft' },
+        data: { status: 'submitted' },
+      });
+      if (res.count > 0) {
+        await this.audit.recordInTx(tx, {
+          entity: 'GradeEntry',
+          entityId: examScheduleId,
+          action: 'update',
+          newValues: { action: 'submit', examScheduleId, count: res.count },
+        });
+        await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'submitted');
+      }
+      return { updated: res.count };
     });
-    return { updated: res.count };
   }
 
   async approve(examScheduleId: string) {
     const organizationId = this.tenant.organizationId;
+    const approverId = this.tenant.userId ?? null;
     return this.prisma.client.$transaction(async (tx: any) => {
+      const pending = await tx.gradeEntry.findMany({
+        where: { examScheduleId, status: 'submitted' },
+        select: { id: true, enteredById: true },
+      });
+      if (pending.length === 0) return { updated: 0 };
+
+      // A0 segregation of duty: whoever entered a mark must not approve it.
+      // Approving a batch that contains any self-entered mark is refused.
+      const selfEntered = pending.some((g: any) => g.enteredById && g.enteredById === approverId);
+      if (selfEntered) {
+        throw new BadRequestException(
+          'You entered one or more of these marks and cannot approve your own entries (segregation of duty).',
+        );
+      }
+
       const res = await tx.gradeEntry.updateMany({
         where: { examScheduleId, status: 'submitted' },
-        data: { status: 'approved', approvedById: this.tenant.userId ?? null, approvedAt: new Date() },
+        data: { status: 'approved', approvedById: approverId, approvedAt: new Date() },
       });
+      await this.audit.recordInTx(tx, {
+        entity: 'GradeEntry',
+        entityId: examScheduleId,
+        action: 'approve',
+        newValues: { examScheduleId, approvedById: approverId, count: res.count },
+      });
+      await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'approved', approverId);
       this.events.publish(EVENTS.SchoolGradeApproved, {
         organizationId,
         examScheduleId,
-        approvedById: this.tenant.userId ?? '',
+        approvedById: approverId ?? '',
+      });
+      return { updated: res.count };
+    });
+  }
+
+  /**
+   * A0: reject submitted marks back to `rejected` with a reason, making the
+   * previously-unreachable `rejected` state reachable via the API. From
+   * `rejected` the enterer can `resubmit` (see the grade_entry workflow).
+   */
+  async reject(examScheduleId: string, reason: string) {
+    const organizationId = this.tenant.organizationId;
+    const rejectedById = this.tenant.userId ?? null;
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const res = await tx.gradeEntry.updateMany({
+        where: { examScheduleId, status: 'submitted' },
+        data: { status: 'rejected', rejectionReason: reason },
+      });
+      if (res.count === 0) {
+        throw new NotFoundException(`No submitted grades to reject for schedule ${examScheduleId}`);
+      }
+      await this.audit.recordInTx(tx, {
+        entity: 'GradeEntry',
+        entityId: examScheduleId,
+        action: 'reject',
+        newValues: { examScheduleId, rejectedById, reason, count: res.count },
+      });
+      await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'rejected');
+      this.events.publish(EVENTS.SchoolGradeRejected, {
+        organizationId,
+        examScheduleId,
+        rejectedById: rejectedById ?? '',
+        reason,
       });
       return { updated: res.count };
     });
@@ -227,7 +382,57 @@ export class ReportCardService {
     private readonly grading: GradingService,
     private readonly events: EventBus,
     private readonly templates: ReportCardTemplateService,
+    private readonly audit: AuditService,
+    private readonly results: ResultRunService,
   ) {}
+
+  /** Report cards for a student, newest first. */
+  async byStudent(studentProfileId: string) {
+    return this.prisma.client.reportCard.findMany({
+      where: { studentProfileId },
+      orderBy: { generatedAt: 'desc' },
+    });
+  }
+
+  /**
+   * A0: release a generated report card to the portals. `ReportCard.publishedAt`
+   * and the web `published` badge already existed but nothing ever set the
+   * column — the badge was permanently unlit. This is the missing endpoint.
+   */
+  async publish(id: string) {
+    return this.setPublished(id, true);
+  }
+
+  async unpublish(id: string) {
+    return this.setPublished(id, false);
+  }
+
+  private async setPublished(id: string, publish: boolean) {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const card = await tx.reportCard.findFirst({ where: { id } });
+      if (!card) throw new NotFoundException(`ReportCard ${id} not found`);
+      await tx.reportCard.updateMany({
+        where: { id },
+        data: { publishedAt: publish ? new Date() : null },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'ReportCard',
+        entityId: id,
+        action: 'update',
+        oldValues: { publishedAt: card.publishedAt },
+        newValues: { action: publish ? 'publish' : 'unpublish', publishedAt: publish ? 'now' : null },
+      });
+      this.events.publish(EVENTS.SchoolReportCardPublished, {
+        organizationId,
+        reportCardId: id,
+        studentProfileId: card.studentProfileId,
+        termId: card.termId,
+        published: publish,
+      });
+      return tx.reportCard.findFirst({ where: { id } });
+    });
+  }
 
   async generate(dto: GenerateReportCardDto) {
     const organizationId = this.tenant.organizationId;
@@ -235,10 +440,28 @@ export class ReportCardService {
       const term = await tx.term.findFirst({ where: { id: dto.termId } });
       if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
 
-      const { gpa, rank, meanPercent, totalMarks } = await this.grading.computeTermGpa(dto.studentProfileId, dto.termId);
+      // A3: prefer the published result spine as the source of truth. The spine
+      // is a versioned, immutable, reproducible snapshot; the legacy per-call
+      // computeTermGpa remains only as the fallback for terms not yet run.
+      const spine = await this.results.latestPublished(dto.termId, dto.studentProfileId);
+      const legacy = await this.grading.computeTermGpa(dto.studentProfileId, dto.termId);
 
       // Build the templated layout (sections + summary + eligibility).
       const layout = await this.templates.buildLayout(dto.studentProfileId, dto.termId);
+
+      const provenance = spine
+        ? {
+            source: 'result_spine' as const,
+            resultSetId: spine.resultSet.id,
+            resultSetRevision: spine.resultSet.revision,
+            calculationVersion: spine.resultSet.calculationVersion,
+          }
+        : { source: 'legacy_compute' as const };
+
+      const gpa = spine?.term.gpa != null ? Number(spine.term.gpa) : legacy.gpa;
+      const rank = spine?.term.classRank ?? legacy.rank;
+      const meanPercent = spine?.term.meanPercent != null ? Number(spine.term.meanPercent) : legacy.meanPercent;
+      const totalMarks = spine ? spine.term.subjectsCount : legacy.totalMarks;
 
       const payload = {
         system: layout.system,
@@ -247,11 +470,14 @@ export class ReportCardService {
         rank,
         meanPercent,
         totalMarks,
+        division: spine?.term.division ?? null,
+        promotionRecommendation: spine?.term.promotionRecommendation ?? null,
         sections: layout.sections,
         summary: layout.summary,
-        eligible: layout.eligible,
+        eligible: spine ? spine.term.eligible : layout.eligible,
         footer: layout.footer,
         columnHeaders: layout.columnHeaders,
+        provenance,
         generatedAt: new Date().toISOString(),
       };
 
@@ -269,6 +495,12 @@ export class ReportCardService {
           payload: payload as any,
         },
         update: { payload: payload as any },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'ReportCard',
+        entityId: upserted.id,
+        action: 'create',
+        newValues: { studentProfileId: dto.studentProfileId, termId: dto.termId, gpa, rank },
       });
       this.events.publish(EVENTS.SchoolReportCardGenerated, {
         organizationId,
