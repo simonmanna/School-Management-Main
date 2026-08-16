@@ -48,6 +48,30 @@ export class CurriculumController {
     return this.service.update(id, dto);
   }
 
+  @Post(':id/publish')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  publish(@Param('id') id: string) {
+    return this.service.publish(id);
+  }
+
+  @Post(':id/clone')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  clone(@Param('id') id: string) {
+    return this.service.cloneAsNewVersion(id);
+  }
+
+  @Post(':id/archive')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  archive(@Param('id') id: string) {
+    return this.service.archive(id);
+  }
+
+  @Get('versions/:classId/:academicYearId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  versions(@Param('classId') classId: string, @Param('academicYearId') academicYearId: string) {
+    return this.service.versions(classId, academicYearId);
+  }
+
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions(PERMISSIONS.school.manageFoundation)

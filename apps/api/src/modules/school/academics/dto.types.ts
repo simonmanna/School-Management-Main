@@ -126,3 +126,60 @@ export class UpdateTimetableSlotDto {
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() room?: string;
 }
+
+// ── Curriculum content (Competency / Topic / Unit / LearningObjective) ──────
+export class CreateCompetencyDto {
+  @IsString() @IsNotEmpty() code!: string;
+  @IsOptional() @IsString() subjectId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsString() level?: string;
+}
+export class UpdateCompetencyDto {
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() subjectId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsString() level?: string;
+}
+
+export class CreateTopicDto {
+  @IsString() @IsNotEmpty() title!: string;
+  @IsOptional() @IsString() curriculumId?: string;
+  @IsOptional() @IsString() curriculumSubjectId?: string;
+  @IsOptional() @IsString() competencyId?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+}
+export class UpdateTopicDto {
+  @IsOptional() @IsString() @IsNotEmpty() title?: string;
+  @IsOptional() @IsString() curriculumSubjectId?: string;
+  @IsOptional() @IsString() competencyId?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+}
+
+export class CreateUnitDto {
+  @IsString() @IsNotEmpty() title!: string;
+  @IsOptional() @IsString() curriculumId?: string;
+  @IsOptional() @IsString() curriculumSubjectId?: string;
+  @IsOptional() @IsString() topicId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+}
+export class UpdateUnitDto {
+  @IsOptional() @IsString() @IsNotEmpty() title?: string;
+  @IsOptional() @IsString() curriculumSubjectId?: string;
+  @IsOptional() @IsString() topicId?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(0) order?: number;
+}
+
+export class CreateLearningObjectiveDto {
+  @IsString() @IsNotEmpty() description!: string;
+  @IsOptional() @IsString() unitId?: string;
+  @IsOptional() @IsString() topicId?: string;
+  @IsOptional() @IsString() bloomLevel?: string;
+}
+export class UpdateLearningObjectiveDto {
+  @IsOptional() @IsString() @IsNotEmpty() description?: string;
+  @IsOptional() @IsString() unitId?: string;
+  @IsOptional() @IsString() topicId?: string;
+  @IsOptional() @IsString() bloomLevel?: string;
+}

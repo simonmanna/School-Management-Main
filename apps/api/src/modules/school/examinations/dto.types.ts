@@ -146,3 +146,15 @@ export class GenerateReportCardDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsString() @IsNotEmpty() termId!: string;
 }
+
+export class UpdateReportCardCommentDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  /// Class teacher's narrative for this student's report card.
+  @IsOptional() @IsString() classTeacherComment?: string;
+  /// Head teacher / principal's narrative.
+  @IsOptional() @IsString() principalComment?: string;
+  /// Competency levels keyed by competencyId (CBC strand outcomes), e.g.
+  /// { "comp_1": "proficient", "comp_2": "emerging" }.
+  @IsOptional() competencyLevels?: Record<string, string>;
+}

@@ -5,7 +5,7 @@ import {
   useExams, useCreateExam, useExamAction,
   useExamSchedules, useCreateExamSchedule,
   useGradesByClass, useBulkGrades, useGradeAction,
-  useReportCards, useGenerateReportCard, usePublishReportCard,
+  useReportCards, useGenerateReportCard, usePublishReportCard, useUpdateReportCardComment,
   useTerms, useClasses, useSubjects, useClassRoster, useStudents,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -282,6 +282,30 @@ function ReportsTab() {
           </CardContent>
         </Card>
       )}
+
+      {studentId && termId && <CommentEditor studentId={studentId} termId={termId} />}
     </div>
+  );
+}
+
+/* ── P0-A Report card comments ── */
+function CommentEditor({ studentId, termId }: { studentId: string; termId: string }) {
+  const updateComment = useUpdateReportCardComment();
+  const [teacher, setTeacher] = useState('');
+  const [principal, setPrincipal] = useState('');
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Report card comments</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        <textarea className={sel + ' h-20'} placeholder="Class teacher comment" value={teacher} onChange={(e) => setTeacher(e.target.value)} />
+        <textarea className={sel + ' h-20'} placeholder="Principal / head teacher comment" value={principal} onChange={(e) => setPrincipal(e.target.value)} />
+        <Button size="sm" disabled={updateComment.isPending} onClick={async () => {
+          try { await updateComment.mutateAsync({ studentProfileId: studentId, termId, classTeacherComment: teacher, principalComment: principal }); notify.success('Comments saved'); }
+          catch { notify.error('Save failed'); }
+        }}><FileText className="h-4 w-4" /> Save comments</Button>
+        <p className="text-xs text-muted-foreground">Comments are printed on the PDF and persist with the report card.</p>
+      </CardContent>
+    </Card>
   );
 }

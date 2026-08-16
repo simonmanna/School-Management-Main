@@ -22,6 +22,7 @@ import type {
   UpdateExamScheduleDto,
   UpdateExamTypeDto,
   UpdateGradingScaleDto,
+  UpdateReportCardCommentDto,
 } from './dto.types';
 
 @Injectable()
@@ -463,6 +464,15 @@ export class ReportCardService {
       const meanPercent = spine?.term.meanPercent != null ? Number(spine.term.meanPercent) : legacy.meanPercent;
       const totalMarks = spine ? spine.term.subjectsCount : legacy.totalMarks;
 
+      // P0-A: carry persisted teacher/principal comments + competency levels
+      // (if a card for this student+term already holds them) into the payload.
+      const prior = await tx.reportCard.findFirst({
+        where: { studentProfileId: dto.studentProfileId, termId: dto.termId },
+      });
+      const classTeacherComment = prior?.classTeacherComment ?? null;
+      const principalComment = prior?.principalComment ?? null;
+      const competencyLevels = prior?.competencyLevels ?? {};
+
       const payload = {
         system: layout.system,
         term: { id: term.id, name: term.name },
@@ -479,6 +489,9 @@ export class ReportCardService {
         columnHeaders: layout.columnHeaders,
         provenance,
         generatedAt: new Date().toISOString(),
+        classTeacherComment,
+        principalComment,
+        competencyLevels,
       };
 
       // Idempotent: the latest card per (student, term) wins. We do this by
@@ -493,6 +506,9 @@ export class ReportCardService {
           studentProfileId: dto.studentProfileId,
           termId: dto.termId,
           payload: payload as any,
+          classTeacherComment,
+          principalComment,
+          competencyLevels,
         },
         update: { payload: payload as any },
       });
@@ -509,6 +525,60 @@ export class ReportCardService {
         termId: dto.termId,
       });
       return upserted;
+    });
+  }
+
+  /**
+   * P0-A: capture/overwrite the free-text teacher & principal narratives and
+   * competency levels for a student's report card. Either regenerates the
+   * payload (so the new text appears on the PDF) or, if no card exists yet,
+   * creates a lightweight card holding only the comments until generate runs.
+   */
+  async updateComment(dto: UpdateReportCardCommentDto) {
+    const organizationId = this.tenant.organizationId;
+    const deterministicId = `rc_${dto.studentProfileId.slice(0, 12)}_${dto.termId.slice(0, 12)}`.replace(/-/g, '');
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const existing = await tx.reportCard.findFirst({ where: { id: deterministicId } });
+      const payload = existing?.payload
+        ? {
+            ...existing.payload,
+            classTeacherComment: dto.classTeacherComment ?? existing.payload.classTeacherComment ?? null,
+            principalComment: dto.principalComment ?? existing.payload.principalComment ?? null,
+            competencyLevels: dto.competencyLevels
+              ? { ...(existing.payload.competencyLevels ?? {}), ...dto.competencyLevels }
+              : existing.payload.competencyLevels ?? {},
+          }
+        : {
+            classTeacherComment: dto.classTeacherComment ?? null,
+            principalComment: dto.principalComment ?? null,
+            competencyLevels: dto.competencyLevels ?? {},
+          };
+      const card = await tx.reportCard.upsert({
+        where: { id: deterministicId },
+        create: {
+          id: deterministicId,
+          organizationId,
+          studentProfileId: dto.studentProfileId,
+          termId: dto.termId,
+          payload: payload as any,
+          classTeacherComment: dto.classTeacherComment ?? null,
+          principalComment: dto.principalComment ?? null,
+          competencyLevels: (payload as any).competencyLevels ?? {},
+        },
+        update: {
+          payload: payload as any,
+          classTeacherComment: (payload as any).classTeacherComment,
+          principalComment: (payload as any).principalComment,
+          competencyLevels: (payload as any).competencyLevels ?? {},
+        },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'ReportCard',
+        entityId: card.id,
+        action: 'update',
+        newValues: { classTeacherComment: (payload as any).classTeacherComment, principalComment: (payload as any).principalComment },
+      });
+      return card;
     });
   }
 }

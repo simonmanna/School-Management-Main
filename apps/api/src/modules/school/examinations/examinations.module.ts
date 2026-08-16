@@ -12,6 +12,9 @@ import { ReportCardTemplateService } from './report-card-template.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
 import { GradingService } from './grading.service';
 import { ExamRegistrationService, ExamVenueService } from './exam-ops.service';
+import { InvigilatorService } from './invigilator.service';
+import { LearningOutcomeService } from './outcomes.service';
+import { QuestionPaperService } from './question-paper.service';
 import {
   ExamController,
   ExamScheduleController,
@@ -19,6 +22,9 @@ import {
   GradeEntryController,
   GradingScaleController,
   ReportCardController,
+  InvigilatorController,
+  LearningOutcomeController,
+  QuestionPaperController,
 } from './examinations.controller';
 import { ExamRegistrationController, ExamVenueController } from './exam-ops.controller';
 
@@ -33,6 +39,9 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     ReportCardController,
     ExamVenueController,
     ExamRegistrationController,
+    InvigilatorController,
+    LearningOutcomeController,
+    QuestionPaperController,
   ],
   providers: [
     ExamTypeService,
@@ -46,6 +55,9 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     ReportCardTemplateService,
     ExamVenueService,
     ExamRegistrationService,
+    InvigilatorService,
+    LearningOutcomeService,
+    QuestionPaperService,
   ],
   exports: [
     ExamTypeService,
@@ -59,6 +71,9 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     ReportCardTemplateService,
     ExamVenueService,
     ExamRegistrationService,
+    InvigilatorService,
+    LearningOutcomeService,
+    QuestionPaperService,
   ],
 })
 export class ExaminationsModule {}

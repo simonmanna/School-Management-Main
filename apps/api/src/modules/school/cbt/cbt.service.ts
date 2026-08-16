@@ -8,6 +8,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { MarkingService } from '../assessment/marking.service';
+import { CbtResultBridgeService } from '../assessment/cbt-result-bridge.service';
 import { markResponse, totalAuto, type MarkableQuestion } from './cbt-marking';
 import type {
   CreatePaperDto,
@@ -138,6 +139,7 @@ export class CbtAttemptService {
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
     private readonly marking: MarkingService,
+    private readonly bridge: CbtResultBridgeService,
   ) {}
 
   /** Assemble the questions for a paper — fixed list, or a random draw from a bank. */
@@ -288,15 +290,33 @@ export class CbtAttemptService {
     });
     await tx.attemptEvent.create({ data: { organizationId, attemptId: attempt.id, type: status, payload: { autoScore: autoScore.toString(), manualPending } } });
 
-    // Post the auto-marked total to the assessment spine, if linked.
-    if (attempt.studentAssessmentId && manualPending === 0) {
-      await tx.markEntry.upsert({
-        where: { studentAssessmentId_round: { studentAssessmentId: attempt.studentAssessmentId, round: 'first' } },
-        create: { organizationId, studentAssessmentId: attempt.studentAssessmentId, round: 'first', score: autoScore },
-        update: { score: autoScore },
-      });
-      await tx.studentAssessment.updateMany({ where: { id: attempt.studentAssessmentId }, data: { status: 'graded' } });
-      await this.marking.recompute(tx, attempt.studentAssessmentId);
+    // Post the auto-marked total to the assessment spine.
+    if (manualPending === 0) {
+      if (attempt.studentAssessmentId) {
+        await tx.markEntry.upsert({
+          where: { studentAssessmentId_round: { studentAssessmentId: attempt.studentAssessmentId, round: 'first' } },
+          create: { organizationId, studentAssessmentId: attempt.studentAssessmentId, round: 'first', score: autoScore },
+          update: { score: autoScore },
+        });
+        await tx.studentAssessment.updateMany({ where: { id: attempt.studentAssessmentId }, data: { status: 'graded' } });
+        await this.marking.recompute(tx, attempt.studentAssessmentId);
+      } else {
+        // P1-A: ensure the quiz lands in the spine even when not pre-linked, so
+        // it counts toward the term result aggregation.
+        const paper = await tx.paper.findFirst({
+          where: { id: attempt.paperId },
+          include: { subject: true },
+        });
+        await this.bridge.postAttempt(tx, {
+          organizationId,
+          quizAttemptId: attempt.id,
+          paperId: attempt.paperId,
+          studentProfileId: attempt.studentProfileId,
+          autoScore: Number(autoScore),
+          maxScore: Number(attempt.maxScore),
+          subjectId: paper?.subjectId ?? null,
+        });
+      }
     }
 
     this.events.publish(EVENTS.SchoolQuizAttemptSubmitted, {

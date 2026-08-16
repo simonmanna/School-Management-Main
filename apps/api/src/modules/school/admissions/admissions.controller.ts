@@ -3,7 +3,20 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AdmissionsService } from './admissions.service';
-import { AddExamScoreDto, CreateApplicationDto, EnrollApplicationDto, UpdateApplicationDto } from './dto.types';
+import {
+  AddExamScoreDto,
+  BulkEnrollDto,
+  ChargeFeeDto,
+  CreateApplicationDto,
+  EnrollApplicationDto,
+  IssueOfferDto,
+  ReEnrollDto,
+  ScheduleInterviewDto,
+  ScoreApplicationDto,
+  TransferInDto,
+  UpdateApplicationDto,
+  WithdrawStudentDto,
+} from './dto.types';
 
 @Controller('school/admissions')
 export class AdmissionsController {
@@ -67,6 +80,78 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
   enroll(@Body() dto: EnrollApplicationDto) {
     return this.admissions.enroll(dto);
+  }
+
+  @Post('enroll/bulk')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  bulkEnroll(@Body() dto: BulkEnrollDto) {
+    return this.admissions.bulkEnroll(dto);
+  }
+
+  @Post(':id/screen')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  screen(@Param('id') id: string) {
+    return this.admissions.review(id, 'screen');
+  }
+
+  @Post(':id/interview')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  scheduleInterview(@Param('id') id: string, @Body() dto: ScheduleInterviewDto) {
+    return this.admissions.scheduleInterview(id, dto);
+  }
+
+  @Post(':id/interview/complete')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  completeInterview(@Param('id') id: string, @Body() dto: ScheduleInterviewDto) {
+    return this.admissions.completeInterview(id, dto);
+  }
+
+  @Post(':id/score')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  scoreApplication(@Param('id') id: string, @Body() dto: ScoreApplicationDto) {
+    return this.admissions.scoreApplication(id, dto);
+  }
+
+  @Post(':id/offer')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  issueOffer(@Param('id') id: string, @Body() dto: IssueOfferDto) {
+    return this.admissions.issueOffer(id, dto);
+  }
+
+  @Post(':id/offer/accept')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  acceptOffer(@Param('id') id: string) {
+    return this.admissions.acceptOffer(id);
+  }
+
+  @Post(':id/offer/decline')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  declineOffer(@Param('id') id: string) {
+    return this.admissions.declineOffer(id);
+  }
+
+  @Post(':id/fee')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  chargeApplicationFee(@Param('id') id: string, @Body() dto: ChargeFeeDto) {
+    return this.admissions.chargeApplicationFee(id, dto);
+  }
+
+  @Post('students/transfer-in')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  transferIn(@Body() dto: TransferInDto) {
+    return this.admissions.transferIn(dto);
+  }
+
+  @Post('students/:id/withdraw')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  withdrawStudent(@Param('id') id: string, @Body() dto: WithdrawStudentDto) {
+    return this.admissions.withdrawStudent(id, dto);
+  }
+
+  @Post('students/:id/re-enroll')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  reEnroll(@Param('id') id: string, @Body() dto: ReEnrollDto) {
+    return this.admissions.reEnroll(id, dto);
   }
 
   @Delete(':id')

@@ -168,3 +168,26 @@ export class SetCurrentYearDto {
 export class SetCurrentTermDto {
   @IsString() @IsNotEmpty() termId!: string;
 }
+
+// ── SubjectCategory ────────────────────────────────────────────────────────
+export class CreateSubjectCategoryDto {
+  @IsString() @IsNotEmpty() code!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() description?: string;
+}
+export class UpdateSubjectCategoryDto {
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() description?: string;
+}
+
+// ── Stream ─────────────────────────────────────────────────────────────────
+export class CreateStreamDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+}
+export class UpdateStreamDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number;
+}

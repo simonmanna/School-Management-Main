@@ -11,6 +11,10 @@ import { SchoolClassService, SectionService } from './class.service';
 import { SchoolClassController, SectionController } from './class.controller';
 import { SubjectService } from './subject.service';
 import { SubjectController } from './subject.controller';
+import { SubjectCategoryService } from './subject-category.service';
+import { SubjectCategoryController } from './subject-category.controller';
+import { StreamService } from './stream.service';
+import { StreamController } from './stream.controller';
 import { CalendarService, PeriodService } from './period-calendar.service';
 import { CalendarController, PeriodController } from './period-calendar.controller';
 
@@ -28,6 +32,8 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     SchoolClassController,
     SectionController,
     SubjectController,
+    SubjectCategoryController,
+    StreamController,
     PeriodController,
     CalendarController,
   ],
@@ -40,6 +46,8 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     SchoolClassService,
     SectionService,
     SubjectService,
+    SubjectCategoryService,
+    StreamService,
     PeriodService,
     CalendarService,
   ],
@@ -52,6 +60,8 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     SchoolClassService,
     SectionService,
     SubjectService,
+    SubjectCategoryService,
+    StreamService,
     PeriodService,
     CalendarService,
   ],

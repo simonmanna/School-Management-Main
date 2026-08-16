@@ -69,6 +69,22 @@ export class ReportCardPdfService {
       layout = await this.templates.buildLayout(card.studentProfileId, card.termId);
     }
 
+    // P0-A: build the teacher/principal/competency comment block from the card.
+    const commentBlock: Array<{ label: string; value: string }> = [];
+    if (card.classTeacherComment) commentBlock.push({ label: 'Class Teacher', value: String(card.classTeacherComment) });
+    if (card.principalComment) commentBlock.push({ label: 'Principal', value: String(card.principalComment) });
+    const compLevels = (card.competencyLevels ?? {}) as Record<string, string>;
+    const compEntries = Object.entries(compLevels);
+    if (compEntries.length > 0) {
+      const ids = compEntries.map(([id]) => id);
+      const comps = await this.prisma.client.competency.findMany({ where: { id: { in: ids } } });
+      const byId = new Map(comps.map((c: any) => [c.id, c.code ?? c.description ?? c.id]));
+      commentBlock.push({
+        label: 'Competency Levels',
+        value: compEntries.map(([id, level]) => `${byId.get(id) ?? id}: ${level}`).join('  •  '),
+      });
+    }
+
     return this.render({
       studentName: partner?.name ?? 'Student',
       admissionNo: profile?.admissionNo ?? '—',
@@ -78,6 +94,7 @@ export class ReportCardPdfService {
       motto: school?.motto ?? undefined,
       system: layout.system ?? 'UCE',
       layout,
+      comments: commentBlock,
       gpa: stored?.gpa,
       rank: stored?.rank,
       meanPercent: stored?.meanPercent,
@@ -101,6 +118,7 @@ export class ReportCardPdfService {
       eligible?: { qualifies: boolean; reason: string };
       footer?: string[];
     };
+    comments?: Array<{ label: string; value: string }>;
     gpa?: number;
     rank?: number;
     meanPercent?: number;
@@ -214,6 +232,21 @@ export class ReportCardPdfService {
         if (args.meanPercent != null) doc.text(`Mean percent: ${args.meanPercent.toFixed(1)}%`);
       }
 
+      // P0-A: teacher & principal narrative comments + competency levels.
+      const comments = args.comments ?? [];
+      if (comments.length > 0) {
+        doc.moveDown(0.4);
+        doc.moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+        doc.moveDown(0.3);
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('#000').text('Comments');
+        doc.moveDown(0.2);
+        for (const c of comments) {
+          doc.fontSize(9).font('Helvetica-Bold').fillColor('#222').text(`${c.label}: `, { continued: true });
+          doc.font('Helvetica').fillColor('#000').text(c.value);
+          doc.moveDown(0.15);
+        }
+      }
+
       // ── Footer ───────────────────────────────────────────────────
       doc.moveDown(0.8);
       doc.fontSize(8).fillColor('#888');
@@ -223,6 +256,16 @@ export class ReportCardPdfService {
 
       doc.end();
     });
+  }
+
+  /** Turn competencyId→level pairs into a readable line (code fallback). */
+  private async competencySummary(entries: Array<[string, string]>): Promise<string> {
+    const ids = entries.map(([id]) => id);
+    const comps = ids.length
+      ? await this.prisma.client.competency.findMany({ where: { id: { in: ids } } })
+      : [];
+    const byId = new Map(comps.map((c: any) => [c.id, c.code ?? c.description ?? c.id]));
+    return entries.map(([id, level]) => `${byId.get(id) ?? id}: ${level}`).join('  •  ');
   }
 
   private columnWidths(count: number, system: string): Array<{ x: number; w: number }> {

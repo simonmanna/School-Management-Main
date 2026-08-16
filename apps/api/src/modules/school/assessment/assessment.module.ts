@@ -7,6 +7,7 @@ import { AcademicRosterService } from './roster.service';
 import { RubricService } from './rubric.service';
 import { AssignmentService } from './assignment.service';
 import { ResultRunService } from './result-run.service';
+import { CbtResultBridgeService } from './cbt-result-bridge.service';
 import {
   AcademicRosterController,
   AssessmentComponentController,
@@ -22,6 +23,7 @@ import {
  * Assessment core (A1) + rosters/assignments/rubrics (A2). Exports the services
  * other modules build on — AssessmentProjectionService for the examinations
  * GradeEntry adapter, and the marking/roster services for A3's result spine.
+ * CbtResultBridgeService lets the CBT module post quiz marks into this spine.
  */
 @Module({
   controllers: [
@@ -44,6 +46,7 @@ import {
     RubricService,
     AssignmentService,
     ResultRunService,
+    CbtResultBridgeService,
   ],
   exports: [
     AssessmentPolicyService,
@@ -55,6 +58,7 @@ import {
     RubricService,
     AssignmentService,
     ResultRunService,
+    CbtResultBridgeService,
   ],
 })
 export class AssessmentModule {}

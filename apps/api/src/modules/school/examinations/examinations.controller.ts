@@ -24,7 +24,14 @@ import {
   type UpdateExamScheduleDto,
   type UpdateExamTypeDto,
   type UpdateGradingScaleDto,
+  type UpdateReportCardCommentDto,
 } from './dto.types';
+import { InvigilatorService } from './invigilator.service';
+import { CreateInvigilatorDto, UpdateInvigilatorDto, AssignInvigilatorDto } from './invigilator.dto';
+import { LearningOutcomeService } from './outcomes.service';
+import { CreateLearningOutcomeDto, UpdateLearningOutcomeDto, RecordOutcomeAchievementDto } from './outcomes.dto';
+import { QuestionPaperService } from './question-paper.service';
+import { CreateQuestionPaperDto, UpdateQuestionPaperDto } from './question-paper.dto';
 
 @Controller('school/exam-types')
 export class ExamTypeController {
@@ -251,6 +258,13 @@ export class ReportCardController {
     return this.service.unpublish(id);
   }
 
+  /** P0-A: persist teacher/principal comments + competency levels for a card. */
+  @Post('comment')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  updateComment(@Body() dto: UpdateReportCardCommentDto) {
+    return this.service.updateComment(dto);
+  }
+
   @Get('by-student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
   async byStudent(@Param('studentProfileId') id: string) {
@@ -268,5 +282,146 @@ export class ReportCardController {
       'Content-Length': buf.length,
     });
     return new StreamableFile(buf);
+  }
+}
+
+@Controller('school/invigilators')
+export class InvigilatorController {
+  constructor(private readonly service: InvigilatorService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.read)
+  list(@Query() q: PaginationDto) {
+    return this.service.list(q);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  create(@Body() dto: CreateInvigilatorDto) {
+    return this.service.create(dto);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  update(@Param('id') id: string, @Body() dto: UpdateInvigilatorDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+
+  /** Assign an invigilator to an exam schedule (clash-checked). */
+  @Post('assign')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  assign(@Body() dto: AssignInvigilatorDto) {
+    return this.service.assign(dto);
+  }
+
+  @Delete('assign/:examScheduleId/:invigilatorId')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  unassign(@Param('examScheduleId') examScheduleId: string, @Param('invigilatorId') invigilatorId: string) {
+    return this.service.unassign(examScheduleId, invigilatorId);
+  }
+
+  @Get('by-schedule/:examScheduleId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  bySchedule(@Param('examScheduleId') examScheduleId: string) {
+    return this.service.bySchedule(examScheduleId);
+  }
+}
+
+@Controller('school/learning-outcomes')
+export class LearningOutcomeController {
+  constructor(private readonly service: LearningOutcomeService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.read)
+  list(@Query() q: PaginationDto) {
+    return this.service.list(q);
+  }
+
+  @Get(':id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
+  create(@Body() dto: CreateLearningOutcomeDto) {
+    return this.service.create(dto);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
+  update(@Param('id') id: string, @Body() dto: UpdateLearningOutcomeDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+
+  /** P1-B: record a student's achievement against an outcome (idempotent). */
+  @Post('achievement')
+  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  recordAchievement(@Body() dto: RecordOutcomeAchievementDto) {
+    return this.service.recordAchievement(dto);
+  }
+
+  @Get('achievements/student/:studentProfileId/term/:termId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  achievementsByStudentTerm(@Param('studentProfileId') studentProfileId: string, @Param('termId') termId: string) {
+    return this.service.achievementsByStudentTerm(studentProfileId, termId);
+  }
+
+  @Get('achievements/subject/:subjectId/term/:termId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  achievementsBySubjectTerm(@Param('subjectId') subjectId: string, @Param('termId') termId: string) {
+    return this.service.achievementsBySubjectTerm(subjectId, termId);
+  }
+}
+
+@Controller('school/question-papers')
+export class QuestionPaperController {
+  constructor(private readonly service: QuestionPaperService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.read)
+  list(@Query() q: PaginationDto) {
+    return this.service.list(q);
+  }
+
+  @Get('by-schedule/:examScheduleId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  bySchedule(@Param('examScheduleId') examScheduleId: string) {
+    return this.service.bySchedule(examScheduleId);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  create(@Body() dto: CreateQuestionPaperDto) {
+    return this.service.create(dto);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  update(@Param('id') id: string, @Body() dto: UpdateQuestionPaperDto) {
+    return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 }

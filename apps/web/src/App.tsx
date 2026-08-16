@@ -48,6 +48,8 @@ import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
 import { SchoolCbtPage } from '@/pages/school/cbt';
 import { SchoolCertificationPage } from '@/pages/school/certification';
+import { SchoolLearningOutcomesPage } from '@/pages/school/learning-outcomes';
+import { SchoolCompetencyReportPage } from '@/pages/school/competency-report';
 import { SchoolAnalyticsPage } from '@/pages/school/analytics';
 import { SchoolPortalsPage } from '@/pages/school/portals';
 import { DealsPage } from '@/pages/crm/deals';
@@ -398,6 +400,8 @@ export function App() {
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
+          <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
+          <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
           <Route path="/school/cbt" element={<SchoolCbtPage />} />
           <Route path="/school/certification" element={<SchoolCertificationPage />} />
           <Route path="/school/analytics" element={<SchoolAnalyticsPage />} />

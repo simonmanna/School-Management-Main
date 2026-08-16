@@ -236,6 +236,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/assessment-ops', label: 'Rosters & Assignments', icon: ClipboardList, permission: PERMISSIONS.school.read },
       { to: '/school/results', label: 'Result Spine', icon: ScrollText, permission: PERMISSIONS.school.read },
       { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.read },
+      { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.read },
       { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read },
       { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },

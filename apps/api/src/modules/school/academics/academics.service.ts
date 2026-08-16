@@ -22,12 +22,16 @@ import type {
 export class CurriculumService extends BaseCrudService<Curriculum, CreateCurriculumDto, UpdateCurriculumDto> {
   protected readonly entityName = 'Curriculum';
   protected readonly searchFields = ['name'];
-  protected readonly defaultInclude = { subjects: { include: { subject: true } } };
+  protected readonly defaultInclude = {
+    subjects: { include: { subject: true } },
+    topics: { include: { units: { include: { learningObjectives: true } } } },
+  };
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
+    private readonly events: EventBus,
   ) {
     super(prisma.client.curriculum as unknown as CrudDelegate);
   }
@@ -35,6 +39,7 @@ export class CurriculumService extends BaseCrudService<Curriculum, CreateCurricu
   async create(dto: CreateCurriculumDto): Promise<Curriculum> {
     return this.prisma.client.$transaction(async (tx: any) => {
       const organizationId = this.tenant.organizationId;
+      // v1 is always a fresh draft.
       const row = await tx.curriculum.create({
         data: {
           organizationId,
@@ -42,19 +47,174 @@ export class CurriculumService extends BaseCrudService<Curriculum, CreateCurricu
           academicYearId: dto.academicYearId,
           name: dto.name,
           description: dto.description ?? null,
-          subjects: {
-            create: dto.subjects.map((s) => ({
-              subjectId: s.subjectId,
-              periodsPerWeek: s.periodsPerWeek,
-              isCore: s.isCore ?? true,
-            })),
-          },
+          version: 1,
+          status: 'draft',
         },
-        include: { subjects: { include: { subject: true } } },
+        include: this.defaultInclude,
+      });
+      await tx.curriculumSubject.createMany({
+        data: dto.subjects.map((s: any) => ({
+          organizationId,
+          curriculumId: row.id,
+          subjectId: s.subjectId,
+          periodsPerWeek: s.periodsPerWeek,
+          isCore: s.isCore ?? true,
+        })),
       });
       await this.audit.recordInTx(tx, { entity: 'Curriculum', entityId: row.id, action: 'create', newValues: row });
-      return row;
+      this.events.publish(EVENTS.SchoolCurriculumCreated, { organizationId, curriculumId: row.id, version: 1 });
+      return tx.curriculum.findFirst({ where: { id: row.id }, include: this.defaultInclude }) as Promise<Curriculum>;
     });
+  }
+
+  /**
+   * Publish a draft curriculum version. Immutable once published: further edits must
+   * go through cloneAsNewVersion. Uses the WorkflowService transition so permission
+   * gating is centralised.
+   */
+  async publish(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const cur = await tx.curriculum.findFirst({ where: { id } });
+      if (!cur) throw new NotFoundException(`Curriculum ${id} not found`);
+      if (cur.status !== 'draft') {
+        throw new BadRequestException(`Cannot publish a curriculum in status '${cur.status}' (must be draft).`);
+      }
+      await tx.curriculum.updateMany({ where: { id }, data: { status: 'published', publishedAt: new Date() } });
+      await this.audit.recordInTx(tx, { entity: 'Curriculum', entityId: id, action: 'update', oldValues: { status: cur.status }, newValues: { status: 'published' } });
+      this.events.publish(EVENTS.SchoolCurriculumPublished, { organizationId: this.tenant.organizationId, curriculumId: id, version: cur.version });
+      return tx.curriculum.findFirst({ where: { id }, include: this.defaultInclude });
+    });
+  }
+
+  /** Archive a published version (retained for history; not deletable). */
+  async archive(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const cur = await tx.curriculum.findFirst({ where: { id } });
+      if (!cur) throw new NotFoundException(`Curriculum ${id} not found`);
+      if (cur.status !== 'published') {
+        throw new BadRequestException(`Only published curriculum versions can be archived (current: '${cur.status}').`);
+      }
+      await tx.curriculum.updateMany({ where: { id }, data: { status: 'archived', archivedAt: new Date() } });
+      await this.audit.recordInTx(tx, { entity: 'Curriculum', entityId: id, action: 'update', oldValues: { status: cur.status }, newValues: { status: 'archived' } });
+      return tx.curriculum.findFirst({ where: { id }, include: this.defaultInclude });
+    });
+  }
+
+  /**
+   * Clone a published/frozen version into a new editable draft (version+1), copying
+   * subjects, topics, units, and learning objectives. This is how curriculum edits
+   * preserve a complete auditable history.
+   */
+  async cloneAsNewVersion(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const src = await tx.curriculum.findFirst({
+        where: { id },
+        include: {
+          subjects: true,
+          topics: { include: { units: { include: { learningObjectives: true } } } },
+        },
+      });
+      if (!src) throw new NotFoundException(`Curriculum ${id} not found`);
+
+      const nextVersion = (src.version ?? 1) + 1;
+      const clone = await tx.curriculum.create({
+        data: {
+          organizationId: src.organizationId,
+          classId: src.classId,
+          academicYearId: src.academicYearId,
+          name: src.name,
+          description: src.description,
+          version: nextVersion,
+          status: 'draft',
+          parentVersionId: src.id,
+        },
+      });
+
+      // Copy subjects
+      if (src.subjects?.length) {
+        await tx.curriculumSubject.createMany({
+          data: src.subjects.map((s: any) => ({
+            organizationId: src.organizationId,
+            curriculumId: clone.id,
+            subjectId: s.subjectId,
+            periodsPerWeek: s.periodsPerWeek,
+            isCore: s.isCore,
+          })),
+        });
+      }
+
+      // Copy topics → units → learning objectives
+      for (const topic of src.topics ?? []) {
+        const newTopic = await tx.topic.create({
+          data: {
+            organizationId: src.organizationId,
+            curriculumId: clone.id,
+            curriculumSubjectId: topic.curriculumSubjectId,
+            competencyId: topic.competencyId,
+            title: topic.title,
+            order: topic.order,
+          },
+        });
+        for (const unit of topic.units ?? []) {
+          const newUnit = await tx.unit.create({
+            data: {
+              organizationId: src.organizationId,
+              curriculumId: clone.id,
+              curriculumSubjectId: unit.curriculumSubjectId,
+              topicId: newTopic.id,
+              title: unit.title,
+              description: unit.description,
+              order: unit.order,
+            },
+          });
+          if (unit.learningObjectives?.length) {
+            await tx.learningObjective.createMany({
+              data: unit.learningObjectives.map((lo: any) => ({
+                organizationId: src.organizationId,
+                unitId: newUnit.id,
+                topicId: newTopic.id,
+                description: lo.description,
+                bloomLevel: lo.bloomLevel,
+              })),
+            });
+          }
+        }
+      }
+
+      await this.audit.recordInTx(tx, {
+        entity: 'Curriculum', entityId: clone.id, action: 'create',
+        newValues: { version: nextVersion, parentVersionId: src.id, status: 'draft' },
+      });
+      this.events.publish(EVENTS.SchoolCurriculumVersionCloned, {
+        organizationId: this.tenant.organizationId, curriculumId: clone.id,
+        fromVersion: src.version, toVersion: nextVersion,
+      });
+      return tx.curriculum.findFirst({ where: { id: clone.id }, include: this.defaultInclude });
+    });
+  }
+
+  /** List all versions of a (classId, academicYearId) curriculum lineage. */
+  async versions(classId: string, academicYearId: string) {
+    return this.prisma.client.curriculum.findMany({
+      where: { classId, academicYearId },
+      orderBy: { version: 'asc' },
+      include: { parentVersion: true },
+    });
+  }
+
+  /**
+   * Override: published/archived curriculum versions are immutable. Edits must go
+   * through cloneAsNewVersion. Drafts may still be patched (e.g. rename, description).
+   */
+  async update(id: string, data: UpdateCurriculumDto): Promise<Curriculum> {
+    const cur = await this.prisma.client.curriculum.findFirst({ where: { id } });
+    if (!cur) throw new NotFoundException(`${this.entityName} ${id} not found`);
+    if (cur.status !== 'draft') {
+      throw new BadRequestException(
+        `Curriculum v${cur.version} is '${cur.status}' and immutable. Edit via cloneAsNewVersion().`,
+      );
+    }
+    return super.update(id, data);
   }
 }
 
