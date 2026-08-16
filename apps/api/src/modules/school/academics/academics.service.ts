@@ -325,27 +325,53 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     // Breaks and free periods are intentionally not bookable resources — skip.
     if (slot.type === 'break' || slot.type === 'free') return [];
     const conflicts: string[] = [];
-    const where = (extra: Record<string, unknown>) => ({
+    const excl = excludeSlotId ? { id: { not: excludeSlotId } } : {};
+    const base = (extra: Record<string, unknown>) => ({
       organizationId: undefined as any, // tenancy extension fills this
       dayOfWeek: slot.dayOfWeek,
-      periodId: slot.periodId,
       ...extra,
-      ...(excludeSlotId ? { id: { not: excludeSlotId } } : {}),
+      ...excl,
     });
+
+    // Resolve the ordered period list to validate multi-period (double) spans.
+    const span = slot.spanPeriods ?? 1;
+    let periodIds: string[] = [slot.periodId];
+    if (span > 1) {
+      const ordered = (await this.prisma.client.period.findMany({ orderBy: { order: 'asc' } }))
+        .map((p: any) => p.id);
+      const idx = ordered.indexOf(slot.periodId);
+      if (idx < 0 || idx + span > ordered.length) {
+        conflicts.push(`Double period spans past the end of the day`);
+      } else {
+        periodIds = ordered.slice(idx, idx + span);
+      }
+    }
+
+    // Teacher availability: cannot place where the teacher is unavailable.
     if (slot.teacherPartnerId) {
+      const avail = await this.prisma.client.teacherAvailability.findFirst({
+        where: { teacherPartnerId: slot.teacherPartnerId, dayOfWeek: slot.dayOfWeek,
+          periodId: { in: periodIds }, status: 'unavailable' } as any,
+      });
+      if (avail) conflicts.push(`Teacher unavailable at this period (${avail.reason ?? ''})`);
+
       const teacherClash = await this.prisma.client.timetableSlot.findFirst({
-        where: where({ teacherPartnerId: slot.teacherPartnerId }),
+        where: base({ teacherPartnerId: slot.teacherPartnerId, periodId: { in: periodIds } }),
       });
       if (teacherClash) conflicts.push(`Teacher double-booked (slot ${teacherClash.id})`);
     }
-    if (slot.room) {
+
+    // Room: prefer managed teachingRoomId, fall back to free-text room label.
+    const roomKey = slot.teachingRoomId ? { teachingRoomId: slot.teachingRoomId } : (slot.room ? { room: slot.room } : null);
+    if (roomKey) {
       const roomClash = await this.prisma.client.timetableSlot.findFirst({
-        where: where({ room: slot.room }),
+        where: base({ ...roomKey, periodId: { in: periodIds } }),
       });
-      if (roomClash) conflicts.push(`Room ${slot.room} double-booked (slot ${roomClash.id})`);
+      if (roomClash) conflicts.push(`Room double-booked (slot ${roomClash.id})`);
     }
+
     const classClash = await this.prisma.client.timetableSlot.findFirst({
-      where: where({ classId: slot.classId, sectionId: slot.sectionId ?? null }),
+      where: base({ classId: slot.classId, sectionId: slot.sectionId ?? null, periodId: { in: periodIds } }),
     });
     if (classClash) conflicts.push(`Class already has a lesson at this time (slot ${classClash.id})`);
     return conflicts;

@@ -98,6 +98,9 @@ export class CreateTimetableSlotDto {
   @IsOptional() @IsString() room?: string;
   @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
   @IsOptional() @IsString() substituteTeacherId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(4) spanPeriods?: number;
+  @IsOptional() @IsIn(['all', 'A', 'B']) cycle?: string;
+  @IsOptional() @IsString() teachingRoomId?: string;
 }
 
 export class BulkTimetableSlot {
@@ -109,6 +112,9 @@ export class BulkTimetableSlot {
   @IsOptional() @IsString() room?: string;
   @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
   @IsOptional() @IsString() substituteTeacherId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(4) spanPeriods?: number;
+  @IsOptional() @IsIn(['all', 'A', 'B']) cycle?: string;
+  @IsOptional() @IsString() teachingRoomId?: string;
 }
 
 export class BulkTimetableDto {
@@ -132,6 +138,9 @@ export class UpdateTimetableSlotDto {
   @IsOptional() @IsString() room?: string;
   @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
   @IsOptional() @IsString() substituteTeacherId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(4) spanPeriods?: number;
+  @IsOptional() @IsIn(['all', 'A', 'B']) cycle?: string;
+  @IsOptional() @IsString() teachingRoomId?: string;
 }
 
 // ── Curriculum content (Competency / Topic / Unit / LearningObjective) ──────

@@ -5,6 +5,7 @@ import {
   TeacherAssignmentService,
   TimetableService,
 } from './academics.service';
+import { TimetableAdvancedService } from './timetable-advanced.service';
 import {
   CompetencyService,
   TopicService,
@@ -17,6 +18,7 @@ import {
   TeacherAssignmentController,
   TimetableController,
 } from './academics.controller';
+import { TimetableAdvancedController } from './timetable-advanced.controller';
 import {
   CompetencyController,
   TopicController,
@@ -30,6 +32,7 @@ import {
     LessonPlanController,
     TeacherAssignmentController,
     TimetableController,
+    TimetableAdvancedController,
     CompetencyController,
     TopicController,
     UnitController,
@@ -40,6 +43,7 @@ import {
     LessonPlanService,
     TeacherAssignmentService,
     TimetableService,
+    TimetableAdvancedService,
     CompetencyService,
     TopicService,
     UnitService,
@@ -50,6 +54,7 @@ import {
     LessonPlanService,
     TeacherAssignmentService,
     TimetableService,
+    TimetableAdvancedService,
     CompetencyService,
     TopicService,
     UnitService,

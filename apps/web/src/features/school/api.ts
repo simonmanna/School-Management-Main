@@ -1046,6 +1046,98 @@ export function usePublishTimetable() {
   });
 }
 
+/* ── Timetable advanced (P1/P2/P3) ──────────────────────────────────────── */
+
+export function useStudentTimetable(studentProfileId: string | undefined, date?: string) {
+  return useQuery({
+    queryKey: ['school', 'timetable-student', studentProfileId, date],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/student/${studentProfileId}${date ? `?date=${date}` : ''}`)).data),
+  });
+}
+
+export function useTeachingRooms() {
+  return useQuery({
+    queryKey: ['school', 'teaching-rooms'],
+    queryFn: async () => (await api.get<unknown>(`${S}/timetable/rooms`)).data as any[],
+  });
+}
+export function useCreateTeachingRoom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post(`${S}/timetable/rooms`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teaching-rooms'] }),
+  });
+}
+export function useDeleteTeachingRoom() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`${S}/timetable/rooms/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teaching-rooms'] }),
+  });
+}
+
+export function useTeacherAvailability(teacherPartnerId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'teacher-avail', teacherPartnerId],
+    enabled: !!teacherPartnerId,
+    queryFn: async () => (await api.get<unknown>(`${S}/timetable/availability/teacher/${teacherPartnerId}`)).data as any[],
+  });
+}
+export function useSetAvailability() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post(`${S}/timetable/availability`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'teacher-avail', v.teacherPartnerId] }),
+  });
+}
+
+export function useRotation(classId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'rotation', classId],
+    enabled: !!classId,
+    queryFn: async () => (await api.get<unknown>(`${S}/timetable/rotation/${classId}`)).data as any,
+  });
+}
+export function useSetRotation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ classId, activeCycle }: { classId: string; activeCycle: string }) =>
+      (await api.post(`${S}/timetable/rotation/${classId}`, { activeCycle })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'rotation', v.classId] }),
+  });
+}
+
+export function useOverrides(classId: string | undefined, sectionId?: string) {
+  return useQuery({
+    queryKey: ['school', 'overrides', classId, sectionId],
+    enabled: !!classId,
+    queryFn: async () =>
+      (await api.get<unknown>(`${S}/timetable/overrides/${classId}${sectionId ? `?sectionId=${sectionId}` : ''}`)).data as any[],
+  });
+}
+export function useCreateOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post(`${S}/timetable/overrides`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'overrides', v.classId] }),
+  });
+}
+export function useDeleteOverride() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`${S}/timetable/overrides/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'overrides'] }),
+  });
+}
+
+export function useGenerateTimetable() {
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post(`${S}/timetable/generate`, dto)).data,
+  });
+}
+
 export interface Period { id: string; name: string; startTime: string; endTime: string; order: number }
 
 export function usePeriods() {

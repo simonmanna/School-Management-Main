@@ -10803,6 +10803,13 @@ model TimetableSlot {
   substituteTeacherId String?
   /// Published to students/staff (a class's whole grid is published together).
   published        Boolean  @default(false)
+  /// Number of consecutive periods this slot spans (2 = double period).
+  spanPeriods      Int      @default(1)
+  /// Rotating-schedule cycle this slot belongs to: 'all' | 'A' | 'B'.
+  cycle            String   @default("all")
+  /// Optional link to a managed teaching room (vs the free-text `room` label).
+  teachingRoomId   String?
+  teachingRoom     TeachingRoom? @relation(fields: [teachingRoomId], references: [id])
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -10820,6 +10827,82 @@ model TimetableSlot {
   @@index([teacherPartnerId, dayOfWeek])
   @@index([periodId, dayOfWeek])
   @@index([streamId])
+  @@index([teachingRoomId])
+}
+
+/// Managed teaching rooms (labs, halls) used for timetable room booking/availability.
+model TeachingRoom {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  code           String?
+  capacity       Int      @default(30)
+  type           String   @default("classroom") // classroom | lab | hall | gym
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+
+  timetableSlots TimetableSlot[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Teacher weekly availability: which periods a teacher is free / busy / unavailable.
+model TeacherAvailability {
+  id               String   @id @default(uuid())
+  organizationId   String
+  teacherPartnerId String
+  dayOfWeek        Int // 1=Mon ... 7=Sun
+  periodId         String
+  /// 'available' | 'busy' | 'unavailable'. Drives conflict detection.
+  status           String   @default("available")
+  reason           String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([organizationId, teacherPartnerId, dayOfWeek, periodId])
+  @@index([organizationId])
+  @@index([teacherPartnerId, dayOfWeek])
+}
+
+/// Per-class active rotating-schedule cycle ('all' | 'A' | 'B').
+model TimetableRotation {
+  id          String   @id @default(uuid())
+  organizationId String
+  classId     String   @unique
+  /// Currently active cycle shown on the grid.
+  activeCycle String   @default("all")
+  /// When the active cycle last switched.
+  switchedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+/// Temporary timetable changes: swap a slot's subject/teacher for a date range.
+model TimetableOverride {
+  id             String   @id @default(uuid())
+  organizationId String
+  classId        String
+  sectionId      String?
+  dayOfWeek      Int
+  periodId       String
+  /// Inclusive date range the override is active for.
+  effectiveFrom  DateTime
+  effectiveTo    DateTime
+  /// Replacement values (optional). Null = cancellation for the window.
+  subjectId      String?
+  teacherPartnerId String?
+  reason         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+
+  @@index([organizationId])
+  @@index([classId, dayOfWeek, periodId])
 }
 
 enum AttendanceStatus {
