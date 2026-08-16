@@ -4145,6 +4145,8 @@ model File {
   // certificates and medical records inherit its access control and checksums.
   studentDocuments     StudentDocument[]     @relation("studentDocuments")
   applicationDocuments ApplicationDocument[] @relation("applicationDocuments")
+  schoolDocs           SchoolDoc[]           @relation("schoolDocFile")
+  schoolDocSignatures  SchoolDoc[]           @relation("schoolDocSignature")
 
   @@index([organizationId, ownerType, ownerId])
   @@index([organizationId, createdAt])
@@ -10208,6 +10210,78 @@ model StudentDocument {
 
   @@index([organizationId])
   @@index([studentProfileId])
+}
+
+/// Unified school document-management store (P0-P2). Supersedes the scattered
+/// per-entity doc tables for management purposes: one model covers student,
+/// staff and admission documents across every category (certificates, report
+/// cards, contracts, medical, ID, etc.) with expiry, verification, digital
+/// signature, versioning and per-document secure-access scoping. Files live in
+/// the platform File service (access control + checksums inherited).
+model SchoolDoc {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// 'student' | 'staff' | 'admission' | 'general'.
+  ownerType      String   @default("student")
+  /// FK to StudentProfile / StaffProfile / AdmissionApplication depending on ownerType.
+  ownerId        String
+  /// High-level category: 'student_doc' | 'staff_doc' | 'admission_doc' |
+  /// 'certificate' | 'report_card' | 'contract' | 'medical' | 'id_doc' | 'other'.
+  category       String   @default("other")
+  /// Fine-grained type within the category (e.g. 'birth_cert', 'passport', 'contract').
+  type           String
+  title          String
+  fileId         String
+  /// Optional signed-copy file (digital signature capture).
+  signatureFileId String?
+  /// Optimistic-lock / version counter; bumped on every content or metadata edit.
+  version        Int      @default(1)
+  /// ISO date the document becomes invalid (drives expiry alerts).
+  expiresAt      DateTime?
+  /// Per-document secure-access: empty array = org-wide (any school role);
+  /// non-empty = restricted to these role keys (e.g. ['school:medical']).
+  accessRoles    Json     @default("[]")
+  verified       Boolean  @default(false)
+  verifiedById   String?
+  verifiedAt     DateTime?
+  signedAt       DateTime?
+  signedById     String?
+  notes          String?
+  customFields   Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+
+  file           File     @relation("schoolDocFile", fields: [fileId], references: [id], onDelete: Restrict)
+  signatureFile  File?    @relation("schoolDocSignature", fields: [signatureFileId], references: [id])
+  versions       SchoolDocVersion[]
+
+  @@index([organizationId])
+  @@index([organizationId, ownerType, ownerId])
+  @@index([organizationId, category])
+  @@index([organizationId, expiresAt])
+}
+
+/// Immutable version snapshot for a SchoolDoc (digital-signature + versioning).
+model SchoolDocVersion {
+  id             String   @id @default(uuid())
+  organizationId String
+  schoolDocId    String
+  versionNo      Int
+  /// Snapshot of title/type/category/expiresAt/notes/accessRoles at save time.
+  snapshot       Json
+  /// File captured with this version (if re-uploaded).
+  fileId         String?
+  changeNote     String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+
+  schoolDoc SchoolDoc @relation(fields: [schoolDocId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolDocId, versionNo])
+  @@index([organizationId])
+  @@index([schoolDocId])
 }
 
 model StaffProfile {

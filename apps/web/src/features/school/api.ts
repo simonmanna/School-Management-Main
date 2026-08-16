@@ -2414,3 +2414,117 @@ export function useDeleteGradingScale() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
   });
 }
+
+// ── Document Management (P0-P2): unified school documents ─────────────────
+export interface SchoolDocRow {
+  id: string;
+  ownerType: 'student' | 'staff' | 'admission' | 'general';
+  ownerId: string;
+  category: string;
+  type: string;
+  title: string;
+  fileId: string;
+  signatureFileId?: string | null;
+  version: number;
+  expiresAt?: string | null;
+  accessRoles: string[];
+  verified: boolean;
+  verifiedById?: string | null;
+  verifiedAt?: string | null;
+  signedAt?: string | null;
+  signedById?: string | null;
+  notes?: string | null;
+  file?: { filename: string; contentType: string; byteSize: number } | null;
+  signatureFile?: { filename: string; contentType: string } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface SchoolDocVersionRow {
+  id: string;
+  versionNo: number;
+  snapshot: any;
+  fileId?: string | null;
+  changeNote?: string | null;
+  createdById?: string | null;
+  createdAt: string;
+}
+
+export function useSchoolDocs(filters: { ownerType?: string; ownerId?: string; category?: string; type?: string; verified?: boolean; expiry?: 'expiring' | 'expired'; expiryDays?: number } = {}) {
+  const qc = useQueryClient();
+  const key = ['school', 'docs', JSON.stringify(filters)];
+  const query = useQuery<SchoolDocRow[]>({
+    queryKey: key,
+    queryFn: async () => {
+      const p = new URLSearchParams();
+      Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') p.set(k, String(v)); });
+      return (await api.get<SchoolDocRow[]>(`${S}/documents?${p.toString()}`)).data;
+    },
+  });
+  return { ...query, refetch: () => qc.invalidateQueries({ queryKey: key }) };
+}
+
+export function useCreateSchoolDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post<SchoolDocRow>(`${S}/documents`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'docs'] }),
+  });
+}
+
+export function useVerifySchoolDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, verified }: { id: string; verified: boolean }) =>
+      (await api.post(`${S}/documents/${id}/verify`, { verified })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'docs'] }),
+  });
+}
+
+export function useSignSchoolDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, signatureFileId }: { id: string; signatureFileId: string }) =>
+      (await api.post(`${S}/documents/${id}/sign`, { signatureFileId })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'docs'] }),
+  });
+}
+
+export function useUpdateSchoolDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: any }) =>
+      (await api.patch<SchoolDocRow>(`${S}/documents/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'docs'] }),
+  });
+}
+
+export function useDeleteSchoolDoc() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`${S}/documents/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'docs'] }),
+  });
+}
+
+export function useSchoolDocVersions(id: string | undefined) {
+  return useQuery<SchoolDocVersionRow[]>({
+    queryKey: ['school', 'doc-versions', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<SchoolDocVersionRow[]>(`${S}/documents/${id}/versions`)).data,
+  });
+}
+
+/** Upload a file via the platform file service; returns the minted file id. */
+export async function uploadSchoolFile(file: File, ownerType = 'school_doc', ownerId = 'school'): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('ownerType', ownerType);
+  fd.append('ownerId', ownerId);
+  const res = await api.post<{ id: string }>('/files/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  return res.data.id;
+}
+
+/** Signed download URL helper for a stored file. */
+export function fileUrl(id: string): string {
+  return `/api/v1/files/${id}/download`;
+}

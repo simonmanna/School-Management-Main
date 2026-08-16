@@ -323,6 +323,8 @@ export const ORG_SCOPED = new Set<string>([
   'StudentGuardian',
   'MedicalRecord',
   'StudentDocument',
+  'SchoolDoc',
+  'SchoolDocVersion',
   'StaffProfile',
   'StaffStatusHistory',
   'Position',

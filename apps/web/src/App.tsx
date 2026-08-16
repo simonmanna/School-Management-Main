@@ -49,6 +49,7 @@ import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
 import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
 import { SchoolCbtPage } from '@/pages/school/cbt';
 import { SchoolCertificationPage } from '@/pages/school/certification';
+import SchoolDocumentsPage from '@/pages/school/documents';
 import { SchoolLearningOutcomesPage } from '@/pages/school/learning-outcomes';
 import { SchoolCompetencyReportPage } from '@/pages/school/competency-report';
 import { SchoolAnalyticsPage } from '@/pages/school/analytics';
@@ -428,6 +429,7 @@ export function App() {
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
           <Route path="/school/cbt" element={<SchoolCbtPage />} />
           <Route path="/school/certification" element={<SchoolCertificationPage />} />
+          <Route path="/school/documents" element={<SchoolDocumentsPage />} />
           <Route path="/school/analytics" element={<SchoolAnalyticsPage />} />
           <Route path="/school/portals" element={<SchoolPortalsPage />} />
           <Route path="/crm/deals" element={<DealsPage />} />

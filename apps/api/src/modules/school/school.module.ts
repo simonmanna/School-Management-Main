@@ -22,6 +22,7 @@ import { HostelModule } from './hostel/hostel.module';
 import { CafeteriaModule } from './cafeteria/cafeteria.module';
 import { MealsModule } from './meals/meals.module';
 import { ReportingModule } from './reporting/reporting.module';
+import { DocumentsModule } from './documents/school-documents.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
 
@@ -59,6 +60,7 @@ import { SchoolController } from './school.controller';
     CafeteriaModule,
     MealsModule,
     ReportingModule,
+    DocumentsModule,
   ],
   controllers: [SchoolController],
   providers: [SchoolService],

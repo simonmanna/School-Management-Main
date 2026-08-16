@@ -407,6 +407,8 @@ export const PERMISSIONS = {
     readAnalytics: 'school:analytics:read',
     exportAnalytics: 'school:analytics:export',
     manageFees: 'school:fees:write',
+    manageDocuments: 'school:documents:write',
+    readDocuments: 'school:documents:read',
     collectPayments: 'school:fees:collect',
     refundFees: 'school:fees:refund',
     manageLibrary: 'school:library:write',

@@ -204,6 +204,14 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Document Management',
+    icon: FileText,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/documents', label: 'Documents', icon: FileText, permission: PERMISSIONS.school.read },
+    ],
+  },
+  {
     title: 'Admissions & Enrollment',
     icon: FilePlus2,
     flag: 'VITE_ENABLE_SCHOOL',
