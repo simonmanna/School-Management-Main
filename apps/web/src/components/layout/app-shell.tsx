@@ -783,7 +783,7 @@ export function AppShell() {
       <aside
         className={cn(
           'sticky top-0 hidden h-screen shrink-0 flex-col transition-all duration-200 md:flex print:hidden',
-          sidebarCollapsed ? 'w-20' : 'w-72',
+          sidebarCollapsed ? 'w-20' : 'w-80',
         )}
         style={{ background: sb.sidebar }}
       >
