@@ -10910,6 +10910,8 @@ enum AttendanceStatus {
   absent
   late
   excused
+  early_departure
+  unexcused
 }
 
 model StudentAttendance {
@@ -10941,6 +10943,27 @@ model StudentAttendance {
   @@index([classId, date])
   @@index([organizationId, date])
   @@index([organizationId, studentProfileId, date])
+}
+
+/// P1: attendance alert thresholds. An org-level default plus optional
+/// per-class overrides. `minAttendancePct` is the floor below which a student
+/// is flagged and guardians are notified. `notifyAbsent` / `notifyLate` /
+/// `notifyEarly` toggle the per-event parent alerts; `notifyBelowThreshold`
+/// toggles the rolling roll-up alert.
+model AttendanceThreshold {
+  id                      String   @id @default(uuid())
+  organizationId          String
+  classId                 String?  // null = org default
+  minAttendancePct        Float    @default(75)
+  notifyAbsent            Boolean  @default(true)
+  notifyLate              Boolean  @default(true)
+  notifyEarly             Boolean  @default(true)
+  notifyBelowThreshold    Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, classId])
 }
 
 model HomeworkAssignment {

@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Patch, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentAttendanceService } from './student-attendance.service';
-import { BulkMarkAttendanceDto } from './dto.types';
+import { BulkMarkAttendanceDto, CorrectAttendanceDto, UpsertAttendanceThresholdDto } from './dto.types';
 
 @Controller('school/attendance')
 export class StudentAttendanceController {
@@ -34,5 +34,25 @@ export class StudentAttendanceController {
     @Query('to') to: string,
   ) {
     return this.attendance.byStudent(id, from, to);
+  }
+
+  /** P0d: correct a single attendance record (audit-logged). */
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.school.takeAttendance)
+  correct(@Param('id') id: string, @Body() dto: CorrectAttendanceDto) {
+    return this.attendance.correct(id, dto);
+  }
+
+  /** P1a: attendance alert thresholds (org default + per-class overrides). */
+  @Get('thresholds')
+  @RequirePermissions(PERMISSIONS.school.read)
+  thresholds(@Query('classId') classId?: string) {
+    return this.attendance.getThreshold(classId || null);
+  }
+
+  @Put('thresholds')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  upsertThresholds(@Body() dto: UpsertAttendanceThresholdDto) {
+    return this.attendance.upsertThreshold(dto);
   }
 }

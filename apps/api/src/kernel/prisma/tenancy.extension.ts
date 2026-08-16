@@ -350,6 +350,7 @@ export const ORG_SCOPED = new Set<string>([
   'TeacherAssignment',
   'TimetableSlot',
   'StudentAttendance',
+  'AttendanceThreshold',
   'HomeworkAssignment',
   'HomeworkSubmission',
   'LearningResource',

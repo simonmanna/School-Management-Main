@@ -214,6 +214,7 @@ export const EVENTS = {
   SchoolLessonPlanPublished: 'school.lesson_plan.published',
   // Attendance + LMS
   SchoolAttendanceMarked: 'school.attendance.marked',
+  SchoolAttendanceCorrected: 'school.attendance.corrected',
   SchoolAttendanceCorrectionRequested: 'school.attendance.correction_requested',
   SchoolHomeworkAssigned: 'school.homework.assigned',
   SchoolHomeworkGraded: 'school.homework.graded',
@@ -581,9 +582,19 @@ export interface DomainEventMap {
     organizationId: string;
     date: string;
     classId: string;
+    periodId?: string | null;
     present: number;
     absent: number;
     late: number;
+    entries: Array<{ studentProfileId: string; status: string; minutesLate: number; earlyDepartureMinutes?: number | null }>;
+  };
+  'school.attendance.corrected': {
+    organizationId: string;
+    studentProfileId: string;
+    attendanceId: string;
+    fromStatus: string;
+    toStatus: string;
+    note?: string | null;
   };
   'school.attendance.correction_requested': {
     organizationId: string;

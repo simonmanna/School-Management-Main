@@ -3,15 +3,18 @@
  *
  * H2/B6: class-validator classes (were bare interfaces). Import as values.
  */
-import { IsArray, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const ATT_STATUS = ['present', 'absent', 'late', 'excused'] as const;
+const ATT_STATUS = ['present', 'absent', 'late', 'excused', 'early_departure', 'unexcused'] as const;
 
 export class AttendanceEntry {
   @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsIn([...ATT_STATUS]) status!: (typeof ATT_STATUS)[number];
+  /// Minutes the student was late (status = late).
   @IsOptional() @IsInt() @Min(0) minutesLate?: number;
+  /// Minutes early the student left (status = early_departure).
+  @IsOptional() @IsInt() @Min(0) earlyDepartureMinutes?: number;
   @IsOptional() @IsString() reason?: string;
 }
 
@@ -31,4 +34,22 @@ export class BulkMarkAttendanceDto {
   @ValidateNested({ each: true })
   @Type(() => AttendanceEntry)
   entries!: AttendanceEntry[];
+}
+
+export class CorrectAttendanceDto {
+  @IsIn([...ATT_STATUS]) status!: (typeof ATT_STATUS)[number];
+  @IsOptional() @IsInt() @Min(0) minutesLate?: number;
+  @IsOptional() @IsInt() @Min(0) earlyDepartureMinutes?: number;
+  @IsOptional() @IsString() reason?: string;
+  /// Why the correction is being made (audit trail).
+  @IsOptional() @IsString() correctionNote?: string;
+}
+
+export class UpsertAttendanceThresholdDto {
+  @IsOptional() @IsString() classId?: string | null;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) minAttendancePct?: number;
+  @IsOptional() @IsBoolean() notifyAbsent?: boolean;
+  @IsOptional() @IsBoolean() notifyLate?: boolean;
+  @IsOptional() @IsBoolean() notifyEarly?: boolean;
+  @IsOptional() @IsBoolean() notifyBelowThreshold?: boolean;
 }

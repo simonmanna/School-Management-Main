@@ -885,7 +885,7 @@ export function useSubjects() {
 
 /* ───────────────────────── Attendance ───────────────────────── */
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused' | 'early_departure' | 'unexcused';
 
 export interface RosterStudent {
   id: string;
@@ -906,7 +906,9 @@ export interface AttendanceRow {
   studentProfileId: string;
   status: AttendanceStatus;
   minutesLate: number;
+  earlyDepartureMinutes?: number | null;
   reason?: string | null;
+  studentProfile?: { partner?: { name?: string } };
 }
 
 export function useAttendanceRegister(classId: string | undefined, date: string | undefined) {
@@ -924,9 +926,47 @@ export function useMarkAttendance() {
       date: string;
       classId: string;
       sectionId?: string;
-      entries: Array<{ studentProfileId: string; status: AttendanceStatus; minutesLate?: number; reason?: string }>;
+      periodId?: string;
+      entries: Array<{ studentProfileId: string; status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string }>;
     }) => (await api.post(`${S}/attendance/mark`, dto)).data,
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'register', v.classId, v.date] }),
+  });
+}
+
+export function useCorrectAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { id: string; status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string; correctionNote?: string }) =>
+      (await api.patch(`${S}/attendance/${dto.id}`, {
+        status: dto.status, minutesLate: dto.minutesLate, earlyDepartureMinutes: dto.earlyDepartureMinutes, reason: dto.reason, correctionNote: dto.correctionNote,
+      })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'register'] }),
+  });
+}
+
+export interface AttendanceThreshold {
+  id?: string; organizationId?: string; classId?: string | null;
+  minAttendancePct: number; notifyAbsent: boolean; notifyLate: boolean; notifyEarly: boolean; notifyBelowThreshold: boolean;
+}
+export function useAttendanceThresholds(classId?: string) {
+  return useQuery({
+    queryKey: ['school', 'attendance-thresholds', classId ?? 'default'],
+    queryFn: async () => (await api.get<AttendanceThreshold>(`${S}/attendance/thresholds`, { params: { classId } })).data,
+  });
+}
+export function useUpsertAttendanceThreshold() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: Partial<AttendanceThreshold> & { classId?: string | null }) =>
+      (await api.put(`${S}/attendance/thresholds`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'attendance-thresholds'] }),
+  });
+}
+export function useAttendanceWeekly(classId: string | undefined, weekStart: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'attendance-weekly', classId, weekStart],
+    enabled: !!classId && !!weekStart,
+    queryFn: async () => (await api.get<{ from: string; to: string; byDate: Record<string, Record<string, number>> }>(`${S}/attendance/weekly`, { params: { classId, weekStart } })).data,
   });
 }
 
