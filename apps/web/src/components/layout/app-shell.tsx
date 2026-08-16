@@ -62,8 +62,6 @@ import {
   KeyRound,
   Calculator,
   Boxes,
-  ChefHat,
-  UtensilsCrossed,
   MessagesSquare,
   Radio,
   Zap,
@@ -172,20 +170,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/communication', label: 'Inbox', icon: MessagesSquare, permission: PERMISSIONS.communication.conversationRead },
       { to: '/communication/channels', label: 'Channels', icon: Radio, permission: PERMISSIONS.communication.channelRead },
       { to: '/communication/rules', label: 'Automation', icon: Zap, permission: PERMISSIONS.communication.channelManage },
-    ],
-  },
-  {
-    title: 'POS',
-    icon: Coffee,
-    items: [
-      { to: '/pos/terminal', label: 'POS Terminal', icon: Coffee, permission: PERMISSIONS.pos.checkout },
-      { to: '/pos/kds', label: 'Kitchen Display', icon: ChefHat, permission: PERMISSIONS.pos.kds },
-      { to: '/pos/kitchen-stations', label: 'Kitchen Stations', icon: UtensilsCrossed, permission: PERMISSIONS.pos.override },
-      { to: '/pos/kds-reports', label: 'Kitchen Reports', icon: BarChart3, permission: PERMISSIONS.pos.reports },
-      { to: '/pos/cash-registers', label: 'Cash Registers', icon: Banknote, permission: PERMISSIONS.cashSession.read },
-      { to: '/pos/receipts', label: 'POS Receipts', icon: ScrollText, permission: PERMISSIONS.pos.read },
-      { to: '/pos/receivables', label: 'Credit / Receivables', icon: HandCoins, permission: PERMISSIONS.pos.read },
-      { to: '/pos/reports', label: 'POS Reports', icon: BarChart3, permission: PERMISSIONS.pos.reports },
     ],
   },
   {
@@ -811,7 +795,7 @@ export function AppShell() {
       <aside
         className={cn(
           'sticky top-0 hidden h-screen shrink-0 flex-col transition-all duration-200 md:flex print:hidden',
-          sidebarCollapsed ? 'w-16' : 'w-64',
+          sidebarCollapsed ? 'w-20' : 'w-72',
         )}
         style={{ background: sb.sidebar }}
       >
@@ -822,7 +806,7 @@ export function AppShell() {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-72 flex-col shadow-xl">
+          <aside className="absolute inset-y-0 left-0 flex w-80 flex-col shadow-xl">
             {sidebarInner(false)}
           </aside>
         </div>
