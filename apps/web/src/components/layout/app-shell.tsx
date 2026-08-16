@@ -173,7 +173,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Sales',
+    title: 'Invoices',
     icon: ShoppingCart,
     items: [
       { to: '/invoices', label: 'Sales/Invoices', icon: Receipt, permission: PERMISSIONS.invoice.read },
@@ -292,7 +292,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Teacher & Staff Management',
+    title: 'Human Resources',
     icon: Users,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
