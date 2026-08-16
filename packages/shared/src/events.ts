@@ -248,6 +248,7 @@ export const EVENTS = {
   // Result spine (A3)
   SchoolResultsComputed: 'school.results.computed',
   SchoolResultsPublished: 'school.results.published',
+  SchoolResultsLocked: 'school.results.locked',
   SchoolResultsAmended: 'school.results.amended',
   // CBT engine (A5)
   SchoolQuizAttemptStarted: 'school.quiz.attempt.started',
@@ -696,6 +697,12 @@ export interface DomainEventMap {
     studentCount: number;
   };
   'school.results.published': {
+    organizationId: string;
+    resultSetId: string;
+    termId: string;
+    revision: number;
+  };
+  'school.results.locked': {
     organizationId: string;
     resultSetId: string;
     termId: string;

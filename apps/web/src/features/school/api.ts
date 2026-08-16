@@ -1883,6 +1883,13 @@ export function usePublishResultSet() {
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'result-set', v] }),
   });
 }
+export function useLockResultSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${RES}/${id}/lock`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'result-set', v] }),
+  });
+}
 export function useRequestAmendment() {
   const qc = useQueryClient();
   return useMutation({
@@ -2296,5 +2303,45 @@ export function useCreateQuestionPaper() {
     mutationFn: async (dto: { examScheduleId: string; title: string; paperKind?: string; paperNumber?: number; totalMarks?: number; questions?: Array<{ number: number; text: string; marks: number }>; fileUrl?: string; setterId?: string; moderatorId?: string }) =>
       (await api.post<QuestionPaper>(QP, dto)).data,
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'question-papers', 'by-schedule', v.examScheduleId] }),
+  });
+}
+
+/* ── Grading scales (grade boundaries) ───────────────────────────────────── */
+export interface GradingBand { min: number; max: number; grade: string; gpa: number; remark?: string }
+export interface GradingScale { id: string; name: string; bands: GradingBand[]; isDefault: boolean }
+
+export function useGradingScales() {
+  return useQuery({
+    queryKey: ['school', 'grading-scales'],
+    queryFn: async () => (await api.get<GradingScale[]>(`${S}/grading-scales`, { params: { pageSize: 100 } })).data,
+  });
+}
+export function useDefaultGradingScale() {
+  return useQuery({
+    queryKey: ['school', 'grading-scale-default'],
+    queryFn: async () => (await api.get<GradingScale>(`${S}/grading-scales/default`)).data,
+  });
+}
+export function useCreateGradingScale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; bands: GradingBand[]; isDefault?: boolean }) =>
+      (await api.post<GradingScale>(`${S}/grading-scales`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
+  });
+}
+export function useUpdateGradingScale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: Partial<{ name: string; bands: GradingBand[]; isDefault: boolean }> }) =>
+      (await api.patch<GradingScale>(`${S}/grading-scales/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
+  });
+}
+export function useDeleteGradingScale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`${S}/grading-scales/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
   });
 }

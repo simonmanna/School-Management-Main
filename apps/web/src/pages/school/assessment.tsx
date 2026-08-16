@@ -5,7 +5,7 @@ import {
   useAssessmentPolicies, useCreateAssessmentPolicy,
   useResolvePolicy, useAssessmentComponents, useValidateComponents, useCreateAssessmentComponent,
   useAssessments, useCreateAssessment, useAssessmentTransition,
-  useMarksByAssessment, useRecordMark, useSetParticipation, useSubmitMarks, useMarkingApproval,
+  useMarksByAssessment, useRecordMark, useSetParticipation, useSubmitMarks, useMarkingApproval, useAppendAdjustment,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -161,6 +161,12 @@ function MarkTab() {
   const setPart = useSetParticipation();
   const submit = useSubmitMarks();
   const approve = useMarkingApproval();
+  const appendAdj = useAppendAdjustment();
+  const [modSa, setModSa] = useState('');
+  const [modKind, setModKind] = useState('moderation');
+  const [modDelta, setModDelta] = useState('');
+  const [modReplace, setModReplace] = useState('');
+  const [modReason, setModReason] = useState('');
   const [vals, setVals] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -216,6 +222,35 @@ function MarkTab() {
           </CardContent>
         </Card>
       )}
+
+      {marks && marks.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Moderation & adjustments (audit-logged)</CardTitle></CardHeader>
+            <CardContent className="flex flex-wrap items-end gap-2">
+              <select className={sel + ' w-56'} value={modSa} onChange={(e) => setModSa(e.target.value)}>
+                <option value="">Student…</option>
+                {(marks ?? []).map((m) => <option key={m.studentAssessmentId} value={m.studentAssessmentId}>{m.studentName}</option>)}
+              </select>
+              <select className={sel} value={modKind} onChange={(e) => setModKind(e.target.value)}>
+                {['moderation', 'scaling', 'late_penalty', 'special_consideration', 'correction'].map((k) => <option key={k} value={k}>{k.replace('_', ' ')}</option>)}
+              </select>
+              <Input type="number" className="w-24" placeholder="Δ score" value={modDelta} onChange={(e) => setModDelta(e.target.value)} />
+              <Input type="number" className="w-28" placeholder="or replace" value={modReplace} onChange={(e) => setModReplace(e.target.value)} />
+              <Input className="w-56" placeholder="Reason (required)" value={modReason} onChange={(e) => setModReason(e.target.value)} />
+              <Button size="sm" variant="outline" disabled={!modSa || !modReason || appendAdj.isPending}
+                onClick={async () => {
+                  try {
+                    await appendAdj.mutateAsync({
+                      studentAssessmentId: modSa, kind: modKind, reason: modReason,
+                      delta: modDelta ? Number(modDelta) : undefined,
+                      replacementScore: modReplace ? Number(modReplace) : undefined,
+                    });
+                    notify.success('Adjustment recorded'); setModDelta(''); setModReplace(''); setModReason('');
+                  } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Failed'); }
+                }}><Plus className="h-4 w-4" /> Apply</Button>
+            </CardContent>
+          </Card>
+        )}
     </div>
   );
 }

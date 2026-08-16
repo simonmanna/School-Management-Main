@@ -108,6 +108,48 @@ function SeatingTab(props: any) {
           {(regs ?? []).length === 0 && <p className="text-sm text-muted-foreground">Select an exam to see candidates.</p>}
         </CardContent>
       </Card>
+      {examId && <HallPlan regs={regs} venues={venues} />}
+    </div>
+  );
+}
+
+/* ── P2 Hall plan (visual seating) ── */
+function HallPlan({ regs, venues }: { regs: any[]; venues: any }) {
+  if (!regs || regs.length === 0) return null;
+  const byVenue = new Map<string, any[]>();
+  for (const r of regs) {
+    const key = r.venueId ?? 'unassigned';
+    if (!byVenue.has(key)) byVenue.set(key, []);
+    byVenue.get(key)!.push(r);
+  }
+  const venueName = (id: string) => (venues?.data ?? []).find((v: any) => v.id === id)?.name ?? 'Unassigned';
+  return (
+    <div className="space-y-4">
+      {[...byVenue.entries()].map(([vid, list]) => {
+        const sorted = [...list].sort((a, b) => String(a.seatNumber ?? '').localeCompare(String(b.seatNumber ?? '')));
+        return (
+          <Card key={vid}>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><Armchair className="h-4 w-4" /> {venueName(vid)} · {list.length} seats</CardTitle></CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-8 gap-2 sm:grid-cols-10 md:grid-cols-12">
+                {sorted.map((r) => {
+                  const statusColor = r.status === 'sat' ? 'bg-emerald-50 border-emerald-300'
+                    : r.status === 'absent' ? 'bg-rose-50 border-rose-300'
+                    : r.status === 'withheld' ? 'bg-amber-50 border-amber-300'
+                    : 'bg-card border-border';
+                  return (
+                    <div key={r.id} title={`${r.studentName ?? r.admissionNo ?? r.studentProfileId.slice(0,6)} · ${r.status}`}
+                      className={`rounded border p-1.5 text-center text-[10px] leading-tight ${statusColor}`}>
+                      <div className="font-mono text-muted-foreground">{r.seatNumber ?? '—'}</div>
+                      <div className="truncate font-medium">{r.studentName ?? r.admissionNo ?? r.studentProfileId.slice(0,6)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

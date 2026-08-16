@@ -210,6 +210,30 @@ export class ResultRunService {
   }
 
   // ── publish gate ───────────────────────────────────────────────────────────
+  /** Irreversibly freeze a published ResultSet. Only published sets may be locked;
+   *  corrections then go through an AmendmentRequest → new revision. */
+  async lock(resultSetId: string): Promise<ResultSet> {
+    const organizationId = this.tenant.organizationId;
+    const rs = await this.prisma.client.resultSet.findFirst({ where: { id: resultSetId } });
+    if (!rs) throw new NotFoundException(`ResultSet ${resultSetId} not found`);
+    if (rs.status !== 'published') {
+      throw new BadRequestException(`ResultSet ${resultSetId} is '${rs.status}', only published sets can be locked`);
+    }
+    return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.resultSet.updateMany({ where: { id: resultSetId }, data: { status: 'locked' } });
+      await this.audit.recordInTx(tx, {
+        entity: 'ResultSet',
+        entityId: resultSetId,
+        action: 'post',
+        newValues: { action: 'lock', revision: rs.revision },
+      });
+      this.events.publish(EVENTS.SchoolResultsLocked, {
+        organizationId, resultSetId, termId: rs.termId, revision: rs.revision,
+      });
+      return tx.resultSet.findFirst({ where: { id: resultSetId } });
+    });
+  }
+
   async publish(resultSetId: string): Promise<ResultSet> {
     const organizationId = this.tenant.organizationId;
     const rs = await this.prisma.client.resultSet.findFirst({

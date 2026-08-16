@@ -370,6 +370,12 @@ export class ResultController {
     return this.service.publish(id);
   }
 
+  @Post(':id/lock')
+  @RequirePermissions(PERMISSIONS.school.publishResults)
+  lock(@Param('id') id: string) {
+    return this.service.lock(id);
+  }
+
   @Post('amendments')
   @RequirePermissions(PERMISSIONS.school.amendResults)
   requestAmendment(@Body() dto: RequestAmendmentDto) {

@@ -45,6 +45,7 @@ import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
+import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
 import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
 import { SchoolCbtPage } from '@/pages/school/cbt';
 import { SchoolCertificationPage } from '@/pages/school/certification';
@@ -421,6 +422,7 @@ export function App() {
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
+          <Route path="/school/grading-scales" element={<SchoolGradingScalePage />} />
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />

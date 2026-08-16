@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Calculator, ShieldCheck, History, Send } from 'lucide-react';
+import { Calculator, ShieldCheck, History, Send, Lock } from 'lucide-react';
 import {
   useTerms, useRosters,
   useComputeResults, useResultSets, useResultSet, usePublishResultSet,
-  useRequestAmendment, useAmendments, useApproveAmendment,
+  useRequestAmendment, useAmendments, useApproveAmendment, useLockResultSet,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ export function SchoolResultsPage() {
   const [setId, setSetId] = useState('');
   const { data: detail } = useResultSet(setId || undefined);
   const publish = usePublishResultSet();
+  const lock = useLockResultSet();
   const requestAmd = useRequestAmendment();
   const { data: amendments } = useAmendments(setId || undefined);
   const approveAmd = useApproveAmendment();
@@ -65,7 +66,9 @@ export function SchoolResultsPage() {
             <CardTitle className="text-base">Detail</CardTitle>
             {detail && (
               <div className="flex gap-1">
-                {detail.resultSet.status !== 'published' && <Button size="sm" variant="ghost" disabled={publish.isPending} onClick={() => publish.mutate(detail.resultSet.id)}><ShieldCheck className="h-4 w-4" /> Publish</Button>}
+                {detail.resultSet.status === 'locked' && <Badge><Lock className="h-3 w-3" /> Locked</Badge>}
+                {detail.resultSet.status === 'published' && <Button size="sm" variant="ghost" disabled={lock.isPending} onClick={() => lock.mutate(detail.resultSet.id)}><Lock className="h-4 w-4" /> Lock</Button>}
+                {detail.resultSet.status !== 'published' && detail.resultSet.status !== 'locked' && <Button size="sm" variant="ghost" disabled={publish.isPending} onClick={() => publish.mutate(detail.resultSet.id)}><ShieldCheck className="h-4 w-4" /> Publish</Button>}
               </div>
             )}
           </CardHeader>
