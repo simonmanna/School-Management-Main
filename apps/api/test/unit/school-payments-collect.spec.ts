@@ -72,7 +72,7 @@ describe('SchoolPaymentService.collect — invoice selection', () => {
     const where = documentFindMany.mock.calls[0][0].where;
     expect(where.paymentStatus).toEqual({ in: ['not_paid', 'partial'] });
     expect(where.paymentStatus.in).not.toContain('paid');
-    expect(where.sourceType).toEqual({ in: ['school_fee', 'school_penalty', 'library_fine'] });
+    expect(where.sourceType).toEqual({ in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] });
     expect(where.amountResidual).toEqual({ gt: 0 });
     expect(documentFindMany.mock.calls[0][0].orderBy).toEqual({ issueDate: 'asc' });
   });
