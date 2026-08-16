@@ -967,39 +967,48 @@ function normalizeTimetable(payload: unknown): TimetableGrid {
   return { slots: obj.slots ?? [], grid: obj.grid ?? {} };
 }
 
-export function useClassTimetable(classId: string | undefined) {
+export function useClassTimetable(classId: string | undefined, cycle?: string) {
   return useQuery({
-    queryKey: ['school', 'timetable', classId],
+    queryKey: ['school', 'timetable', classId, cycle],
     enabled: !!classId,
     queryFn: async () =>
-      normalizeTimetable((await api.get<unknown>(`${S}/timetable/class/${classId}`)).data),
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/class/${classId}${cycle ? `?cycle=${cycle}` : ''}`)).data),
   });
 }
 
-export function useTeacherTimetable(teacherPartnerId: string | undefined) {
+export function useTeacherTimetable(teacherPartnerId: string | undefined, cycle?: string) {
   return useQuery({
-    queryKey: ['school', 'timetable-teacher', teacherPartnerId],
+    queryKey: ['school', 'timetable-teacher', teacherPartnerId, cycle],
     enabled: !!teacherPartnerId,
     queryFn: async () =>
-      normalizeTimetable((await api.get<unknown>(`${S}/timetable/teacher/${teacherPartnerId}`)).data),
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/teacher/${teacherPartnerId}${cycle ? `?cycle=${cycle}` : ''}`)).data),
   });
 }
 
-export function useRoomTimetable(room: string | undefined) {
+export function useRoomTimetable(room: string | undefined, cycle?: string) {
   return useQuery({
-    queryKey: ['school', 'timetable-room', room],
+    queryKey: ['school', 'timetable-room', room, cycle],
     enabled: !!room,
     queryFn: async () =>
-      normalizeTimetable((await api.get<unknown>(`${S}/timetable/room/${encodeURIComponent(room!)}`)).data),
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/room/${encodeURIComponent(room!)}${cycle ? `?cycle=${cycle}` : ''}`)).data),
   });
 }
 
-export function useSubjectTimetable(subjectId: string | undefined) {
+export function useSubjectTimetable(subjectId: string | undefined, cycle?: string) {
   return useQuery({
-    queryKey: ['school', 'timetable-subject', subjectId],
+    queryKey: ['school', 'timetable-subject', subjectId, cycle],
     enabled: !!subjectId,
     queryFn: async () =>
-      normalizeTimetable((await api.get<unknown>(`${S}/timetable/subject/${subjectId}`)).data),
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/subject/${subjectId}${cycle ? `?cycle=${cycle}` : ''}`)).data),
+  });
+}
+
+export function useSpecialSchedule(from?: string, to?: string) {
+  return useQuery({
+    queryKey: ['school', 'timetable-special', from, to],
+    enabled: !!from && !!to,
+    queryFn: async () =>
+      (await api.get<unknown>(`${S}/timetable/special?from=${from}&to=${to}`)).data as any[],
   });
 }
 

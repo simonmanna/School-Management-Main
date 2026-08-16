@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Send, Coffee, Minus, Wand2, Trash2 } from 'lucide-react';
+import { Plus, Send, Coffee, Minus, Wand2, Trash2, CalendarDays } from 'lucide-react';
 import {
   useClasses, useSubjects, usePeriods, useStaff, useStudents,
   useClassTimetable, useTeacherTimetable, useRoomTimetable, useSubjectTimetable, useStudentTimetable,
@@ -7,7 +7,7 @@ import {
   useTeachingRooms, useCreateTeachingRoom, useDeleteTeachingRoom,
   useTeacherAvailability, useSetAvailability,
   useRotation, useSetRotation, useOverrides, useCreateOverride, useDeleteOverride,
-  useGenerateTimetable,
+  useGenerateTimetable, useSpecialSchedule,
   type TimetableSlotInput,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,11 +26,15 @@ type Tab = 'class' | 'teacher' | 'room' | 'subject' | 'student';
 
 export function SchoolTimetablePage() {
   const [tab, setTab] = useState<Tab>('class');
+  const [cycle, setCycle] = useState<string>(''); // '' = all weeks
+  const [specialFrom, setSpecialFrom] = useState('');
+  const [specialTo, setSpecialTo] = useState('');
   const { data: periods } = usePeriods();
   const { data: subjects } = useSubjects();
   const { data: classes } = useClasses();
   const { data: staff } = useStaff();
   const { data: students } = useStudents();
+  const special = useSpecialSchedule(specialFrom || undefined, specialTo || undefined);
 
   const periodRows = useMemo(() => [...(periods?.data ?? [])].sort((a: any, b: any) => a.order - b.order), [periods]);
   const subjectName = useMemo(() => Object.fromEntries((subjects?.data ?? []).map((s: any) => [s.id, s.name])), [subjects]);
@@ -42,10 +46,10 @@ export function SchoolTimetablePage() {
   const [subjectId, setSubjectId] = useState('');
   const [studentId, setStudentId] = useState('');
 
-  const classTT = useClassTimetable(tab === 'class' ? classId || undefined : undefined);
-  const teacherTT = useTeacherTimetable(tab === 'teacher' ? teacherId || undefined : undefined);
-  const roomTT = useRoomTimetable(tab === 'room' ? room || undefined : undefined);
-  const subjectTT = useSubjectTimetable(tab === 'subject' ? subjectId || undefined : undefined);
+  const classTT = useClassTimetable(tab === 'class' ? classId || undefined : undefined, cycle || undefined);
+  const teacherTT = useTeacherTimetable(tab === 'teacher' ? teacherId || undefined : undefined, cycle || undefined);
+  const roomTT = useRoomTimetable(tab === 'room' ? room || undefined : undefined, cycle || undefined);
+  const subjectTT = useSubjectTimetable(tab === 'subject' ? subjectId || undefined : undefined, cycle || undefined);
   const studentTT = useStudentTimetable(tab === 'student' ? studentId || undefined : undefined);
 
   const tt = tab === 'class' ? classTT : tab === 'teacher' ? teacherTT : tab === 'room' ? roomTT : tab === 'subject' ? subjectTT : studentTT;
@@ -163,6 +167,20 @@ export function SchoolTimetablePage() {
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="space-y-1"><Label className="text-xs">View cycle</Label>
+          <select className={sel} value={cycle} onChange={(e) => setCycle(e.target.value)}>
+            <option value="">All weeks</option><option value="A">Week A only</option><option value="B">Week B only</option>
+          </select>
+        </div>
+        <div className="space-y-1"><Label className="text-xs">Special schedule (exam/event) range</Label>
+          <div className="flex gap-1">
+            <Input type="date" className="w-40" value={specialFrom} onChange={(e) => setSpecialFrom(e.target.value)} />
+            <Input type="date" className="w-40" value={specialTo} onChange={(e) => setSpecialTo(e.target.value)} />
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-1"><Label className="text-xs">{tab === 'student' ? 'Student' : tab === 'room' ? 'Room name' : tab === 'teacher' ? 'Teacher' : tab === 'subject' ? 'Subject' : 'Class'}</Label>{selector}</div>
 
       {(tab === 'class' ? classId : tab === 'teacher' ? teacherId : tab === 'room' ? room : tab === 'subject' ? subjectId : tab === 'student' ? studentId : '') && grid}
@@ -203,7 +221,33 @@ export function SchoolTimetablePage() {
       {tab === 'class' && classId && <ClassExtras classId={classId} subjects={subjects?.data ?? []} staff={staff?.data ?? []} />}
       {tab === 'teacher' && teacherId && <TeacherAvailabilityCard teacherId={teacherId} periods={periodRows} />}
       <TeachingRoomsCard />
+      <SpecialSchedulePanel events={special.data ?? []} loading={special.isLoading} />
     </div>
+  );
+}
+
+/* ── Special schedule (exam / event calendar overlay) ─────────────────────── */
+function SpecialSchedulePanel({ events, loading }: { events: any[]; loading: boolean }) {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><CalendarDays className="h-4 w-4" /> Special schedule — exams & events</CardTitle></CardHeader>
+      <CardContent>
+        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {!loading && events.length === 0 && <p className="text-sm text-muted-foreground">No exam/event calendar entries in the selected range. Pick a date range above, or add exam/event entries under School → Calendar & Holidays.</p>}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {events.map((e: any) => (
+            <div key={e.id} className={`rounded-md border px-3 py-2 ${e.type === 'exam' ? 'border-rose-200 bg-rose-50' : 'border-blue-200 bg-blue-50'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">{e.title}</span>
+                <span className="text-xs uppercase text-muted-foreground">{e.type}</span>
+              </div>
+              <div className="text-xs text-muted-foreground">{e.startDate?.slice(0, 10)} → {e.endDate?.slice(0, 10)}</div>
+              {e.description && <div className="mt-1 text-xs">{e.description}</div>}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

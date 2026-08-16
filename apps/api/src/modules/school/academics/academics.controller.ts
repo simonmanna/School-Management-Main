@@ -182,8 +182,8 @@ export class TimetableController {
 
   @Get('class/:classId')
   @RequirePermissions(PERMISSIONS.school.read)
-  gridForClass(@Param('classId') classId: string, @Query('sectionId') sectionId?: string) {
-    return this.service.gridForClass(classId, sectionId);
+  gridForClass(@Param('classId') classId: string, @Query('sectionId') sectionId?: string, @Query('cycle') cycle?: string) {
+    return this.service.gridForClass(classId, sectionId, cycle);
   }
 
   @Post('slots')
@@ -220,20 +220,20 @@ export class TimetableController {
 
   @Get('teacher/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.read)
-  gridForTeacher(@Param('teacherPartnerId') teacherPartnerId: string) {
-    return this.service.gridForTeacher(teacherPartnerId);
+  gridForTeacher(@Param('teacherPartnerId') teacherPartnerId: string, @Query('cycle') cycle?: string) {
+    return this.service.gridForTeacher(teacherPartnerId, cycle);
   }
 
   @Get('room/:room')
   @RequirePermissions(PERMISSIONS.school.read)
-  gridForRoom(@Param('room') room: string) {
-    return this.service.gridForRoom(decodeURIComponent(room));
+  gridForRoom(@Param('room') room: string, @Query('cycle') cycle?: string) {
+    return this.service.gridForRoom(decodeURIComponent(room), cycle);
   }
 
   @Get('subject/:subjectId')
   @RequirePermissions(PERMISSIONS.school.read)
-  gridForSubject(@Param('subjectId') subjectId: string) {
-    return this.service.gridForSubject(subjectId);
+  gridForSubject(@Param('subjectId') subjectId: string, @Query('cycle') cycle?: string) {
+    return this.service.gridForSubject(subjectId, cycle);
   }
 
   @Post('class/:classId/publish')

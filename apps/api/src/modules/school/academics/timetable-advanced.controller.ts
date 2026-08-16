@@ -12,6 +12,14 @@ import {
 export class TimetableAdvancedController {
   constructor(private readonly svc: TimetableAdvancedService) {}
 
+  /* Special schedules: exam/event calendar events overlapping a date range. */
+  @Get('special')
+  @RequirePermissions(PERMISSIONS.school.read)
+  special(@Query('from') from: string, @Query('to') to: string) {
+    if (!from || !to) return [];
+    return this.svc.specialSchedule(from, to);
+  }
+
   /* Teaching rooms */
   @Get('rooms')
   @RequirePermissions(PERMISSIONS.school.read)

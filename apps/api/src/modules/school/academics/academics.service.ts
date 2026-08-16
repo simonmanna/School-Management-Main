@@ -441,9 +441,12 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     });
   }
 
-  async gridForClass(classId: string, sectionId?: string) {
+  async gridForClass(classId: string, sectionId?: string, cycle?: string) {
     const slots = await this.prisma.client.timetableSlot.findMany({
-      where: { classId, sectionId: sectionId ?? null },
+      where: {
+        classId, sectionId: sectionId ?? null,
+        ...(cycle ? { cycle: { in: ['all', cycle] } } : {}),
+      },
       include: { subject: true, period: true, teacher: true },
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
     });
@@ -457,9 +460,9 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   }
 
   /** Teacher timetable: every slot assigned to a given teacher (across classes). */
-  async gridForTeacher(teacherPartnerId: string) {
+  async gridForTeacher(teacherPartnerId: string, cycle?: string) {
     const slots = await this.prisma.client.timetableSlot.findMany({
-      where: { teacherPartnerId },
+      where: { teacherPartnerId, ...(cycle ? { cycle: { in: ['all', cycle] } } : {}) },
       include: { subject: true, period: true, schoolClass: true, teacher: true },
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
     });
@@ -467,9 +470,9 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   }
 
   /** Room timetable: every slot booked into a given room (free-text room label). */
-  async gridForRoom(room: string) {
+  async gridForRoom(room: string, cycle?: string) {
     const slots = await this.prisma.client.timetableSlot.findMany({
-      where: { room },
+      where: { room, ...(cycle ? { cycle: { in: ['all', cycle] } } : {}) },
       include: { subject: true, period: true, schoolClass: true, teacher: true },
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
     });
@@ -477,9 +480,9 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   }
 
   /** Subject timetable: every slot for a given subject (across classes/teachers). */
-  async gridForSubject(subjectId: string) {
+  async gridForSubject(subjectId: string, cycle?: string) {
     const slots = await this.prisma.client.timetableSlot.findMany({
-      where: { subjectId },
+      where: { subjectId, ...(cycle ? { cycle: { in: ['all', cycle] } } : {}) },
       include: { subject: true, period: true, schoolClass: true, teacher: true },
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
     });

@@ -20,6 +20,18 @@ export class TimetableAdvancedService {
     return (this.prisma.client as any).teachingRoom.delete({ where: { id } });
   }
 
+  /* ── Special schedules (exam / event overrides from calendar) ───────────── */
+  async specialSchedule(from: string, to: string) {
+    return (this.prisma.client as any).schoolCalendarEvent.findMany({
+      where: {
+        type: { in: ['exam', 'event'] },
+        startDate: { lte: new Date(to) },
+        endDate: { gte: new Date(from) },
+      },
+      orderBy: { startDate: 'asc' },
+    });
+  }
+
   /* ── Student timetable (resolve current enrollment -> class grid) ──────── */
   async gridForStudent(studentProfileId: string, date?: string) {
     const enrollment = await (this.prisma.client as any).enrollment.findFirst({
