@@ -103,6 +103,7 @@ export class UpsertMedicalRecordDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsOptional() @IsString() bloodGroup?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) allergies?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) dietaryRequirements?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) conditions?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) medications?: string[];
   @IsOptional() @IsString() emergencyNotes?: string;

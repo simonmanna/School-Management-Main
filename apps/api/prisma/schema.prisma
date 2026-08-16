@@ -10172,6 +10172,9 @@ model MedicalRecord {
   studentProfileId String   @unique
   bloodGroup       String?
   allergies        Json     @default("[]")
+  /// Dietary requirements (vegetarian, halal, diabetic, no-pork, etc.). Separated
+  /// from medical allergies so the kitchen/meal planner can filter by preference.
+  dietaryRequirements Json @default("[]")
   conditions       Json     @default("[]")
   medications      Json     @default("[]")
   emergencyNotes   String?

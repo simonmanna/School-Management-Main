@@ -230,13 +230,13 @@ export class MealWalletService {
       where: { studentProfileId },
       include: { mealPlan: true },
     });
-    if (!account) return { exists: false, balance: 0, transactions: [] };
+    if (!account) return { exists: false, id: null, balance: 0, mealPlan: null, transactions: [] };
     const transactions = await this.prisma.client.mealAccountTransaction.findMany({
       where: { mealAccountId: account.id },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
-    return { exists: true, balance: account.balance, mealPlan: account.mealPlan, transactions };
+    return { exists: true, id: account.id, balance: account.balance, mealPlan: account.mealPlan, transactions };
   }
 
   /** Reconciliation: opening + Σ ledger = cached balance (must tie exactly). */

@@ -23,7 +23,8 @@ import { MealWalletController } from './meal-wallet.controller';
 import { MealBillingService } from './meal-billing.service';
 import { MealBillingController } from './meal-billing.controller';
 import { MealKitchenService } from './meal-kitchen.service';
-import { MealKitchenController } from './meal-kitchen.controller';
+import { MealReportsService } from './meal-reports.service';
+import { MealReportsController } from './meal-reports.controller';
 
 /**
  * School Meals module (Meals V1–V3). Operations (V1), wallet ledger + GL (V1.5/
@@ -42,6 +43,7 @@ import { MealKitchenController } from './meal-kitchen.controller';
     MealWalletController,
     MealBillingController,
     MealKitchenController,
+    MealReportsController,
   ],
   providers: [
     MealProgramService,
@@ -53,6 +55,7 @@ import { MealKitchenController } from './meal-kitchen.controller';
     MealWalletService,
     MealBillingService,
     MealKitchenService,
+    MealReportsService,
   ],
   exports: [
     MealProgramService,

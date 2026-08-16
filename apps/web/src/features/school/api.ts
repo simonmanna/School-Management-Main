@@ -412,6 +412,14 @@ export function useStudentMedical(studentProfileId: string | undefined) {
     queryFn: async () => (await api.get<MedicalInfo>(`${S}/students/${studentProfileId}/medical-record`)).data,
   });
 }
+export function useUpsertStudentMedical() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; bloodGroup?: string; allergies?: string[]; dietaryRequirements?: string[]; conditions?: string[]; medications?: string[]; emergencyNotes?: string; doctorName?: string; doctorPhone?: string }) =>
+      (await api.post(`${S}/students/${dto.studentProfileId}/medical-record`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'medical', v.studentProfileId] }),
+  });
+}
 
 /* Student 360 — modules without a dedicated list page (library, meals, transport,
    behavior/communication/activities). Each reads the new per-student GET endpoint. */
@@ -1367,7 +1375,7 @@ export interface MealPlanAssignment {
   mealPlan?: MealPlan; studentProfile?: { admissionNo: string; partner?: { name: string } | null } | null;
 }
 export interface MealSession { id: string; mealTypeId: string; date: string; classId?: string | null; expectedCount: number; servedCount: number; status: string; mealType?: MealType }
-export interface MealRosterRow { studentProfileId: string; admissionNo?: string; name?: string | null; status: MealAttendanceStatus | null }
+export interface MealRosterRow { studentProfileId: string; admissionNo?: string; name?: string | null; status: MealAttendanceStatus | null; allergies?: string[]; dietaryRequirements?: string[] }
 export interface TodaysMeal { mealTypeId: string; mealType: string; expected: number; served: number; sessions: number; status: string; sessionIds: string[] }
 export interface TodaysMeals { date: string; meals: TodaysMeal[] }
 export interface MealMenu { id: string; mealTypeId: string; date?: string | null; dayOfWeek?: number | null; title?: string | null; items?: Array<{ id: string; name: string; notes?: string | null; sortOrder: number; posMenuItemId?: string | null }>; mealType?: MealType }
@@ -1537,6 +1545,27 @@ export function useWalletTopUp() {
     mutationFn: async (dto: { studentProfileId: string; mealPlanId: string; amount: number; reference?: string }) =>
       (await api.post<MealAccount>(`${MEALS}/wallet/top-up`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'meal-wallet'] }),
+  });
+}
+export function useWalletPurchase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { mealAccountId: string; amount: number; description: string; reference?: string }) =>
+      (await api.post<MealAccount>(`${MEALS}/wallet/purchase`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'meal-wallet', v.mealAccountId] }),
+  });
+}
+export function useWalletByStudent(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'meal-wallet-by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<{ exists: boolean; balance: number; mealPlan?: any }>(`${MEALS}/wallet/by-student/${studentProfileId}`)).data,
+  });
+}
+export function useMealReports(from?: string, to?: string) {
+  return useQuery({
+    queryKey: ['school', 'meal-reports', from, to],
+    queryFn: async () => (await api.get<any>(`${MEALS}/reports/summary`, { params: { from, to } })).data,
   });
 }
 export function useWalletHistory(accountId: string | undefined) {

@@ -1,8 +1,8 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   useStudent, useStudentPortal, useGuardians, useStudentStatement, useStudentAttendance,
-  useStudentDocuments, useStudentMedical,
+  useStudentDocuments, useStudentMedical, useUpsertStudentMedical,
   useStudentLibrary, useStudentMeals, useStudentTransport, useStudentActivities,
   useCreateGuardian, useUpdateGuardian, useDeleteGuardian,
   type Student, type FeeStatement, type Guardian,
@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Trash2, Pencil, Plus } from 'lucide-react';
+import { notify } from '@/lib/notify';
 
 const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
 const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
@@ -90,7 +91,7 @@ export function SchoolStudent360Page() {
         <TabsContent value="library" className="pt-4"><LibraryTab rows={library} /></TabsContent>
         <TabsContent value="communication" className="pt-4"><CommunicationTab activities={activities} /></TabsContent>
         <TabsContent value="documents" className="pt-4"><DocumentsTab docs={documents} /></TabsContent>
-        <TabsContent value="health" className="pt-4"><HealthTab medical={medical} /></TabsContent>
+        <TabsContent value="health" className="pt-4"><HealthTab medical={medical} studentProfileId={id} /></TabsContent>
         <TabsContent value="activities" className="pt-4"><ActivitiesTab activities={activities} /></TabsContent>
       </Tabs>
     </div>
@@ -349,14 +350,48 @@ function DocumentsTab({ docs }: { docs?: any[] }) {
   );
 }
 
-function HealthTab({ medical }: { medical?: any }) {
+function HealthTab({ medical, studentProfileId }: { medical?: any; studentProfileId?: string }) {
+  const upsert = useUpsertStudentMedical();
+  const [allergies, setAllergies] = useState('');
+  const [dietary, setDietary] = useState('');
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (medical) { setAllergies((medical.allergies ?? []).join(', ')); setDietary((medical.dietaryRequirements ?? []).join(', ')); }
+  }, [medical]);
   if (!medical) return <Empty label="No medical record." />;
+  const save = async () => {
+    try {
+      await upsert.mutateAsync({
+        studentProfileId: studentProfileId!,
+        allergies: allergies.split(',').map((s) => s.trim()).filter(Boolean),
+        dietaryRequirements: dietary.split(',').map((s) => s.trim()).filter(Boolean),
+        conditions: medical.conditions ?? [],
+        medications: medical.medications ?? [],
+        bloodGroup: medical.bloodGroup ?? undefined,
+        emergencyNotes: medical.emergencyNotes ?? undefined,
+      });
+      notify.success('Health info updated'); setEditing(false);
+    } catch { notify.error('Update failed'); }
+  };
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Health</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between"><CardTitle className="text-base">Health</CardTitle>
+        <Button size="sm" variant="ghost" onClick={() => setEditing((e) => !e)}>{editing ? 'Cancel' : 'Edit'}</Button>
+      </CardHeader>
       <CardContent className="space-y-2 text-sm">
         <Info k="Blood group" v={medical.bloodGroup ?? '—'} />
-        <Info k="Allergies" v={(medical.allergies ?? []).join(', ') || '—'} />
+        {editing ? (
+          <>
+            <div className="space-y-1"><Label className="text-xs">Allergies (comma-separated)</Label><Input value={allergies} onChange={(e) => setAllergies(e.target.value)} /></div>
+            <div className="space-y-1"><Label className="text-xs">Dietary requirements (comma-separated)</Label><Input value={dietary} onChange={(e) => setDietary(e.target.value)} placeholder="vegetarian, halal, no-pork, diabetic" /></div>
+            <Button size="sm" onClick={save} disabled={upsert.isPending}>Save</Button>
+          </>
+        ) : (
+          <>
+            <Info k="Allergies" v={(medical.allergies ?? []).join(', ') || '—'} />
+            <Info k="Dietary requirements" v={(medical.dietaryRequirements ?? []).join(', ') || '—'} />
+          </>
+        )}
         <Info k="Conditions" v={(medical.conditions ?? []).join(', ') || '—'} />
         <Info k="Notes" v={medical.notes ?? '—'} />
       </CardContent>

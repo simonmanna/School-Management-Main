@@ -121,7 +121,7 @@ export class MealSessionService {
 
     const assignments = await this.prisma.client.mealPlanAssignment.findMany({
       where: this.eligibleAssignmentWhere(session.mealTypeId, session.date, session.classId),
-      include: { studentProfile: { include: { partner: true } } },
+      include: { studentProfile: { include: { partner: true, medicalRecord: true } } },
     });
     const marked = await this.prisma.client.mealAttendance.findMany({ where: { mealSessionId: sessionId } });
     const status = new Map<string, string>(marked.map((a: any) => [a.studentProfileId, a.status]));
@@ -136,6 +136,8 @@ export class MealSessionService {
         admissionNo: a.studentProfile?.admissionNo,
         name: a.studentProfile?.partner?.name ?? null,
         status: status.get(a.studentProfileId) ?? null,
+        allergies: (a.studentProfile?.medicalRecord?.allergies as string[] | undefined) ?? [],
+        dietaryRequirements: (a.studentProfile?.medicalRecord?.dietaryRequirements as string[] | undefined) ?? [],
       });
     }
     return { session, roster };

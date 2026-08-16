@@ -15,6 +15,7 @@ export class MedicalRecordService {
         studentProfileId: dto.studentProfileId,
         bloodGroup: dto.bloodGroup ?? null,
         allergies: (dto.allergies as any) ?? [],
+        dietaryRequirements: (dto.dietaryRequirements as any) ?? [],
         conditions: (dto.conditions as any) ?? [],
         medications: (dto.medications as any) ?? [],
         emergencyNotes: dto.emergencyNotes ?? null,
@@ -24,6 +25,7 @@ export class MedicalRecordService {
       update: {
         bloodGroup: dto.bloodGroup ?? undefined,
         allergies: (dto.allergies as any) ?? undefined,
+        dietaryRequirements: (dto.dietaryRequirements as any) ?? undefined,
         conditions: (dto.conditions as any) ?? undefined,
         medications: (dto.medications as any) ?? undefined,
         emergencyNotes: dto.emergencyNotes ?? undefined,

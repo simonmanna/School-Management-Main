@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, UtensilsCrossed, ClipboardCheck, CalendarDays, Play, HandCoins, ChefHat } from 'lucide-react';
+import { Plus, UtensilsCrossed, ClipboardCheck, CalendarDays, Play, HandCoins, ChefHat, BarChart3, CreditCard } from 'lucide-react';
 import {
   useMealPrograms,
   useCreateMealProgram,
@@ -23,6 +23,9 @@ import {
   useBuildMenuFromPos,
   useRunMealBilling,
   useWalletTopUp,
+  useWalletPurchase,
+  useWalletByStudent,
+  useMealReports,
   useMealRecipes,
   useCreateMealRecipe,
   useProductionPlans,
@@ -60,6 +63,8 @@ export function SchoolMealsPage() {
           <TabsTrigger value="menus">Menus</TabsTrigger>
           <TabsTrigger value="kitchen">Kitchen</TabsTrigger>
           <TabsTrigger value="finance">Finance</TabsTrigger>
+          <TabsTrigger value="pos">Cafeteria POS</TabsTrigger>
+          <TabsTrigger value="reports">Reports</TabsTrigger>
         </TabsList>
         <TabsContent value="today" className="pt-4"><TodayTab /></TabsContent>
         <TabsContent value="planning" className="pt-4"><PlanningTab /></TabsContent>
@@ -68,6 +73,8 @@ export function SchoolMealsPage() {
         <TabsContent value="menus" className="pt-4"><MenusTab /></TabsContent>
         <TabsContent value="kitchen" className="pt-4"><KitchenTab /></TabsContent>
         <TabsContent value="finance" className="pt-4"><FinanceTab /></TabsContent>
+        <TabsContent value="pos" className="pt-4"><POSTab /></TabsContent>
+        <TabsContent value="reports" className="pt-4"><ReportsTab /></TabsContent>
       </Tabs>
     </div>
   );
@@ -434,9 +441,12 @@ function AttendanceTab() {
             <ul className="space-y-1 text-sm">
               {roster.data?.roster.map((r) => {
                 const cur = status[r.studentProfileId] ?? r.status ?? 'served';
+                const flags = [...(r.allergies ?? []).map((a: string) => ({ t: a, k: 'allergy' })), ...(r.dietaryRequirements ?? []).map((a: string) => ({ t: a, k: 'diet' }))];
                 return (
                   <li key={r.studentProfileId} className="flex items-center justify-between rounded border px-2 py-1">
-                    <span>{r.name ?? r.studentProfileId} · {r.admissionNo}</span>
+                    <span className="flex items-center gap-2">{r.name ?? r.studentProfileId} · {r.admissionNo}
+                      {flags.length > 0 && <span className="flex gap-1">{flags.map((f, i) => <Badge key={i} variant={f.k === 'allergy' ? 'destructive' : 'secondary'} className="text-[10px]">{f.t}</Badge>)}</span>}
+                    </span>
                     <button className={`rounded px-2 py-0.5 text-xs ${ATT_TONE[cur]}`} onClick={() => cycle(r.studentProfileId, cur)}>
                       {cur.replace('_', ' ')}
                     </button>
@@ -715,6 +725,116 @@ function FinanceTab() {
           <Button className="w-full" onClick={doTopUp}><HandCoins className="mr-1 h-4 w-4" /> Top up wallet</Button>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/* ─────────────── Cafeteria POS (P2) ─────────────── */
+
+function POSTab() {
+  const [search, setSearch] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [desc, setDesc] = useState('Meal purchase');
+  const students = useStudents({ search: search || undefined, pageSize: 20 });
+  const wallet = useWalletByStudent(studentId || undefined);
+  const purchase = useWalletPurchase();
+  const mealAccountId = (wallet.data as any)?.id ?? '';
+  const doCharge = async () => {
+    if (!mealAccountId) { notify.error('Wallet not loaded'); return; }
+    if (!amount || Number(amount) <= 0) { notify.error('Enter an amount'); return; }
+    if (Number(amount) > (wallet.data?.balance ?? 0)) { notify.error(`Insufficient balance (${wallet.data?.balance ?? 0})`); return; }
+    try {
+      await purchase.mutateAsync({ mealAccountId, amount: Number(amount), description: desc || 'Meal purchase' });
+      notify.success('Charged to wallet'); setAmount('');
+    } catch { notify.error('Charge failed'); }
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><CreditCard className="h-4 w-4" /> Cafeteria POS — charge a meal</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Input placeholder="Search student…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+            <option value="">Select student…</option>
+            {students.data?.data.map((s: any) => <option key={s.id} value={s.id}>{s.partner?.name} · {s.admissionNo}</option>)}
+          </select>
+          {studentId && (
+            <div className="rounded-md border bg-muted/40 p-2 text-sm">
+              Wallet balance: <span className="font-semibold">{(wallet.data?.balance ?? 0).toLocaleString()}</span>
+              {!wallet.data?.exists && <span className="ml-2 text-rose-600">No wallet — top up first</span>}
+            </div>
+          )}
+          <Input placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input placeholder="Description" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <Button className="w-full" onClick={doCharge} disabled={purchase.isPending || !mealAccountId}>
+            <HandCoins className="mr-1 h-4 w-4" /> Charge wallet
+          </Button>
+          <p className="text-xs text-muted-foreground">Deducts from the student&apos;s prepaid cafeteria wallet and records a purchase ledger entry.</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-base">How it works</CardTitle></CardHeader>
+        <CardContent className="space-y-1 text-sm text-muted-foreground">
+          <p>1. Find the student and confirm their wallet balance.</p>
+          <p>2. Enter the meal amount and a description.</p>
+          <p>3. Charge — the wallet balance decreases and a purchase is logged (auditable via the Finance tab history).</p>
+          <p>Top-ups are handled in the Finance tab; this POS is for day-to-day meal charges.</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ─────────────── Reports (P1) ─────────────── */
+
+function ReportsTab() {
+  const [days, setDays] = useState(30);
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const { data, isLoading } = useMealReports(from, to);
+
+  const cards = [
+    { label: 'Attendance', sub: data ? `${data.attendance.served}/${data.attendance.expected} served` : '—', value: data ? `${data.attendance.rate}%` : '—' },
+    { label: 'Waste', sub: data ? `${data.waste.wasteQty} units · ${data.waste.wasteCost} cost` : '—', value: data ? `${data.waste.wastePct}%` : '—' },
+    { label: 'Production cost', sub: 'food consumed', value: data ? `${data.production.foodCost}` : '—' },
+    { label: 'Wallet', sub: data ? `top-ups ${data.wallet.topUps}` : '—', value: data ? `spent ${data.wallet.purchases}` : '—' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end gap-3">
+        <div className="space-y-1"><Label className="text-xs">Window</Label>
+          <select className={sel} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select></div>
+        <Badge variant="secondary"><BarChart3 className="h-3 w-3 mr-1" /> {from} → {to}</Badge>
+      </div>
+      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((c) => (
+          <Card key={c.label}><CardHeader className="pb-2"><CardTitle className="text-xs text-muted-foreground">{c.label}</CardTitle></CardHeader>
+            <CardContent><div className="text-2xl font-semibold">{c.value}</div><div className="text-xs text-muted-foreground">{c.sub}</div></CardContent></Card>
+        ))}
+      </div>
+      {data && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Detail</CardTitle></CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <div className="flex justify-between"><span>Meals served / expected</span><span>{data.attendance.served} / {data.attendance.expected}</span></div>
+            <div className="flex justify-between"><span>Attendance rate</span><span>{data.attendance.rate}%</span></div>
+            <div className="flex justify-between"><span>Production plans</span><span>{data.production.plans}</span></div>
+            <div className="flex justify-between"><span>Ingredients consumed (qty)</span><span>{data.production.consumedQty}</span></div>
+            <div className="flex justify-between"><span>Waste records / cost</span><span>{data.waste.records} / {data.waste.wasteCost}</span></div>
+            <div className="flex justify-between"><span>Waste % of food cost</span><span>{data.waste.wastePct}%</span></div>
+            <div className="flex justify-between"><span>Wallet top-ups</span><span>{data.wallet.topUps}</span></div>
+            <div className="flex justify-between"><span>Wallet purchases</span><span>{data.wallet.purchases}</span></div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
