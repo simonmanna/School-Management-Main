@@ -58,7 +58,6 @@ import {
   Handshake,
   Wrench,
   Timer,
-  Database,
   Wine,
   KeyRound,
   Calculator,
@@ -174,19 +173,6 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Master Data',
-    icon: Database,
-    items: [
-      { to: '/suppliers', label: 'Suppliers', icon: Building2 },
-      { to: '/products', label: 'Products', icon: Package },
-      { to: '/uom', label: 'Units of Measure', icon: Ruler },
-      { to: '/menu', label: 'Menu', icon: Coffee },
-      { to: '/menu/modifiers', label: 'Modifiers', icon: Tag },
-      { to: '/menu/combos', label: 'Combos', icon: Package },
-      { to: '/menu/accompaniments', label: 'Accompaniments', icon: Tag },
-    ],
-  },
-  {
     title: 'Sales',
     icon: ShoppingCart,
     items: [
@@ -283,6 +269,10 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/meals', label: 'Meals & Cafeteria', icon: Coffee, permission: PERMISSIONS.school.read },
+      { to: '/menu', label: 'Menu', icon: Coffee },
+      { to: '/menu/modifiers', label: 'Modifiers', icon: Tag },
+      { to: '/menu/combos', label: 'Combos', icon: Package },
+      { to: '/menu/accompaniments', label: 'Accompaniments', icon: Tag },
     ],
   },
   {
@@ -319,6 +309,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/inventory/adjustments', label: 'Stock Adjustments', icon: Scale, permission: 'inventory:move' },
       { to: '/inventory/transfers', label: 'Stock Transfers', icon: Truck, permission: 'inventory:move' },
       { to: '/inventory/locations', label: 'Locations', icon: MapPin, permission: PERMISSIONS.inventoryLocation.read },
+      { to: '/products', label: 'Products', icon: Package },
+      { to: '/uom', label: 'Units of Measure', icon: Ruler },
     ],
   },
   {
@@ -383,6 +375,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Purchasing',
     icon: Truck,
     items: [
+      { to: '/suppliers', label: 'Suppliers', icon: Building2 },
       { to: '/procurement/purchase-orders', label: 'Purchases', icon: ShoppingCart, permission: 'purchase_order:read' },
       { to: '/procurement/goods-receipts', label: 'Goods Receipts', icon: Truck, permission: 'goods_receipt:read' },
       // { to: '/procurement/three-way-match', label: '3-Way Match', icon: Scale, permission: 'three_way_match:read' },
