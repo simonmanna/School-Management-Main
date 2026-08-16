@@ -192,18 +192,11 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'School',
-    icon: GraduationCap,
-    flag: 'VITE_ENABLE_SCHOOL',
-    items: [
-      { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
-    ],
-  },
-  {
     title: 'Student Management',
     icon: GraduationCap,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
+      { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/portals', label: 'Portals & Promotion', icon: GraduationCap, permission: PERMISSIONS.school.read },
