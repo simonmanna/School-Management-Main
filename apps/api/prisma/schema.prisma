@@ -12388,6 +12388,56 @@ model FeeCredit {
   @@index([studentProfileId])
 }
 
+/// P2: Generic school policy store (attendance, grading, late-fee, uniform, etc.).
+model SchoolPolicy {
+  id           String   @id @default(uuid())
+  organizationId String
+  /// Stable key, e.g. 'attendance.graceMinutes', 'grading.scale', 'lateFee.percent'
+  key          String
+  name         String
+  category     String   @default("general")
+  /// Free-form policy value (number / string / object / array).
+  value        Json
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String?
+  updatedBy    String?
+  deletedAt    DateTime?
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@index([organizationId, category])
+}
+
+/// P3: Reusable custom-field definitions attached to school entities
+/// (Student / Staff / Class / Guardian / etc.). Replaces ad-hoc Json columns.
+model CustomField {
+  id         String   @id @default(uuid())
+  organizationId String
+  /// Target entity: 'student' | 'staff' | 'class' | 'guardian' | 'fee' | 'subject'
+  entityType String
+  name       String
+  label      String
+  /// 'text' | 'number' | 'date' | 'select' | 'boolean' | 'textarea'
+  type       String   @default("text")
+  /// For select type.
+  options    String[]
+  required   Boolean  @default(false)
+  active     Boolean  @default(true)
+  order      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  createdBy  String?
+  updatedBy  String?
+  deletedAt  DateTime?
+
+  @@unique([organizationId, entityType, name])
+  @@index([organizationId])
+  @@index([organizationId, entityType])
+}
+
 model FeeSchedule {
   id             String   @id @default(uuid())
   organizationId String

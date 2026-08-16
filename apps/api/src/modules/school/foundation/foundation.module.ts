@@ -17,6 +17,12 @@ import { StreamService } from './stream.service';
 import { StreamController } from './stream.controller';
 import { CalendarService, PeriodService } from './period-calendar.service';
 import { CalendarController, PeriodController } from './period-calendar.controller';
+import { CalendarEventService } from './calendar-event.service';
+import { CalendarEventController } from './calendar-event.controller';
+import { SchoolPolicyService } from './school-policy.service';
+import { SchoolPolicyController } from './school-policy.controller';
+import { CustomFieldService } from './custom-field.service';
+import { CustomFieldController } from './custom-field.controller';
 
 /**
  * Foundation sprint — school-level master data.
@@ -36,6 +42,9 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     StreamController,
     PeriodController,
     CalendarController,
+    CalendarEventController,
+    SchoolPolicyController,
+    CustomFieldController,
   ],
   providers: [
     CampusService,
@@ -50,6 +59,9 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     StreamService,
     PeriodService,
     CalendarService,
+    CalendarEventService,
+    SchoolPolicyService,
+    CustomFieldService,
   ],
   exports: [
     CampusService,
@@ -64,6 +76,9 @@ import { CalendarController, PeriodController } from './period-calendar.controll
     StreamService,
     PeriodService,
     CalendarService,
+    CalendarEventService,
+    SchoolPolicyService,
+    CustomFieldService,
   ],
 })
 export class FoundationModule {}

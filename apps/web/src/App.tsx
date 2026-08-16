@@ -52,6 +52,17 @@ import { SchoolLearningOutcomesPage } from '@/pages/school/learning-outcomes';
 import { SchoolCompetencyReportPage } from '@/pages/school/competency-report';
 import { SchoolAnalyticsPage } from '@/pages/school/analytics';
 import { SchoolPortalsPage } from '@/pages/school/portals';
+import { SchoolAcademicYearsPage } from '@/pages/school/academic-years';
+import { SchoolTermsPage } from '@/pages/school/terms';
+import { SchoolDepartmentsPage } from '@/pages/school/departments';
+import { SchoolClassesPage } from '@/pages/school/classes';
+import { SchoolSectionsPage } from '@/pages/school/sections';
+import { SchoolStreamsPage } from '@/pages/school/streams';
+import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
+import { SchoolCalendarPage } from '@/pages/school/calendar';
+import { SchoolPoliciesPage } from '@/pages/school/policies';
+import { SchoolCustomFieldsPage } from '@/pages/school/custom-fields';
+import { SchoolRolesPage } from '@/pages/school/roles';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -396,6 +407,17 @@ export function App() {
           <Route path="/school/staff" element={<SchoolStaffPage />} />
           <Route path="/school/campuses" element={<SchoolCampusesPage />} />
           <Route path="/school/subjects" element={<SchoolSubjectsPage />} />
+          <Route path="/school/management/academic-years" element={<SchoolAcademicYearsPage />} />
+          <Route path="/school/management/terms" element={<SchoolTermsPage />} />
+          <Route path="/school/management/departments" element={<SchoolDepartmentsPage />} />
+          <Route path="/school/management/classes" element={<SchoolClassesPage />} />
+          <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
+          <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
+          <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
+          <Route path="/school/management/calendar" element={<SchoolCalendarPage />} />
+          <Route path="/school/management/policies" element={<SchoolPoliciesPage />} />
+          <Route path="/school/management/custom-fields" element={<SchoolCustomFieldsPage />} />
+          <Route path="/school/management/roles" element={<SchoolRolesPage />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
