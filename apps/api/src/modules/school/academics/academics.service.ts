@@ -322,6 +322,8 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
    * Returns an array of conflict descriptions; empty array means clean.
    */
   async detectConflicts(slot: CreateTimetableSlotDto, excludeSlotId?: string): Promise<string[]> {
+    // Breaks and free periods are intentionally not bookable resources — skip.
+    if (slot.type === 'break' || slot.type === 'free') return [];
     const conflicts: string[] = [];
     const where = (extra: Record<string, unknown>) => ({
       organizationId: undefined as any, // tenancy extension fills this
@@ -426,5 +428,53 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
       grid[s.dayOfWeek][s.periodId] = s;
     }
     return { slots, grid };
+  }
+
+  /** Teacher timetable: every slot assigned to a given teacher (across classes). */
+  async gridForTeacher(teacherPartnerId: string) {
+    const slots = await this.prisma.client.timetableSlot.findMany({
+      where: { teacherPartnerId },
+      include: { subject: true, period: true, schoolClass: true, teacher: true },
+      orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
+    });
+    return this.toGrid(slots);
+  }
+
+  /** Room timetable: every slot booked into a given room (free-text room label). */
+  async gridForRoom(room: string) {
+    const slots = await this.prisma.client.timetableSlot.findMany({
+      where: { room },
+      include: { subject: true, period: true, schoolClass: true, teacher: true },
+      orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
+    });
+    return this.toGrid(slots);
+  }
+
+  /** Subject timetable: every slot for a given subject (across classes/teachers). */
+  async gridForSubject(subjectId: string) {
+    const slots = await this.prisma.client.timetableSlot.findMany({
+      where: { subjectId },
+      include: { subject: true, period: true, schoolClass: true, teacher: true },
+      orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
+    });
+    return this.toGrid(slots);
+  }
+
+  private toGrid(slots: any[]) {
+    const grid: Record<number, Record<string, any>> = {};
+    for (const s of slots) {
+      grid[s.dayOfWeek] ??= {};
+      grid[s.dayOfWeek][s.periodId] = s;
+    }
+    return { slots, grid };
+  }
+
+  /** Publish (or unpublish) a class's entire timetable grid at once. */
+  async publishClass(classId: string, sectionId: string | undefined, published: boolean) {
+    await this.prisma.client.timetableSlot.updateMany({
+      where: { classId, sectionId: sectionId ?? null },
+      data: { published },
+    });
+    return { published };
   }
 }

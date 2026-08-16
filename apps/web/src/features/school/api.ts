@@ -976,6 +976,76 @@ export function useClassTimetable(classId: string | undefined) {
   });
 }
 
+export function useTeacherTimetable(teacherPartnerId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'timetable-teacher', teacherPartnerId],
+    enabled: !!teacherPartnerId,
+    queryFn: async () =>
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/teacher/${teacherPartnerId}`)).data),
+  });
+}
+
+export function useRoomTimetable(room: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'timetable-room', room],
+    enabled: !!room,
+    queryFn: async () =>
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/room/${encodeURIComponent(room!)}`)).data),
+  });
+}
+
+export function useSubjectTimetable(subjectId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'timetable-subject', subjectId],
+    enabled: !!subjectId,
+    queryFn: async () =>
+      normalizeTimetable((await api.get<unknown>(`${S}/timetable/subject/${subjectId}`)).data),
+  });
+}
+
+export interface TimetableSlotInput {
+  classId: string;
+  dayOfWeek: number;
+  periodId: string;
+  subjectId: string;
+  room?: string;
+  teacherPartnerId?: string;
+  type?: 'lesson' | 'break' | 'free';
+  substituteTeacherId?: string;
+}
+
+export function useUpdateSlot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: Partial<TimetableSlotInput> }) => {
+      const res = await api.patch(`${S}/timetable/slots/${id}`, dto);
+      return res.data;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'timetable'] });
+      if (v.dto.classId) qc.invalidateQueries({ queryKey: ['school', 'timetable', v.dto.classId] });
+    },
+  });
+}
+
+export function usePublishTimetable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ classId, sectionId, published }: { classId: string; sectionId?: string; published: boolean }) => {
+      const res = await api.post(`${S}/timetable/class/${classId}/publish`, { published }, {
+        params: sectionId ? { sectionId } : {},
+      });
+      return res.data;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'timetable', v.classId] });
+      qc.invalidateQueries({ queryKey: ['school', 'timetable-teacher'] });
+      qc.invalidateQueries({ queryKey: ['school', 'timetable-room'] });
+      qc.invalidateQueries({ queryKey: ['school', 'timetable-subject'] });
+    },
+  });
+}
+
 export interface Period { id: string; name: string; startTime: string; endTime: string; order: number }
 
 export function usePeriods() {

@@ -217,4 +217,32 @@ export class TimetableController {
   removeSlot(@Param('id') id: string) {
     return this.service.remove(id);
   }
+
+  @Get('teacher/:teacherPartnerId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  gridForTeacher(@Param('teacherPartnerId') teacherPartnerId: string) {
+    return this.service.gridForTeacher(teacherPartnerId);
+  }
+
+  @Get('room/:room')
+  @RequirePermissions(PERMISSIONS.school.read)
+  gridForRoom(@Param('room') room: string) {
+    return this.service.gridForRoom(decodeURIComponent(room));
+  }
+
+  @Get('subject/:subjectId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  gridForSubject(@Param('subjectId') subjectId: string) {
+    return this.service.gridForSubject(subjectId);
+  }
+
+  @Post('class/:classId/publish')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  publishClass(
+    @Param('classId') classId: string,
+    @Query('sectionId') sectionId: string | undefined,
+    @Body() body: { published?: boolean },
+  ) {
+    return this.service.publishClass(classId, sectionId, body?.published ?? true);
+  }
 }

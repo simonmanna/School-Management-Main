@@ -6,6 +6,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -95,6 +96,8 @@ export class CreateTimetableSlotDto {
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() room?: string;
+  @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
+  @IsOptional() @IsString() substituteTeacherId?: string;
 }
 
 export class BulkTimetableSlot {
@@ -104,6 +107,8 @@ export class BulkTimetableSlot {
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() room?: string;
+  @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
+  @IsOptional() @IsString() substituteTeacherId?: string;
 }
 
 export class BulkTimetableDto {
@@ -125,6 +130,8 @@ export class UpdateTimetableSlotDto {
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() room?: string;
+  @IsOptional() @IsIn(['lesson', 'break', 'free']) type?: string;
+  @IsOptional() @IsString() substituteTeacherId?: string;
 }
 
 // ── Curriculum content (Competency / Topic / Unit / LearningObjective) ──────

@@ -10797,6 +10797,12 @@ model TimetableSlot {
   subjectId        String
   teacherPartnerId String?
   room             String?
+  /// 'lesson' | 'break' | 'free'. Breaks/free periods are not conflict-checked.
+  type             String   @default("lesson")
+  /// Substitute teacher covering this slot (overrides teacherPartnerId visually).
+  substituteTeacherId String?
+  /// Published to students/staff (a class's whole grid is published together).
+  published        Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
