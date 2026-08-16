@@ -22,7 +22,9 @@ import {
   StudentFeeAssignmentController,
 } from './catalog.controller';
 import { BillingService, SchoolPaymentService } from './billing.service';
+import { AdvancedFinanceService } from './advanced.service';
 import { BillingController, SchoolPaymentController } from './billing.controller';
+import { AdvancedFinanceController } from './advanced.controller';
 import { PenaltyCronWorker } from './penalty-cron.worker';
 
 /**
@@ -51,6 +53,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
     PenaltyRunController,
     BillingController,
     SchoolPaymentController,
+    AdvancedFinanceController,
   ],
   providers: [
     FeeStructureService,
@@ -63,6 +66,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
     PenaltyRunService,
     BillingService,
     SchoolPaymentService,
+    AdvancedFinanceService,
     PenaltyCronWorker,
   ],
   exports: [
@@ -76,6 +80,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
     PenaltyRunService,
     BillingService,
     SchoolPaymentService,
+    AdvancedFinanceService,
     PenaltyCronWorker,
   ],
 })

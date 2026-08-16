@@ -6,7 +6,7 @@ import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { BillingService, SchoolPaymentService } from './billing.service';
 // Value import (not `import type`): the global ValidationPipe needs the runtime
 // class to read class-validator metadata; `import type` would erase it.
-import { CollectFeePaymentDto, GenerateBillingDto } from './dto.types';
+import { CollectFeePaymentDto, GenerateBillingDto, RefundFeeDto } from './dto.types';
 
 /**
  * Bursar endpoints. All money-mutating endpoints are idempotent: the
@@ -44,5 +44,12 @@ export class SchoolPaymentController {
   @RequirePermissions(PERMISSIONS.school.collectPayments)
   collect(@Body() dto: CollectFeePaymentDto) {
     return this.payments.collect(dto);
+  }
+
+  @Post('refund')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.refundFees)
+  refund(@Body() dto: RefundFeeDto) {
+    return this.payments.refundFee(dto);
   }
 }

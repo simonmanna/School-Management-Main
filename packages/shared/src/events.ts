@@ -196,8 +196,17 @@ export const EVENTS = {
   // Admissions
   SchoolAdmissionSubmitted: 'school.admission.submitted',
   SchoolAdmissionUnderReview: 'school.admission.under_review',
+  SchoolAdmissionScreened: 'school.admission.screened',
+  SchoolAdmissionInterviewScheduled: 'school.admission.interview_scheduled',
+  SchoolAdmissionInterviewed: 'school.admission.interviewed',
+  SchoolAdmissionScored: 'school.admission.scored',
   SchoolAdmissionExamScheduled: 'school.admission.exam_scheduled',
   SchoolAdmissionAccepted: 'school.admission.accepted',
+  SchoolAdmissionWaitlisted: 'school.admission.waitlisted',
+  SchoolAdmissionOfferIssued: 'school.admission.offer_issued',
+  SchoolAdmissionOfferAccepted: 'school.admission.offer_accepted',
+  SchoolAdmissionOfferDeclined: 'school.admission.offer_declined',
+  SchoolAdmissionFeeInvoiced: 'school.admission.fee_invoiced',
   SchoolAdmissionRejected: 'school.admission.rejected',
   SchoolAdmissionEnrolled: 'school.admission.enrolled',
   SchoolAdmissionWithdrawn: 'school.admission.withdrawn',
@@ -218,6 +227,15 @@ export const EVENTS = {
   SchoolGradeRejected: 'school.grade.rejected',
   SchoolReportCardGenerated: 'school.reportcard.generated',
   SchoolReportCardPublished: 'school.reportcard.published',
+  // Curriculum versioning (Academic Management)
+  SchoolCurriculumCreated: 'school.curriculum.created',
+  SchoolCurriculumPublished: 'school.curriculum.published',
+  SchoolCurriculumVersionCloned: 'school.curriculum.version_cloned',
+  SchoolCurriculumArchived: 'school.curriculum.archived',
+  // Student academic enrollment (historical entity)
+  SchoolEnrollmentCreated: 'school.enrollment.created',
+  SchoolEnrollmentEnded: 'school.enrollment.ended',
+  SchoolEnrollmentReEnrolled: 'school.enrollment.re_enrolled',
   // Assessment core (A1)
   SchoolAssessmentStatusChanged: 'school.assessment.status_changed',
   SchoolMarksApproved: 'school.marks.approved',
@@ -244,7 +262,11 @@ export const EVENTS = {
   SchoolFeeInvoicePosted: 'school.fee.invoice.posted',
   SchoolFeeInvoiceOverdue: 'school.fee.invoice.overdue',
   SchoolFeePaymentRecorded: 'school.fee.payment.recorded',
+  SchoolFeeRefundRecorded: 'school.fee.refund.recorded',
   SchoolPenaltyRunCompleted: 'school.fee.penalty.run',
+  SchoolSponsorshipCreated: 'school.fee.sponsorship.created',
+  SchoolWaiverApplied: 'school.fee.waiver.applied',
+  SchoolFeeCreditCreated: 'school.fee.credit.created',
   // Library + transport
   SchoolBookBorrowed: 'school.library.borrowed',
   SchoolBookReturned: 'school.library.returned',
@@ -523,14 +545,23 @@ export interface DomainEventMap {
     applicationId: string;
     applicationNumber: string;
   };
-  'school.admission.under_review': { organizationId: string; applicationId: string };
-  'school.admission.exam_scheduled': { organizationId: string; applicationId: string };
-  'school.admission.accepted': { organizationId: string; applicationId: string };
+  'school.admission.under_review': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.screened': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.interview_scheduled': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.interviewed': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.exam_scheduled': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.scored': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.accepted': { organizationId: string; applicationId: string; reason?: string };
   'school.admission.rejected': {
     organizationId: string;
     applicationId: string;
     reason?: string;
   };
+  'school.admission.waitlisted': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.offer_issued': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.offer_accepted': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.offer_declined': { organizationId: string; applicationId: string; reason?: string };
+  'school.admission.fee_invoiced': { organizationId: string; applicationId: string; invoiceId: string };
   'school.admission.enrolled': {
     organizationId: string;
     applicationId: string;
@@ -609,6 +640,13 @@ export interface DomainEventMap {
     termId: string;
     published: boolean;
   };
+  'school.curriculum.created': { organizationId: string; curriculumId: string; version: number };
+  'school.curriculum.published': { organizationId: string; curriculumId: string; version: number };
+  'school.curriculum.version_cloned': { organizationId: string; curriculumId: string; fromVersion: number; toVersion: number };
+  'school.curriculum.archived': { organizationId: string; curriculumId: string; version: number };
+  'school.enrollment.created': { organizationId: string; enrollmentId: string; studentProfileId: string };
+  'school.enrollment.ended': { organizationId: string; enrollmentId: string; toStatus: string; reason: string };
+  'school.enrollment.re_enrolled': { organizationId: string; enrollmentId: string };
   'school.assessment.status_changed': {
     organizationId: string;
     assessmentId: string;
@@ -737,6 +775,32 @@ export interface DomainEventMap {
     totalAssessed: string;
     invoiceIds: string[];
     penaltyRunId: string;
+  };
+  'school.fee.refund.recorded': {
+    organizationId: string;
+    paymentId: string;
+    studentProfileId: string;
+    amount: string;
+    overpaymentCredit: string;
+  };
+  'school.fee.sponsorship.created': {
+    organizationId: string;
+    sponsorshipId: string;
+    sponsorId: string;
+    studentProfileId: string;
+  };
+  'school.fee.waiver.applied': {
+    organizationId: string;
+    waiverId: string;
+    studentProfileId: string;
+    amount: string;
+  };
+  'school.fee.credit.created': {
+    organizationId: string;
+    feeCreditId: string;
+    studentProfileId: string;
+    amount: string;
+    source: string;
   };
   'school.library.borrowed': {
     organizationId: string;

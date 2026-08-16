@@ -14,7 +14,7 @@ import { PaymentService } from '../../invoicing/payment/payment.service';
 // module import edge is required.
 import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
-import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto } from './dto.types';
+import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 
 /**
  * BillingService — the keystone of the school vertical.
@@ -661,6 +661,76 @@ export class SchoolPaymentService {
         unallocated: remaining.toNumber(),
         replayed: false,
       };
+    });
+  }
+
+  /**
+   * Refund a fee payment back to a student's guardian.
+   *
+   * Reuses the platform's single payment writer via `createCustomerRefund`
+   * (outbound with counterAccount='receivable'), so the GL leg is Dr Accounts
+   * Receivable / Cr Cash|Bank — the exact mirror of a collection, never a
+   * phantom payable. The inbound overpayment credit the original collection
+   * left on the Payment row is what funds the refund; the engine's own
+   * validation rejects a refund that would overdraw the partner's AR.
+   *
+   * Idempotency: a replayed `reference` returns the original refund rather
+   * than paying out twice (mobile-money reversal retries).
+   */
+  async refundFee(dto: RefundFeeDto) {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const student = await tx.studentProfile.findFirst({
+        where: { id: dto.studentProfileId },
+      });
+      if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+
+      // Replay guard: a prior refund with the same reference returns as-is.
+      if (dto.reference) {
+        const existing = await tx.payment.findFirst({
+          where: { organizationId, reference: dto.reference, direction: 'outbound', partnerId: student.partnerId },
+          include: { allocations: true },
+        });
+        if (existing) {
+          return { payment: existing, replayed: true };
+        }
+      }
+
+      // Optional safeguard: cap at the student's available overpayment credit
+      // (unallocated inbound receipts). A refund above this creates a negative
+      // AR balance — allowed for withdrawals, but we surface the figure so the
+      // caller is explicit. We do NOT block it; the bursar owns the decision.
+      const inbound = await tx.payment.findMany({
+        where: { organizationId, partnerId: student.partnerId, direction: 'inbound' },
+        select: { unallocatedAmount: true },
+      });
+      const overpaymentCredit = inbound.reduce(
+        (sum: number, p: any) => sum + Number(p.unallocatedAmount ?? 0),
+        0,
+      );
+
+      const refund: any = await this.payments.createCustomerRefund(
+        {
+          partnerId: student.partnerId,
+          paymentDate: new Date().toISOString(),
+          amount: dto.amount,
+          paymentMethod: dto.paymentMethod,
+          accountId: dto.paymentMethod === 'bank' ? dto.bankAccountId : undefined,
+          reference: dto.reference,
+          cashSessionId: dto.cashSessionId,
+        },
+        tx,
+      );
+
+      this.events.publish(EVENTS.SchoolFeeRefundRecorded, {
+        organizationId,
+        paymentId: refund.id,
+        studentProfileId: student.id,
+        amount: dto.amount.toString(),
+        overpaymentCredit: overpaymentCredit.toString(),
+      });
+
+      return { payment: refund, replayed: false, overpaymentCredit };
     });
   }
 }

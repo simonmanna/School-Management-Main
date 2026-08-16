@@ -620,6 +620,258 @@ export function useDailyCollections() {
   });
 }
 
+/* ───────────────────────── Fees — discounts, scholarships, installments, penalties ───────────────────────── */
+
+export interface Discount {
+  id: string;
+  code: string;
+  name: string;
+  type: 'percentage' | 'fixed_amount';
+  value: number;
+  isActive?: boolean;
+}
+export function useDiscounts() {
+  return useQuery({
+    queryKey: ['school', 'discounts'],
+    queryFn: async () => (await api.get<Paginated<Discount>>(`${S}/discounts`, { params: { pageSize: 100 } })).data,
+  });
+}
+export function useCreateDiscount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { code: string; name: string; type: 'percentage' | 'fixed_amount'; value: number }) =>
+      (await api.post<Discount>(`${S}/discounts`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'discounts'] }),
+  });
+}
+
+export interface Scholarship {
+  id: string;
+  studentProfileId: string;
+  code: string;
+  name: string;
+  type: 'percent' | 'fixed';
+  value: number;
+  validFrom: string;
+  validTo?: string | null;
+  isActive?: boolean;
+}
+export function useScholarships() {
+  return useQuery({
+    queryKey: ['school', 'scholarships'],
+    queryFn: async () => (await api.get<Paginated<Scholarship>>(`${S}/scholarships`, { params: { pageSize: 100 } })).data,
+  });
+}
+export function useCreateScholarship() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string;
+      code: string;
+      name: string;
+      type: 'percent' | 'fixed';
+      value: number;
+      validFrom: string;
+      validTo?: string;
+    }) => (await api.post<Scholarship>(`${S}/scholarships`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'scholarships'] }),
+  });
+}
+
+export interface InstallmentPlan {
+  id: string;
+  studentProfileId: string;
+  termId: string;
+  totalAmount: number;
+  installments: Array<{ number: number; dueDate: string; amount: number }>;
+}
+export function useInstallmentPlans() {
+  return useQuery({
+    queryKey: ['school', 'installment-plans'],
+    queryFn: async () => (await api.get<Paginated<InstallmentPlan>>(`${S}/installment-plans`, { params: { pageSize: 100 } })).data,
+  });
+}
+export function useCreateInstallmentPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string;
+      termId: string;
+      totalAmount: number;
+      installments: Array<{ number: number; dueDate: string; amount: number }>;
+    }) => (await api.post<InstallmentPlan>(`${S}/installment-plans`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'installment-plans'] }),
+  });
+}
+
+export interface PenaltyRule {
+  id: string;
+  feeScheduleId: string;
+  type: 'percent' | 'fixed';
+  value: number;
+  graceDays?: number;
+  isActive?: boolean;
+}
+export function usePenaltyRules() {
+  return useQuery({
+    queryKey: ['school', 'penalty-rules'],
+    queryFn: async () => (await api.get<Paginated<PenaltyRule>>(`${S}/penalty-rules`, { params: { pageSize: 100 } })).data,
+  });
+}
+export function useCreatePenaltyRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { feeScheduleId: string; type: 'percent' | 'fixed'; value: number; graceDays?: number }) =>
+      (await api.post<PenaltyRule>(`${S}/penalty-rules`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'penalty-rules'] }),
+  });
+}
+
+export interface PenaltyRun {
+  id: string;
+  scheduleId: string;
+  cronDate: string;
+  totalAssessed: number;
+  createdInvoices: string[];
+}
+export function usePenaltyRuns() {
+  return useQuery({
+    queryKey: ['school', 'penalty-runs'],
+    queryFn: async () => (await api.get<Paginated<PenaltyRun>>(`${S}/penalty-runs`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function useRefundFee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string;
+      amount: number;
+      paymentMethod: 'cash' | 'bank' | 'mobile_money' | 'card';
+      cashSessionId?: string;
+      bankAccountId?: string;
+      reference?: string;
+      notes?: string;
+    }) => (await api.post<{ payment: { id: string; paymentNumber?: string }; replayed: boolean; overpaymentCredit: number }>(`${S}/payments/refund`, dto)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
+      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+    },
+  });
+}
+
+/* ───────────────────────── Partners (for sponsors) ───────────────────────── */
+
+export function usePartners() {
+  return useQuery({
+    queryKey: ['partners'],
+    queryFn: async () => (await api.get<{ data: { id: string; name: string }[] }>(`/partner/partners`, { params: { pageSize: 200 } })).data,
+  });
+}
+
+/* ───────────────────────── Fees — sponsorships, waivers, credits, aging (P1/P2) ───────────────────────── */
+
+export interface Sponsorship {
+  id: string;
+  sponsorId: string;
+  studentProfileId: string;
+  code: string;
+  name: string;
+  capAmount?: number | null;
+  validFrom: string;
+  validTo?: string | null;
+  isActive?: boolean;
+}
+export function useSponsorships(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'sponsorships', studentProfileId ?? 'all'],
+    queryFn: async () => (await api.get<Paginated<Sponsorship>>(`${S}/finance/sponsorships`, { params: { pageSize: 100, studentProfileId } })).data,
+  });
+}
+export function useCreateSponsorship() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { sponsorId: string; studentProfileId: string; code: string; name: string; capAmount?: number; validFrom: string; validTo?: string; notes?: string }) =>
+      (await api.post<Sponsorship>(`${S}/finance/sponsorships`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'sponsorships'] }),
+  });
+}
+
+export interface Waiver {
+  id: string;
+  studentProfileId: string;
+  code: string;
+  name: string;
+  amount: number;
+  reason?: string | null;
+  applied: boolean;
+  documentId?: string | null;
+}
+export function useWaivers(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'waivers', studentProfileId ?? 'all'],
+    queryFn: async () => (await api.get<Paginated<Waiver>>(`${S}/finance/waivers`, { params: { pageSize: 100, studentProfileId } })).data,
+  });
+}
+export function useCreateWaiver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; code: string; name: string; amount: number; reason?: string; documentId?: string }) =>
+      (await api.post<Waiver>(`${S}/finance/waivers`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+  });
+}
+export function useApplyWaiver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<Waiver>(`${S}/finance/waivers/${id}/apply`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+  });
+}
+
+export interface FeeCredit {
+  id: string;
+  studentProfileId: string;
+  code: string;
+  amount: number;
+  remaining: number;
+  source: string;
+  isActive?: boolean;
+}
+export function useFeeCredits(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'fee-credits', studentProfileId ?? 'all'],
+    queryFn: async () => (await api.get<Paginated<FeeCredit>>(`${S}/finance/credits`, { params: { pageSize: 100, studentProfileId } })).data,
+  });
+}
+export function useCreateFeeCredit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; amount: number; source?: string; sourcePaymentId?: string; sourceDocumentId?: string; expiresAt?: string }) =>
+      (await api.post<FeeCredit>(`${S}/finance/credits`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-credits'] }),
+  });
+}
+export function useApplyCredits() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (studentProfileId: string) => (await api.post<{ totalApplied: string; appliedCreditIds: string[] }>(`${S}/finance/credits/${studentProfileId}/apply`)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'fee-credits'] });
+      qc.invalidateQueries({ queryKey: ['school', 'statement', v] });
+    },
+  });
+}
+
+export interface AgingRow { documentNumber: string; partnerName: string; dueDate: string; daysOverdue: number; residual: number; bucket: string }
+export interface AgingResult { asOf: string; buckets: Record<string, number>; rows: AgingRow[] }
+export function useFeeAging() {
+  return useQuery({
+    queryKey: ['school', 'finance', 'aging'],
+    queryFn: async () => (await api.get<AgingResult>(`${S}/finance/aging`)).data,
+  });
+}
+
 /* ───────────────────────── Subjects (foundation) ───────────────────────── */
 
 export interface Subject { id: string; code: string; name: string; isCore: boolean }
@@ -1155,6 +1407,10 @@ const TR = `${S}/transcripts`;
 const EXT = `${S}/external-results`;
 const CERT = `${S}/certificates`;
 const AN = `${S}/analytics`;
+const INV = `${S}/invigilators`;
+const LO = `${S}/learning-outcomes`;
+const QP = `${S}/question-papers`;
+const RC = `${S}/report-cards`;
 
 /* ── A1 Assessment policy + components + instances ────────────────────────── */
 
@@ -1729,5 +1985,145 @@ export function useRolloverPlan() {
   return useMutation({
     mutationFn: async (dto: { fromTermId: string; toTermId: string; dryRun?: boolean }) => (await api.post<{ plan: PromotionPlanEntry[]; dryRun: boolean }>(`${PRO}/rollover`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rollover'] }),
+  });
+}
+
+/* ── P0-A Report card comments ─────────────────────────────────────────────── */
+
+export function useUpdateReportCardComment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string;
+      termId: string;
+      classTeacherComment?: string;
+      principalComment?: string;
+      competencyLevels?: Record<string, string>;
+    }) => (await api.post(`${RC}/comment`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'report-cards', v.studentProfileId] }),
+  });
+}
+
+/* ── P0-B Invigilators ────────────────────────────────────────────────────── */
+
+export interface Invigilator { id: string; staffId?: string | null; name: string; note?: string | null; isActive: boolean }
+export interface InvigilatorAssignment { id: string; examScheduleId: string; invigilatorId: string; invigilator: Invigilator }
+
+export function useInvigilators() {
+  return useQuery({ queryKey: ['school', 'invigilators'], queryFn: async () => (await api.get<Paginated<Invigilator>>(INV, { params: { pageSize: 200 } })).data });
+}
+export function useCreateInvigilator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; staffId?: string; note?: string; isActive?: boolean }) => (await api.post<Invigilator>(INV, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'invigilators'] }),
+  });
+}
+export function useAssignInvigilator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examScheduleId: string; invigilatorId: string }) => (await api.post(`${INV}/assign`, dto)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'invigilators', 'by-schedule', v.examScheduleId] });
+      qc.invalidateQueries({ queryKey: ['school', 'exam-schedules'] });
+    },
+  });
+}
+export function useUnassignInvigilator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { examScheduleId: string; invigilatorId: string }) => (await api.delete(`${INV}/assign/${v.examScheduleId}/${v.invigilatorId}`)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'invigilators', 'by-schedule', v.examScheduleId] }),
+  });
+}
+export function useInvigilatorsBySchedule(examScheduleId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'invigilators', 'by-schedule', examScheduleId],
+    enabled: !!examScheduleId,
+    queryFn: async () => (await api.get<InvigilatorAssignment[]>(`${INV}/by-schedule/${examScheduleId}`)).data,
+  });
+}
+
+/* ── P1-B Learning outcomes ───────────────────────────────────────────────── */
+
+export interface LearningOutcome {
+  id: string;
+  subjectId?: string | null;
+  topicId?: string | null;
+  competencyId?: string | null;
+  title: string;
+  description?: string | null;
+  expectedLevel?: string | null;
+  order: number;
+}
+export interface OutcomeAchievement {
+  id: string;
+  studentProfileId: string;
+  learningOutcomeId: string;
+  termId: string;
+  level: 'not_met' | 'approaching' | 'met' | 'exceeded';
+  masteryPercent?: number | null;
+  comment?: string | null;
+  learningOutcome?: LearningOutcome & { competency?: { id: string; code?: string } | null };
+}
+
+export function useLearningOutcomes() {
+  return useQuery({ queryKey: ['school', 'learning-outcomes'], queryFn: async () => (await api.get<Paginated<LearningOutcome>>(LO, { params: { pageSize: 200 } })).data });
+}
+export function useCreateLearningOutcome() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { title: string; description?: string; subjectId?: string; topicId?: string; competencyId?: string; expectedLevel?: string; order?: number }) =>
+      (await api.post<LearningOutcome>(LO, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'learning-outcomes'] }),
+  });
+}
+export function useRecordOutcomeAchievement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; learningOutcomeId: string; termId: string; level: string; masteryPercent?: number; comment?: string }) =>
+      (await api.post(`${LO}/achievement`, dto)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'outcome-achievements', v.studentProfileId, v.termId] });
+      qc.invalidateQueries({ queryKey: ['school', 'outcome-achievements', 'subject', v.learningOutcomeId] });
+    },
+  });
+}
+export function useOutcomeAchievements(studentProfileId: string | undefined, termId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'outcome-achievements', studentProfileId, termId],
+    enabled: !!studentProfileId && !!termId,
+    queryFn: async () => (await api.get<OutcomeAchievement[]>(`${LO}/achievements/student/${studentProfileId}/term/${termId}`)).data,
+  });
+}
+
+/* ── P2-A Traditional question papers ──────────────────────────────────────── */
+
+export interface QuestionPaper {
+  id: string;
+  examScheduleId: string;
+  title: string;
+  paperKind: string;
+  paperNumber?: number | null;
+  totalMarks: number;
+  questions: Array<{ number: number; text: string; marks: number }>;
+  fileUrl?: string | null;
+  setterId?: string | null;
+  moderatorId?: string | null;
+}
+
+export function useQuestionPapersBySchedule(examScheduleId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'question-papers', 'by-schedule', examScheduleId],
+    enabled: !!examScheduleId,
+    queryFn: async () => (await api.get<QuestionPaper[]>(`${QP}/by-schedule/${examScheduleId}`)).data,
+  });
+}
+export function useCreateQuestionPaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examScheduleId: string; title: string; paperKind?: string; paperNumber?: number; totalMarks?: number; questions?: Array<{ number: number; text: string; marks: number }>; fileUrl?: string; setterId?: string; moderatorId?: string }) =>
+      (await api.post<QuestionPaper>(QP, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'question-papers', 'by-schedule', v.examScheduleId] }),
   });
 }

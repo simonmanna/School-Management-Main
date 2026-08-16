@@ -643,6 +643,7 @@ model Partner {
   // scalar; these formalize it so `include: { partner: true }` works.
   schoolStudent    StudentProfile?       @relation("StudentPartner")
   schoolStaff      StaffProfile?         @relation("StaffPartner")
+  sponsorships     Sponsorship[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -9799,6 +9800,8 @@ model Term {
   organizationId String
   academicYearId String
   name           String
+  /// 'term' | 'semester'. Configurable; schools may run terms, semesters, or both.
+  kind           String    @default("term")
   startDate      DateTime
   endDate        DateTime
   isCurrent      Boolean   @default(false)
@@ -9840,6 +9843,26 @@ model Department {
   staffProfiles StaffProfile[]
 
   @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Subject categories (e.g. Sciences / Humanities / Languages) — distinct from the
+/// organizational Department. A subject belongs to a department AND a category.
+model SubjectCategory {
+  id             String    @id @default(uuid())
+  organizationId String
+  name           String
+  code           String
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  subjects Subject[]
+
+  @@unique([organizationId, code])
   @@index([organizationId])
 }
 
@@ -9887,6 +9910,7 @@ model SchoolClass {
   homeworks          HomeworkAssignment[]
   announcements      Announcement[]
   examSchedules      ExamSchedule[]
+  streams            Stream[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -9919,22 +9943,50 @@ model Section {
   @@index([classId])
 }
 
-model Subject {
+/// Stream: a sub-grouping of a class distinct from a Section (e.g. S1 → Section A →
+/// Stream East). Optional — many schools only use sections.
+model Stream {
   id             String    @id @default(uuid())
   organizationId String
-  code           String
+  classId        String
   name           String
-  departmentId   String?
-  isCore         Boolean   @default(true)
-  customFields   Json      @default("{}")
+  capacity       Int       @default(40)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
   updatedBy      String?
   deletedAt      DateTime?
 
+  schoolClass       SchoolClass         @relation(fields: [classId], references: [id])
+  studentProfiles   StudentProfile[]
+  enrollments       Enrollment[]
+  teacherAssignments TeacherAssignment[]
+  timetableSlots    TimetableSlot[]
+
+  @@unique([organizationId, classId, name])
+  @@index([organizationId])
+  @@index([classId])
+}
+
+model Subject {
+  id                String    @id @default(uuid())
+  organizationId    String
+  code              String
+  name              String
+  departmentId      String?
+  subjectCategoryId String?
+  isCore            Boolean   @default(true)
+  customFields      Json      @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
+
   department         Department?          @relation(fields: [departmentId], references: [id])
+  subjectCategory    SubjectCategory?    @relation(fields: [subjectCategoryId], references: [id])
   curriculumSubjects CurriculumSubject[]
+  competencies       Competency[]
   teacherAssignments TeacherAssignment[]
   timetableSlots     TimetableSlot[]
   homeworks          HomeworkAssignment[]
@@ -9942,9 +9994,12 @@ model Subject {
   lessonPlans        LessonPlan[]
   entranceExams      EntranceExam[]
 
+  learningOutcomes LearningOutcome[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([departmentId])
+  @@index([subjectCategoryId])
 }
 
 model Period {
@@ -10017,6 +10072,7 @@ model StudentProfile {
   admissionNo      String
   currentClassId   String?
   currentSectionId String?
+  currentStreamId  String?
   enrollmentDate   DateTime
   status           StudentStatus @default(active)
   /// Date-of-birth mirror for fast filtering (also stored on Partner customFields).
@@ -10037,6 +10093,7 @@ model StudentProfile {
 
   currentClass        SchoolClass?                 @relation(fields: [currentClassId], references: [id])
   currentSection      Section?                     @relation(fields: [currentSectionId], references: [id])
+  currentStream       Stream?                      @relation(fields: [currentStreamId], references: [id])
   guardians           StudentGuardian[]
   medicalRecord       MedicalRecord?
   documents           StudentDocument[]
@@ -10047,6 +10104,9 @@ model StudentProfile {
   gradeEntries        GradeEntry[]
   feeAssignments      StudentFeeAssignment[]
   scholarships        Scholarship[]
+  sponsorships        Sponsorship[]
+  waivers             Waiver[]
+  feeCredits          FeeCredit[]
   mealAccount         MealAccount?
   mealPlanAssignments MealPlanAssignment[]
   mealAttendances     MealAttendance[]
@@ -10054,10 +10114,13 @@ model StudentProfile {
   hostelAllocation    HostelAllocation[]
   installmentPlans    InstallmentPlan[]
 
+  outcomeAchievements StudentOutcomeAchievement[]
+
   @@unique([organizationId, admissionNo])
   @@index([organizationId])
   @@index([currentClassId])
   @@index([currentSectionId])
+  @@index([currentStreamId])
 }
 
 model StudentStatusHistory {
@@ -10243,8 +10306,14 @@ model StaffAttendance {
 enum AdmissionStatus {
   submitted
   under_review
-  exam_scheduled
+  screening
+  interview_scheduled
+  interviewed
+  scored
   accepted
+  waitlisted
+  offer_issued
+  offer_accepted
   rejected
   enrolled
   withdrawn
@@ -10274,6 +10343,10 @@ model AdmissionApplication {
   reviewedById       String?
   reviewedAt         DateTime?
   decisionNotes      String?
+  /// Application fee lifecycle. unpaid | pending (invoice issued) | paid | waived.
+  feeStatus          String          @default("unpaid")
+  /// FK to the sales_invoice Document created for the application fee.
+  feeInvoiceId       String?
   customFields       Json            @default("{}")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -10284,7 +10357,11 @@ model AdmissionApplication {
   academicYear  AcademicYear          @relation(fields: [academicYearId], references: [id])
   documents     ApplicationDocument[]
   entranceExams EntranceExam[]
+  interviews    Interview?
+  score         ApplicantScore?
   waitingList   WaitingList?
+  fee           AdmissionFee?
+  offerLetter   OfferLetter?
   enrollment    Enrollment?
 
   @@unique([organizationId, applicationNumber])
@@ -10348,6 +10425,79 @@ model WaitingList {
   @@index([classId, position])
 }
 
+/// Interview scheduling + outcome for an admission application.
+model Interview {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  /// Staff/partner id of the interviewer (or panel lead).
+  interviewerId  String?
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  /// 1-5 panel rating.
+  rating         Int?
+  /// 'strong' | 'borderline' | 'weak'.
+  recommendation String?
+  panelNotes     String?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+/// Aggregate applicant score (entrance exam + interview + documents).
+model ApplicantScore {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  examScore      Decimal? @db.Decimal(6, 2)
+  interviewScore Decimal? @db.Decimal(6, 2)
+  documentScore  Decimal? @db.Decimal(6, 2)
+  totalScore     Decimal? @db.Decimal(6, 2)
+  computedAt     DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// Application fee tracking. The actual charge is a sales_invoice Document
+/// (reusing the invoicing/accounting stack — zero new accounting code).
+model AdmissionFee {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  amount         Decimal  @db.Decimal(10, 2)
+  /// FK to the sales_invoice Document created for this fee.
+  invoiceId      String?
+  paid           Boolean  @default(false)
+  paidAt         DateTime?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// Offer letter issued to an accepted applicant.
+model OfferLetter {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  issuedAt       DateTime @default(now())
+  expiresAt      DateTime?
+  templateId     String?
+  body           String?
+  /// 'issued' | 'accepted' | 'declined'.
+  status         String   @default("issued")
+  acceptedAt     DateTime?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
 model Enrollment {
   id               String   @id @default(uuid())
   organizationId   String
@@ -10355,11 +10505,17 @@ model Enrollment {
   studentProfileId String
   classId          String
   sectionId        String?
+  streamId         String?
   termId           String
   rollNumber       String
   enrolledAt       DateTime @default(now())
+  /// Date the enrollment became effective (may differ from enrolledAt for mid-year entries).
+  effectiveDate    DateTime @default(now())
   /// 'enrolled' | 'completed' | 'transferred_out' | 'withdrawn'.
   status           String   @default("enrolled")
+  /// Set when the enrollment ends (transfer/withdraw). History is append-only in EnrollmentHistory.
+  endedAt          DateTime?
+  endReason        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -10367,14 +10523,40 @@ model Enrollment {
   student     StudentProfile        @relation(fields: [studentProfileId], references: [id])
   schoolClass SchoolClass           @relation(fields: [classId], references: [id])
   section     Section?              @relation(fields: [sectionId], references: [id])
+  stream      Stream?               @relation(fields: [streamId], references: [id])
   term        Term                  @relation(fields: [termId], references: [id])
+  history     EnrollmentHistory[]
 
   @@unique([organizationId, studentProfileId, termId])
   @@index([organizationId])
   @@index([classId])
+  @@index([sectionId])
+  @@index([streamId])
   @@index([termId])
 }
 
+/// Append-only history of every enrollment status change (enroll / transfer / withdraw /
+/// re-enroll). This is the auditable record that makes Student Academic Enrollment a
+/// first-class historical entity.
+model EnrollmentHistory {
+  id               String   @id @default(uuid())
+  organizationId   String
+  enrollmentId     String
+  fromStatus       String?
+  toStatus         String
+  reason           String?
+  changedById      String?
+  changedAt        DateTime @default(now())
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([enrollmentId])
+}
+
+/// Curriculum (per class + academic year). Versioned + lifecycle-managed:
+/// draft → published → archived. Published versions are immutable; edits create a
+/// new version via cloneAsNewVersion so the history is auditable.
 model Curriculum {
   id             String    @id @default(uuid())
   organizationId String
@@ -10382,15 +10564,27 @@ model Curriculum {
   academicYearId String
   name           String
   description    String?
+  /// Monotonic version within (classId, academicYearId). v1 is the first draft.
+  version        Int       @default(1)
+  /// 'draft' | 'published' | 'archived'.
+  status         String    @default("draft")
+  parentVersionId String?
+  publishedAt    DateTime?
+  archivedAt     DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
 
   academicYear AcademicYear        @relation(fields: [academicYearId], references: [id])
   subjects     CurriculumSubject[]
+  parentVersion Curriculum?        @relation("CurriculumVersion", fields: [parentVersionId], references: [id])
+  childVersions Curriculum[]       @relation("CurriculumVersion")
+  topics       Topic[]
+  units        Unit[]
 
-  @@unique([organizationId, classId, academicYearId, name])
+  @@unique([organizationId, classId, academicYearId, version])
   @@index([organizationId])
+  @@index([parentVersionId])
 }
 
 model CurriculumSubject {
@@ -10408,9 +10602,116 @@ model CurriculumSubject {
   curriculum Curriculum @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
   subject    Subject    @relation(fields: [subjectId], references: [id])
 
+  topics Topic[]
+  units  Unit[]
+
   @@unique([curriculumId, subjectId])
   @@index([organizationId])
   @@index([subjectId])
+}
+
+/// Competency (CBC-style) attached to a subject or standalone for a school.
+model Competency {
+  id             String    @id @default(uuid())
+  organizationId String
+  subjectId      String?
+  code           String
+  description    String?
+  /// Optional competency level/band (e.g. 'emerging' | 'proficient').
+  level          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  subject  Subject?  @relation(fields: [subjectId], references: [id])
+  topics   Topic[]
+
+  learningOutcomes LearningOutcome[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([subjectId])
+}
+
+/// Topic under a competency (or directly under a curriculum subject).
+model Topic {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  curriculumId        String?
+  curriculumSubjectId String?
+  competencyId        String?
+  title               String
+  order               Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           String?
+  updatedBy           String?
+  deletedAt           DateTime?
+
+  curriculum        Curriculum?        @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  curriculumSubject CurriculumSubject? @relation(fields: [curriculumSubjectId], references: [id], onDelete: Cascade)
+  competency        Competency?        @relation(fields: [competencyId], references: [id])
+  units             Unit[]
+  learningObjectives LearningObjective[]
+  learningOutcomes   LearningOutcome[]
+
+  @@index([organizationId])
+  @@index([curriculumId])
+  @@index([curriculumSubjectId])
+  @@index([competencyId])
+}
+
+/// Unit under a topic (or directly under a curriculum subject).
+model Unit {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  curriculumId        String?
+  curriculumSubjectId String?
+  topicId             String?
+  title               String
+  description         String?
+  order               Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           String?
+  updatedBy           String?
+  deletedAt           DateTime?
+
+  curriculum        Curriculum?        @relation(fields: [curriculumId], references: [id], onDelete: Cascade)
+  curriculumSubject CurriculumSubject? @relation(fields: [curriculumSubjectId], references: [id], onDelete: Cascade)
+  topic             Topic?             @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  learningObjectives LearningObjective[]
+
+  @@index([organizationId])
+  @@index([curriculumId])
+  @@index([curriculumSubjectId])
+  @@index([topicId])
+}
+
+/// Learning objective (first-class, optionally tied to a Bloom level) under a unit/topic.
+model LearningObjective {
+  id             String    @id @default(uuid())
+  organizationId String
+  unitId         String?
+  topicId        String?
+  description    String
+  /// Bloom's taxonomy level: 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create'.
+  bloomLevel     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  unit Unit? @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  topic Topic? @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  lessonPlanObjectives LessonPlanObjective[]
+
+  @@index([organizationId])
+  @@index([unitId])
+  @@index([topicId])
 }
 
 model LessonPlan {
@@ -10422,6 +10723,8 @@ model LessonPlan {
   teacherPartnerId String?
   weekOf           DateTime
   title            String
+  /// Denormalized free-text summary (kept for search/backwards-compat). First-class
+  /// objectives live on LearningObjective and link here via LessonPlanObjective.
   objectives       String?
   materials        String?
   /// 'draft' | 'published'.
@@ -10433,10 +10736,27 @@ model LessonPlan {
   subject Subject       @relation(fields: [subjectId], references: [id])
   term    Term?         @relation(fields: [termId], references: [id])
   teacher StaffProfile? @relation(fields: [teacherPartnerId], references: [id])
+  learningObjectives LessonPlanObjective[]
 
   @@index([organizationId])
   @@index([subjectId])
   @@index([teacherPartnerId])
+}
+
+/// Join: a lesson plan references specific learning objectives it covers.
+model LessonPlanObjective {
+  id                String @id @default(uuid())
+  organizationId    String
+  lessonPlanId      String
+  learningObjectiveId String
+  deletedAt         DateTime?
+
+  lessonPlan      LessonPlan       @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+  learningObjective LearningObjective @relation(fields: [learningObjectiveId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonPlanId, learningObjectiveId])
+  @@index([organizationId])
+  @@index([learningObjectiveId])
 }
 
 model TeacherAssignment {
@@ -10446,6 +10766,7 @@ model TeacherAssignment {
   subjectId        String
   classId          String
   sectionId        String?
+  streamId         String?
   termId           String?
   periodsPerWeek   Int      @default(0)
   createdAt        DateTime @default(now())
@@ -10455,12 +10776,14 @@ model TeacherAssignment {
   subject     Subject      @relation(fields: [subjectId], references: [id])
   schoolClass SchoolClass  @relation(fields: [classId], references: [id])
   section     Section?     @relation(fields: [sectionId], references: [id])
+  stream      Stream?      @relation(fields: [streamId], references: [id])
   term        Term?        @relation(fields: [termId], references: [id])
 
-  @@unique([organizationId, teacherPartnerId, subjectId, classId, sectionId, termId])
+  @@unique([organizationId, teacherPartnerId, subjectId, classId, sectionId, streamId, termId])
   @@index([organizationId])
   @@index([teacherPartnerId])
   @@index([classId])
+  @@index([streamId])
 }
 
 model TimetableSlot {
@@ -10468,6 +10791,7 @@ model TimetableSlot {
   organizationId   String
   classId          String
   sectionId        String?
+  streamId         String?
   dayOfWeek        Int // 1=Monday ... 7=Sunday
   periodId         String
   subjectId        String
@@ -10478,6 +10802,7 @@ model TimetableSlot {
 
   schoolClass SchoolClass   @relation(fields: [classId], references: [id])
   section     Section?      @relation(fields: [sectionId], references: [id])
+  stream      Stream?       @relation(fields: [streamId], references: [id])
   period      Period        @relation(fields: [periodId], references: [id])
   subject     Subject       @relation(fields: [subjectId], references: [id])
   campus      Campus?       @relation(fields: [campusId], references: [id])
@@ -10488,6 +10813,7 @@ model TimetableSlot {
   @@index([classId, dayOfWeek])
   @@index([teacherPartnerId, dayOfWeek])
   @@index([periodId, dayOfWeek])
+  @@index([streamId])
 }
 
 enum AttendanceStatus {
@@ -10857,6 +11183,8 @@ model ExamSchedule {
   subject      Subject      @relation(fields: [subjectId], references: [id])
   venue        ExamVenue?   @relation(fields: [venueId], references: [id])
   gradeEntries GradeEntry[]
+  invigilatorAssignments InvigilatorAssignment[]
+  questionPapers QuestionPaper[]
 
   @@unique([examId, classId, subjectId])
   @@index([organizationId])
@@ -10912,6 +11240,133 @@ model ExamRegistration {
   @@index([organizationId])
   @@index([examId])
   @@index([organizationId, studentProfileId])
+}
+
+// ───────────── Invigilator roster (A4) ─────────────
+// Staff who supervise exams. Distinct from teaching staff so a school can run a
+// pool of invigilators (teachers + non-teachers) and assign them to sittings.
+model Invigilator {
+  id             String    @id @default(uuid())
+  organizationId String
+  /// Staff/partner id when the invigilator is a school employee; null for
+  /// external invigilators (named free-text instead).
+  staffId        String?
+  name           String
+  /// Optional free-text qualifier (e.g. "External — UNEB", "Maths Dept").
+  note           String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  assignments InvigilatorAssignment[]
+
+  @@unique([organizationId, staffId])
+  @@index([organizationId])
+}
+
+/// A single invigilator ↔ exam-schedule binding. Drives the A4 clash check
+/// already implemented in ExamScheduleService (INVIGILATOR_CLASH).
+model InvigilatorAssignment {
+  id              String   @id @default(uuid())
+  organizationId  String
+  examScheduleId  String
+  invigilatorId   String
+  createdAt       DateTime @default(now())
+
+  examSchedule ExamSchedule  @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  invigilator Invigilator    @relation(fields: [invigilatorId], references: [id], onDelete: Cascade)
+
+  @@unique([examScheduleId, invigilatorId])
+  @@index([organizationId])
+  @@index([examScheduleId])
+  @@index([invigilatorId])
+}
+
+// ───────────── Learning outcomes (P1-B) ─────────────
+// A learning outcome is a measurable target attached to a subject/topic. Student
+// achievement against each outcome is captured per term and feeds competency
+// reports. Unlike a Competency (a broad strand), an outcome is concrete and
+// assessable ("Solve quadratic equations").
+model LearningOutcome {
+  id             String    @id @default(uuid())
+  organizationId String
+  subjectId      String?
+  topicId        String?
+  competencyId   String?
+  title          String
+  description    String?
+  /// Expected proficiency band, e.g. 'basic' | 'proficient' | 'advanced'.
+  expectedLevel  String?
+  order          Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  subject      Subject?      @relation(fields: [subjectId], references: [id])
+  topic        Topic?        @relation(fields: [topicId], references: [id])
+  competency   Competency?   @relation(fields: [competencyId], references: [id])
+  achievements StudentOutcomeAchievement[]
+
+  @@index([organizationId])
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([competencyId])
+}
+
+/// Per-student per-outcome achievement for a term.
+model StudentOutcomeAchievement {
+  id                String    @id @default(uuid())
+  organizationId    String
+  studentProfileId  String
+  learningOutcomeId String
+  termId            String
+  /// Achieved level: 'not_met' | 'approaching' | 'met' | 'exceeded'.
+  level             String    @default("not_met")
+  /// 0–100 mastery percentage, optional but used for aggregation.
+  masteryPercent    Int?
+  comment           String?
+  assessedById      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  learningOutcome LearningOutcome @relation(fields: [learningOutcomeId], references: [id], onDelete: Cascade)
+  student        StudentProfile  @relation(fields: [studentProfileId], references: [id])
+
+  @@unique([studentProfileId, learningOutcomeId, termId])
+  @@index([organizationId])
+  @@index([studentProfileId, termId])
+  @@index([learningOutcomeId])
+}
+
+// ───────────── Traditional question papers (P2-A) ─────────────
+// Paper-based (non-CBT) question papers, authored by teachers, attached to an
+// ExamSchedule sitting. Distinct from CBT `Paper` so schools can keep a printed
+// paper archive alongside computer-based testing.
+model QuestionPaper {
+  id              String    @id @default(uuid())
+  organizationId  String
+  examScheduleId  String
+  title           String
+  /// 'theory' | 'practical' | 'alternative_to_practical' | 'oral'.
+  paperKind       String    @default("theory")
+  paperNumber     Int?
+  totalMarks      Decimal   @default(0) @db.Decimal(8, 2)
+  /// Free-form question list (number, text, marks) — a printable paper.
+  questions        Json      @default("[]")
+  /// Uploaded paper source (PDF/DOCX) URL.
+  fileUrl          String?
+  /// Setter/moderator sign-off.
+  setterId         String?
+  moderatorId      String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  examSchedule ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([examScheduleId])
 }
 
 model GradeEntry {
@@ -10976,6 +11431,13 @@ model ReportCard {
   pdfUrl           String?
   publishedAt      DateTime?
   customFields     Json      @default("{}")
+  /// Per-student free-text narrative persisted at generation time. These are
+  /// captured via the report-card comment endpoints (P0-A) and rendered into
+  /// the payload + PDF footer.
+  classTeacherComment String?
+  principalComment   String?
+  /// Persisted competency levels keyed by competencyId (CBC strand outcomes).
+  competencyLevels   Json      @default("{}")
 
   @@index([organizationId])
   @@index([studentProfileId])
@@ -11836,6 +12298,94 @@ model FeeStructure {
 
   @@unique([organizationId, name, academicYearId])
   @@index([organizationId])
+}
+
+/// P1: A sponsor (company, NGO, individual) that pays fees on behalf of one or
+/// more students. The sponsor is a Partner; collections attribute to the
+/// student's own Partner but record the sponsorId so reporting can group by
+/// sponsor. A sponsorship may carry a per-term cap and validity window.
+model Sponsorship {
+  id               String   @id @default(uuid())
+  organizationId   String
+  sponsorId        String // FK Partner (type=organization|individual)
+  studentProfileId String
+  code             String
+  name             String
+  /// Optional per-term monetary cap (0/null = uncapped).
+  capAmount        Decimal? @db.Decimal(20, 6)
+  validFrom        DateTime
+  validTo          DateTime?
+  isActive         Boolean  @default(true)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        String?
+  updatedBy        String?
+
+  sponsor        Partner        @relation(fields: [sponsorId], references: [id])
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([sponsorId])
+  @@index([studentProfileId])
+}
+
+/// P1: A waiver forgives an amount the school does not expect to collect (distinct
+/// from a Discount, which reduces the *billed* amount). A waiver is applied as a
+/// credit against a student's open fee invoices (Dr Waiver Expense / Cr AR) and
+/// shows on statements as a waived (not paid) amount.
+model Waiver {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  code             String
+  name             String
+  amount           Decimal  @db.Decimal(20, 6)
+  /// JSON: reason / authorizedBy, free-form.
+  reason           String?
+  documentId       String? // the fee invoice the waiver was applied to (null = whole-student credit)
+  applied          Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        String?
+  updatedBy        String?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([documentId])
+}
+
+/// P1: A student-held fee credit (overpayment, or a credit created by a refund /
+/// withdrawal). Applied automatically by the billing run's allocation step, or
+/// manually. Stored-value liability (Dr AR / Cr Fee Credit Liability on creation)
+/// that draws down as it settles invoices.
+model FeeCredit {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  code             String
+  amount           Decimal  @db.Decimal(20, 6)
+  /// Remaining unapplied balance. amount - applied = available credit.
+  remaining        Decimal  @db.Decimal(20, 6)
+  /// Where the credit came from: 'overpayment' | 'refund' | 'advance' | 'adjustment'.
+  source           String   @default("overpayment")
+  /// The payment/document that funded this credit (for traceability).
+  sourcePaymentId  String?
+  sourceDocumentId String?
+  expiresAt        DateTime?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdBy        String?
+  updatedBy        String?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
 }
 
 model FeeSchedule {

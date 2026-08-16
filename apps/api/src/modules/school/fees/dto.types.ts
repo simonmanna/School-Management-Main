@@ -258,3 +258,27 @@ export class CollectFeePaymentDto {
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsString() notes?: string;
 }
+
+export class RefundFeeDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+
+  @IsNumber() @IsPositive() amount!: number;
+
+  @IsIn(['cash', 'bank', 'mobile_money', 'card'])
+  paymentMethod!: 'cash' | 'bank' | 'mobile_money' | 'card';
+
+  /**
+   * Tender the refund from, e.g. the cash drawer the original payment landed
+   * in, or the bank account to draw down. Optional — when omitted the payment
+   * engine resolves the default cash/bank account per method.
+   */
+  @IsOptional() @IsString() cashSessionId?: string;
+  @IsOptional() @IsString() bankAccountId?: string;
+
+  /**
+   * Optional idempotency/replay key. A mobile-money reversal retry with the
+   * same reference returns the original refund rather than paying out twice.
+   */
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+}

@@ -371,6 +371,10 @@ export const PERMISSIONS = {
     manageStudents: 'school:students:write',
     manageStaff: 'school:staff:write',
     manageAdmissions: 'school:admissions:write',
+    // Admissions sub-grants (off by default; the broad write above is the legacy grant).
+    scheduleAdmissionInterviews: 'school:admissions:interview',
+    issueAdmissionOffers: 'school:admissions:offer',
+    collectAdmissionFees: 'school:admissions:fee',
     takeAttendance: 'school:attendance:write',
     /**
      * Marks ENTRY only. Historically this single grant also covered approving
@@ -404,6 +408,7 @@ export const PERMISSIONS = {
     exportAnalytics: 'school:analytics:export',
     manageFees: 'school:fees:write',
     collectPayments: 'school:fees:collect',
+    refundFees: 'school:fees:refund',
     manageLibrary: 'school:library:write',
     manageTransport: 'school:transport:write',
     manageHostel: 'school:hostel:write',
