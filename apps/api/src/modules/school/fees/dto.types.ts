@@ -282,3 +282,30 @@ export class RefundFeeDto {
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsString() notes?: string;
 }
+
+/* ── Budgeting ── */
+export class CreateBudgetDto {
+  @IsString() @IsNotEmpty() category!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsNumber() @Min(0) amount!: number;
+  @IsOptional() @IsString() academicYearId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() periodFrom?: string;
+  @IsOptional() @IsString() periodTo?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsIn(['draft', 'approved', 'closed']) status?: string;
+}
+
+export class UpdateBudgetDto {
+  @IsOptional() @IsString() @IsNotEmpty() category?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsNumber() @Min(0) amount?: number;
+  @IsOptional() @IsString() academicYearId?: string;
+  @IsOptional() @IsString() termId?: string;
+  @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsString() periodFrom?: string;
+  @IsOptional() @IsString() periodTo?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsOptional() @IsIn(['draft', 'approved', 'closed']) status?: string;
+}

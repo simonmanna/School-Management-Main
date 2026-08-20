@@ -33,12 +33,29 @@ import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolStudentsPage } from '@/pages/school/students';
 import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
+import { SchoolFeesCollectPage } from '@/pages/school/fees-subpages';
+import { SchoolWaiverCategoriesPage } from '@/pages/school/fees-subpages';
+import { SchoolWaiversPage } from '@/pages/school/fees-subpages';
+import { SchoolFeeDefaultersPage } from '@/pages/school/fees-subpages';
+import { SchoolBadDebtorsPage } from '@/pages/school/fees-subpages';
+import { SchoolBudgetingPage } from '@/pages/school/fees-subpages';
 import { SchoolAttendancePage } from '@/pages/school/attendance';
+import { SchoolAttendanceStatusesPage } from '@/pages/school/attendance-statuses';
+import { SchoolAttendanceReportPage } from '@/pages/school/attendance-report';
 import { SchoolTimetablePage } from '@/pages/school/timetable';
+import { SchoolTripsPage } from '@/pages/school/trips';
+import { SchoolTransportPage } from '@/pages/school/transport';
+import { SchoolLibraryPage } from '@/pages/school/library';
+import { FrontDeskPage } from '@/pages/school/front-desk';
 import { SchoolExamsPage } from '@/pages/school/exams';
+import { SchoolReportCardsPage } from '@/pages/school/report-cards';
+import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-settings';
 import { SchoolPromotionPage } from '@/pages/school/promotion';
 import { SchoolMealsPage } from '@/pages/school/meals';
 import { SchoolAdmissionsPage } from '@/pages/school/admissions';
+import { SchoolEnrollmentSummaryPage } from '@/pages/school/enrollment-summary';
+import { SchoolApplicationsPage } from '@/pages/school/applications';
+import { SchoolApplicationFormPage } from '@/pages/school/application-form';
 import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
@@ -62,6 +79,7 @@ import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolStreamsPage } from '@/pages/school/streams';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCalendarPage } from '@/pages/school/calendar';
+import { SchoolEventsPage } from '@/pages/school/events';
 import { SchoolPoliciesPage } from '@/pages/school/policies';
 import { SchoolCustomFieldsPage } from '@/pages/school/custom-fields';
 import { SchoolRolesPage } from '@/pages/school/roles';
@@ -184,6 +202,14 @@ import { HrPayrollSettingsPage } from '@/pages/hr/HrPayrollSettingsPage';
 import { HrPayslipsPage } from '@/pages/hr/HrPayslipsPage';
 import { HrAdvancesLoansPage } from '@/pages/hr/HrAdvancesLoansPage';
 import { HrReportsPage } from '@/pages/hr/HrReportsPage';
+import { HrJobGradesPage } from '@/pages/hr/HrJobGradesPage';
+import { HrContractsPage } from '@/pages/hr/HrContractsPage';
+import { HrRecruitmentPage } from '@/pages/hr/HrRecruitmentPage';
+import { HrQualificationsPage } from '@/pages/hr/HrQualificationsPage';
+import { HrTrainingPage } from '@/pages/hr/HrTrainingPage';
+import { HrOffboardingPage } from '@/pages/hr/HrOffboardingPage';
+import { HrPayrollPreviewPage } from '@/pages/hr/HrPayrollPreviewPage';
+import { HrMyPage } from '@/pages/hr/HrMyPage';
 import { StockLedgerPage } from '@/pages/inventory/StockLedgerPage';
 import LocationsPage from '@/pages/inventory/LocationsPage';
 import TerminalPage from '@/pages/pos/Terminal';
@@ -377,6 +403,14 @@ export function App() {
           <Route path="/hr/payslips" element={<HrPayslipsPage />} />
           <Route path="/hr/advances-loans" element={<HrAdvancesLoansPage />} />
           <Route path="/hr/reports" element={<HrReportsPage />} />
+          <Route path="/hr/job-grades" element={<HrJobGradesPage />} />
+          <Route path="/hr/contracts" element={<HrContractsPage />} />
+          <Route path="/hr/recruitment" element={<HrRecruitmentPage />} />
+          <Route path="/hr/qualifications" element={<HrQualificationsPage />} />
+          <Route path="/hr/training" element={<HrTrainingPage />} />
+          <Route path="/hr/offboarding" element={<HrOffboardingPage />} />
+          <Route path="/hr/payroll/preview" element={<HrPayrollPreviewPage />} />
+          <Route path="/hr/my" element={<HrMyPage />} />
           <Route path="/inventory/ledger" element={<StockLedgerPage />} />
           <Route path="/inventory/locations" element={<LocationsPage />} />
           <Route path="/procurement/purchase-requests" element={<PurchaseRequestsPage />} />
@@ -400,12 +434,26 @@ export function App() {
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
+          <Route path="/school/fees/collect" element={<SchoolFeesCollectPage />} />
+          <Route path="/school/fees/waiver-categories" element={<SchoolWaiverCategoriesPage />} />
+          <Route path="/school/fees/waivers" element={<SchoolWaiversPage />} />
+          <Route path="/school/fees/defaulters" element={<SchoolFeeDefaultersPage />} />
+          <Route path="/school/fees/bad-debtors" element={<SchoolBadDebtorsPage />} />
+          <Route path="/school/fees/budgeting" element={<SchoolBudgetingPage />} />
           <Route path="/school/attendance" element={<SchoolAttendancePage />} />
+          <Route path="/school/attendance/statuses" element={<SchoolAttendanceStatusesPage />} />
+          <Route path="/school/attendance/report" element={<SchoolAttendanceReportPage />} />
           <Route path="/school/timetable" element={<SchoolTimetablePage />} />
           <Route path="/school/exams" element={<SchoolExamsPage />} />
+          <Route path="/school/report-cards" element={<SchoolReportCardsPage />} />
+          <Route path="/school/report-card-settings" element={<SchoolReportCardSettingsPage />} />
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
           <Route path="/school/meals" element={<SchoolMealsPage />} />
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
+          <Route path="/school/admissions/enrollment-summary" element={<SchoolEnrollmentSummaryPage />} />
+          <Route path="/school/applications/new" element={<SchoolApplicationFormPage />} />
+          <Route path="/school/applications/:id" element={<SchoolApplicationFormPage />} />
+          <Route path="/school/applications" element={<SchoolApplicationsPage />} />
           <Route path="/school/staff" element={<SchoolStaffPage />} />
           <Route path="/school/campuses" element={<SchoolCampusesPage />} />
           <Route path="/school/subjects" element={<SchoolSubjectsPage />} />
@@ -416,7 +464,13 @@ export function App() {
           <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
           <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
-          <Route path="/school/management/calendar" element={<SchoolCalendarPage />} />
+          <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
+          <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />
+          <Route path="/school/timetable/events" element={<SchoolEventsPage />} />
+          <Route path="/school/timetable/trips" element={<SchoolTripsPage />} />
+          <Route path="/school/transport" element={<SchoolTransportPage />} />
+          <Route path="/school/library" element={<SchoolLibraryPage />} />
+          <Route path="/school/front-desk" element={<FrontDeskPage />} />
           <Route path="/school/management/policies" element={<SchoolPoliciesPage />} />
           <Route path="/school/management/custom-fields" element={<SchoolCustomFieldsPage />} />
           <Route path="/school/management/roles" element={<SchoolRolesPage />} />

@@ -1,11 +1,17 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
+import { CurrentUser } from '../../kernel/auth/decorators/current-user.decorator';
 import { HrOrgService } from './hr-org.service';
 import { HrAttendanceService } from './hr-attendance.service';
 import { HrTimesheetService } from './hr-timesheet.service';
 import { HrLeaveService } from './hr-leave.service';
 import { HrPayrollService } from './hr-payroll.service';
 import { HrReportsService } from './hr-reports.service';
+import { HrLifecycleService } from './hr-lifecycle.service';
+import { HrRecruitmentService } from './hr-recruitment.service';
+import { HrTrainingService } from './hr-training.service';
+import { HrAlertsSubscriber } from './hr-alerts.subscriber';
 import { RequiresModule } from '../../kernel/module-loader/requires-module.decorator';
 
 /**
@@ -26,6 +32,10 @@ export class HrController {
     private readonly leave: HrLeaveService,
     private readonly payroll: HrPayrollService,
     private readonly reports: HrReportsService,
+    private readonly lifecycle: HrLifecycleService,
+    private readonly recruitment: HrRecruitmentService,
+    private readonly training: HrTrainingService,
+    private readonly alerts: HrAlertsSubscriber,
   ) {}
 
   // ── Dashboard / reports ──────────────────────────────────────────────────
@@ -624,5 +634,375 @@ export class HrController {
   @RequirePermissions('hr:performance')
   deleteReview(@Param('id') id: string) {
     return this.reports.deleteReview(id);
+  }
+
+  // ── Salary structures & job grades ─────────────────────────────────────────
+
+  @Get('job-grades')
+  @RequirePermissions('hr:grade')
+  listJobGrades(@Query() query: any) {
+    return this.lifecycle.listGrades(query);
+  }
+
+  @Get('job-grades/:id')
+  @RequirePermissions('hr:grade')
+  getJobGrade(@Param('id') id: string) {
+    return this.lifecycle.getGrade(id);
+  }
+
+  @Post('job-grades')
+  @RequirePermissions('hr:grade')
+  createJobGrade(@Body() dto: any) {
+    return this.lifecycle.createGrade(dto);
+  }
+
+  @Patch('job-grades/:id')
+  @RequirePermissions('hr:grade')
+  updateJobGrade(@Param('id') id: string, @Body() dto: any) {
+    return this.lifecycle.updateGrade(id, dto);
+  }
+
+  @Delete('job-grades/:id')
+  @RequirePermissions('hr:grade')
+  deleteJobGrade(@Param('id') id: string) {
+    return this.lifecycle.deleteGrade(id);
+  }
+
+  @Get('salary-structures')
+  @RequirePermissions('hr:grade')
+  listSalaryStructures(@Query() query: any) {
+    return this.lifecycle.listStructures(query);
+  }
+
+  @Post('salary-structures')
+  @RequirePermissions('hr:grade')
+  createSalaryStructure(@Body() dto: any) {
+    return this.lifecycle.createStructure(dto);
+  }
+
+  @Patch('salary-structures/:id')
+  @RequirePermissions('hr:grade')
+  updateSalaryStructure(@Param('id') id: string, @Body() dto: any) {
+    return this.lifecycle.updateStructure(id, dto);
+  }
+
+  @Delete('salary-structures/:id')
+  @RequirePermissions('hr:grade')
+  deleteSalaryStructure(@Param('id') id: string) {
+    return this.lifecycle.deleteStructure(id);
+  }
+
+  // ── Contracts / onboarding / offboarding / settlement ──────────────────────
+
+  @Get('contracts')
+  @RequirePermissions('hr:contract')
+  listContracts(@Query() query: any) {
+    return this.lifecycle.listContracts(query);
+  }
+
+  @Get('contracts/expiring')
+  @RequirePermissions('hr:contract')
+  expiringContracts(@Query('days') days?: string) {
+    return this.lifecycle.listExpiringContracts(days ? Number(days) : 60);
+  }
+
+  @Post('contracts')
+  @RequirePermissions('hr:contract')
+  createContract(@Body() dto: any) {
+    return this.lifecycle.createContract(dto);
+  }
+
+  @Patch('contracts/:id')
+  @RequirePermissions('hr:contract')
+  updateContract(@Param('id') id: string, @Body() dto: any) {
+    return this.lifecycle.updateContract(id, dto);
+  }
+
+  @Delete('contracts/:id')
+  @RequirePermissions('hr:contract')
+  deleteContract(@Param('id') id: string) {
+    return this.lifecycle.deleteContract(id);
+  }
+
+  @Get('employees/:id/salary-history')
+  @RequirePermissions('hr:audit')
+  salaryHistory(@Param('id') id: string) {
+    return this.lifecycle.listSalaryHistory(id);
+  }
+
+  @Get('employees/:id/actions')
+  @RequirePermissions('hr:employee')
+  employeeActions(@Param('id') id: string) {
+    return this.lifecycle.listActions(id);
+  }
+
+  @Get('employees/:id/audit-trail')
+  @RequirePermissions('hr:audit')
+  auditTrail(@Param('id') id: string) {
+    return this.lifecycle.listAuditTrail(id);
+  }
+
+  @Get('employees/:id/onboarding')
+  @RequirePermissions('hr:employee')
+  listOnboarding(@Param('id') id: string) {
+    return this.lifecycle.listOnboarding({ employeeId: id });
+  }
+
+  @Post('onboarding-tasks')
+  @RequirePermissions('hr:employee')
+  addOnboardingTask(@Body() dto: any) {
+    return this.lifecycle.addOnboardingTask(dto);
+  }
+
+  @Post('onboarding-tasks/:id/complete')
+  @RequirePermissions('hr:employee')
+  completeOnboardingTask(@Param('id') id: string) {
+    return this.lifecycle.completeOnboardingTask(id);
+  }
+
+  @Delete('onboarding-tasks/:id')
+  @RequirePermissions('hr:employee')
+  removeOnboardingTask(@Param('id') id: string) {
+    return this.lifecycle.removeOnboardingTask(id);
+  }
+
+  @Get('offboarding')
+  @RequirePermissions('hr:offboarding')
+  listOffboarding(@Query() query: any) {
+    return this.lifecycle.listOffboarding(query);
+  }
+
+  @Get('offboarding/settlement')
+  @RequirePermissions('hr:offboarding')
+  previewSettlement(@Query('employeeId') employeeId: string, @Query('lastDay') lastDay: string) {
+    if (!employeeId || !lastDay) throw new BadRequestException('employeeId and lastDay are required');
+    return this.lifecycle.computeFinalSettlement(employeeId, lastDay, false);
+  }
+
+  @Post('offboarding/settle')
+  @RequirePermissions('hr:offboarding')
+  settle(@Body() dto: any) {
+    if (!dto.employeeId || !dto.lastDay) throw new BadRequestException('employeeId and lastDay are required');
+    return this.lifecycle.computeFinalSettlement(dto.employeeId, dto.lastDay, true);
+  }
+
+  // ── Recruitment / ATS ───────────────────────────────────────────────────────
+
+  @Get('vacancies')
+  @RequirePermissions('hr:recruitment')
+  listVacancies(@Query() query: any) {
+    return this.recruitment.listVacancies(query);
+  }
+
+  @Post('vacancies')
+  @RequirePermissions('hr:recruitment')
+  createVacancy(@Body() dto: any) {
+    return this.recruitment.createVacancy(dto);
+  }
+
+  @Patch('vacancies/:id')
+  @RequirePermissions('hr:recruitment')
+  updateVacancy(@Param('id') id: string, @Body() dto: any) {
+    return this.recruitment.updateVacancy(id, dto);
+  }
+
+  @Delete('vacancies/:id')
+  @RequirePermissions('hr:recruitment')
+  deleteVacancy(@Param('id') id: string) {
+    return this.recruitment.deleteVacancy(id);
+  }
+
+  @Get('applicants')
+  @RequirePermissions('hr:recruitment')
+  listApplicants(@Query() query: any) {
+    return this.recruitment.listApplicants(query);
+  }
+
+  @Post('applicants')
+  @RequirePermissions('hr:recruitment')
+  createApplicant(@Body() dto: any) {
+    return this.recruitment.createApplicant(dto);
+  }
+
+  @Post('applicants/:id/status')
+  @RequirePermissions('hr:recruitment')
+  setApplicantStatus(@Param('id') id: string, @Body() dto: any) {
+    return this.recruitment.setApplicantStatus(id, dto.status, dto.notes);
+  }
+
+  @Delete('applicants/:id')
+  @RequirePermissions('hr:recruitment')
+  deleteApplicant(@Param('id') id: string) {
+    return this.recruitment.deleteApplicant(id);
+  }
+
+  @Post('interviews')
+  @RequirePermissions('hr:recruitment')
+  addInterview(@Body() dto: any) {
+    return this.recruitment.addInterview(dto);
+  }
+
+  @Patch('interviews/:id')
+  @RequirePermissions('hr:recruitment')
+  updateInterview(@Param('id') id: string, @Body() dto: any) {
+    return this.recruitment.updateInterview(id, dto);
+  }
+
+  @Delete('interviews/:id')
+  @RequirePermissions('hr:recruitment')
+  deleteInterview(@Param('id') id: string) {
+    return this.recruitment.deleteInterview(id);
+  }
+
+  @Post('applicants/:id/hire')
+  @RequirePermissions('hr:recruitment')
+  hire(@Param('id') id: string, @Body() dto: any) {
+    return this.recruitment.hire(id, dto);
+  }
+
+  // ── Qualifications / certifications / training ──────────────────────────────
+
+  @Get('qualifications')
+  @RequirePermissions('hr:qualification')
+  listQualifications(@Query() query: any) {
+    return this.training.listQualifications(query);
+  }
+
+  @Post('qualifications')
+  @RequirePermissions('hr:qualification')
+  createQualification(@Body() dto: any) {
+    return this.training.createQualification(dto);
+  }
+
+  @Delete('qualifications/:id')
+  @RequirePermissions('hr:qualification')
+  deleteQualification(@Param('id') id: string) {
+    return this.training.deleteQualification(id);
+  }
+
+  @Get('certifications')
+  @RequirePermissions('hr:qualification')
+  listCertifications(@Query() query: any) {
+    return this.training.listCertifications(query);
+  }
+
+  @Get('certifications/expiring')
+  @RequirePermissions('hr:qualification')
+  expiringCertifications(@Query('days') days?: string) {
+    return this.training.listExpiringCertifications(days ? Number(days) : 30);
+  }
+
+  @Post('certifications')
+  @RequirePermissions('hr:qualification')
+  createCertification(@Body() dto: any) {
+    return this.training.createCertification(dto);
+  }
+
+  @Post('certifications/:id/refresh')
+  @RequirePermissions('hr:qualification')
+  refreshCertification(@Param('id') id: string) {
+    return this.training.refreshCertificationStatus(id);
+  }
+
+  @Delete('certifications/:id')
+  @RequirePermissions('hr:qualification')
+  deleteCertification(@Param('id') id: string) {
+    return this.training.deleteCertification(id);
+  }
+
+  @Get('trainings')
+  @RequirePermissions('hr:training')
+  listTrainings(@Query() query: any) {
+    return this.training.listTrainings(query);
+  }
+
+  @Post('trainings')
+  @RequirePermissions('hr:training')
+  createTraining(@Body() dto: any) {
+    return this.training.createTraining(dto);
+  }
+
+  @Delete('trainings/:id')
+  @RequirePermissions('hr:training')
+  deleteTraining(@Param('id') id: string) {
+    return this.training.deleteTraining(id);
+  }
+
+  @Post('training-enrollments')
+  @RequirePermissions('hr:training')
+  enrollTraining(@Body() dto: any) {
+    return this.training.enroll(dto);
+  }
+
+  @Post('training-enrollments/:id/status')
+  @RequirePermissions('hr:training')
+  setEnrollmentStatus(@Param('id') id: string, @Body() dto: any) {
+    return this.training.setEnrollmentStatus(id, dto.status, dto.certificateUrl);
+  }
+
+  @Delete('training-enrollments/:id')
+  @RequirePermissions('hr:training')
+  deleteEnrollment(@Param('id') id: string) {
+    return this.training.deleteEnrollment(id);
+  }
+
+  @Get('training/cpd-report')
+  @RequirePermissions('hr:training')
+  cpdReport() {
+    return this.training.cpdReport();
+  }
+
+  // ── Payroll hardening: statutory + preview ──────────────────────────────────
+
+  @Get('payroll/statutory')
+  @RequirePermissions('hr:tax_table')
+  listStatutory(@Query() query: any) {
+    return this.payroll.listStatutoryConfigs(query);
+  }
+
+  @Post('payroll/statutory')
+  @RequirePermissions('hr:tax_table')
+  createStatutory(@Body() dto: any) {
+    return this.payroll.createStatutoryConfig(dto);
+  }
+
+  @Patch('payroll/statutory/:id')
+  @RequirePermissions('hr:tax_table')
+  updateStatutory(@Param('id') id: string, @Body() dto: any) {
+    return this.payroll.updateStatutoryConfig(id, dto);
+  }
+
+  @Delete('payroll/statutory/:id')
+  @RequirePermissions('hr:tax_table')
+  deleteStatutory(@Param('id') id: string) {
+    return this.payroll.deleteStatutoryConfig(id);
+  }
+
+  @Get('payroll/runs/:id/preview')
+  @RequirePermissions('hr:payroll')
+  payrollPreview(@Param('id') id: string) {
+    return this.payroll.previewRun(id);
+  }
+
+  @Post('alerts/run')
+  @RequirePermissions('hr:report')
+  runAlerts(@Body() dto: any, @CurrentUser() user: any) {
+    return this.alerts.runAlerts(dto?.organizationId);
+  }
+
+  // ── Employee & Manager self-service ─────────────────────────────────────────
+
+  @Get('self/profile')
+  @RequirePermissions('hr:read')
+  selfProfile(@CurrentUser() user: any) {
+    return this.payroll.employeeForUser(user.id);
+  }
+
+  @Get('team')
+  @RequirePermissions('hr:read')
+  team(@CurrentUser() user: any) {
+    return this.payroll.employeeForUser(user.id).then((emp: any) =>
+      emp ? this.payroll.teamForManager(emp.id) : [],
+    );
   }
 }

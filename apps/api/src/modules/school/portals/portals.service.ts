@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
 
 /**
  * PortalsService — composes existing services to build role-specific dashboards.
@@ -16,6 +17,7 @@ export class PortalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly statusConfig: AttendanceStatusConfigService,
   ) {}
 
   /**
@@ -107,15 +109,19 @@ export class PortalsService {
   private async recentAttendance(studentProfileId: string) {
     const from = new Date();
     from.setDate(from.getDate() - 30);
-    const rows = await this.prisma.client.studentAttendance.findMany({
-      where: { studentProfileId, date: { gte: from } },
-      orderBy: { date: 'desc' },
-      take: 30,
-    });
+    const [rows, cfg] = await Promise.all([
+      this.prisma.client.studentAttendance.findMany({
+        where: { studentProfileId, date: { gte: from } },
+        orderBy: { date: 'desc' },
+        take: 30,
+      }),
+      // P-att-status: rate maths uses the org's configured present/late flags.
+      this.statusConfig.catalogByCode(),
+    ]);
     const total = rows.length;
-    const present = rows.filter((r) => r.status === 'present').length;
-    const late = rows.filter((r) => r.status === 'late').length;
-    const absent = rows.filter((r) => r.status === 'absent').length;
+    const present = rows.filter((r) => cfg[r.status]?.isPresent).length;
+    const late = rows.filter((r) => cfg[r.status]?.isLate).length;
+    const absent = rows.filter((r) => cfg[r.status]?.isAbsent).length;
     return { total, present, late, absent, rate: total > 0 ? Math.round(((present + late * 0.5) / total) * 100) : 0 };
   }
 

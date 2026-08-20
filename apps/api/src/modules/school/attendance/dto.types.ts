@@ -3,14 +3,17 @@
  *
  * H2/B6: class-validator classes (were bare interfaces). Import as values.
  */
-import { IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
+// P-att-status: status is now a free string (the AttendanceStatusConfig.code).
+// The mark/correct endpoints accept any non-empty string; the UI only offers
+// org-configured codes, but we keep it permissive so legacy/custom values persist.
 const ATT_STATUS = ['present', 'absent', 'late', 'excused', 'early_departure', 'unexcused'] as const;
 
 export class AttendanceEntry {
   @IsString() @IsNotEmpty() studentProfileId!: string;
-  @IsIn([...ATT_STATUS]) status!: (typeof ATT_STATUS)[number];
+  @IsString() @IsNotEmpty() status!: string;
   /// Minutes the student was late (status = late).
   @IsOptional() @IsInt() @Min(0) minutesLate?: number;
   /// Minutes early the student left (status = early_departure).
@@ -37,7 +40,7 @@ export class BulkMarkAttendanceDto {
 }
 
 export class CorrectAttendanceDto {
-  @IsIn([...ATT_STATUS]) status!: (typeof ATT_STATUS)[number];
+  @IsString() @IsNotEmpty() status!: string;
   @IsOptional() @IsInt() @Min(0) minutesLate?: number;
   @IsOptional() @IsInt() @Min(0) earlyDepartureMinutes?: number;
   @IsOptional() @IsString() reason?: string;

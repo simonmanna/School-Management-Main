@@ -153,7 +153,7 @@ export class SchoolDocumentsService {
     return this.prisma.client.schoolDocVersion.findMany({
       where: { schoolDocId: d.id },
       orderBy: { versionNo: 'desc' },
-      include: { file: true },
+      include: { schoolDoc: true },
     });
   }
 

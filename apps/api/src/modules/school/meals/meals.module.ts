@@ -18,6 +18,8 @@ import { MealSessionService } from './meal-session.service';
 import { MealSessionController } from './meal-session.controller';
 import { MealMenuService } from './meal-menu.service';
 import { MealMenuController } from './meal-menu.controller';
+import { MealConsumptionService } from './meal-consumption.service';
+import { MealConsumptionController } from './meal-consumption.controller';
 import { MealWalletService } from './meal-wallet.service';
 import { MealWalletController } from './meal-wallet.controller';
 import { MealBillingService } from './meal-billing.service';
@@ -40,9 +42,9 @@ import { MealReportsController } from './meal-reports.controller';
     MealAssignmentController,
     MealSessionController,
     MealMenuController,
+    MealConsumptionController,
     MealWalletController,
     MealBillingController,
-    MealKitchenController,
     MealReportsController,
   ],
   providers: [
@@ -52,6 +54,7 @@ import { MealReportsController } from './meal-reports.controller';
     MealAssignmentService,
     MealSessionService,
     MealMenuService,
+    MealConsumptionService,
     MealWalletService,
     MealBillingService,
     MealKitchenService,

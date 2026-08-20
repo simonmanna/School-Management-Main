@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -77,6 +77,60 @@ export class AdvancedFinanceController {
   @RequirePermissions(PERMISSIONS.school.collectPayments)
   applyCredits(@Param('studentProfileId') studentProfileId: string) {
     return this.finance.applyCredits(studentProfileId);
+  }
+
+  /* Waiver categories (catalog) */
+  @Post('waiver-categories')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  createWaiverCategory(@Body() dto: any) {
+    return this.finance.createWaiverCategory(dto);
+  }
+
+  @Get('waiver-categories')
+  @RequirePermissions(PERMISSIONS.school.read)
+  listWaiverCategories(@Query('includeInactive') includeInactive?: string) {
+    return this.finance.listWaiverCategories(includeInactive === 'true');
+  }
+
+  @Patch('waiver-categories/:id')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  updateWaiverCategory(@Param('id') id: string, @Body() dto: any) {
+    return this.finance.updateWaiverCategory(id, dto);
+  }
+
+  @Delete('waiver-categories/:id')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  deleteWaiverCategory(@Param('id') id: string) {
+    return this.finance.deleteWaiverCategory(id);
+  }
+
+  /* Fee defaulters & bad debtors (read-only reports) */
+  @Get('fee-defaulters')
+  @RequirePermissions(PERMISSIONS.school.read)
+  feeDefaulters(
+    @Query('asOf') asOf?: string,
+    @Query('minBalance') minBalance?: string,
+    @Query('classId') classId?: string,
+  ) {
+    return this.finance.feeDefaulters(asOf, minBalance ? Number(minBalance) : 0, classId);
+  }
+
+  @Get('bad-debtors')
+  @RequirePermissions(PERMISSIONS.school.read)
+  badDebtors(
+    @Query('asOf') asOf?: string,
+    @Query('thresholdDays') thresholdDays?: string,
+    @Query('classId') classId?: string,
+  ) {
+    return this.finance.badDebtors(asOf, thresholdDays ? Number(thresholdDays) : 90, classId);
+  }
+
+  @Post('bad-debtors/:studentProfileId/write-off')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  writeOffBadDebt(@Param('studentProfileId') studentProfileId: string, @Body() dto: any) {
+    return this.finance.writeOffBadDebt(studentProfileId, dto ?? {});
   }
 
   /* Aging (P2) */

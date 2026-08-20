@@ -264,6 +264,8 @@ model Organization {
   /// Receipt header/footer overrides (businessName, addressLine1, phone, taxId, message)
   receiptHeader       Json?
   receiptFooter       Json?
+  /// Report card printable configuration (logo, colors, visibility toggles).
+  reportCardSettings  ReportCardSettings?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   deletedAt           DateTime?
@@ -644,6 +646,7 @@ model Partner {
   schoolStudent    StudentProfile?       @relation("StudentPartner")
   schoolStaff      StaffProfile?         @relation("StaffPartner")
   sponsorships     Sponsorship[]
+  frontDeskLogs    FrontDeskLog[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -8654,6 +8657,7 @@ model HrPosition {
   code           String
   name           String
   departmentId   String?
+  gradeId        String?
   defaultSalary  Decimal?  @db.Decimal(20, 6)
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
@@ -8663,6 +8667,7 @@ model HrPosition {
   deletedAt      DateTime?
 
   department HrDepartment? @relation(fields: [departmentId], references: [id])
+  grade      HrJobGrade?   @relation(fields: [gradeId], references: [id])
   employees  HrEmployee[]
 
   @@unique([organizationId, code])
@@ -8724,6 +8729,16 @@ model HrEmployee {
   payrollItems       HrPayrollItem[]
   bankPaymentLines   HrBankPaymentLine[]
   performanceReviews HrPerformanceReview[]
+  salaryChanges      HrSalaryChange[]
+  employmentActions  HrEmploymentAction[]
+  contracts          HrContract[]
+  onboardingTasks    HrOnboardingTask[]
+  offboardings       HrOffboarding[]
+  applicants         HrApplicant[]        @relation("HiredApplicant")
+  qualifications     HrQualification[]
+  certifications     HrCertification[]
+  trainingEnrollments HrTrainingEnrollment[]
+  auditTrail         HrEmployeeAuditTrail[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, deletedAt])
@@ -8989,6 +9004,8 @@ model HrPayrollComponent {
   createdBy      String?
   updatedBy      String?
   deletedAt      DateTime?
+
+  salaryStructures HrSalaryStructure[]
 
   @@unique([organizationId, code])
   @@index([organizationId, deletedAt])
@@ -9304,6 +9321,348 @@ model HrPerformanceReview {
   employee HrEmployee @relation(fields: [employeeId], references: [id])
 
   @@index([organizationId, employeeId, deletedAt])
+}
+
+// =============================================================================
+// HR — Phase 1+: Salary structures/grades, employee lifecycle, recruitment,
+// qualifications/training, ESS/MSS, payroll hardening.
+// All models are org-scoped + soft-deleted (registered in tenancy.extension.ts).
+// =============================================================================
+
+model HrJobGrade {
+  id        String   @id @default(uuid())
+  organizationId String
+  code      String
+  name      String
+  minSalary Decimal? @db.Decimal(20, 6)
+  midSalary Decimal? @db.Decimal(20, 6)
+  maxSalary Decimal? @db.Decimal(20, 6)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  structures HrSalaryStructure[]
+  positions  HrPosition[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, deletedAt])
+}
+
+model HrSalaryStructure {
+  id           String   @id @default(uuid())
+  organizationId String
+  gradeId      String
+  componentId  String
+  amount       Decimal? @db.Decimal(20, 6)
+  rate         Decimal? @db.Decimal(10, 6)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String?
+  updatedBy    String?
+  deletedAt    DateTime?
+
+  grade     HrJobGrade        @relation(fields: [gradeId], references: [id])
+  component HrPayrollComponent @relation(fields: [componentId], references: [id])
+
+  @@unique([organizationId, gradeId, componentId])
+  @@index([organizationId, deletedAt])
+}
+
+model HrSalaryChange {
+  id            String   @id @default(uuid())
+  organizationId String
+  employeeId    String
+  effectiveDate DateTime
+  previousAmount Decimal? @db.Decimal(20, 6)
+  newAmount     Decimal? @db.Decimal(20, 6)
+  reason        String?
+  changedById   String?
+  documentId    String?
+  createdAt     DateTime @default(now())
+  createdBy     String?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId])
+}
+
+model HrEmploymentAction {
+  id            String   @id @default(uuid())
+  organizationId String
+  employeeId    String
+  actionType    String // promotion|demotion|transfer|grade_change|salary_change|manager_change|campus_transfer
+  fromValue     String?
+  toValue       String?
+  effectiveDate DateTime
+  reason        String?
+  changedById   String?
+  createdAt     DateTime @default(now())
+  createdBy     String?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId])
+}
+
+model HrContract {
+  id            String   @id @default(uuid())
+  organizationId String
+  employeeId    String
+  contractNumber String
+  type          String   @default("permanent") // permanent|fixed_term|probation|temporary|casual|part_time|contractor|internship
+  startDate     DateTime
+  endDate       DateTime?
+  payFrequency  String?
+  salary        Json?
+  documentId    String?
+  status        String   @default("draft") // draft|pending|active|expiring|expired|terminated
+  signedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdBy     String?
+  updatedBy     String?
+  deletedAt     DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@unique([organizationId, contractNumber])
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrOnboardingTask {
+  id            String   @id @default(uuid())
+  organizationId String
+  employeeId    String
+  task          String
+  status        String   @default("pending") // pending|done
+  doneById      String?
+  doneAt        DateTime?
+  createdAt     DateTime @default(now())
+  createdBy     String?
+  deletedAt     DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrOffboarding {
+  id             String   @id @default(uuid())
+  organizationId String
+  employeeId     String
+  reason         String   // resignation|termination|retirement|contract_expiry|redundancy|death|dismissal
+  noticeDate     DateTime?
+  lastWorkingDay DateTime?
+  status         String   @default("initiated") // initiated|settled|archived
+  salaryDue      Decimal? @db.Decimal(20, 6)
+  leavePayout    Decimal? @db.Decimal(20, 6)
+  loanOutstanding Decimal? @db.Decimal(20, 6)
+  advanceOutstanding Decimal? @db.Decimal(20, 6)
+  otherDeductions Decimal? @db.Decimal(20, 6)
+  netSettlement  Decimal? @db.Decimal(20, 6)
+  journalEntryId String?
+  notes          String?
+  settledAt      DateTime?
+  settledById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrVacancy {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  title          String
+  positionId     String?
+  departmentId   String?
+  openings       Int      @default(1)
+  salaryRange    Json?
+  hiringManagerId String?
+  status         String   @default("open") // draft|open|closed|filled
+  approvedById   String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  applicants HrApplicant[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, deletedAt])
+}
+
+model HrApplicant {
+  id             String   @id @default(uuid())
+  organizationId String
+  vacancyId      String
+  firstName      String
+  lastName       String?
+  email          String?
+  phone          String?
+  cvUrl          String?
+  documentId     String?
+  status         String   @default("applied") // applied|screening|shortlisted|interview|offer|hired|rejected
+  score          Int?
+  notes          String?
+  hiredEmployeeId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  vacancy   HrVacancy    @relation(fields: [vacancyId], references: [id])
+  interviews HrInterview[]
+  employee  HrEmployee?  @relation("HiredApplicant", fields: [hiredEmployeeId], references: [id])
+
+  @@index([organizationId, vacancyId, deletedAt])
+}
+
+model HrInterview {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicantId    String
+  scheduledAt    DateTime?
+  interviewerId  String?
+  score          Int?
+  notes          String?
+  createdAt      DateTime @default(now())
+  createdBy      String?
+  deletedAt      DateTime?
+
+  applicant HrApplicant @relation(fields: [applicantId], references: [id])
+
+  @@index([organizationId, applicantId, deletedAt])
+}
+
+model HrQualification {
+  id             String   @id @default(uuid())
+  organizationId String
+  employeeId     String
+  type           String   @default("degree") // degree|diploma|teaching_qual|license|professional
+  title          String
+  institution    String?
+  graduatedAt    DateTime?
+  certificateNumber String?
+  documentId     String?
+  createdAt      DateTime @default(now())
+  createdBy      String?
+  deletedAt      DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrCertification {
+  id             String   @id @default(uuid())
+  organizationId String
+  employeeId     String
+  name           String
+  issuer         String?
+  issuedAt       DateTime?
+  expiryDate     DateTime?
+  documentId     String?
+  status         String   @default("active") // active|expired
+  createdAt      DateTime @default(now())
+  createdBy      String?
+  deletedAt      DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrTraining {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  title          String
+  provider       String?
+  cost           Decimal? @db.Decimal(20, 6)
+  cpdHours       Int?
+  category       String?
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  enrollments HrTrainingEnrollment[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, deletedAt])
+}
+
+model HrTrainingEnrollment {
+  id             String   @id @default(uuid())
+  organizationId String
+  trainingId     String
+  employeeId     String
+  enrolledAt     DateTime @default(now())
+  completedAt    DateTime?
+  certificateUrl String?
+  status         String   @default("enrolled") // enrolled|completed|cancelled
+  createdAt      DateTime @default(now())
+  createdBy      String?
+  deletedAt      DateTime?
+
+  training  HrTraining  @relation(fields: [trainingId], references: [id])
+  employee  HrEmployee  @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, trainingId, deletedAt])
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+model HrStatutoryConfig {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  configType     String   @default("PENSION") // PENSION|NSSF|SOCIAL_SECURITY|EMPLOYER_PENSION
+  rate           Decimal? @db.Decimal(10, 6)
+  employerRate   Decimal? @db.Decimal(10, 6)
+  effectiveFrom  DateTime
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  @@unique([organizationId, code, effectiveFrom])
+  @@index([organizationId, deletedAt])
+}
+
+model HrEmployeeAuditTrail {
+  id             String   @id @default(uuid())
+  organizationId String
+  employeeId     String
+  field          String
+  oldValue       String?
+  newValue       String?
+  reason         String?
+  approverId     String?
+  changedById    String?
+  createdAt      DateTime @default(now())
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+
+  @@index([organizationId, employeeId])
 }
 
 // =============================================================================
@@ -9742,6 +10101,7 @@ model Campus {
   periods        Period[]
   staffProfiles  StaffProfile[]
   timetableSlots TimetableSlot[]
+  transportGeofences TransportGeofence[] @relation("campusGeofences")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -9792,6 +10152,8 @@ model AcademicYear {
   feeStructures FeeStructure[]
   curriculums   Curriculum[]
   admissions    AdmissionApplication[]
+  budgets       Budget[]
+  admissionCycles AdmissionCycle[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -9822,6 +10184,7 @@ model Term {
   feeAssignments      StudentFeeAssignment[]
   installmentPlans    InstallmentPlan[]
   mealPlanAssignments MealPlanAssignment[]
+  budgets            Budget[]
 
   @@unique([organizationId, academicYearId, name])
   @@index([organizationId])
@@ -10047,6 +10410,8 @@ model SchoolCalendarEvent {
   @@index([organizationId])
   @@index([termId])
   @@index([organizationId, startDate])
+
+  scheduleExceptions TransportScheduleException[]
 }
 
 enum StudentStatus {
@@ -10113,6 +10478,12 @@ model StudentProfile {
   mealPlanAssignments MealPlanAssignment[]
   mealAttendances     MealAttendance[]
   transportAssignment StudentTransportAssignment[]
+  transportRequests   TransportRequest[]
+  authorizedPersons   TransportAuthorizedPerson[]
+  specialRequirements TransportSpecialRequirement[]
+  tripPassengers      TransportTripPassenger[] @relation("tripPassengers")
+  boardingEvents      TransportBoardingEvent[] @relation("studentBoarding")
+  incidentStudents    TransportIncidentStudent[] @relation("incidentStudents")
   hostelAllocation    HostelAllocation[]
   installmentPlans    InstallmentPlan[]
 
@@ -10290,6 +10661,7 @@ model StaffProfile {
   /// UNIQUE FK to Partner.
   partnerId       String      @unique
   partner         Partner     @relation("StaffPartner", fields: [partnerId], references: [id])
+  courseOfferingTeachers CourseOfferingTeacher[]
   employeeNo      String
   departmentId    String?
   positionId      String?
@@ -10386,6 +10758,7 @@ enum AdmissionStatus {
   screening
   interview_scheduled
   interviewed
+  exam_scheduled
   scored
   accepted
   waitlisted
@@ -10403,10 +10776,138 @@ enum ExamStatus {
   closed
 }
 
+/// Phase-2 identity/deduplication layer. Non-destructive candidate matching:
+/// when a new application is submitted, the system computes likely-duplicate
+/// existing students/applicants (by name+DOB, guardian phone/email, national/
+/// birth-cert id where stored) and records them as ApplicantIdentityMatch rows.
+/// An authorized admissions user then confirms (same person) or dismisses (not
+/// the same person). This prevents destructive auto-merging and supports the
+/// reapplication invariant: a person may hold multiple applications across cycles.
+model ApplicantIdentityMatch {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  applicationId        String
+  candidateType        String /// 'student' | 'applicant'
+  candidateId          String /// StudentProfile.id OR AdmissionApplication.id being compared
+  candidateName        String
+  matchMethod          String /// 'name_dob' | 'guardian_phone' | 'guardian_email' | 'national_id' | 'birth_cert'
+  matchScore           Int      @default(0) /// 0-100 confidence
+  status               String   @default("open") /// open | confirmed_same | dismissed
+  reviewedById         String?
+  reviewedAt           DateTime?
+  createdAt            DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+  @@index([candidateId])
+}
+
+/// Phase-3 admission cycle: a scoped admissions campaign under an AcademicYear
+/// (e.g. "Primary 1 2027/28"). Owns capacity, criteria, deadlines — not the
+/// application FSM itself.
+model AdmissionCycle {
+  id             String   @id @default(uuid())
+  organizationId String
+  academicYearId String
+  name           String
+  opensAt        DateTime?
+  closesAt       DateTime?
+  status         String   @default("open") /// open | closed
+  customFields   Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear  AcademicYear        @relation(fields: [academicYearId], references: [id])
+  applications   AdmissionApplication[]
+  capacities     AdmissionCapacity[]
+  criteriaSets   AdmissionCriteriaSet[]
+
+  @@unique([organizationId, academicYearId, name])
+  @@index([organizationId])
+  @@index([academicYearId])
+}
+
+/// Phase-3 capacity. Holds ONLY the declared capacity + reserved seats. Occupied
+/// seats are DERIVED from active Enrollments (never stored, to avoid sync drift).
+model AdmissionCapacity {
+  id               String  @id @default(uuid())
+  organizationId   String
+  admissionCycleId String
+  classId          String
+  sectionId        String?
+  streamId         String?
+  campusId         String?
+  capacity         Int     @default(0)
+  reservedCapacity Int     @default(0)
+
+  admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, admissionCycleId, classId, sectionId, streamId])
+  @@index([organizationId])
+  @@index([admissionCycleId])
+  @@index([classId])
+}
+
+/// Phase-3 configurable admission criteria set (per cycle/class). Weights drive
+/// the weighted scoring engine instead of the old fixed "/3".
+model AdmissionCriteriaSet {
+  id               String   @id @default(uuid())
+  organizationId   String
+  admissionCycleId String
+  name             String
+  classId          String?
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  admissionCycle AdmissionCycle      @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
+  criteria       AdmissionCriterion[]
+
+  @@index([organizationId])
+  @@index([admissionCycleId])
+}
+
+model AdmissionCriterion {
+  id                String  @id @default(uuid())
+  organizationId    String
+  criteriaSetId     String
+  name              String /// e.g. Entrance Exam, Interview, Previous Grades
+  weight            Float   @default(0) /// 0-1, sums to 1 across the set
+  maxScore          Float   @default(100)
+  required          Boolean  @default(false)
+  passMark          Float   @default(0)
+
+  criteriaSet AdmissionCriteriaSet @relation(fields: [criteriaSetId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([criteriaSetId])
+}
+
+/// Phase-3 admission decision record (audit + dispute resolution). Stores the
+/// final decision, weighted score, per-criterion breakdown, and reason.
+model AdmissionDecision {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String   @unique
+  decision       String /// accepted | rejected | waitlisted
+  totalScore     Float?
+  breakdown      Json?    /// { exam: 86, interview: 78, ... }
+  decidedById    String?
+  reason         String?
+  decidedAt      DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
 model AdmissionApplication {
   id                 String          @id @default(uuid())
   organizationId     String
   academicYearId     String
+  admissionCycleId   String?
   applicationNumber  String
   applicantFirstName String
   applicantLastName  String
@@ -10424,6 +10925,15 @@ model AdmissionApplication {
   feeStatus          String          @default("unpaid")
   /// FK to the sales_invoice Document created for the application fee.
   feeInvoiceId       String?
+  /// Phase-5 SLA / processing-time tracking timestamps.
+  screenedAt         DateTime?
+  interviewedAt      DateTime?
+  examScheduledAt    DateTime?
+  scoredAt           DateTime?
+  acceptedAt         DateTime?
+  offerIssuedAt      DateTime?
+  offerAcceptedAt    DateTime?
+  enrolledAt         DateTime?
   customFields       Json            @default("{}")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -10432,6 +10942,7 @@ model AdmissionApplication {
   deletedAt          DateTime?
 
   academicYear  AcademicYear          @relation(fields: [academicYearId], references: [id])
+  admissionCycle AdmissionCycle?       @relation(fields: [admissionCycleId], references: [id])
   documents     ApplicationDocument[]
   entranceExams EntranceExam[]
   interviews    Interview?
@@ -10440,6 +10951,8 @@ model AdmissionApplication {
   fee           AdmissionFee?
   offerLetter   OfferLetter?
   enrollment    Enrollment?
+  identityMatches ApplicantIdentityMatch[]
+  decision      AdmissionDecision?
 
   @@unique([organizationId, applicationNumber])
   @@index([organizationId])
@@ -10532,6 +11045,7 @@ model ApplicantScore {
   interviewScore Decimal? @db.Decimal(6, 2)
   documentScore  Decimal? @db.Decimal(6, 2)
   totalScore     Decimal? @db.Decimal(6, 2)
+  breakdown       Json?    /// per-criterion weighted contribution map
   computedAt     DateTime @default(now())
 
   application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
@@ -10565,9 +11079,16 @@ model OfferLetter {
   expiresAt      DateTime?
   templateId     String?
   body           String?
-  /// 'issued' | 'accepted' | 'declined'.
+  /// 'issued' | 'viewed' | 'accepted' | 'declined' | 'expired' | 'withdrawn'.
   status         String   @default("issued")
   acceptedAt     DateTime?
+  viewedAt       DateTime?
+  declinedAt     DateTime?
+  withdrawnAt    DateTime?
+  /// Free-text conditions attached to the offer (scholarship, deposit, etc.).
+  conditions     String?
+  depositPaid    Boolean  @default(false)
+  version        Int      @default(1)
 
   application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
 
@@ -10794,6 +11315,10 @@ model LearningObjective {
 model LessonPlan {
   id               String    @id @default(uuid())
   organizationId   String
+  /// NEW (Phase 1): teaching instance this plan belongs to.
+  courseOfferingId String?
+  /// Specific curriculum version row (published Curriculum).
+  curriculumVersionId String?
   subjectId        String
   classId          String?
   termId           String?
@@ -10804,7 +11329,16 @@ model LessonPlan {
   /// objectives live on LearningObjective and link here via LessonPlanObjective.
   objectives       String?
   materials        String?
-  /// 'draft' | 'published'.
+  /// NEW (Phase 1): richer curriculum linkage.
+  unitId           String?
+  topicId          String?
+  subtopic         String?
+  /// Phase 1 workflow status. Replaces the minimal 'draft'|'published'.
+  /// draft | submitted | needs_revision | approved | archived
+  workflowStatus   String    @default("draft")
+  /// Optimistic concurrency guard (reject stale writes on update).
+  version          Int       @default(1)
+  /// Backwards-compat thin status; kept until consumers migrate.
   status           String    @default("draft")
   publishedAt      DateTime?
   createdAt        DateTime  @default(now())
@@ -10814,6 +11348,15 @@ model LessonPlan {
   term    Term?         @relation(fields: [termId], references: [id])
   teacher StaffProfile? @relation(fields: [teacherPartnerId], references: [id])
   learningObjectives LessonPlanObjective[]
+  lessonPlanActivities LessonPlanActivity[]
+  lessonPlanResources LessonPlanResource[]
+  lessonPlanAssessments LessonPlanAssessment[]
+  lessonPlanDifferentiations LessonPlanDifferentiation[]
+  lessonPlanReflections LessonPlanReflection[]
+  lessonPlanReviews LessonPlanReview[]
+  lessonPlanRevisions LessonPlanRevision[]
+  scheduledLessons ScheduledLesson[]
+  discussions Discussion[]
 
   @@index([organizationId])
   @@index([subjectId])
@@ -10834,6 +11377,338 @@ model LessonPlanObjective {
   @@unique([lessonPlanId, learningObjectiveId])
   @@index([organizationId])
   @@index([learningObjectiveId])
+}
+
+/// ─────────────── LMS (Phase 1) ───────────────
+/// Teaching instance of a subject: Subject+Class+Section+Term+Curriculum(version row).
+/// Teacher is NOT part of the identity — team-teaching handled via CourseOfferingTeacher.
+model CourseOffering {
+  id               String   @id @default(uuid())
+  organizationId   String
+  academicYearId   String
+  termId           String
+  subjectId        String
+  classId          String
+  sectionId        String?
+  /// Specific Curriculum version row (point at a published Curriculum, not a bare class).
+  curriculumId     String
+  status           String   @default("active") // active | archived
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  teachers CourseOfferingTeacher[]
+  scheduledLessons ScheduledLesson[]
+  discussions Discussion[]
+
+  @@unique([organizationId, academicYearId, termId, subjectId, classId, sectionId])
+  @@index([organizationId])
+  @@index([classId])
+  @@index([subjectId])
+  @@index([curriculumId])
+  @@index([termId])
+}
+
+model CourseOfferingTeacher {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  teacherPartnerId String
+  /// 'lead' | 'assistant' — supports team teaching without polluting CourseOffering identity.
+  role             String?  @default("lead")
+  createdAt        DateTime @default(now())
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  teacher StaffProfile @relation(fields: [teacherPartnerId], references: [id])
+
+  @@unique([courseOfferingId, teacherPartnerId])
+  @@index([organizationId])
+  @@index([teacherPartnerId])
+  @@index([courseOfferingId])
+}
+
+/// Reusable activity definition (library promoted later; inline-create in P1).
+model LearningActivity {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  type               String   // reading | video | group | worksheet | quiz | discussion | practical | external_link | teacher_instruction
+  title              String
+  /// Polymorphic payload (videoUrl / resourceId / url / etc). JSON is acceptable here — it's the activity body, not relational data.
+  content            Json     @default("{}")
+  learningObjectiveId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+
+  lessonPlanActivities LessonPlanActivity[]
+
+  @@index([organizationId])
+  @@index([learningObjectiveId])
+}
+
+/// Lesson plan → activity placement (contextual to a specific plan).
+model LessonPlanActivity {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  lessonPlanId         String
+  learningActivityId   String?
+  sequence             Int      @default(0)
+  durationMin          Int?
+  teacherInstructions  String?
+  studentInstructions  String?
+  differentiationId    String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+  learningActivity LearningActivity? @relation(fields: [learningActivityId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+  @@index([learningActivityId])
+}
+
+model LessonPlanResource {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  lessonPlanId       String
+  learningResourceId String
+  createdAt          DateTime @default(now())
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+  learningResource LearningResource @relation(fields: [learningResourceId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonPlanId, learningResourceId])
+  @@index([organizationId])
+  @@index([learningResourceId])
+}
+
+model LessonPlanAssessment {
+  id           String   @id @default(uuid())
+  organizationId String
+  lessonPlanId String
+  kind         String   // formative | exit_ticket | success_criteria
+  prompt       String
+  sequence     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+}
+
+model LessonPlanDifferentiation {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  lessonPlanId       String
+  lessonPlanActivityId String? // nullable: plan-level OR activity-level differentiation
+  learningObjectiveId String?
+  tier               String   // support | core | extension
+  description        String
+  createdAt          DateTime @default(now())
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+  @@index([lessonPlanActivityId])
+}
+
+/// Teacher reflection. TeacherPerceivedAchievement is QUALITATIVE only — computed mastery comes from evidence.
+model LessonPlanReflection {
+  id                        String   @id @default(uuid())
+  organizationId            String
+  lessonPlanId              String
+  whatWorked                String?
+  whatDidnt                 String?
+  teacherPerceivedAchievement String? // free text e.g. "most met objective" — NOT the computed mastery %
+  studentsNeedingSupport    String?
+  followUp                  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+}
+
+model LessonPlanTemplate {
+  id           String   @id @default(uuid())
+  organizationId String
+  name         String
+  scope        String   // school | department | subject | teacher
+  subjectId    String?
+  /// Snapshot of the plan structure (objectives/activities/resources/assessment/differentiation).
+  body         Json     @default("{}")
+  isSchoolWide Boolean  @default(false)
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  @@index([organizationId])
+  @@index([subjectId])
+}
+
+/// Append-only, auditable HOD review history (reviewer, from/to status, comment, requested changes).
+model LessonPlanReview {
+  id               String   @id @default(uuid())
+  organizationId   String
+  lessonPlanId     String
+  reviewerId       String?
+  fromStatus       String
+  toStatus         String
+  comment          String?
+  requestedChanges String?
+  createdAt        DateTime @default(now())
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+}
+
+/// Immutable snapshot captured on each workflow transition (revision history, distinct from optimistic-concurrency version).
+model LessonPlanRevision {
+  id           String   @id @default(uuid())
+  organizationId String
+  lessonPlanId String
+  version      Int
+  snapshot     Json
+  createdById      String?
+  createdAt        DateTime @default(now())
+
+  lessonPlan LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([lessonPlanId])
+}
+
+/// Execution layer: a timetable occurrence the plan is delivered through.
+model ScheduledLesson {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  timetableSlotId  String?  // timetable remains the schedule authority
+  lessonPlanId     String?
+  plannedDate      DateTime
+  teacherPartnerId String?  // nullable override (substitute)
+  teachingRoomId   String?  // nullable override
+  room             String?  // nullable free-text override
+  status           String   @default("scheduled") // scheduled | in_progress | completed | cancelled | rescheduled
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  lessonPlan LessonPlan? @relation(fields: [lessonPlanId], references: [id])
+
+  @@index([organizationId])
+  @@index([courseOfferingId])
+  @@index([timetableSlotId])
+  @@index([lessonPlanId])
+  @@index([plannedDate])
+}
+
+/// What actually happened in the classroom. Attendance/room are REFERENCES, not authoritative copies.
+model LessonDelivery {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  scheduledLessonId  String
+  lessonPlanId       String?
+  attendanceSessionId String? // ref → Attendance module (canonical attendance truth)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  deliveredById      String?
+  participationNote  String?
+  reflection         Json?    // free-form teacher notes
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([scheduledLessonId])
+  @@index([lessonPlanId])
+}
+
+model Discussion {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String?
+  lessonPlanId     String?
+  title            String
+  body             String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  courseOffering CourseOffering? @relation(fields: [courseOfferingId], references: [id])
+  lessonPlan LessonPlan? @relation(fields: [lessonPlanId], references: [id])
+
+  @@index([organizationId])
+  @@index([courseOfferingId])
+  @@index([lessonPlanId])
+}
+
+model DiscussionPost {
+  id           String   @id @default(uuid())
+  organizationId String
+  discussionId String
+  authorId     String?
+  parentPostId String?
+  body         String
+  pinned       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([discussionId])
+  @@index([parentPostId])
+}
+
+/// Typed evidence feeding computed objective mastery. Never hand-maintained.
+model LearningObjectiveEvidence {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  studentProfileId   String
+  learningObjectiveId String
+  sourceType         String   // LESSON_ACTIVITY | ASSIGNMENT | QUIZ | ASSESSMENT | TEACHER_OBSERVATION | PRACTICAL
+  sourceId           String
+  normalizedScore    Decimal? @db.Decimal(5, 2)
+  proficiency        String?  // emerging | developing | proficient | mastered
+  observedAt         DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([learningObjectiveId])
+}
+
+/// Computed mastery per student/objective (from evidence via a pluggable mastery policy).
+model LearningObjectiveProgress {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  studentProfileId   String
+  learningObjectiveId String
+  masteryPct         Decimal  @default(0) @db.Decimal(5, 2)
+  lastComputedAt     DateTime @default(now())
+
+  @@unique([studentProfileId, learningObjectiveId])
+  @@index([organizationId])
+  @@index([learningObjectiveId])
+}
+
+model StudentCourseProgress {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  courseOfferingId String
+  progressPct      Decimal  @default(0) @db.Decimal(5, 2)
+  lastComputedAt   DateTime @default(now())
+
+  @@unique([studentProfileId, courseOfferingId])
+  @@index([organizationId])
+  @@index([courseOfferingId])
 }
 
 model TeacherAssignment {
@@ -10982,15 +11857,10 @@ model TimetableOverride {
   @@index([classId, dayOfWeek, periodId])
 }
 
-enum AttendanceStatus {
-  present
-  absent
-  late
-  excused
-  early_departure
-  unexcused
-}
-
+/// P-att-status: attendance statuses are organization-configurable. The old
+/// rigid `AttendanceStatus` enum is gone; `status` is now a free string holding
+/// the AttendanceStatusConfig.code (e.g. "present", "absent", "late"). An
+/// optional FK to the config row carries display metadata (colour/label).
 model StudentAttendance {
   id               String           @id @default(uuid())
   organizationId   String
@@ -11004,7 +11874,10 @@ model StudentAttendance {
   /// the migration (NULLS DISTINCT would otherwise let a student have many null
   /// daily rows), so this is a plain @@index here, not @@unique.
   periodId         String?
-  status           AttendanceStatus @default(present)
+  status           String          @default("present")
+  /// FK to AttendanceStatusConfig for display metadata (colour/label). Null when
+  /// the status code has no matching config row (e.g. legacy / custom value).
+  statusCfgId      String?
   minutesLate      Int              @default(0)
   reason           String?
   markedById       String?
@@ -11015,11 +11888,44 @@ model StudentAttendance {
   schoolClass    SchoolClass    @relation(fields: [classId], references: [id])
   section        Section?       @relation(fields: [sectionId], references: [id])
   period         Period?        @relation(fields: [periodId], references: [id])
+  statusConfig   AttendanceStatusConfig? @relation(fields: [statusCfgId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([classId, date])
   @@index([organizationId, date])
   @@index([organizationId, studentProfileId, date])
+  @@index([statusCfgId])
+}
+
+/// P-att-status: organization-configurable attendance statuses. Seed default
+/// ships Absent / Present / Late (codes "absent" | "present" | "late"). Schools
+/// can add more (e.g. "Excused", "On Leave") or adjust colours/labels. The
+/// `isPresent`/`isLate` flags drive roll-up maths and parent alerts.
+model AttendanceStatusConfig {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// Stable machine code used as StudentAttendance.status (e.g. "present").
+  code           String
+  label          String
+  /// Hex colour used by the UI (e.g. "#16a34a").
+  color          String   @default("#6b7280")
+  /// First status shown in the mark grid; only one per org.
+  isDefault      Boolean  @default(false)
+  sortOrder      Int      @default(0)
+  /// Counts towards "present" roll-up (good attendance).
+  isPresent      Boolean  @default(false)
+  /// Counts as a late arrival (treated as partial credit in rate maths).
+  isLate         Boolean  @default(false)
+  /// Counts as an absence (triggers absence alerts / below-threshold maths).
+  isAbsent       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  attendanceRecords StudentAttendance[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, isDefault])
 }
 
 /// P1: attendance alert thresholds. An org-level default plus optional
@@ -11051,6 +11957,11 @@ model HomeworkAssignment {
   sectionId        String?
   subjectId        String
   termId           String?
+  /// NEW (Phase 1): link into the LMS spine. NO studentAssessmentId here — the
+  /// bridge is at submission level (HomeworkSubmission → StudentAssessment).
+  courseOfferingId String?
+  lessonPlanId     String?
+  learningObjectiveId String?
   title            String
   description      String?
   dueDate          DateTime
@@ -11105,10 +12016,18 @@ model LearningResource {
   fileUrl        String?
   tags           String[]  @default([])
   description    String?
+  /// NEW (Phase 1): versioning + where-attachable + preview + curriculum linkage.
+  version        Int       @default(1)
+  previewUrl     String?
+  curriculumVersionId String?
+  /// Json: { offeringId?, lessonPlanId?, assignmentId?, topicId? } — one canonical resource system.
+  attaches       Json      @default("{}")
   publishedAt    DateTime?
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  lessonPlanResources LessonPlanResource[]
 
   @@index([organizationId])
   @@index([classId])
@@ -11643,6 +12562,37 @@ model AcademicTranscript {
 
   @@index([organizationId])
   @@index([studentProfileId])
+}
+
+/// Org-scoped configuration for the printable student report card
+/// (school header colors, logo/photo/watermark/comment/date/fees/motto visibility).
+/// Exactly one per organization; created lazily on first read with org defaults.
+model ReportCardSettings {
+  id                       String   @id @default(uuid())
+  organizationId           String   @unique
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  showSchoolLogo           Boolean  @default(true)
+  showStudentPhoto         Boolean  @default(true)
+  showWatermark            Boolean  @default(false)
+  showClassTeacherComment  Boolean  @default(true)
+  showHeadTeacherComment   Boolean  @default(true)
+  showTermStartDate        Boolean  @default(false)
+  showTermEndDate          Boolean  @default(true)
+  showFeesBalance          Boolean  @default(false)
+  showSchoolMotto          Boolean  @default(true)
+
+  schoolNameColor          String   @default("#000000")
+  schoolAddressColor       String   @default("#000000")
+  contactColor             String   @default("#000000")
+  websiteColor             String   @default("#000000")
+  emailColor               String   @default("#000000")
+  reportTitleColor         String   @default("#000000")
+
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([organizationId])
 }
 
 // ─────────────────────────── Assessment core (A1) ───────────────────────────
@@ -12269,6 +13219,10 @@ model Paper {
   organizationId  String
   name            String
   subjectId       String?
+  /// NEW (Phase 1): link quizzes into the LMS spine (no new quiz engine).
+  courseOfferingId String?
+  lessonPlanId     String?
+  learningObjectiveId String?
   totalMarks      Decimal   @default(0) @db.Decimal(8, 2)
   durationMinutes Int       @default(60)
   /// Random assembly from a blueprint (draw by tag/difficulty/count) vs a fixed
@@ -12309,6 +13263,10 @@ model QuizAttempt {
   organizationId      String
   paperId             String
   studentProfileId    String
+  /// NEW (Phase 1): link attempts into the LMS spine.
+  courseOfferingId    String?
+  lessonPlanId        String?
+  learningObjectiveId String?
   /// Optional link to the assessment spine — the auto-marked total lands here.
   studentAssessmentId String?
   attemptNumber       Int               @default(1)
@@ -12520,29 +13478,60 @@ model Sponsorship {
   @@index([studentProfileId])
 }
 
+/// Catalog of reusable waiver templates (e.g. "Sibling Discount 25%", "Merit
+/// Bursary", "Staff Child", "COVID Relief"). A waiver (Waiver) may be born from
+/// a category; the category only pre-fills name/amount/type when creating one.
+model WaiverCategory {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  description    String?
+  /// 'percentage' (of billed fee) or 'fixed' (absolute amount).
+  type           String   @default("percentage")
+  /// percentage: 0-100; fixed: absolute monetary value.
+  value          Decimal  @db.Decimal(20, 6)
+  defaultReason  String?
+  /// JSON filter: { gradeLevelIds: [...], classIds: [...] } (null/empty = all).
+  appliesTo      Json?    @default("{}")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  updatedBy      String?
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
 /// P1: A waiver forgives an amount the school does not expect to collect (distinct
 /// from a Discount, which reduces the *billed* amount). A waiver is applied as a
 /// credit against a student's open fee invoices (Dr Waiver Expense / Cr AR) and
-/// shows on statements as a waived (not paid) amount.
+/// shows on statements as a waived (not paid) amount. A waiver may be born from a
+/// WaiverCategory (waiverCategoryId) or created ad-hoc.
 model Waiver {
-  id               String   @id @default(uuid())
-  organizationId   String
-  studentProfileId String
-  code             String
-  name             String
-  amount           Decimal  @db.Decimal(20, 6)
+  id                 String   @id @default(uuid())
+  organizationId     String
+  waiverCategoryId   String?
+  studentProfileId  String
+  code               String
+  name               String
+  amount             Decimal  @db.Decimal(20, 6)
   /// JSON: reason / authorizedBy, free-form.
-  reason           String?
-  documentId       String? // the fee invoice the waiver was applied to (null = whole-student credit)
-  applied          Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  createdBy        String?
-  updatedBy        String?
+  reason             String?
+  documentId         String? // the fee invoice the waiver was applied to (null = whole-student credit)
+  applied            Boolean  @default(false)
+  /// Set when the waiver was applied as a bad-debt write-off.
+  badDebt            Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  createdBy          String?
+  updatedBy          String?
 
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+  @@index([waiverCategoryId])
   @@index([studentProfileId])
   @@index([documentId])
 }
@@ -12873,77 +13862,155 @@ model Borrowing {
   @@index([dueAt])
 }
 
+/// Transport fleet vehicle. Evolved in place from the naive v1: real status
+/// enum, ownership, odometer, capacity split (seated vs operational vs
+/// wheelchair), and compliance documents. `driverPartnerId` is deprecated —
+/// real crew lives on `TransportCrewMember`; the migration backfills it.
 model Vehicle {
-  id              String    @id @default(uuid())
-  organizationId  String
-  code            String
-  plateNumber     String
-  capacity        Int       @default(14)
-  /// 'bus' | 'van' | 'car'.
-  type            String    @default("bus")
-  driverPartnerId String?
-  isActive        Boolean   @default(true)
-  customFields    Json      @default("{}")
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  deletedAt       DateTime?
+  id                 String              @id @default(uuid())
+  organizationId     String
+  code               String
+  plateNumber        String
+  fleetNumber        String?
+  /// 'bus' | 'van' | 'car' | 'shuttle'.
+  type               String              @default("bus")
+  make               String?
+  model              String?
+  year               Int?
+  fuelType           String?
+  odometerKm         Decimal             @default(0) @db.Decimal(20, 6)
+  seatedCapacity     Int                 @default(14)
+  wheelchairCapacity Int                 @default(0)
+  /// The capacity checks actually use (legal/policy beats physical).
+  operationalCapacity Int                @default(14)
+  ownership          TransportOwnership   @default(owned)
+  providerId         String?
+  status             TransportVehicleStatus @default(available)
+  campusId           String?
+  /// Deprecated — real driver is a TransportCrewMember. Kept for backfilled data.
+  driverPartnerId    String?
+  customFields       Json                @default("{}")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  createdBy          String?
+  updatedBy          String?
+  deletedAt          DateTime?
 
-  routeAssignments RouteAssignment[]
+  routeAssignments         RouteAssignment[]
+  documents               TransportVehicleDocument[]
+  inspections             TransportVehicleInspection[]
+  trips                   TransportTrip[]
+  devices                 TransportDevice[]
+  locationEvents          TransportLocationEvent[]
+  geofenceEvents          TransportGeofenceEvent[]
+  trackingAlerts          TransportTrackingAlert[]
+  schedules               TransportSchedule[]     @relation("schedVehicle")
+  incidents               TransportIncident[]      @relation("vehicleIncidents")
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([plateNumber])
+  @@index([campusId])
+  @@index([status])
 }
 
+/// A planned transport service. Evolved in place: real status enum, direction,
+/// service type, campus/year scoping, and an immutable route-version history.
+/// `monthlyFee`/`feeProductId` are kept but demoted — T4 pricing lives on
+/// `TransportFeePlan`; these are the flat-rate fallback.
 model Route {
-  id             String    @id @default(uuid())
-  organizationId String
-  name           String
-  description    String?
-  monthlyFee     Decimal   @default(0) @db.Decimal(18, 6)
-  /// FK to Product (service) used when invoicing the transport fee.
-  feeProductId   String?
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id               String              @id @default(uuid())
+  organizationId   String
+  name             String
+  code             String?
+  description      String?
+  campusId         String?
+  academicYearId   String?
+  direction        TransportDirection  @default(inbound)
+  /// 'morning' | 'afternoon' | 'activity' | 'special' | 'field_trip'.
+  serviceType      String              @default("morning")
+  status           TransportRouteStatus @default(draft)
+  currentVersionId String?
+  estimatedDurationMin Int?
+  distanceKm       Decimal?            @db.Decimal(20, 6)
+  monthlyFee       Decimal             @default(0) @db.Decimal(20, 6)
+  /// FK to Product (service) used when invoicing the transport fee fallback.
+  feeProductId     String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
 
-  stops            Stop[]
   assignments      StudentTransportAssignment[]
   routeAssignments RouteAssignment[]
+  versions         TransportRouteVersion[]
+  schedules        TransportSchedule[]   @relation("routeSchedules")
+  trips            TransportTrip[]       @relation("routeTrips")
+  requests         TransportRequest[]    @relation("routeRequests")
+  feeRates         TransportFeePlanRate[] @relation("routeFeeRates")
 
   @@unique([organizationId, name])
   @@index([organizationId])
+  @@index([campusId])
+  @@index([academicYearId])
+  @@index([status])
 }
 
+/// Standalone physical location. Restructured in T1: the v1 `Stop` was owned by
+/// the route (routeId + order + times on the stop itself). Now a Stop is a
+/// shared place (a physical point can serve multiple routes) and ordering/timing
+/// live on `TransportRouteStop` (route-version scoped).
 model Stop {
-  id             String   @id @default(uuid())
+  id             String              @id @default(uuid())
   organizationId String
-  routeId        String
+  code           String
   name           String
-  /// Pickup order (1 = first stop).
-  order          Int      @default(1)
-  pickupTime     String? // 'HH:mm'
-  dropoffTime    String? // 'HH:mm'
-  feeOverride    Decimal? @db.Decimal(18, 6)
-  /// Geo: {lat, lng}
-  location       Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  zoneId         String?
+  campusId       String?
+  address        String?
+  landmark       String?
+  latitude       Decimal?            @db.Decimal(9, 6)
+  longitude      Decimal?            @db.Decimal(9, 6)
+  pickupAllowed  Boolean             @default(true)
+  dropoffAllowed Boolean             @default(true)
+  geofenceRadiusM Int                @default(100)
+  safetyNotes    String?
+  status         TransportStopStatus @default(active)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
 
-  route       Route                        @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  assignments StudentTransportAssignment[]
+  assignments        StudentTransportAssignment[]
+  routeStops         TransportRouteStop[]
+  tripStops          TransportTripStop[]
+  boardingEvents     TransportBoardingEvent[]
+  geofences          TransportGeofence[]
+  authorizedPersons  TransportAuthorizedPerson[]
+  zone               TransportZone?         @relation(fields: [zoneId], references: [id])
+  pickupAssignments  StudentTransportAssignment[] @relation("pickupStop")
+  dropoffAssignments StudentTransportAssignment[] @relation("dropoffStop")
+  requests           TransportRequest[]           @relation("stopRequests")
+  feeRates          TransportFeePlanRate[]      @relation("stopFeeRates")
+  tripPickups       TransportTripPassenger[]   @relation("tripPassengerPickup")
+  tripDropoffs      TransportTripPassenger[]   @relation("tripPassengerDropoff")
 
-  @@unique([organizationId, routeId, name])
+  @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([zoneId])
+  @@index([campusId])
+  @@index([status])
 }
 
+/// Retired in T1. Its (route, vehicle, dayOfWeek) rows are backfilled into
+/// `TransportSchedule` and the table is dropped.
 model RouteAssignment {
   id             String  @id @default(uuid())
   organizationId String
   routeId        String
   vehicleId      String
-  /// Day of week 1..7 (1=Monday).
   dayOfWeek      Int
   pickupTime     String? // 'HH:mm'
   dropoffTime    String? // 'HH:mm'
@@ -12956,26 +14023,1087 @@ model RouteAssignment {
   @@index([organizationId])
 }
 
+/// Student ⇄ Route contractual assignment. Evolved in place: real status enum,
+/// termId FK, separate inbound/outbound stops, service mode, assignment type,
+/// days-of-week, and a partial-unique invariant (one active per
+/// student+term+serviceMode). The v1 `stopId` is backfilled into `pickupStopId`
+/// and kept as a deprecated alias.
 model StudentTransportAssignment {
-  id               String    @id @default(uuid())
-  organizationId   String
-  studentProfileId String
-  routeId          String
-  stopId           String
-  termId           String?
-  startDate        DateTime
-  endDate          DateTime?
-  monthlyFee       Decimal   @default(0) @db.Decimal(18, 6)
-  isActive         Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String                   @id @default(uuid())
+  organizationId    String
+  studentProfileId  String
+  routeId           String
+  /// Deprecated alias; backfilled from v1 `stopId`. Use pickupStopId/dropoffStopId.
+  stopId            String
+  pickupStopId      String?
+  dropoffStopId     String?
+  campusId          String?
+  academicYearId    String?
+  termId            String?
+  startDate         DateTime
+  endDate           DateTime?
+  serviceMode       TransportServiceMode     @default(both)
+  assignmentType    TransportAssignmentType @default(permanent)
+  daysOfWeek        Int[]                    @default([1, 2, 3, 4, 5])
+  monthlyFee        Decimal                  @default(0) @db.Decimal(20, 6)
+  status            TransportAssignmentStatus @default(pending)
+  reason            String?
+  requestId         String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
 
-  student StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
-  route   Route          @relation(fields: [routeId], references: [id])
-  stop    Stop           @relation(fields: [stopId], references: [id])
+  student       StudentProfile            @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  route         Route                     @relation(fields: [routeId], references: [id])
+  stop          Stop                      @relation(fields: [stopId], references: [id])
+  pickupStop    Stop?                     @relation("pickupStop", fields: [pickupStopId], references: [id])
+  dropoffStop   Stop?                     @relation("dropoffStop", fields: [dropoffStopId], references: [id])
+  tripPassengers TransportTripPassenger[]
+  boardingEvents  TransportBoardingEvent[]
+
+  requests TransportRequest[] @relation("assignmentRequests")
+  charges TransportCharge[]   @relation("assignmentCharges")
+
+  @@unique([organizationId, studentProfileId, termId, serviceMode], map: "StudentTransportAssignment_active_unique")
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([routeId])
+  @@index([status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// School Transport Management System (STMS) — enums
+// ═══════════════════════════════════════════════════════════════════════════
+enum TransportOwnership {
+  owned
+  leased
+  provider
+}
+enum TransportVehicleStatus {
+  available
+  assigned
+  in_service
+  maintenance
+  out_of_service
+  accident
+  retired
+}
+enum TransportRouteStatus {
+  draft
+  planned
+  active
+  suspended
+  retired
+}
+enum TransportDirection {
+  inbound
+  outbound
+  loop
+}
+enum TransportStopStatus {
+  active
+  inactive
+  retired
+}
+enum TransportServiceMode {
+  morning_only
+  afternoon_only
+  both
+}
+enum TransportAssignmentType {
+  permanent
+  temporary
+}
+enum TransportAssignmentStatus {
+  pending
+  active
+  suspended
+  ended
+  cancelled
+}
+enum TransportCrewRole {
+  driver
+  attendant
+  supervisor
+  coordinator
+}
+enum TransportCrewStatus {
+  active
+  suspended
+  on_leave
+  inactive
+}
+enum TransportRequestType {
+  new
+  change_stop
+  suspend
+  resume
+  cancel
+  temporary
+}
+enum TransportRequestStatus {
+  submitted
+  under_review
+  approved
+  rejected
+  withdrawn
+}
+enum TransportScheduleExceptionKind {
+  no_service
+  time_change
+  route_change
+  extra_service
+}
+enum TransportTripStatus {
+  scheduled
+  ready
+  dispatched
+  en_route
+  at_stop
+  completed
+  cancelled
+  aborted
+}
+enum TransportPassengerStatus {
+  expected
+  boarded
+  no_show
+  dropped_off
+  excused
+  cancelled
+}
+enum TransportBoardingEventType {
+  board
+  drop_off
+  absent
+  no_show
+  refused
+  manual_override
+}
+enum TransportBoardingSource {
+  manual
+  qr
+  rfid
+  barcode
+  mobile
+  automated
+}
+enum TransportInspectionResult {
+  pass
+  fail
+}
+enum TransportInspectionItemResult {
+  pass
+  fail
+  na
+}
+enum TransportFeeBasis {
+  flat
+  zone
+  route
+  stop
+  distance
+}
+enum TransportFeePeriod {
+  monthly
+  termly
+  yearly
+  per_trip
+}
+enum TransportChargeStatus {
+  pending
+  invoiced
+  cancelled
+}
+enum TransportIncidentType {
+  accident
+  breakdown
+  medical
+  student_behavior
+  missing_student
+  unauthorized_pickup
+  vehicle_failure
+  route_deviation
+  speeding
+  emergency
+  other
+}
+enum TransportIncidentSeverity {
+  low
+  medium
+  high
+  critical
+}
+enum TransportIncidentStatus {
+  open
+  investigating
+  resolved
+  closed
+}
+enum TransportGeofenceKind {
+  school
+  stop
+  zone
+  corridor
+  restricted
+}
+enum TransportGeofenceEventType {
+  entered
+  left
+}
+enum TransportTrackingAlertKind {
+  route_deviation
+  speed_violation
+  prolonged_stop
+  no_signal
+}
+enum TransportTrackingAlertSeverity {
+  low
+  medium
+  high
+  critical
+}
+enum TransportDeviceKind {
+  hardware
+  phone
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// School Transport Management System (STMS) — models
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Per (org, optional campus) transport configuration.
+model TransportSettings {
+  id                String   @id @default(uuid())
+  organizationId    String
+  campusId          String?
+  operatingDays     Int[]    @default([1, 2, 3, 4, 5])
+  pickupGraceMin    Int      @default(5)
+  dropoffGraceMin   Int      @default(5)
+  lateThresholdMin  Int      @default(10)
+  maxRouteDurationMin Int?
+  boardingMethodsEnabled Json @default("[\"manual\",\"qr\",\"rfid\",\"barcode\",\"mobile\"]")
+  deviationThresholdM Int    @default(150)
+  speedThresholdKph  Int     @default(80)
+  geofenceDefaultRadiusM Int @default(100)
+  notifyAbsenceCancelsPickup Boolean @default(false)
+  billingSuspensionEnabled Boolean @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String?
+  updatedBy         String?
+
+  @@unique([organizationId, campusId])
+  @@index([organizationId])
+}
+
+/// Named service area — drives pricing, planning and reporting.
+model TransportZone {
+  id           String   @id @default(uuid())
+  organizationId String
+  code         String
+  name         String
+  campusId     String?
+  boundary     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String?
+  updatedBy    String?
+  deletedAt    DateTime?
+
+  stops       Stop[]
+  feeRates    TransportFeePlanRate[]
+  geofences   TransportGeofence[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([campusId])
+}
+
+/// Immutable route history. Trips reference the version, never the route directly.
+model TransportRouteVersion {
+  id             String              @id @default(uuid())
+  organizationId String
+  routeId        String
+  versionNo      Int
+  effectiveFrom  DateTime
+  effectiveTo    DateTime?
+  status         TransportRouteStatus @default(active)
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  route      Route               @relation(fields: [routeId], references: [id])
+  routeStops TransportRouteStop[]
+  schedules  TransportSchedule[]
+  trips      TransportTrip[]
+
+  @@unique([routeId, versionNo])
+  @@index([organizationId])
+  @@index([routeId])
+}
+
+/// Ordered stop on a route *version* (timing + capacity live here, not on Stop).
+model TransportRouteStop {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  routeVersionId     String
+  stopId             String
+  sequence           Int
+  plannedArrival     String?  // 'HH:mm'
+  plannedDeparture   String?  // 'HH:mm'
+  pickupAllowed      Boolean  @default(true)
+  dropoffAllowed     Boolean  @default(true)
+  studentCapacity    Int?
+  distanceFromPrevKm Decimal? @db.Decimal(20, 6)
+  feeOverride        Decimal? @db.Decimal(20, 6)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  routeVersion TransportRouteVersion @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
+  stop         Stop                   @relation(fields: [stopId], references: [id])
+
+  @@unique([routeVersionId, sequence])
+  @@index([organizationId])
+  @@index([routeVersionId])
+  @@index([stopId])
+}
+
+/// Driver / attendant / supervisor / coordinator — one model, many roles.
+model TransportCrewMember {
+  id             String            @id @default(uuid())
+  organizationId String
+  /// Link to the staff profile (for drivers needing a real login).
+  staffProfileId String?
+  /// Link to a Partner (person) when not a staff member.
+  partnerId      String?
+  role           TransportCrewRole @default(driver)
+  name           String
+  phone          String?
+  licenseNumber  String?
+  licenseClass   String?
+  licenseExpiry  DateTime?
+  emergencyContact Json?
+  status         TransportCrewStatus @default(active)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  documents    TransportCrewDocument[]
+  driverTrips  TransportTrip[]        @relation("tripDriver")
+  attendantTrips TransportTrip[]      @relation("tripAttendant")
+  inspections TransportVehicleInspection[]
+  incidents    TransportIncident[]
+  scheduledDrivers  TransportSchedule[] @relation("schedDriverBack")
+  scheduledAttendants TransportSchedule[] @relation("schedAttendantBack")
+
+  @@index([organizationId])
+  @@index([staffProfileId])
+  @@index([partnerId])
+  @@index([status])
+}
+
+model TransportCrewDocument {
+  id            String   @id @default(uuid())
+  organizationId String
+  crewMemberId  String
+  /// 'license' | 'training' | 'first_aid' | 'background_check' | 'medical'.
+  documentType  String
+  documentNumber String
+  issueDate     DateTime?
+  expiryDate    DateTime?
+  fileId        String?
+  verified      Boolean  @default(false)
+  verifiedById  String?
+  verifiedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  crewMember TransportCrewMember @relation(fields: [crewMemberId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([crewMemberId])
+  @@index([expiryDate])
+}
+
+model TransportVehicleDocument {
+  id            String   @id @default(uuid())
+  organizationId String
+  vehicleId     String
+  /// 'registration' | 'insurance' | 'inspection_certificate' | 'roadworthiness' | 'operating_licence' | 'permit'.
+  documentType  String
+  documentNumber String
+  issueDate     DateTime?
+  expiryDate    DateTime?
+  fileId        String?
+  verified      Boolean  @default(false)
+  verifiedById  String?
+  verifiedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([vehicleId])
+  @@index([expiryDate])
+}
+
+// ── T2 Student Transport ──
+
+/// Parent-initiated request. Approval mints or amends a StudentTransportAssignment.
+model TransportRequest {
+  id                 String              @id @default(uuid())
+  organizationId     String
+  studentProfileId   String
+  type               TransportRequestType @default(new)
+  requestedRouteId   String?
+  requestedStopId    String?
+  requestedStartDate DateTime?
+  requestedEndDate   DateTime?
+  notes              String?
+  status             TransportRequestStatus @default(submitted)
+  reviewedById       String?
+  decisionNotes      String?
+  assignmentId       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  createdBy          String?
+  updatedBy          String?
+
+  student   StudentProfile @relation(fields: [studentProfileId], references: [id])
+  route     Route?         @relation("routeRequests", fields: [requestedRouteId], references: [id])
+  stop      Stop?          @relation("stopRequests", fields: [requestedStopId], references: [id])
+  assignment StudentTransportAssignment? @relation("assignmentRequests", fields: [assignmentId], references: [id])
 
   @@index([organizationId])
   @@index([studentProfileId])
+  @@index([status])
+}
+
+/// Per-student authorized pick-up person.
+model TransportAuthorizedPerson {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  stopId           String?
+  name             String
+  relationship     String
+  phone            String?
+  photoFileId      String?
+  idType           String?
+  idNumber         String?
+  validFrom        DateTime?
+  validTo          DateTime?
+  isActive         Boolean  @default(true)
+  verificationMethod String @default("visual") // 'visual' | 'qr' | 'otp' | 'staff_approval'
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  student StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  stop    Stop?          @relation(fields: [stopId], references: [id])
+  releasedBy TransportBoardingEvent[] @relation("boardingReleases")
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([stopId])
+}
+
+/// Per-student eligibility flags that feed vehicle/route checks.
+model TransportSpecialRequirement {
+  id           String   @id @default(uuid())
+  organizationId String
+  studentProfileId String
+  /// 'wheelchair' | 'mobility' | 'visual' | 'hearing' | 'behavioral' | 'escort_required' | 'front_seat' | 'medication'.
+  kind         String
+  notes        String?
+  validFrom    DateTime?
+  validTo      DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  student StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+}
+
+// ── T3 Scheduling + Operations ──
+
+/// The *plan*: route version × direction × days × vehicle × crew.
+model TransportSchedule {
+  id                   String              @id @default(uuid())
+  organizationId       String
+  routeVersionId       String
+  routeId              String?
+  direction            TransportDirection
+  daysOfWeek           Int[]               @default([1, 2, 3, 4, 5])
+  departureTime        String // 'HH:mm'
+  defaultVehicleId     String?
+  defaultCrewDriverId  String?
+  defaultCrewAttendantId String?
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  status               TransportRouteStatus @default(active)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  createdBy            String?
+  updatedBy            String?
+  deletedAt            DateTime?
+
+  routeVersion TransportRouteVersion @relation(fields: [routeVersionId], references: [id])
+  route       Route?        @relation("routeSchedules", fields: [routeId], references: [id])
+  vehicle     Vehicle?               @relation("schedVehicle", fields: [defaultVehicleId], references: [id])
+  driver       TransportCrewMember? @relation("schedDriverBack", fields: [defaultCrewDriverId], references: [id])
+  attendant    TransportCrewMember? @relation("schedAttendantBack", fields: [defaultCrewAttendantId], references: [id])
+  exceptions   TransportScheduleException[]
+  trips        TransportTrip[]
+
+  @@index([organizationId])
+  @@index([routeVersionId])
+}
+
+/// Date-scoped override of a schedule.
+model TransportScheduleException {
+  id                 String                        @id @default(uuid())
+  organizationId     String
+  scheduleId         String
+  date               DateTime
+  kind               TransportScheduleExceptionKind
+  newDepartureTime   String?
+  newRouteVersionId  String?
+  reason             String?
+  calendarEventId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  schedule      TransportSchedule     @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  calendarEvent SchoolCalendarEvent?  @relation(fields: [calendarEventId], references: [id])
+
+  @@index([organizationId])
+  @@index([scheduleId])
+  @@index([date])
+}
+
+/// The *execution* of a schedule on a date.
+model TransportTrip {
+  id                    String            @id @default(uuid())
+  organizationId        String
+  scheduleId            String?
+  routeVersionId        String
+  routeId               String?
+  direction             TransportDirection
+  vehicleId             String?
+  driverCrewId          String?
+  attendantCrewId       String?
+  date                  DateTime
+  status                TransportTripStatus @default(scheduled)
+  plannedDeparture      DateTime?
+  plannedArrival        DateTime?
+  actualDeparture       DateTime?
+  actualArrival         DateTime?
+  odometerStart         Decimal?          @db.Decimal(20, 6)
+  odometerEnd           Decimal?          @db.Decimal(20, 6)
+  delayMinutes          Int               @default(0)
+  inspectionId          String?
+  endOfTripCheckedAt    DateTime?
+  endOfTripCheckedById  String?
+  unaccountedCount      Int               @default(0)
+  version               Int               @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  createdBy             String?
+  updatedBy             String?
+
+  schedule      TransportSchedule?        @relation(fields: [scheduleId], references: [id])
+  routeVersion  TransportRouteVersion    @relation(fields: [routeVersionId], references: [id])
+  route         Route?          @relation("routeTrips", fields: [routeId], references: [id])
+  vehicle       Vehicle?                  @relation(fields: [vehicleId], references: [id])
+  driver        TransportCrewMember?      @relation("tripDriver", fields: [driverCrewId], references: [id])
+  attendant     TransportCrewMember?      @relation("tripAttendant", fields: [attendantCrewId], references: [id])
+  inspection    TransportVehicleInspection? @relation("inspectionTrip", fields: [inspectionId], references: [id])
+  stops         TransportTripStop[]
+  passengers    TransportTripPassenger[]
+  tripEvents    TransportTripEvent[]
+  boardingEvents TransportBoardingEvent[]
+  geofenceEvents TransportGeofenceEvent[]
+  locationEvents TransportLocationEvent[]
+  trackingAlerts TransportTrackingAlert[]
+  incidents     TransportIncident[]
+  track         TransportTripTrack?
+  endOfTripCheck TransportEndOfTripCheck[] @relation("endOfTripCheck")
+
+  @@unique([organizationId, scheduleId, date, direction])
+  @@index([organizationId])
+  @@index([routeVersionId])
+  @@index([vehicleId])
+  @@index([date])
+  @@index([status])
+}
+
+/// Materialized per-trip stop.
+model TransportTripStop {
+  id               String   @id @default(uuid())
+  organizationId   String
+  tripId           String
+  stopId           String
+  sequence         Int
+  plannedArrival   DateTime?
+  plannedDeparture DateTime?
+  actualArrival    DateTime?
+  actualDeparture  DateTime?
+  expectedCount    Int      @default(0)
+  boardedCount     Int      @default(0)
+  skipped          Boolean  @default(false)
+  skipReason       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  trip TransportTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stop Stop         @relation(fields: [stopId], references: [id])
+
+  @@index([organizationId])
+  @@index([tripId])
+  @@index([stopId])
+}
+
+/// The manifest: one row per (trip, student).
+model TransportTripPassenger {
+  id                  String                @id @default(uuid())
+  organizationId      String
+  tripId              String
+  studentProfileId    String
+  pickupStopId        String?
+  dropoffStopId       String?
+  assignmentId        String?
+  status              TransportPassengerStatus @default(expected)
+  specialRequirementsSnapshot Json?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  trip        TransportTrip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  student     StudentProfile       @relation("tripPassengers", fields: [studentProfileId], references: [id])
+  pickupStop  Stop?                @relation("tripPassengerPickup", fields: [pickupStopId], references: [id])
+  dropoffStop Stop?                @relation("tripPassengerDropoff", fields: [dropoffStopId], references: [id])
+  assignment  StudentTransportAssignment? @relation(fields: [assignmentId], references: [id])
+  boardingEvents TransportBoardingEvent[] @relation("passengerBoarding")
+
+  @@unique([tripId, studentProfileId])
+  @@index([organizationId])
+  @@index([tripId])
+  @@index([studentProfileId])
+}
+
+/// Immutable, append-only boarding fact.
+model TransportBoardingEvent {
+  id               String                  @id @default(uuid())
+  organizationId   String
+  tripId           String
+  studentProfileId String
+  stopId           String?
+  assignmentId     String?
+  eventType        TransportBoardingEventType
+  occurredAt       DateTime                @default(now())
+  source           TransportBoardingSource @default(manual)
+  deviceId         String?
+  recordedById     String?
+  latitude         Decimal?                @db.Decimal(9, 6)
+  longitude        Decimal?                @db.Decimal(9, 6)
+  reason           String?
+  releasedToPersonId String?
+  /// Offline idempotency key (one event per clientEventId).
+  clientEventId    String?
+  clientRecordedAt DateTime?
+  sequence         Int?
+  createdAt        DateTime                @default(now())
+
+  trip        TransportTrip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  student     StudentProfile             @relation("studentBoarding", fields: [studentProfileId], references: [id])
+  stop        Stop?                      @relation(fields: [stopId], references: [id])
+  assignment  StudentTransportAssignment? @relation(fields: [assignmentId], references: [id])
+  passenger   TransportTripPassenger[]   @relation("passengerBoarding")
+  releasedTo  TransportAuthorizedPerson? @relation("boardingReleases", fields: [releasedToPersonId], references: [id])
+
+  @@unique([organizationId, clientEventId], map: "TransportBoardingEvent_client_unique")
+  @@index([organizationId])
+  @@index([tripId])
+  @@index([studentProfileId])
+}
+
+/// Pre-trip vehicle inspection.
+model TransportVehicleInspection {
+  id              String                @id @default(uuid())
+  organizationId  String
+  vehicleId       String
+  tripId          String?
+  date            DateTime
+  inspectedByCrewId String
+  result          TransportInspectionResult @default(pass)
+  odometerKm      Decimal               @default(0) @db.Decimal(20, 6)
+  notes           String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  vehicle   Vehicle             @relation(fields: [vehicleId], references: [id])
+  crewMember TransportCrewMember @relation(fields: [inspectedByCrewId], references: [id])
+  trip      TransportTrip[]      @relation("inspectionTrip")
+  items     TransportInspectionItem[]
+
+  @@index([organizationId])
+  @@index([vehicleId])
+  @@index([date])
+}
+
+model TransportInspectionItem {
+  id               String                    @id @default(uuid())
+  organizationId   String
+  inspectionId     String
+  label            String
+  isCritical       Boolean                  @default(false)
+  result           TransportInspectionItemResult @default(pass)
+  notes            String?
+  createdAt        DateTime                 @default(now())
+
+  inspection TransportVehicleInspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([inspectionId])
+}
+
+/// Operational timeline (complements, does not replace, AuditLog).
+model TransportTripEvent {
+  id          String   @id @default(uuid())
+  organizationId String
+  tripId      String
+  eventType   String
+  fromStatus  String?
+  toStatus    String?
+  actorId     String?
+  reason      String?
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  trip TransportTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([tripId])
+}
+
+// ── T4 Finance ──
+
+model TransportFeePlan {
+  id              String            @id @default(uuid())
+  organizationId  String
+  name            String
+  campusId        String?
+  academicYearId  String?
+  basis           TransportFeeBasis @default(flat)
+  period          TransportFeePeriod @default(monthly)
+  baseAmount      Decimal           @default(0) @db.Decimal(20, 6)
+  oneWayFactor    Decimal           @default(0.6) @db.Decimal(9, 4)
+  ratePerKm       Decimal?          @db.Decimal(20, 6)
+  feeProductId    String?
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  createdBy       String?
+  updatedBy       String?
+  deletedAt       DateTime?
+
+  rates    TransportFeePlanRate[]
+
+  @@index([organizationId])
+  @@index([campusId])
+  @@index([academicYearId])
+}
+
+model TransportFeePlanRate {
+  id          String   @id @default(uuid())
+  organizationId String
+  feePlanId   String
+  zoneId      String?
+  routeId     String?
+  stopId      String?
+  amount      Decimal  @default(0) @db.Decimal(20, 6)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plan TransportFeePlan @relation(fields: [feePlanId], references: [id], onDelete: Cascade)
+  zone TransportZone?   @relation(fields: [zoneId], references: [id])
+  route Route?          @relation("routeFeeRates", fields: [routeId], references: [id])
+  stop  Stop?           @relation("stopFeeRates", fields: [stopId], references: [id])
+
+  @@index([organizationId])
+  @@index([feePlanId])
+}
+
+model TransportDiscountRule {
+  id         String   @id @default(uuid())
+  organizationId String
+  name       String
+  /// 'sibling' | 'staff' | 'scholarship' | 'hardship'.
+  kind       String
+  /// 'percent' | 'fixed'.
+  type       String
+  value      Decimal  @default(0) @db.Decimal(20, 6)
+  criteria   Json?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([isActive])
+}
+
+/// Normalized charge row; maps to an invoiced Document.
+model TransportCharge {
+  id            String              @id @default(uuid())
+  organizationId String
+  assignmentId  String
+  periodStart   DateTime
+  periodEnd     DateTime
+  grossAmount   Decimal             @default(0) @db.Decimal(20, 6)
+  discountAmount Decimal            @default(0) @db.Decimal(20, 6)
+  netAmount     Decimal             @default(0) @db.Decimal(20, 6)
+  documentId    String?
+  status        TransportChargeStatus @default(pending)
+  prorated      Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  assignment StudentTransportAssignment @relation("assignmentCharges", fields: [assignmentId], references: [id])
+
+  @@unique([organizationId, assignmentId, periodStart, periodEnd])
+  @@index([organizationId])
+  @@index([assignmentId])
+  @@index([status])
+}
+
+// ── T5 Safety + Communication ──
+
+model TransportIncident {
+  id              String                  @id @default(uuid())
+  organizationId  String
+  type            TransportIncidentType   @default(other)
+  severity        TransportIncidentSeverity @default(medium)
+  tripId          String?
+  vehicleId       String?
+  crewMemberId    String?
+  latitude        Decimal?                @db.Decimal(9, 6)
+  longitude       Decimal?                @db.Decimal(9, 6)
+  occurredAt      DateTime                @default(now())
+  description     String?
+  status          TransportIncidentStatus @default(open)
+  reportedById    String?
+  resolutionNotes String?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  createdBy       String?
+  updatedBy       String?
+  deletedAt       DateTime?
+
+  trip       TransportTrip?        @relation(fields: [tripId], references: [id])
+  vehicle    Vehicle?              @relation("vehicleIncidents", fields: [vehicleId], references: [id])
+  crewMember TransportCrewMember? @relation(fields: [crewMemberId], references: [id])
+  students   TransportIncidentStudent[]
+  actions    TransportIncidentAction[]
+
+  @@index([organizationId])
+  @@index([tripId])
+  @@index([status])
+  @@index([severity])
+}
+
+model TransportIncidentStudent {
+  id           String   @id @default(uuid())
+  organizationId String
+  incidentId   String
+  studentProfileId String
+  createdAt    DateTime @default(now())
+
+  incident TransportIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  student  StudentProfile   @relation("incidentStudents", fields: [studentProfileId], references: [id])
+
+  @@index([organizationId])
+  @@index([incidentId])
+  @@index([studentProfileId])
+}
+
+model TransportIncidentAction {
+  id           String   @id @default(uuid())
+  organizationId String
+  incidentId   String
+  action       String
+  actorId      String?
+  notes        String?
+  fileId       String?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  incident TransportIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([incidentId])
+}
+
+/// End-of-trip safety checklist; a trip cannot close without it.
+model TransportEndOfTripCheck {
+  id           String   @id @default(uuid())
+  organizationId String
+  tripId       String
+  checklist    Json
+  confirmedByCrewId String
+  confirmedAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  trip TransportTrip @relation("endOfTripCheck", fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId])
+  @@index([organizationId])
+}
+
+// ── T6 GPS + Tracking ──
+
+/// GPS unit or registered driver phone.
+model TransportDevice {
+  id           String            @id @default(uuid())
+  organizationId String
+  vehicleId    String?
+  kind         TransportDeviceKind @default(hardware)
+  identifier   String
+  secretHash   String?
+  lastSeenAt   DateTime?
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  deletedAt    DateTime?
+
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+
+  @@unique([organizationId, identifier])
+  @@index([organizationId])
+  @@index([vehicleId])
+}
+
+/// Partitioned by month (T6 maintenance cron). Written by the queue processor.
+model TransportLocationEvent {
+  id           String   @id @default(uuid())
+  organizationId String
+  vehicleId    String
+  tripId       String?
+  recordedAt   DateTime @default(now())
+  latitude     Decimal  @db.Decimal(9, 6)
+  longitude    Decimal  @db.Decimal(9, 6)
+  speedKph     Decimal? @db.Decimal(9, 2)
+  headingDeg   Int?
+  accuracyM    Int?
+  source       String   @default("gps")
+  deviceId     String?
+  createdAt    DateTime @default(now())
+
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+  trip    TransportTrip? @relation(fields: [tripId], references: [id])
+
+  @@index([organizationId])
+  @@index([vehicleId])
+  @@index([tripId])
+  @@index([recordedAt])
+}
+
+model TransportGeofence {
+  id           String              @id @default(uuid())
+  organizationId String
+  kind         TransportGeofenceKind @default(stop)
+  stopId       String?
+  campusId     String?
+  zoneId       String?
+  centerLat    Decimal?            @db.Decimal(9, 6)
+  centerLng    Decimal?            @db.Decimal(9, 6)
+  radiusM      Int?
+  polygon      Json?
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+
+  stop  Stop?        @relation(fields: [stopId], references: [id])
+  campus Campus?     @relation("campusGeofences", fields: [campusId], references: [id])
+  zone  TransportZone? @relation(fields: [zoneId], references: [id])
+  events TransportGeofenceEvent[]
+
+  @@index([organizationId])
+  @@index([stopId])
+  @@index([campusId])
+  @@index([zoneId])
+}
+
+model TransportGeofenceEvent {
+  id           String                    @id @default(uuid())
+  organizationId String
+  vehicleId    String
+  tripId       String?
+  geofenceId   String
+  eventType    TransportGeofenceEventType
+  occurredAt   DateTime                  @default(now())
+  createdAt    DateTime                  @default(now())
+
+  vehicle   Vehicle?        @relation(fields: [vehicleId], references: [id])
+  trip      TransportTrip?   @relation(fields: [tripId], references: [id])
+  geofence  TransportGeofence @relation(fields: [geofenceId], references: [id])
+
+  @@index([organizationId])
+  @@index([vehicleId])
+  @@index([tripId])
+  @@index([geofenceId])
+}
+
+model TransportTrackingAlert {
+  id           String                      @id @default(uuid())
+  organizationId String
+  tripId       String?
+  vehicleId    String
+  kind         TransportTrackingAlertKind
+  severity     TransportTrackingAlertSeverity @default(medium)
+  detail       Json?
+  raisedAt     DateTime                    @default(now())
+  acknowledgedAt DateTime?
+  acknowledgedById String?
+  createdAt    DateTime                    @default(now())
+
+  trip    TransportTrip? @relation(fields: [tripId], references: [id])
+  vehicle Vehicle?       @relation(fields: [vehicleId], references: [id])
+
+  @@index([organizationId])
+  @@index([tripId])
+  @@index([vehicleId])
+  @@index([raisedAt])
+}
+
+/// Post-completion rollup so raw location rows can age out.
+model TransportTripTrack {
+  id           String   @id @default(uuid())
+  organizationId String
+  tripId       String
+  polyline     Json?
+  distanceKm   Decimal? @db.Decimal(20, 6)
+  maxSpeedKph  Decimal? @db.Decimal(9, 2)
+  avgSpeedKph  Decimal? @db.Decimal(9, 2)
+  pointCount   Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  trip TransportTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId])
+  @@index([organizationId])
 }
 
 model Dormitory {
@@ -13078,6 +15206,11 @@ model MealPlan {
   billingModel   String    @default("term_plan")
   /// 'school_funded' | 'parent_funded' | 'parent_contribution' | 'mixed'.
   fundingModel   String    @default("parent_funded")
+  /// When true, serving a student on this plan (via attendance) decrements the
+  /// inventory products behind each menu dish (via MealRecipeIngredient) and
+  /// writes a per-student MealConsumption row. Off by default — opt-in so plans
+  /// that are billing-only or inventory-free don't move stock.
+  trackInventory Boolean   @default(false)
   isActive       Boolean   @default(true)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -13089,6 +15222,7 @@ model MealPlan {
   accounts     MealAccount[]
   entitlements MealPlanEntitlement[]
   assignments  MealPlanAssignment[]
+  menus        MealMenu[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -13330,10 +15464,12 @@ model MealMenu {
   deletedAt      DateTime?
 
   mealType MealType       @relation(fields: [mealTypeId], references: [id])
+  mealPlan MealPlan?      @relation(fields: [mealPlanId], references: [id])
   items    MealMenuItem[]
 
   @@index([organizationId])
   @@index([mealTypeId])
+  @@index([mealPlanId])
 }
 
 /// A dish line under a menu. Distinct from the POS `MenuItem`.
@@ -13450,10 +15586,16 @@ model MealProductionItem {
 
 /// Actual ingredient issue/consume event — the ONLY thing that moves stock (via
 /// StockService.issue). Keeps "served" (attendance) separate from "consumed".
+/// Supports two scopes: (a) kitchen production issue (mealProductionPlanId set,
+/// student NULL) and (b) per-student consumption when a plan serves a meal and
+/// tracks inventory (studentProfileId + mealSessionId + mealMenuId set).
 model MealConsumption {
   id                   String   @id @default(uuid())
   organizationId       String
-  mealProductionPlanId String
+  mealProductionPlanId String?
+  mealSessionId        String?
+  mealMenuId           String?
+  studentProfileId     String?
   productId            String
   quantity             Decimal  @db.Decimal(20, 6)
   unitCost             Decimal  @default(0) @db.Decimal(20, 6)
@@ -13464,10 +15606,13 @@ model MealConsumption {
   recordedById         String?
   createdAt            DateTime @default(now())
 
-  productionPlan MealProductionPlan @relation(fields: [mealProductionPlanId], references: [id], onDelete: Cascade)
+  productionPlan MealProductionPlan? @relation(fields: [mealProductionPlanId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([mealProductionPlanId])
+  @@index([mealSessionId])
+  @@index([studentProfileId])
+  @@index([mealMenuId])
 }
 
 /// Food waste record. Cost is computed from inventory costing, not hand-entered.
@@ -13528,4 +15673,57 @@ model SchoolDashboardCache {
 
   @@unique([organizationId, kind, asOf])
   @@index([organizationId, asOf])
+}
+
+/// School finance budgeting — planned vs actual spend per category/period.
+model Budget {
+  id             String   @id @default(uuid())
+  organizationId String
+  academicYearId String?
+  termId         String?
+  /// e.g. 'salaries', 'supplies', 'transport', 'utilities', 'capital', 'feeding'.
+  category       String
+  name           String
+  /// Planned amount for the period (in org currency).
+  amount         Decimal  @db.Decimal(18, 4)
+  currency       String?
+  periodFrom     DateTime?
+  periodTo       DateTime?
+  notes          String?
+  /// 'draft' | 'approved' | 'closed'.
+  status         String   @default("approved")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
+  term         Term?         @relation(fields: [termId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([academicYearId])
+  @@index([termId])
+}
+
+/// Front Desk visitor / walk-in log (check-in / check-out, purpose, host).
+model FrontDeskLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// Optional link to an existing Partner (repeat visitor / parent / guest).
+  partnerId      String?
+  visitorName    String
+  phone          String?
+  purpose        String?
+  personVisited  String?
+  /// 'in' | 'out' | 'expected'.
+  status         String   @default("in")
+  notes          String?
+  checkInAt      DateTime @default(now())
+  checkOutAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  partner Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([partnerId])
+  @@index([status])
 }

@@ -5,6 +5,11 @@ import { RequirePermissions } from '../../../kernel/auth/decorators/require-perm
 import { CalendarEventService } from './calendar-event.service';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './config.dto';
 
+/**
+ * CANONICAL SchoolCalendarEvent API for ALL new Calendar/Events functionality.
+ * Calendar UI (month grid) and Events UI (agenda/list) both consume this contract.
+ * Do NOT build new features against the legacy `/school/calendar` endpoint.
+ */
 @Controller('school/calendar-events')
 export class CalendarEventController {
   constructor(private readonly events: CalendarEventService) {}

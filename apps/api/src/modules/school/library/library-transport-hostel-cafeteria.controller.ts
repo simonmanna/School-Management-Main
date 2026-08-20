@@ -175,7 +175,7 @@ export class MealPlanController {
   constructor(private readonly service: MealPlanService) {}
   @Get() @RequirePermissions(PERMISSIONS.school.read) list(@Query() q: PaginationDto) { return this.service.list(q); }
   @Post() @RequirePermissions(PERMISSIONS.school.manageCafeteria) create(@Body() dto: CreateMealPlanDto) { return this.service.create(dto); }
-  @Patch(':id') @RequirePermissions(PERMISSIONS.school.manageCafeteria) update(@Param('id') id: string, @Body() dto: UpdateMealPlanDto) { return this.service.update(id, dto); }
+  @Patch(':id') @RequirePermissions(PERMISSIONS.school.manageCafeteria) update(@Param('id') id: string, @Body() dto: UpdateMealPlanDto) { return this.service.updatePlan(id, dto); }
   @Delete(':id') @HttpCode(204) @RequirePermissions(PERMISSIONS.school.manageCafeteria) remove(@Param('id') id: string) { return this.service.remove(id); }
 }
 

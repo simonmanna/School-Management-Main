@@ -1,25 +1,28 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useStudent, useStudentPortal, useGuardians, useStudentStatement, useStudentAttendance,
   useStudentDocuments, useStudentMedical, useUpsertStudentMedical,
   useStudentLibrary, useStudentMeals, useStudentTransport, useStudentActivities,
-  useCreateGuardian, useUpdateGuardian, useDeleteGuardian,
-  type Student, type FeeStatement, type Guardian,
+  useCreateGuardian, useUpdateGuardian, useDeleteGuardian, useUpdateStudent,
+  type FeeStatement, type Guardian,
 } from '@/features/school/api';
+import { useUpdatePartner } from '@/features/partners/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Trash2, Pencil, Plus } from 'lucide-react';
+import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Archive, Users, CalendarCheck } from 'lucide-react';
 import { notify } from '@/lib/notify';
 
 const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
 const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
 
 const STATUS_META: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
@@ -32,6 +35,7 @@ const STATUS_META: Record<string, string> = {
 export function SchoolStudent360Page() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: student, isLoading } = useStudent(id);
   const { data: portal } = useStudentPortal(id);
   const { data: statement } = useStudentStatement(id);
@@ -42,12 +46,123 @@ export function SchoolStudent360Page() {
   const { data: meals } = useStudentMeals(id);
   const { data: transport } = useStudentTransport(id);
   const { data: activities } = useStudentActivities(id);
+  const updateStudent = useUpdateStudent();
+  const updatePartner = useUpdatePartner();
+
+  const [tab, setTab] = useState('profile');
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState('');
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [bioOpen, setBioOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+
+  // Bio-edit local state
+  const [name, setName] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [gender, setGender] = useState('');
+  const [nationality, setNationality] = useState('');
+  const [religion, setReligion] = useState('');
+  const [house, setHouse] = useState('');
+  const [residenceType, setResidenceType] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [bioBusy, setBioBusy] = useState(false);
+
+  const cf = ((student as any)?.customFields ?? {}) as any;
+  const photo = (student?.partner as any)?.customFields?.photoUrl as string | undefined;
+
+  const openBio = () => {
+    setName(student?.partner?.name ?? '');
+    setDateOfBirth((cf.dateOfBirth ?? student?.dateOfBirth ?? '').toString().slice(0, 10));
+    setGender(student?.gender ?? '');
+    setNationality((student as any)?.nationality ?? '');
+    setReligion((student as any)?.religion ?? '');
+    setHouse(cf.house ?? '');
+    setResidenceType(student?.residenceType ?? '');
+    setEmail(student?.partner?.email ?? '');
+    setPhone(student?.partner?.phone ?? '');
+    setBioOpen(true);
+  };
+
+  const onPhotoFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setPhotoPreview(reader.result as string);
+    reader.readAsDataURL(f);
+  };
+
+  const savePhoto = async () => {
+    if (!photoPreview || !student?.partnerId) return;
+    setPhotoBusy(true);
+    try {
+      const existing = (student.partner as any)?.customFields ?? {};
+      await updatePartner.mutateAsync({
+        id: student.partnerId,
+        data: { customFields: { ...existing, photoUrl: photoPreview } } as any,
+      });
+      qc.invalidateQueries({ queryKey: ['school', 'student', id] });
+      notify.success('Profile photo updated');
+      setPhotoOpen(false);
+      setPhotoPreview('');
+    } catch {
+      notify.error('Photo update failed');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const saveBio = async () => {
+    if (!student) return;
+    setBioBusy(true);
+    try {
+      await updateStudent.mutateAsync({
+        id: student.id,
+        dto: { dateOfBirth, gender, nationality, religion, house, residenceType } as any,
+      });
+      if (student.partnerId) {
+        await updatePartner.mutateAsync({
+          id: student.partnerId,
+          data: { name, email: email || undefined, phone: phone || undefined },
+        });
+      }
+      qc.invalidateQueries({ queryKey: ['school', 'student', id] });
+      notify.success('Bio data updated');
+      setBioOpen(false);
+    } catch {
+      notify.error('Update failed');
+    } finally {
+      setBioBusy(false);
+    }
+  };
+
+  const archive = async () => {
+    if (!student) return;
+    if (!confirm(`Archive ${student.partner?.name}? This sets the student to withdrawn.`)) return;
+    setArchiving(true);
+    try {
+      await updateStudent.mutateAsync({ id: student.id, dto: { status: 'withdrawn', reason: 'Archived from profile' } });
+      qc.invalidateQueries({ queryKey: ['school', 'student', id] });
+      notify.success('Student archived');
+    } catch {
+      notify.error('Archive failed');
+    } finally {
+      setArchiving(false);
+    }
+  };
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading student…</div>;
   if (!student) return <div className="p-6 text-sm text-muted-foreground">Student not found. <Link className="text-primary underline" to="/school/students">Back to students</Link></div>;
 
-  const photo = (student.partner as any)?.customFields?.photoUrl as string | undefined;
-  const cf = ((student as any).customFields ?? {}) as any;
+  const TABS = [
+    { value: 'profile', label: 'Profile', icon: User },
+    { value: 'guardians', label: 'Guardians', icon: Users },
+    { value: 'academic', label: 'Academic', icon: GraduationCap },
+    { value: 'attendance', label: 'Attendance', icon: CalendarCheck },
+    { value: 'financial', label: 'Financial', icon: Wallet },
+    { value: 'wellbeing', label: 'Wellbeing', icon: HeartPulse },
+    { value: 'engagement', label: 'Engagement', icon: Activity },
+  ] as const;
 
   return (
     <div className="space-y-4 p-6">
@@ -55,92 +170,226 @@ export function SchoolStudent360Page() {
 
       {/* Identity header */}
       <Card>
-        <CardContent className="flex items-center gap-4 p-4">
-          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-primary/10 text-primary flex items-center justify-center text-xl font-semibold">
-            {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials(student.partner?.name)}
+        <CardContent className="flex flex-col items-center gap-3 p-5 text-center sm:flex-row sm:text-left">
+          <div className="relative">
+            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-semibold">
+              {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials(student.partner?.name)}
+            </div>
+            <button
+              onClick={() => setPhotoOpen(true)}
+              className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow flex items-center gap-1"
+            >
+              <Camera className="h-3 w-3" /> Change Photo
+            </button>
           </div>
           <div className="flex-1">
             <h1 className="text-2xl font-semibold">{student.partner?.name}</h1>
             <p className="font-mono text-xs text-muted-foreground">{student.admissionNo} · ID {student.id.slice(0, 8)}</p>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs">
+            <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs sm:justify-start">
               <Badge className={STATUS_META[student.status] ?? 'bg-slate-100'}>{student.status}</Badge>
+              {student.currentClass?.name && <Badge variant="secondary">Class {student.currentClass.name}</Badge>}
               {cf.house && <Badge variant="outline">House {cf.house}</Badge>}
-              <Badge variant="outline" className="capitalize">{student.residenceType}</Badge>
+              {student.residenceType && <Badge variant="outline" className="capitalize">{student.residenceType}</Badge>}
               {student.gender && <Badge variant="outline" className="capitalize">{student.gender}</Badge>}
-              {student.currentClassId && <Badge variant="secondary">Class {student.currentClassId.slice(0, 6)}</Badge>}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="profile">
-        <TabsList className="flex flex-wrap gap-1">
-          {TABS.map((t) => <TabsTrigger key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</TabsTrigger>)}
-        </TabsList>
+      {/* Tab strip — icon + text, blue underline on active */}
+      <div className="flex flex-wrap gap-1 border-b border-border">
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.value;
+          return (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                active ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Icon className="h-4 w-4" /> {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-        <TabsContent value="profile" className="pt-4"><ProfileTab student={student} cf={cf} /></TabsContent>
-        <TabsContent value="guardians" className="pt-4"><GuardiansTab studentProfileId={student.id} cf={cf} /></TabsContent>
-        <TabsContent value="academics" className="pt-4"><AcademicsTab portal={portal} /></TabsContent>
-        <TabsContent value="attendance" className="pt-4"><AttendanceTab summary={attendance} /></TabsContent>
-        <TabsContent value="assessments" className="pt-4"><AssessmentsTab portal={portal} /></TabsContent>
-        <TabsContent value="behavior" className="pt-4"><BehaviorTab activities={activities} /></TabsContent>
-        <TabsContent value="fees" className="pt-4"><FeesTab statement={statement} /></TabsContent>
-        <TabsContent value="payments" className="pt-4"><FeesTab statement={statement} payments /></TabsContent>
-        <TabsContent value="transport" className="pt-4"><TransportTab rows={transport} /></TabsContent>
-        <TabsContent value="meals" className="pt-4"><MealsTab wallet={meals} /></TabsContent>
-        <TabsContent value="library" className="pt-4"><LibraryTab rows={library} /></TabsContent>
-        <TabsContent value="communication" className="pt-4"><CommunicationTab activities={activities} /></TabsContent>
-        <TabsContent value="documents" className="pt-4"><DocumentsTab docs={documents} /></TabsContent>
-        <TabsContent value="health" className="pt-4"><HealthTab medical={medical} studentProfileId={id} /></TabsContent>
-        <TabsContent value="activities" className="pt-4"><ActivitiesTab activities={activities} /></TabsContent>
+      <Tabs value={tab} onValueChange={setTab}>
+        {/* ───────────────────────── Profile ───────────────────────── */}
+        <TabsContent value="profile" className="pt-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            {/* Left column — Academic information */}
+            <SectionCard title="Academic Information">
+              <Field label="Registration no." value={student.partner?.code ?? '—'} />
+              <Field label="Admission no." value={student.admissionNo} />
+              <Field label="Class" value={student.currentClass?.name ?? '—'} />
+              <Field label="Section" value={student.currentSectionId ? student.currentSectionId.slice(0, 6) : '—'} />
+              <Field label="House" value={cf.house ?? '—'} />
+              <Field label="Residential status" value={student.residenceType ?? '—'} />
+              <Field label="Entry status" value={student.status} />
+              <Field label="Admission date" value={fmtDate(student.enrollmentDate)} />
+              <Field label="School payment code" value={student.partner?.code ?? '—'} />
+            </SectionCard>
+
+            {/* Right column — Bio data + guardians */}
+            <div className="space-y-4">
+              <SectionCard
+                title="Student Bio Data"
+                actions={
+                  <>
+                    <Button size="sm" variant="ghost" className="text-emerald-600" onClick={openBio}><Pencil className="mr-1 h-4 w-4" />Edit</Button>
+                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={archive} disabled={archiving}><Archive className="mr-1 h-4 w-4" />Archive</Button>
+                  </>
+                }
+              >
+                <Field label="Full name" value={student.partner?.name} />
+                <Field label="Date of birth" value={cf.dateOfBirth ?? student.dateOfBirth ?? '—'} />
+                <Field label="Gender" value={student.gender ?? '—'} />
+                <Field label="Religion" value={(student as any).religion ?? '—'} />
+                <Field label="Nationality" value={(student as any).nationality ?? '—'} />
+                <Field label="Email" value={student.partner?.email ?? '—'} />
+                <Field label="Phone" value={student.partner?.phone ?? '—'} />
+              </SectionCard>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ───────────────────────── Guardians ───────────────────────── */}
+        <TabsContent value="guardians" className="pt-4">
+          <SectionCard title="Guardian Details">
+            <GuardianManager studentProfileId={student.id} />
+            {cf.emergencyContact && <p className="mt-2 text-xs text-muted-foreground">Emergency contact: {cf.emergencyContact}</p>}
+            {cf.siblings && <p className="mt-1 text-xs text-muted-foreground">Siblings on roll: {cf.siblings}</p>}
+          </SectionCard>
+        </TabsContent>
+
+        {/* ───────────────────────── Academic ───────────────────────── */}
+        <TabsContent value="academic" className="space-y-4 pt-4">
+          <AcademicsTab portal={portal} />
+          <AssessmentsTab portal={portal} />
+          <LibraryTab rows={library} />
+        </TabsContent>
+
+        {/* ───────────────────────── Attendance ───────────────────────── */}
+        <TabsContent value="attendance" className="space-y-4 pt-4">
+          <AttendanceTab summary={attendance} />
+        </TabsContent>
+
+        {/* ───────────────────────── Financial ───────────────────────── */}
+        <TabsContent value="financial" className="space-y-4 pt-4">
+          <FinancialTab statement={statement} />
+        </TabsContent>
+
+        {/* ───────────────────────── Wellbeing ───────────────────────── */}
+        <TabsContent value="wellbeing" className="space-y-4 pt-4">
+          <HealthTab medical={medical} studentProfileId={id} />
+          <TransportTab rows={transport} />
+          <MealsTab wallet={meals} />
+        </TabsContent>
+
+        {/* ───────────────────────── Engagement ───────────────────────── */}
+        <TabsContent value="engagement" className="space-y-4 pt-4">
+          <BehaviorTab activities={activities} />
+          <CommunicationTab activities={activities} />
+          <ActivitiesTab activities={activities} />
+          <DocumentsTab docs={documents} />
+        </TabsContent>
       </Tabs>
+
+      {/* Change Photo dialog */}
+      <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Change profile photo</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="flex justify-center">
+              <div className="h-24 w-24 overflow-hidden rounded-full bg-primary/10 text-primary flex items-center justify-center text-xl font-semibold">
+                {photoPreview ? <img src={photoPreview} alt="" className="h-full w-full object-cover" /> : (photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials(student.partner?.name))}
+              </div>
+            </div>
+            <Input type="file" accept="image/*" onChange={onPhotoFile} />
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+            <Button onClick={savePhoto} disabled={photoBusy || !photoPreview}>{photoBusy ? 'Saving…' : 'Save photo'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Bio Data dialog */}
+      <Dialog open={bioOpen} onOpenChange={setBioOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit student bio data</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Full name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Date of birth</Label><Input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} /></div>
+              <div><Label>Gender</Label>
+                <Select value={gender} onValueChange={setGender}>
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="male">Male</SelectItem>
+                    <SelectItem value="female">Female</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Nationality</Label><Input value={nationality} onChange={(e) => setNationality(e.target.value)} /></div>
+              <div><Label>Religion</Label><Input value={religion} onChange={(e) => setReligion(e.target.value)} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>House</Label><Input value={house} onChange={(e) => setHouse(e.target.value)} /></div>
+              <div><Label>Residence</Label>
+                <Select value={residenceType} onValueChange={setResidenceType}>
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="day">Day</SelectItem>
+                    <SelectItem value="boarder">Boarder</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+              <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+            <Button onClick={saveBio} disabled={bioBusy || !name.trim()}>{bioBusy ? 'Saving…' : 'Save changes'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-const TABS = ['profile', 'guardians', 'academics', 'attendance', 'assessments', 'behavior', 'fees', 'payments', 'transport', 'meals', 'library', 'communication', 'documents', 'health', 'activities'] as const;
+/* ───────────────────────── Shared blocks ───────────────────────── */
 
-function ProfileTab({ student, cf }: { student: Student; cf: any }) {
-  const rows: [string, string][] = [
-    ['Admission no.', student.admissionNo],
-    ['Student ID', student.id],
-    ['Date of birth', cf.dateOfBirth ?? student.dateOfBirth ?? '—'],
-    ['Gender', student.gender ?? '—'],
-    ['Nationality', (student as any).nationality ?? '—'],
-    ['Religion', (student as any).religion ?? '—'],
-    ['House', cf.house ?? '—'],
-    ['Residence', student.residenceType],
-    ['Status', student.status],
-    ['Enrolled', student.enrollmentDate ? new Date(student.enrollmentDate).toLocaleDateString() : '—'],
-    ['Email', student.partner?.email ?? '—'],
-    ['Phone', student.partner?.phone ?? '—'],
-  ];
+function SectionCard({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Demographics</CardTitle></CardHeader>
-        <CardContent><dl className="grid grid-cols-2 gap-2 text-sm">
-          {rows.map(([k, v]) => (<div key={k}><dt className="text-xs text-muted-foreground">{k}</dt><dd className="capitalize">{String(v)}</dd></div>))}
-        </dl></CardContent>
-      </Card>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="text-base text-primary">{title}</CardTitle>
+        {actions && <div className="flex gap-1">{actions}</div>}
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function Field({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-1.5 text-sm last:border-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right font-medium capitalize">{value ?? '—'}</span>
     </div>
   );
 }
 
-function GuardiansTab({ studentProfileId, cf }: { studentProfileId: string; cf: any }) {
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Parents / guardians</CardTitle></CardHeader>
-        <CardContent>
-          <GuardianManager studentProfileId={studentProfileId} />
-          {cf.emergencyContact && <p className="mt-3 text-xs text-muted-foreground">Emergency contact: {cf.emergencyContact}</p>}
-          {cf.siblings && <p className="mt-1 text-xs text-muted-foreground">Siblings on roll: {cf.siblings}</p>}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+/* ───────────────────────── Guardians ───────────────────────── */
 
 const RELATIONSHIPS = ['father', 'mother', 'uncle', 'aunt', 'sibling', 'grandparent', 'guardian', 'other'] as const;
 
@@ -270,8 +519,10 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
   );
 }
 
+/* ───────────────────────── Academic / Attendance / etc ───────────────────────── */
+
 function AcademicsTab({ portal }: { portal?: any }) {
-  if (!portal?.publishedResults) return <Empty label="No published results yet — compute & publish a result set first." />;
+  if (!portal?.publishedResults) return <Card><CardContent className="p-6"><Empty label="No published results yet — compute & publish a result set first." /></CardContent></Card>;
   const r = portal.publishedResults;
   return (
     <Card>
@@ -301,8 +552,7 @@ function AssessmentsTab({ portal }: { portal?: any }) {
 }
 
 function AttendanceTab({ summary }: { summary?: any }) {
-  if (!summary) return <Empty label="No attendance records in range." />;
-  // API returns an aggregate: { total, present, late, absent, attendanceRate }
+  if (!summary) return <Card><CardContent className="p-6"><Empty label="No attendance records in range." /></CardContent></Card>;
   const total = summary.total ?? 0;
   const present = summary.present ?? 0;
   const late = summary.late ?? 0;
@@ -322,17 +572,64 @@ function AttendanceTab({ summary }: { summary?: any }) {
   );
 }
 
-function FeesTab({ statement, payments }: { statement?: FeeStatement; payments?: boolean }) {
-  if (!statement) return <Empty label="No fee statement." />;
+function FinancialTab({ statement }: { statement?: FeeStatement }) {
+  if (!statement) return <Card><CardContent className="p-6"><Empty label="No fee statement." /></CardContent></Card>;
   return (
-    <Card>
-      <CardHeader><CardTitle className="text-base">{payments ? 'Payments' : 'Fees'}</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-3 gap-3 text-center">
-        <Stat label="Billed" value={money(statement.totalBilled)} />
-        <Stat label="Paid" value={money(statement.totalPaid)} />
-        <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Fees summary</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-3 gap-3 text-center">
+          <Stat label="Billed" value={money(statement.totalBilled)} />
+          <Stat label="Paid" value={money(statement.totalPaid)} />
+          <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Invoices</CardTitle></CardHeader>
+        <CardContent>
+          {statement.invoices.length === 0 && <Empty label="No invoices issued." />}
+          <div className="max-h-80 overflow-y-auto scroll-thin">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Document</th><th className="px-2 py-1">Issue date</th><th className="px-2 py-1">Amount</th><th className="px-2 py-1">Balance</th><th className="px-2 py-1">Status</th></tr></thead>
+              <tbody>
+                {statement.invoices.map((inv: any) => (
+                  <tr key={inv.id} className="border-b last:border-0">
+                    <td className="px-2 py-1">{inv.documentNumber}</td>
+                    <td className="px-2 py-1">{fmtDate(inv.issueDate)}</td>
+                    <td className="px-2 py-1">{money(inv.totalAmount)}</td>
+                    <td className="px-2 py-1">{money(inv.amountResidual)}</td>
+                    <td className="px-2 py-1 capitalize">{inv.paymentStatus}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Payments</CardTitle></CardHeader>
+        <CardContent>
+          {statement.payments.length === 0 && <Empty label="No payments recorded." />}
+          <div className="max-h-80 overflow-y-auto scroll-thin">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Payment</th><th className="px-2 py-1">Date</th><th className="px-2 py-1">Method</th><th className="px-2 py-1">Amount</th></tr></thead>
+              <tbody>
+                {statement.payments.map((p: any) => (
+                  <tr key={p.id} className="border-b last:border-0">
+                    <td className="px-2 py-1">{p.paymentNumber}</td>
+                    <td className="px-2 py-1">{fmtDate(p.paymentDate)}</td>
+                    <td className="px-2 py-1 capitalize">{p.paymentMethod}</td>
+                    <td className="px-2 py-1">{money(p.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -358,7 +655,7 @@ function HealthTab({ medical, studentProfileId }: { medical?: any; studentProfil
   useEffect(() => {
     if (medical) { setAllergies((medical.allergies ?? []).join(', ')); setDietary((medical.dietaryRequirements ?? []).join(', ')); }
   }, [medical]);
-  if (!medical) return <Empty label="No medical record." />;
+  if (!medical) return <Card><CardContent className="p-6"><Empty label="No medical record." /></CardContent></Card>;
   const save = async () => {
     try {
       await upsert.mutateAsync({
@@ -379,7 +676,7 @@ function HealthTab({ medical, studentProfileId }: { medical?: any; studentProfil
         <Button size="sm" variant="ghost" onClick={() => setEditing((e) => !e)}>{editing ? 'Cancel' : 'Edit'}</Button>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <Info k="Blood group" v={medical.bloodGroup ?? '—'} />
+        <Field label="Blood group" value={medical.bloodGroup ?? '—'} />
         {editing ? (
           <>
             <div className="space-y-1"><Label className="text-xs">Allergies (comma-separated)</Label><Input value={allergies} onChange={(e) => setAllergies(e.target.value)} /></div>
@@ -388,12 +685,12 @@ function HealthTab({ medical, studentProfileId }: { medical?: any; studentProfil
           </>
         ) : (
           <>
-            <Info k="Allergies" v={(medical.allergies ?? []).join(', ') || '—'} />
-            <Info k="Dietary requirements" v={(medical.dietaryRequirements ?? []).join(', ') || '—'} />
+            <Field label="Allergies" value={(medical.allergies ?? []).join(', ') || '—'} />
+            <Field label="Dietary requirements" value={(medical.dietaryRequirements ?? []).join(', ') || '—'} />
           </>
         )}
-        <Info k="Conditions" v={(medical.conditions ?? []).join(', ') || '—'} />
-        <Info k="Notes" v={medical.notes ?? '—'} />
+        <Field label="Conditions" value={(medical.conditions ?? []).join(', ') || '—'} />
+        <Field label="Notes" value={medical.notes ?? '—'} />
       </CardContent>
     </Card>
   );
@@ -479,7 +776,7 @@ function TransportTab({ rows }: { rows?: any[] }) {
               <span>Stop: {t.stop?.name ?? '—'}</span>
               <span>Pickup: {t.stop?.pickupTime ?? '—'}</span>
               <span>Monthly fee: {money(t.monthlyFee)}</span>
-              <span>From: {new Date(t.startDate).toLocaleDateString()}</span>
+              <span>From: {fmtDate(t.startDate)}</span>
             </div>
             <div className="mt-2"><Badge variant={t.isActive ? 'default' : 'secondary'}>{t.isActive ? 'active' : 'ended'}</Badge></div>
           </div>
@@ -497,13 +794,13 @@ function MealsTab({ wallet }: { wallet?: any }) {
       <CardHeader><CardTitle className="text-base">Meals — {wallet.mealPlan?.name ?? 'Wallet'}</CardTitle></CardHeader>
       <CardContent>
         <div className="mb-3"><Stat label="Wallet balance" value={money(wallet.balance)} /></div>
-        <div className="max-h-80 overflow-y-auto">
+        <div className="max-h-80 overflow-y-auto scroll-thin">
           <table className="w-full text-sm">
             <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Date</th><th className="px-2 py-1">Type</th><th className="px-2 py-1">Amount</th><th className="px-2 py-1">Balance</th></tr></thead>
             <tbody>
               {txns.map((t: any) => (
                 <tr key={t.id} className="border-b last:border-0">
-                  <td className="px-2 py-1">{new Date(t.createdAt).toLocaleDateString()}</td>
+                  <td className="px-2 py-1">{fmtDate(t.createdAt)}</td>
                   <td className="px-2 py-1 capitalize">{t.type}</td>
                   <td className="px-2 py-1">{money(t.amount)}</td>
                   <td className="px-2 py-1">{money(t.balanceAfter)}</td>
@@ -527,9 +824,9 @@ function LibraryTab({ rows }: { rows?: any[] }) {
           <div key={b.id} className="rounded-md border p-3">
             <div className="font-medium">{b.bookMetadata?.title ?? 'Book'}</div>
             <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-              <span>Borrowed: {new Date(b.borrowedAt).toLocaleDateString()}</span>
-              <span>Due: {new Date(b.dueAt).toLocaleDateString()}</span>
-              {b.returnedAt && <span>Returned: {new Date(b.returnedAt).toLocaleDateString()}</span>}
+              <span>Borrowed: {fmtDate(b.borrowedAt)}</span>
+              <span>Due: {fmtDate(b.dueAt)}</span>
+              {b.returnedAt && <span>Returned: {fmtDate(b.returnedAt)}</span>}
               {Number(b.fineAmount) > 0 && <span className="text-rose-600">Fine: {money(b.fineAmount)}</span>}
             </div>
             <div className="mt-2"><Badge variant={b.status === 'returned' ? 'secondary' : b.status === 'overdue' ? 'destructive' : 'default'} className="capitalize">{b.status}</Badge></div>
@@ -542,9 +839,6 @@ function LibraryTab({ rows }: { rows?: any[] }) {
 
 function Empty({ label }: { label: string }) {
   return <p className="text-sm text-muted-foreground">{label}</p>;
-}
-function Info({ k, v }: { k: string; v: string }) {
-  return <div><dt className="text-xs text-muted-foreground">{k}</dt><dd className="capitalize">{v}</dd></div>;
 }
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) {
   return <div className="rounded-md border p-2"><div className="text-xs text-muted-foreground">{label}</div><div className={`font-semibold ${tone === 'rose' ? 'text-rose-600' : tone === 'emerald' ? 'text-emerald-600' : ''}`}>{value}</div></div>;

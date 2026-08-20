@@ -194,3 +194,26 @@ export class RecordWasteDto {
 export class SetProductionStatusDto {
   @IsIn([...PRODUCTION_STATUS]) status!: (typeof PRODUCTION_STATUS)[number];
 }
+
+/* ── Plan → menus link + per-student consumption ── */
+/// Records consumption for one student being served a plan's menu on a session.
+/// Decrements each menu dish's recipe products (once per student) and writes a
+/// per-student MealConsumption row — only when the plan has trackInventory=true.
+export class RecordMealConsumptionDto {
+  @IsString() @IsNotEmpty() mealSessionId!: string;
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  /// The menu actually served (defaults to the plan's first menu for the session's meal type).
+  @IsOptional() @IsString() mealMenuId?: string;
+  /// Optional stock location to issue from; falls back to the org default location.
+  @IsOptional() @IsString() stockLocationId?: string;
+}
+
+/// Query params for listing per-student consumption (audit / per-lunch view).
+export class MealConsumptionQueryDto {
+  @IsOptional() @IsString() mealSessionId?: string;
+  @IsOptional() @IsString() studentProfileId?: string;
+  @IsOptional() @IsString() mealMenuId?: string;
+  @IsOptional() @IsString() mealPlanId?: string;
+  @IsOptional() @IsString() from?: string;
+  @IsOptional() @IsString() to?: string;
+}

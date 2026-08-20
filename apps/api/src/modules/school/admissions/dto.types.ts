@@ -63,12 +63,22 @@ export class EnrollStudentInput {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsString() house?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => GuardianDto) guardians?: GuardianDto[];
+}
+
+export class GuardianDto {
+  @IsString() @IsNotEmpty() guardianContactId!: string;
+  @IsString() @IsNotEmpty() relationship!: string;
+  @IsOptional() @IsBoolean() isPrimary?: boolean;
+  @IsOptional() @IsBoolean() canPickup?: boolean;
+  @IsOptional() @IsBoolean() receivesStatements?: boolean;
 }
 
 export class EnrollApplicationDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
@@ -106,6 +116,7 @@ export class BulkEnrollItemDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
@@ -132,6 +143,7 @@ export class TransferInDto {
   @IsOptional() @IsString() transferredFrom?: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
   @IsOptional() @IsString() admissionNo?: string;

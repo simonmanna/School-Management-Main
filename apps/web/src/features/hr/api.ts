@@ -1219,3 +1219,205 @@ export function useDeleteHrReview() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'reviews'] }),
   });
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 1+ extensions: salary structures, lifecycle, recruitment, training, statutory, ESS
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Job grades & salary structures ───────────────────────────────────────────────
+
+export interface HrJobGrade { id: string; code: string; name: string; description?: string | null; minSalary?: number | null; maxSalary?: number | null; isActive?: boolean; _count?: { employees: number; structures: number } }
+export interface HrSalaryStructure { id: string; gradeId: string; componentId: string; amount?: number | null; rate?: number | null; isActive?: boolean; grade?: HrJobGrade; component?: any }
+
+export function useHrJobGrades(params: Record<string, any> = {}) {
+  return useQuery({
+    queryKey: ['hr', 'job-grades', params],
+    queryFn: async () => (await api.get('/hr/job-grades', { params })).data,
+  });
+}
+export function useHrSalaryStructures(params: Record<string, any> = {}) {
+  return useQuery({
+    queryKey: ['hr', 'salary-structures', params],
+    queryFn: async () => (await api.get('/hr/salary-structures', { params })).data,
+  });
+}
+export function useCreateHrJobGrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post('/hr/job-grades', dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'job-grades'] }),
+  });
+}
+export function useCreateHrSalaryStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post('/hr/salary-structures', dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'salary-structures'] }),
+  });
+}
+export function useDeleteHrJobGrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/hr/job-grades/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'job-grades'] }),
+  });
+}
+export function useDeleteHrSalaryStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/hr/salary-structures/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'salary-structures'] }),
+  });
+}
+
+// ── Contracts / onboarding / offboarding / settlement ────────────────────────────
+
+export interface HrContract { id: string; contractNumber?: string | null; employeeId: string; positionId?: string | null; contractType: string; startDate: string; endDate?: string | null; salary?: number | null; status?: string; documentUrl?: string | null; employee?: any }
+export function useHrContracts(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'contracts', params], queryFn: async () => (await api.get('/hr/contracts', { params })).data });
+}
+export function useCreateHrContract() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/contracts', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'contracts'] }) });
+}
+export function useHrExpiringContracts(days = 60) {
+  return useQuery({ queryKey: ['hr', 'contracts', 'expiring', days], queryFn: async () => (await api.get('/hr/contracts/expiring', { params: { days } })).data });
+}
+export function useHrSalaryHistory(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'salary-history', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/salary-history`)).data });
+}
+export function useHrEmployeeActions(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'actions', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/actions`)).data });
+}
+export function useHrAuditTrail(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'audit-trail', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/audit-trail`)).data });
+}
+export function useHrOnboarding(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'onboarding', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/onboarding`)).data });
+}
+export function useAddHrOnboardingTask() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/onboarding-tasks', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'onboarding'] }) });
+}
+export function useCompleteHrOnboardingTask() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.post(`/hr/onboarding-tasks/${id}/complete`, {})).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'onboarding'] }) });
+}
+export function useDeleteHrOnboardingTask() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/onboarding-tasks/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'onboarding'] }) });
+}
+export function useHrOffboarding(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'offboarding', params], queryFn: async () => (await api.get('/hr/offboarding', { params })).data });
+}
+export function useHrSettlementPreview() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { employeeId: string; lastDay: string }) => (await api.post('/hr/offboarding/settle', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'offboarding'] }) });
+}
+
+// ── Recruitment / ATS ────────────────────────────────────────────────────────────
+
+export interface HrVacancy { id: string; title: string; departmentId?: string | null; positionId?: string | null; openings?: number; status?: string; salaryMin?: number | null; salaryMax?: number | null; hiringManagerId?: string | null; _count?: { applicants: number } }
+export interface HrApplicant { id: string; firstName: string; lastName?: string | null; email?: string | null; phone?: string | null; vacancyId: string; status?: string; experienceYears?: number | null; expectedSalary?: number | null; rating?: number | null; vacancy?: HrVacancy }
+export function useHrVacancies(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'vacancies', params], queryFn: async () => (await api.get('/hr/vacancies', { params })).data });
+}
+export function useCreateHrVacancy() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/vacancies', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'vacancies'] }) });
+}
+export function useDeleteHrVacancy() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/vacancies/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'vacancies'] }) });
+}
+export function useHrApplicants(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'applicants', params], queryFn: async () => (await api.get('/hr/applicants', { params })).data });
+}
+export function useCreateHrApplicant() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/applicants', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'applicants'] }) });
+}
+export function useSetHrApplicantStatus() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, status, notes }: { id: string; status: string; notes?: string }) => (await api.post(`/hr/applicants/${id}/status`, { status, notes })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'applicants'] }) });
+}
+export function useHireHrApplicant() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.post(`/hr/applicants/${id}/hire`, dto)).data, onSuccess: () => { qc.invalidateQueries({ queryKey: ['hr', 'applicants'] }); qc.invalidateQueries({ queryKey: ['hr', 'employees'] }); } });
+}
+
+// ── Qualifications / certifications / training ─────────────────────────────────────
+
+export function useHrQualifications(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'qualifications', params], queryFn: async () => (await api.get('/hr/qualifications', { params })).data });
+}
+export function useCreateHrQualification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/qualifications', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'qualifications'] }) });
+}
+export function useDeleteHrQualification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/qualifications/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'qualifications'] }) });
+}
+export function useHrCertifications(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'certifications', params], queryFn: async () => (await api.get('/hr/certifications', { params })).data });
+}
+export function useHrExpiringCertifications(days = 30) {
+  return useQuery({ queryKey: ['hr', 'certifications', 'expiring', days], queryFn: async () => (await api.get('/hr/certifications/expiring', { params: { days } })).data });
+}
+export function useCreateHrCertification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/certifications', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'certifications'] }) });
+}
+export function useDeleteHrCertification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/certifications/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'certifications'] }) });
+}
+export function useHrTrainings(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'trainings', params], queryFn: async () => (await api.get('/hr/trainings', { params })).data });
+}
+export function useCreateHrTraining() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/trainings', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'trainings'] }) });
+}
+export function useDeleteHrTraining() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/trainings/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'trainings'] }) });
+}
+export function useHrEnrollTraining() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/training-enrollments', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'trainings'] }) });
+}
+export function useHrEnrollmentStatus() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, status, certificateUrl }: { id: string; status: string; certificateUrl?: string }) => (await api.post(`/hr/training-enrollments/${id}/status`, { status, certificateUrl })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'trainings'] }) });
+}
+export function useHrCpdReport() {
+  return useQuery({ queryKey: ['hr', 'cpd-report'], queryFn: async () => (await api.get('/hr/training/cpd-report')).data });
+}
+
+// ── Payroll hardening: statutory + preview ──────────────────────────────────────────
+
+export function useHrStatutory(params: Record<string, any> = {}) {
+  return useQuery({ queryKey: ['hr', 'statutory', params], queryFn: async () => (await api.get('/hr/payroll/statutory', { params })).data });
+}
+export function useCreateHrStatutory() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/payroll/statutory', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'statutory'] }) });
+}
+export function useHrRunPreview(runId?: string) {
+  return useQuery({ enabled: !!runId, queryKey: ['hr', 'run-preview', runId], queryFn: async () => (await api.get(`/hr/payroll/runs/${runId}/preview`)).data });
+}
+export function useRunHrAlerts() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (organizationId?: string) => (await api.post('/hr/alerts/run', { organizationId })).data, onSuccess: () => qc.invalidateQueries() });
+}
+
+// ── Employee & Manager self-service ───────────────────────────────────────────────
+
+export function useHrSelfProfile() {
+  return useQuery({ queryKey: ['hr', 'self'], queryFn: async () => (await api.get('/hr/self/profile')).data });
+}
+export function useHrTeam() {
+  return useQuery({ queryKey: ['hr', 'team'], queryFn: async () => (await api.get('/hr/team')).data });
+}

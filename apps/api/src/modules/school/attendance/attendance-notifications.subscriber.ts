@@ -20,7 +20,15 @@ import { EVENTS } from '@erp/shared';
  * logged but not sent. Each notification carries a dedupeKey so at-least-once
  * delivery does not create duplicates within a short window.
  */
-type MarkedEntry = { studentProfileId: string; status: string; minutesLate: number; earlyDepartureMinutes?: number | null };
+type MarkedEntry = {
+  studentProfileId: string;
+  status: string;
+  isPresent?: boolean;
+  isLate?: boolean;
+  isAbsent?: boolean;
+  minutesLate?: number;
+  earlyDepartureMinutes?: number | null;
+};
 type MarkedPayload = {
   organizationId: string;
   date: string;
@@ -52,15 +60,17 @@ export class AttendanceNotificationsSubscriber implements OnModuleInit {
 
       for (const e of p.entries ?? []) {
         let channel = '';
-        if ((e.status === 'absent' || e.status === 'unexcused') && threshold.notifyAbsent) channel = 'absence';
-        else if (e.status === 'late' && threshold.notifyLate) channel = 'late';
-        else if (e.status === 'early_departure' && threshold.notifyEarly) channel = 'early';
+        // P-att-status: channel is driven by the config flags carried on the
+        // entry (isAbsent / isLate), not a hardcoded status literal.
+        if (e.isAbsent && threshold.notifyAbsent) channel = 'absence';
+        else if (e.isLate && threshold.notifyLate) channel = 'late';
+        else if (e.isAbsent && threshold.notifyEarly) channel = 'early';
         if (!channel) continue;
 
-        await this.notifyGuardians(p.organizationId, e.studentProfileId, channel, {
+        await this.notifyGuardians(p.organizationId, e.studentProfileId, channel as any, {
           date: p.date,
           status: e.status,
-          minutesLate: e.minutesLate,
+          minutesLate: e.minutesLate ?? 0,
           earlyDepartureMinutes: e.earlyDepartureMinutes ?? null,
         });
       }
@@ -88,11 +98,14 @@ export class AttendanceNotificationsSubscriber implements OnModuleInit {
     const where: any = { organizationId: orgId, date: { gte: start } };
     if (classId) where.classId = classId;
     const rows = await this.prisma.client.studentAttendance.findMany({ where });
+    // P-att-status: resolve present/late via the live config flags, not literals.
+    const cfgByCode = await this.catalogByCode(orgId);
     const agg: Record<string, { total: number; good: number }> = {};
     for (const r of rows) {
       agg[r.studentProfileId] ??= { total: 0, good: 0 };
       agg[r.studentProfileId].total++;
-      if (r.status === 'present' || r.status === 'late') agg[r.studentProfileId].good++;
+      const cfg = cfgByCode[r.status];
+      if (cfg?.isPresent || cfg?.isLate) agg[r.studentProfileId].good++;
     }
     const flagged: Array<{ studentProfileId: string; pct: number }> = [];
     for (const [sid, v] of Object.entries(agg)) {
@@ -110,6 +123,11 @@ export class AttendanceNotificationsSubscriber implements OnModuleInit {
     return this.prisma.client.attendanceThreshold.findFirst({ where: { organizationId: orgId, classId: null } });
   }
 
+  private async catalogByCode(orgId: string): Promise<Record<string, any>> {
+    const rows = await this.prisma.client.attendanceStatusConfig.findMany({ where: { organizationId: orgId } });
+    return Object.fromEntries(rows.map((r) => [r.code, r]));
+  }
+
   private async notifyGuardians(
     orgId: string,
     studentProfileId: string,
@@ -124,7 +142,7 @@ export class AttendanceNotificationsSubscriber implements OnModuleInit {
       where: { id: studentProfileId },
       include: { partner: true },
     });
-    const name = student?.partner ? `${student.partner.firstName ?? ''} ${student.partner.lastName ?? ''}`.trim() : studentProfileId.slice(0, 8);
+    const name = student?.partner ? `${student.partner.name ?? ''}`.trim() : studentProfileId.slice(0, 8);
     const date = typeof detail.date === 'string' ? detail.date.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
     let title = '';

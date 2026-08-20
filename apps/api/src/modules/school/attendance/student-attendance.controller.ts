@@ -1,12 +1,52 @@
-import { Body, Controller, Get, Param, Post, Put, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Patch, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentAttendanceService } from './student-attendance.service';
-import { BulkMarkAttendanceDto, CorrectAttendanceDto, UpsertAttendanceThresholdDto } from './dto.types';
+import {
+  BulkMarkAttendanceDto,
+  CorrectAttendanceDto,
+  UpsertAttendanceThresholdDto,
+} from './dto.types';
+import {
+  CreateAttendanceStatusConfigDto,
+  UpdateAttendanceStatusConfigDto,
+} from './dto.status-config';
+import { AttendanceStatusConfigService } from './attendance-status-config.service';
 
 @Controller('school/attendance')
 export class StudentAttendanceController {
-  constructor(private readonly attendance: StudentAttendanceService) {}
+  constructor(
+    private readonly attendance: StudentAttendanceService,
+    private readonly statusConfig: AttendanceStatusConfigService,
+  ) {}
+
+  /* ── P-att-status: configurable status catalog (CRUD) ── */
+
+  @Get('statuses')
+  @RequirePermissions(PERMISSIONS.school.read)
+  listStatuses() {
+    return this.statusConfig.list();
+  }
+
+  @Post('statuses')
+  @RequirePermissions(PERMISSIONS.school.manageAttendanceStatuses)
+  createStatus(@Body() dto: CreateAttendanceStatusConfigDto) {
+    return this.statusConfig.create(dto);
+  }
+
+  @Put('statuses/:id')
+  @RequirePermissions(PERMISSIONS.school.manageAttendanceStatuses)
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateAttendanceStatusConfigDto) {
+    return this.statusConfig.update(id, dto);
+  }
+
+  @Delete('statuses/:id')
+  @RequirePermissions(PERMISSIONS.school.manageAttendanceStatuses)
+  deleteStatus(@Param('id') id: string) {
+    return this.statusConfig.remove(id);
+  }
+
+  /* ── Attendance recording / read ── */
 
   @Post('mark')
   @RequirePermissions(PERMISSIONS.school.takeAttendance)
@@ -36,7 +76,19 @@ export class StudentAttendanceController {
     return this.attendance.byStudent(id, from, to);
   }
 
-  /** P0d: correct a single attendance record (audit-logged). */
+  /** P-att-status: org attendance summary across a date range — powers the
+   *  Attendance Report page (cards + per-day status breakdown). */
+  @Get('report')
+  @RequirePermissions(PERMISSIONS.school.read)
+  report(
+    @Query('classId') classId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return this.attendance.report(classId, startDate, endDate);
+  }
+
+  /** Pattendance correction (audit-logged). */
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.school.takeAttendance)
   correct(@Param('id') id: string, @Body() dto: CorrectAttendanceDto) {

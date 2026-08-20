@@ -72,6 +72,50 @@ export function useSchoolOverview() {
   });
 }
 
+export interface SchoolAdminDashboard {
+  students: number;
+  staff: number;
+  campuses: number;
+  classes: number;
+  sections: number;
+  outstandingFees: number;
+}
+
+export function useSchoolAdminDashboard() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'admin'],
+    queryFn: async () => (await api.get<SchoolAdminDashboard>(`${S}/reports/admin`)).data,
+  });
+}
+
+export interface SchoolFinanceDashboard {
+  collectionsThisMonth: number;
+  outstanding: number;
+}
+
+export function useSchoolFinanceDashboard() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'finance'],
+    queryFn: async () => (await api.get<SchoolFinanceDashboard>(`${S}/reports/finance`)).data,
+  });
+}
+
+export interface OutstandingByClass { classId: string; className: string; outstanding: number; studentCount: number }
+export function useSchoolOutstandingByClass() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'outstanding-by-class'],
+    queryFn: async () => (await api.get<OutstandingByClass[]>(`${S}/reports/outstanding-by-class`)).data,
+  });
+}
+
+export interface DailyCollection { date: string; total: number }
+export function useSchoolDailyCollections(days = 30) {
+  return useQuery({
+    queryKey: ['school', 'reports', 'daily-collections', days],
+    queryFn: async () => (await api.get<DailyCollection[]>(`${S}/reports/daily-collections`, { params: { days } })).data,
+  });
+}
+
 /* ───────────────────────── Foundation dropdowns ───────────────────────── */
 
 export function useAcademicYears() {
@@ -92,6 +136,32 @@ export function useClasses() {
   return useQuery({
     queryKey: ['school', 'classes'],
     queryFn: async () => (await api.get<Paginated<SchoolClass>>(`${S}/classes`, { params: { pageSize: 200 } })).data,
+  });
+}
+
+export interface EnrollmentSummaryRow {
+  classId: string;
+  className: string;
+  gradeLevel: string;
+  male: number;
+  female: number;
+  maleBoarding: number;
+  femaleBoarding: number;
+  maleDay: number;
+  femaleDay: number;
+  total: number;
+}
+export interface EnrollmentSummary {
+  rows: EnrollmentSummaryRow[];
+  totals: Omit<EnrollmentSummaryRow, 'classId' | 'className' | 'gradeLevel'>;
+  termId: string | null;
+  generatedAt: string;
+}
+export function useEnrollmentSummary(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'enrollment-summary', termId ?? 'current'],
+    queryFn: async () =>
+      (await api.get<EnrollmentSummary>(`${S}/admissions/reports/enrollment-summary`, { params: termId ? { termId } : {} })).data,
   });
 }
 
@@ -119,9 +189,11 @@ export interface AdmissionApplication {
   applicantFirstName: string;
   applicantLastName: string;
   applicantGender?: string | null;
+  applicantDob?: string | null;
   applyingForClassId?: string | null;
   academicYearId: string;
   status: AdmissionStatus;
+  customFields?: Record<string, unknown>;
   createdAt: string;
   academicYear?: { id: string; name: string } | null;
 }
@@ -134,6 +206,17 @@ export interface CreateAdmissionInput {
   applicantGender?: 'male' | 'female' | 'other';
   applyingForClassId?: string;
   parentContactId?: string;
+  customFields?: Record<string, unknown>;
+}
+
+export interface UpdateAdmissionInput {
+  applicantFirstName?: string;
+  applicantLastName?: string;
+  applicantDob?: string;
+  applicantGender?: 'male' | 'female' | 'other';
+  applyingForClassId?: string;
+  parentContactId?: string;
+  customFields?: Record<string, unknown>;
 }
 
 export function useAdmissions(params: { page?: number; pageSize?: number } = {}) {
@@ -143,10 +226,27 @@ export function useAdmissions(params: { page?: number; pageSize?: number } = {})
   });
 }
 
+export function useAdmission(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'one', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionApplication>(`${S}/admissions/${id}`)).data,
+  });
+}
+
 export function useCreateAdmission() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (dto: CreateAdmissionInput) => (await api.post<AdmissionApplication>(`${S}/admissions`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+export function useUpdateAdmission() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: UpdateAdmissionInput }) =>
+      (await api.patch<AdmissionApplication>(`${S}/admissions/${id}`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
   });
 }
@@ -463,11 +563,97 @@ export interface TransportRow {
   isActive?: boolean;
   monthlyFee?: number | string;
 }
+
+export function useReportCards(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'report-cards', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<ReportCard[]>(`${S}/report-cards/by-student/${studentProfileId}`)).data,
+  });
+}
+
 export function useStudentTransport(studentProfileId: string | undefined) {
   return useQuery({
     queryKey: ['school', 'transport', 'by-student', studentProfileId],
     enabled: !!studentProfileId,
     queryFn: async () => (await api.get<TransportRow[]>(`${S}/transport/assignments/by-student/${studentProfileId}`)).data,
+  });
+}
+
+/* ───────────────────────── Transport Management ─────────────────────────
+ * Hooks target the real, registered STMS (TransportModule → /school/transport/*).
+ * All list endpoints return plain arrays (not paginated).
+ */
+export interface Vehicle {
+  id: string;
+  code: string;
+  plateNumber: string;
+  type?: string | null;
+  seatedCapacity?: number | null;
+  status?: string | null;
+}
+export interface Route {
+  id: string;
+  name: string;
+  code?: string | null;
+  direction?: string | null;
+  monthlyFee?: number | null;
+  status?: string | null;
+}
+export interface Stop {
+  id: string;
+  routeId?: string | null;
+  name: string;
+  code?: string | null;
+  order?: number | null;
+  pickupTime?: string | null;
+  dropoffTime?: string | null;
+}
+export interface StudentTransportAssignment {
+  id: string;
+  studentProfileId: string;
+  routeId: string;
+  stopId: string;
+  termId?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  status?: string;
+  monthlyFee?: number | null;
+  student?: { id: string; partner?: { name: string } | null; admissionNo?: string } | null;
+  route?: { id: string; name?: string } | null;
+  stop?: { id: string; name?: string } | null;
+}
+
+export function useVehicles() {
+  return useQuery({ queryKey: ['school', 'transport', 'vehicles'], queryFn: async () => (await api.get<Vehicle[]>(`${S}/transport/vehicles`)).data });
+}
+export function useCreateVehicle() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { code: string; plateNumber: string; seatedCapacity?: number; type?: string }) => (await api.post<Vehicle>(`${S}/transport/vehicles`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'vehicles'] }) });
+}
+export function useRoutes() {
+  return useQuery({ queryKey: ['school', 'transport', 'routes'], queryFn: async () => (await api.get<Route[]>(`${S}/transport/routes`)).data });
+}
+export function useCreateRoute() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { name: string; monthlyFee?: number; code?: string }) => (await api.post<Route>(`${S}/transport/routes`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'routes'] }) });
+}
+export function useStops() {
+  return useQuery({ queryKey: ['school', 'transport', 'stops'], queryFn: async () => (await api.get<Stop[]>(`${S}/transport/stops`)).data });
+}
+export function useCreateStop() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { routeId: string; name: string; order?: number; pickupTime?: string; dropoffTime?: string }) => (await api.post<Stop>(`${S}/transport/stops`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'stops'] }) });
+}
+export function useStudentTransportAssignments() {
+  return useQuery({ queryKey: ['school', 'transport', 'assignments'], queryFn: async () => (await api.get<StudentTransportAssignment[]>(`${S}/transport/assignments`)).data });
+}
+export function useAssignStudentTransport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; routeId: string; stopId: string; termId: string; startDate: string; monthlyFee?: number }) =>
+      (await api.post<StudentTransportAssignment>(`${S}/transport/assignments`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'assignments'] }),
   });
 }
 
@@ -826,14 +1012,14 @@ export function useCreateWaiver() {
   return useMutation({
     mutationFn: async (dto: { studentProfileId: string; code: string; name: string; amount: number; reason?: string; documentId?: string }) =>
       (await api.post<Waiver>(`${S}/finance/waivers`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['school', 'waivers'] }); qc.invalidateQueries({ queryKey: ['school', 'fee-defaulters'] }); qc.invalidateQueries({ queryKey: ['school', 'bad-debtors'] }); },
   });
 }
 export function useApplyWaiver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => (await api.post<Waiver>(`${S}/finance/waivers/${id}/apply`)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['school', 'waivers'] }); qc.invalidateQueries({ queryKey: ['school', 'fee-defaulters'] }); qc.invalidateQueries({ queryKey: ['school', 'bad-debtors'] }); },
   });
 }
 
@@ -893,7 +1079,58 @@ export function useSubjects() {
 
 /* ───────────────────────── Attendance ───────────────────────── */
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused' | 'early_departure' | 'unexcused';
+// P-att-status: status is now a free string (the AttendanceStatusConfig.code),
+// not a fixed union — schools configure their own catalog. Kept as `string`.
+export type AttendanceStatus = string;
+
+/** Org-configurable attendance status (AttendanceStatusConfig row). */
+export interface AttendanceStatusConfig {
+  id: string;
+  organizationId: string;
+  code: string;
+  label: string;
+  color: string;
+  isDefault: boolean;
+  sortOrder: number;
+  isPresent: boolean;
+  isLate: boolean;
+  isAbsent: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useAttendanceStatuses() {
+  return useQuery({
+    queryKey: ['school', 'attendance-statuses'],
+    queryFn: async () => (await api.get<AttendanceStatusConfig[]>(`${S}/attendance/statuses`)).data,
+  });
+}
+
+export function useCreateAttendanceStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { code: string; label: string; color?: string; isDefault?: boolean; sortOrder?: number; isPresent?: boolean; isLate?: boolean; isAbsent?: boolean }) =>
+      (await api.post(`${S}/attendance/statuses`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'attendance-statuses'] }),
+  });
+}
+
+export function useUpdateAttendanceStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: Partial<{ code: string; label: string; color: string; isDefault: boolean; sortOrder: number; isPresent: boolean; isLate: boolean; isAbsent: boolean }> }) =>
+      (await api.put(`${S}/attendance/statuses/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'attendance-statuses'] }),
+  });
+}
+
+export function useDeleteAttendanceStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/attendance/statuses/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'attendance-statuses'] }),
+  });
+}
 
 export interface RosterStudent {
   id: string;
@@ -912,7 +1149,8 @@ export function useClassRoster(classId: string | undefined) {
 export interface AttendanceRow {
   id: string;
   studentProfileId: string;
-  status: AttendanceStatus;
+  status: string;
+  statusConfig?: AttendanceStatusConfig | null;
   minutesLate: number;
   earlyDepartureMinutes?: number | null;
   reason?: string | null;
@@ -975,6 +1213,28 @@ export function useAttendanceWeekly(classId: string | undefined, weekStart: stri
     queryKey: ['school', 'attendance-weekly', classId, weekStart],
     enabled: !!classId && !!weekStart,
     queryFn: async () => (await api.get<{ from: string; to: string; byDate: Record<string, Record<string, number>> }>(`${S}/attendance/weekly`, { params: { classId, weekStart } })).data,
+  });
+}
+
+export interface AttendanceReportRow {
+  date: string;
+  day: string;
+  total: number;
+  counts: Record<string, number>;
+}
+export interface AttendanceReport {
+  classId: string;
+  start: string;
+  end: string;
+  statuses: AttendanceStatusConfig[];
+  summary: { present: number; absent: number; late: number; total: number };
+  byDate: AttendanceReportRow[];
+}
+export function useAttendanceReport(classId: string | undefined, start: string | undefined, end: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'attendance-report', classId, start, end],
+    enabled: !!classId && !!start && !!end,
+    queryFn: async () => (await api.get<AttendanceReport>(`${S}/attendance/report`, { params: { classId, startDate: start, endDate: end } })).data,
   });
 }
 
@@ -1336,15 +1596,169 @@ export function useGradeAction() {
   });
 }
 
-export interface ReportCard { id: string; studentProfileId: string; termId: string; pdfUrl?: string | null; publishedAt?: string | null }
+export interface ReportCardPayloadSection {
+  title: string;
+  subjects: Array<{
+    subject: string;
+    subjectCode?: string;
+    isCompulsory?: boolean;
+    isPrincipal?: boolean;
+    examScores: Array<{ examType: string; marks: number; maxMarks: number; grade: string | null; points: number | null }>;
+    totalPercent: number;
+    finalGrade: string | null;
+    finalPoints: number | null;
+    remark?: string | null;
+  }>;
+}
+export interface ReportCardPayload {
+  system?: string;
+  term?: { id: string; name: string; startDate?: string; endDate?: string };
+  termName?: string;
+  gpa?: number | null;
+  rank?: number | null;
+  meanPercent?: number | null;
+  totalMarks?: number | null;
+  division?: string | null;
+  promotionRecommendation?: string | null;
+  sections?: ReportCardPayloadSection[];
+  summary?: Array<{ label: string; value: string }>;
+  eligible?: { qualifies: boolean; reason: string } | null;
+  columnHeaders?: string[];
+  footer?: string[];
+  classTeacherComment?: string | null;
+  principalComment?: string | null;
+}
+export interface ReportCard {
+  id: string;
+  studentProfileId: string;
+  termId: string;
+  payload?: ReportCardPayload;
+  pdfUrl?: string | null;
+  publishedAt?: string | null;
+  generatedAt?: string;
+}
 
-export function useReportCards(studentProfileId: string | undefined) {
+export interface ReportCardSettings {
+  id: string;
+  organizationId: string;
+  showSchoolLogo: boolean;
+  showStudentPhoto: boolean;
+  showWatermark: boolean;
+  showClassTeacherComment: boolean;
+  showHeadTeacherComment: boolean;
+  showTermStartDate: boolean;
+  showTermEndDate: boolean;
+  showFeesBalance: boolean;
+  showSchoolMotto: boolean;
+  schoolNameColor: string;
+  schoolAddressColor: string;
+  contactColor: string;
+  websiteColor: string;
+  emailColor: string;
+  reportTitleColor: string;
+}
+
+export function useReportCardSettings() {
   return useQuery({
-    queryKey: ['school', 'report-cards', studentProfileId],
-    enabled: !!studentProfileId,
-    queryFn: async () => (await api.get<ReportCard[]>(`${S}/report-cards/by-student/${studentProfileId}`)).data,
+    queryKey: ['school', 'report-card-settings'],
+    queryFn: async () => (await api.get<ReportCardSettings>(`${S}/report-card-settings`)).data,
   });
 }
+
+export function useUpdateReportCardSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: Partial<ReportCardSettings>) =>
+      (await api.patch<ReportCardSettings>(`${S}/report-card-settings`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'report-card-settings'] }),
+    });
+    }
+
+    /* ───────────────── Fee Waivers & Categories ───────────────── */
+
+    export interface WaiverCategory {
+    id: string;
+    organizationId: string;
+    code: string;
+    name: string;
+    description?: string | null;
+    type: 'percentage' | 'fixed';
+    value: number;
+    defaultReason?: string | null;
+    appliesTo?: { gradeLevelIds?: string[]; classIds?: string[] } | null;
+    isActive: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+    }
+
+    export interface FeeDefaulterRow {
+    studentProfileId: string;
+    studentName: string;
+    admissionNo?: string | null;
+    className: string;
+    totalBalance: number;
+    oldestDueDate?: string | null;
+    maxDaysOverdue: number;
+    invoiceCount: number;
+    waived: number;
+    }
+
+    const FIN = 'school/finance';
+
+    export function useWaiverCategories(includeInactive = false) {
+    return useQuery({
+      queryKey: ['school', 'waiver-categories', includeInactive],
+      queryFn: async () => (await api.get<WaiverCategory[]>(`${FIN}/waiver-categories${includeInactive ? '?includeInactive=true' : ''}`)).data,
+    });
+    }
+
+    export function useCreateWaiverCategory() {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: async (dto: Partial<WaiverCategory>) => (await api.post<WaiverCategory>(`${FIN}/waiver-categories`, dto)).data,
+      onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waiver-categories'] }),
+    });
+    }
+
+    export function useUpdateWaiverCategory() {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: async ({ id, ...dto }: Partial<WaiverCategory> & { id: string }) => (await api.patch<WaiverCategory>(`${FIN}/waiver-categories/${id}`, dto)).data,
+      onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waiver-categories'] }),
+    });
+    }
+
+    export function useDeleteWaiverCategory() {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: async (id: string) => (await api.delete(`${FIN}/waiver-categories/${id}`)).data,
+      onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waiver-categories'] }),
+    });
+    }
+
+    export function useFeeDefaulters(asOf?: string, minBalance = 0, classId?: string) {
+    return useQuery({
+      queryKey: ['school', 'fee-defaulters', asOf, minBalance, classId],
+      queryFn: async () => (await api.get<{ asOf: string; count: number; rows: FeeDefaulterRow[] }>(`${FIN}/fee-defaulters?minBalance=${minBalance}${asOf ? `&asOf=${asOf}` : ''}${classId ? `&classId=${classId}` : ''}`)).data,
+    });
+    }
+
+    export function useBadDebtors(asOf?: string, thresholdDays = 90, classId?: string) {
+    return useQuery({
+      queryKey: ['school', 'bad-debtors', asOf, thresholdDays, classId],
+      queryFn: async () => (await api.get<{ asOf: string; thresholdDays: number; count: number; rows: FeeDefaulterRow[] }>(`${FIN}/bad-debtors?thresholdDays=${thresholdDays}${asOf ? `&asOf=${asOf}` : ''}${classId ? `&classId=${classId}` : ''}`)).data,
+    });
+    }
+
+    export function useWriteOffBadDebt() {
+    const qc = useQueryClient();
+    return useMutation({
+      mutationFn: async ({ studentProfileId, reason }: { studentProfileId: string; reason?: string }) => (await api.post(`${FIN}/bad-debtors/${studentProfileId}/write-off`, { reason })).data,
+      onSuccess: () => { qc.invalidateQueries({ queryKey: ['school', 'bad-debtors'] }); qc.invalidateQueries({ queryKey: ['school', 'fee-defaulters'] }); qc.invalidateQueries({ queryKey: ['school', 'waivers'] }); },
+    });
+    }
+
+
 export function useGenerateReportCard() {
   const qc = useQueryClient();
   return useMutation({
@@ -1366,7 +1780,7 @@ export function usePublishReportCard() {
 
 export interface MealProgram { id: string; name: string; kind: string; description?: string | null; isActive: boolean }
 export interface MealType { id: string; name: string; order: number; startTime?: string | null; endTime?: string | null; isActive: boolean }
-export interface MealPlan { id: string; name: string; type: string; pricePerTerm: string; billingModel: string; fundingModel: string; mealProgramId?: string | null; feeProductId?: string | null; isActive: boolean }
+export interface MealPlan { id: string; name: string; type: string; pricePerTerm: string; billingModel: string; fundingModel: string; mealProgramId?: string | null; feeProductId?: string | null; isActive: boolean; trackInventory?: boolean; menus?: MealMenu[] }
 export interface MealEntitlement { id: string; mealTypeId: string; mealType?: MealType }
 export type MealAttendanceStatus = 'served' | 'absent' | 'excused' | 'not_eligible';
 export interface MealPlanAssignment {
@@ -1378,7 +1792,7 @@ export interface MealSession { id: string; mealTypeId: string; date: string; cla
 export interface MealRosterRow { studentProfileId: string; admissionNo?: string; name?: string | null; status: MealAttendanceStatus | null; allergies?: string[]; dietaryRequirements?: string[] }
 export interface TodaysMeal { mealTypeId: string; mealType: string; expected: number; served: number; sessions: number; status: string; sessionIds: string[] }
 export interface TodaysMeals { date: string; meals: TodaysMeal[] }
-export interface MealMenu { id: string; mealTypeId: string; date?: string | null; dayOfWeek?: number | null; title?: string | null; items?: Array<{ id: string; name: string; notes?: string | null; sortOrder: number; posMenuItemId?: string | null }>; mealType?: MealType }
+export interface MealMenu { id: string; mealTypeId: string; mealPlanId?: string | null; date?: string | null; dayOfWeek?: number | null; title?: string | null; items?: Array<{ id: string; name: string; notes?: string | null; sortOrder: number; posMenuItemId?: string | null; mealRecipeId?: string | null }>; mealType?: MealType }
 
 const MEALS = `${S}/meals`;
 const CAFE = `${S}/cafeteria`;
@@ -1416,6 +1830,14 @@ export function useCreateMealPlan() {
   return useMutation({
     mutationFn: async (dto: { name: string; pricePerTerm: number; type?: string; billingModel?: string; fundingModel?: string; mealProgramId?: string; feeProductId?: string }) =>
       (await api.post<MealPlan>(`${CAFE}/plans`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'meal-plans'] }),
+  });
+}
+export function useUpdateMealPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { id: string; name?: string; pricePerTerm?: number; type?: string; billingModel?: string; fundingModel?: string; mealProgramId?: string; isActive?: boolean; trackInventory?: boolean; mealMenuIds?: string[] }) =>
+      (await api.patch<MealPlan>(`${CAFE}/plans/${dto.id}`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'meal-plans'] }),
   });
 }
@@ -1517,6 +1939,45 @@ export function useBuildMenuFromPos() {
     mutationFn: async (dto: { mealTypeId: string; date?: string; title?: string; posMenuItemIds: string[] }) =>
       (await api.post<MealMenu>(`${MEALS}/menus/from-pos`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'meal-menus'] }),
+  });
+}
+
+/* ───────────────────────── Per-student (per-lunch) consumption ───────────────────────── */
+export interface MealConsumptionRow {
+  id: string;
+  mealSessionId?: string | null;
+  mealMenuId?: string | null;
+  studentProfileId?: string | null;
+  productId: string;
+  quantity: number;
+  unitCost: number;
+  createdAt: string;
+  product?: { id: string; name: string; sku?: string | null };
+  studentProfile?: { partner?: { name: string } | null } | null;
+  menu?: { id: string; title?: string | null } | null;
+}
+export function useRecordConsumption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { mealSessionId: string; studentProfileId: string; mealMenuId?: string; stockLocationId?: string }) =>
+      (await api.post<MealConsumptionRow[]>(`${MEALS}/consumption/record`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'meal-consumption'] });
+      qc.invalidateQueries({ queryKey: ['school', 'meals-today'] });
+    },
+  });
+}
+export function useMealConsumption(query: { mealSessionId?: string; studentProfileId?: string; mealMenuId?: string; mealPlanId?: string; from?: string; to?: string } = {}) {
+  const params: Record<string, string> = {};
+  if (query.mealSessionId) params.mealSessionId = query.mealSessionId;
+  if (query.studentProfileId) params.studentProfileId = query.studentProfileId;
+  if (query.mealMenuId) params.mealMenuId = query.mealMenuId;
+  if (query.mealPlanId) params.mealPlanId = query.mealPlanId;
+  if (query.from) params.from = query.from;
+  if (query.to) params.to = query.to;
+  return useQuery({
+    queryKey: ['school', 'meal-consumption', query],
+    queryFn: async () => (await api.get<MealConsumptionRow[]>(`${MEALS}/consumption`, { params })).data,
   });
 }
 
@@ -2528,3 +2989,198 @@ export async function uploadSchoolFile(file: File, ownerType = 'school_doc', own
 export function fileUrl(id: string): string {
   return `/api/v1/files/${id}/download`;
 }
+
+/* ───────────────────────── School Calendar & Events ─────────────────────────
+ * Both the Calendar (month grid) and Events (agenda/list) UIs consume the SAME
+ * SchoolCalendarEvent data. CRUD goes through the CANONICAL `/school/calendar-events`
+ * contract. Range reads use the legacy `/school/calendar/range` (overlap-fixed) —
+ * the canonical controller has no /range yet; do NOT add new backend endpoints in V1.
+ */
+
+export type CalendarEventType =
+  | 'holiday' | 'working_day' | 'event' | 'exam'
+  | 'meeting' | 'trip' | 'sports' | 'ceremony';
+
+export interface SchoolCalendarEvent {
+  id: string;
+  organizationId: string;
+  termId?: string | null;
+  title: string;
+  type: CalendarEventType;
+  startDate: string;
+  endDate: string;
+  description?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface CalendarEventInput {
+  title: string;
+  type: CalendarEventType;
+  startDate: string;
+  endDate: string;
+  termId?: string | null;
+  description?: string;
+}
+
+/** Range read (overlap semantics: startDate<=to AND endDate>=from). */
+export function useSchoolCalendarEvents(from?: string, to?: string) {
+  return useQuery<SchoolCalendarEvent[]>({
+    queryKey: ['school', 'calendar-events-range', from, to],
+    queryFn: async () =>
+      (await api.get<SchoolCalendarEvent[]>(`${S}/calendar/range`, { params: { from, to } })).data,
+  });
+}
+
+export function useSchoolCalendarEvent(id: string | undefined) {
+  return useQuery<SchoolCalendarEvent>({
+    queryKey: ['school', 'calendar-events', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<SchoolCalendarEvent>(`${S}/calendar-events/${id}`)).data,
+  });
+}
+
+export function useCreateCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: CalendarEventInput) =>
+      (await api.post(`${S}/calendar-events`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'calendar-events'] }),
+  });
+}
+
+export function useUpdateCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: CalendarEventInput & { id: string }) =>
+      (await api.patch(`${S}/calendar-events/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'calendar-events'] }),
+  });
+}
+
+export function useDeleteCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => api.delete(`${S}/calendar-events/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'calendar-events'] }),
+  });
+}
+
+/* ───────────────────────── Library Management ─────────────────────────
+ * Hooks target the real, registered LibraryModule (school/library/*).
+ * BookMetadata requires a productId (FK to a stockable Product).
+ */
+export interface Book {
+  id: string;
+  productId: string;
+  author?: string | null;
+  isbn?: string | null;
+  publisher?: string | null;
+  edition?: string | null;
+  category: string;
+  shelfLocation?: string | null;
+  totalCopies: number;
+}
+export interface BookCopy {
+  id: string;
+  bookMetadataId: string;
+  copyNumber: string;
+  status: string;
+  condition: string;
+}
+export interface Borrowing {
+  id: string;
+  bookCopyId: string;
+  studentProfileId: string;
+  borrowedAt: string;
+  dueAt: string;
+  returnedAt?: string | null;
+  status: string;
+  fineAmount?: number | null;
+  book?: { id: string; author?: string | null; isbn?: string | null } | null;
+  bookCopy?: { id: string; copyNumber: string } | null;
+}
+
+export function useBooks() {
+  return useQuery({ queryKey: ['school', 'library', 'books'], queryFn: async () => (await api.get<Paginated<Book>>(`${S}/library/books`, { params: { pageSize: 100 } })).data });
+}
+export function useCreateBook() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { productId: string; author?: string; isbn?: string; publisher?: string; edition?: string; category?: string; shelfLocation?: string; totalCopies?: number }) => (await api.post<Book>(`${S}/library/books`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'books'] }) });
+}
+export function useBookCopies() {
+  return useQuery({ queryKey: ['school', 'library', 'copies'], queryFn: async () => (await api.get<Paginated<BookCopy>>(`${S}/library/copies`, { params: { pageSize: 200 } })).data });
+}
+export function useCreateBookCopy() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { bookMetadataId: string; copyNumber: string; status?: string; condition?: string }) => (await api.post<BookCopy>(`${S}/library/copies`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'copies'] }) });
+}
+export function useBorrowings() {
+  return useQuery({ queryKey: ['school', 'library', 'borrowings'], queryFn: async () => (await api.get<Paginated<Borrowing>>(`${S}/library/borrowings`, { params: { pageSize: 200 } })).data });
+}
+export function useBorrowBook() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { bookCopyId: string; studentProfileId: string; dueAt: string; notes?: string }) => (await api.post<Borrowing>(`${S}/library/borrowings/borrow`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'borrowings'] }) });
+}
+export function useReturnBook() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.post<Borrowing>(`${S}/library/borrowings/${id}/return`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'borrowings'] }) });
+}
+
+/* ───────────────────────── Budgeting (Fees & School Finance) ───────────────────────── */
+export interface Budget {
+  id: string;
+  category: string;
+  name: string;
+  amount: number | string;
+  currency?: string | null;
+  academicYearId?: string | null;
+  termId?: string | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  notes?: string | null;
+  status: string;
+}
+
+export function useBudgets() {
+  return useQuery({ queryKey: ['school', 'finance', 'budgets'], queryFn: async () => (await api.get<Budget[]>(`${S}/finance/budgets`)).data });
+}
+export function useCreateBudget() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { category: string; name: string; amount: number; academicYearId?: string; termId?: string; currency?: string; periodFrom?: string; periodTo?: string; notes?: string; status?: string }) => (await api.post<Budget>(`${S}/finance/budgets`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'budgets'] }) });
+}
+export function useDeleteBudget() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => api.delete(`${S}/finance/budgets/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'budgets'] }) });
+}
+
+/* ───────────────────────── Front Desk (visitor log) ───────────────────────── */
+export interface FrontDeskLog {
+  id: string;
+  partnerId?: string | null;
+  visitorName: string;
+  phone?: string | null;
+  purpose?: string | null;
+  personVisited?: string | null;
+  status: string;
+  notes?: string | null;
+  checkInAt: string;
+  checkOutAt?: string | null;
+  partner?: { id: string; name: string } | null;
+}
+
+export function useFrontDeskLogs(status?: string) {
+  return useQuery({ queryKey: ['school', 'front-desk', status ?? 'all'], queryFn: async () => (await api.get<FrontDeskLog[]>(`${S}/front-desk`, { params: status ? { status } : undefined })).data });
+}
+export function useCreateFrontDeskLog() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { partnerId?: string; visitorName: string; phone?: string; purpose?: string; personVisited?: string; notes?: string }) => (await api.post<FrontDeskLog>(`${S}/front-desk`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'front-desk'] }) });
+}
+export function useCheckoutFrontDeskLog() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, notes }: { id: string; notes?: string }) => (await api.patch<FrontDeskLog>(`${S}/front-desk/${id}/checkout`, { notes })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'front-desk'] }) });
+}
+
+
+

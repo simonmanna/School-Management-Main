@@ -4,7 +4,8 @@ import {
   useClasses, useClassRoster, usePeriods,
   useAttendanceRegister, useMarkAttendance, useCorrectAttendance,
   useAttendanceThresholds, useUpsertAttendanceThreshold, useAttendanceWeekly,
-  type AttendanceStatus,
+  useAttendanceStatuses,
+  type AttendanceStatus, type AttendanceStatusConfig,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,19 +16,37 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 
 const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
-const STATUSES: AttendanceStatus[] = ['present', 'absent', 'late', 'excused', 'early_departure', 'unexcused'];
-const STATUS_STYLE: Record<AttendanceStatus, string> = {
-  present: 'bg-emerald-600 text-white',
-  absent: 'bg-rose-600 text-white',
-  late: 'bg-amber-500 text-white',
-  excused: 'bg-sky-600 text-white',
-  early_departure: 'bg-purple-600 text-white',
-  unexcused: 'bg-red-800 text-white',
-};
-const STATUS_LABEL: Record<AttendanceStatus, string> = {
-  present: 'Present', absent: 'Absent', late: 'Late', excused: 'Excused',
-  early_departure: 'Left early', unexcused: 'Unexcused',
-};
+
+// P-att-status: the status catalog is org-configurable (seeded Absent / Present /
+// Late). These are the hard fallbacks used only if the catalog is empty.
+const FALLBACK_STATUSES: AttendanceStatusConfig[] = [
+  { id: 'present', organizationId: '', code: 'present', label: 'Present', color: '#16a34a', isDefault: true, sortOrder: 1, isPresent: true, isLate: false, isAbsent: false, createdAt: '', updatedAt: '' },
+  { id: 'absent', organizationId: '', code: 'absent', label: 'Absent', color: '#dc2626', isDefault: false, sortOrder: 2, isPresent: false, isLate: false, isAbsent: true, createdAt: '', updatedAt: '' },
+  { id: 'late', organizationId: '', code: 'late', label: 'Late', color: '#f59e0b', isDefault: false, sortOrder: 3, isPresent: false, isLate: true, isAbsent: false, createdAt: '', updatedAt: '' },
+];
+
+/**
+ * Shared hook returning the live status catalog + lookup helpers. Used by every
+ * attendance component so the mark grid, corrections and analytics all render
+ * the org's configured statuses (with their colours/labels). Falls back to the
+ * seeded Absent / Present / Late trio when the catalog hasn't loaded.
+ */
+function useStatusCatalog() {
+  const { data: statuses } = useAttendanceStatuses();
+  const STATUS_LIST = useMemo<AttendanceStatusConfig[]>(
+    () => (statuses && statuses.length ? statuses : FALLBACK_STATUSES),
+    [statuses],
+  );
+  const STATUS_CODES = useMemo<string[]>(() => STATUS_LIST.map((s) => s.code), [STATUS_LIST]);
+  const STATUS_BY_CODE = useMemo<Record<string, AttendanceStatusConfig>>(
+    () => Object.fromEntries(STATUS_LIST.map((s) => [s.code, s])),
+    [STATUS_LIST],
+  );
+  const labelOf = (code: string) => STATUS_BY_CODE[code]?.label ?? code;
+  const colorOf = (code: string) => STATUS_BY_CODE[code]?.color ?? '#6b7280';
+  const badgeStyle = (code: string) => ({ backgroundColor: colorOf(code), color: '#fff' });
+  return { STATUS_LIST, STATUS_CODES, STATUS_BY_CODE, labelOf, colorOf, badgeStyle };
+}
 
 export function SchoolAttendancePage() {
   const [tab, setTab] = useState<'take' | 'correct' | 'thresholds' | 'analytics'>('take');
@@ -70,6 +89,7 @@ export function SchoolAttendancePage() {
 
 /* ── Take attendance (P0: daily + period, late, early, reasons) ── */
 function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
+  const { STATUS_LIST, STATUS_CODES, labelOf, badgeStyle } = useStatusCatalog();
   const { data: roster } = useClassRoster(classId || undefined);
   const { data: register } = useAttendanceRegister(classId || undefined, date || undefined);
   const mark = useMarkAttendance();
@@ -89,7 +109,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
   }, [students, marks]);
 
   const save = async () => {
-    const entries = students.filter((s: any) => marks[s.id]).map((s: any) => ({ studentProfileId: s.id, ...marks[s.id] }));
+    const entries = students.filter((s: any) => marks[s.id]).map((s: any) => ({ studentProfileId: s.id, status: marks[s.id].status, minutesLate: marks[s.id].minutesLate, earlyDepartureMinutes: marks[s.id].earlyDepartureMinutes, reason: marks[s.id].reason }));
     if (entries.length === 0) return notify.error('Mark at least one student');
     try {
       await mark.mutateAsync({ date, classId, periodId: periodId || undefined, entries });
@@ -119,7 +139,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
           </select>
         </div>
         {classId && students.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => setAll('present')}><CheckCircle2 className="h-4 w-4" /> All present</Button>
+          <Button variant="ghost" size="sm" onClick={() => setAll(STATUS_LIST.find((s) => s.isDefault)?.code ?? STATUS_CODES[0])}><CheckCircle2 className="h-4 w-4" /> All present</Button>
         )}
       </div>
       {!classId && <p className="text-sm text-muted-foreground">Pick a class to load its roster.</p>}
@@ -127,7 +147,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">{students.length} students ·{' '}
-              {STATUSES.filter((s) => summary[s]).map((s) => <span key={s} className="mr-2">{summary[s]} {STATUS_LABEL[s].toLowerCase()}</span>)}
+              {STATUS_CODES.filter((s) => summary[s]).map((s) => <span key={s} className="mr-2">{summary[s]} {labelOf(s).toLowerCase()}</span>)}
             </CardTitle>
             <Button onClick={save} disabled={mark.isPending}><Save className="h-4 w-4" /> Save</Button>
           </CardHeader>
@@ -141,9 +161,9 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
                     <tr key={s.id} className="border-b last:border-0">
                       <td className="px-4 py-2 font-mono text-xs">{s.admissionNo}</td>
                       <td className="px-4 py-2">{s.partner?.name ?? '—'}</td>
-                      <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUSES.map((st) => (
-                        <button key={st} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st } })}
-                          className={`rounded px-2 py-1 text-xs capitalize ${m.status === st ? STATUS_STYLE[st] : 'bg-muted text-muted-foreground hover:bg-muted/70'}`}>{STATUS_LABEL[st]}</button>
+                      <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUS_LIST.map((st) => (
+                        <button key={st.code} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
+                          className={`rounded px-2 py-1 text-xs capitalize ${m.status === st.code ? '' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`} style={m.status === st.code ? badgeStyle(st.code) : undefined}>{st.label}</button>
                       ))}</div></td>
                       <td className="px-4 py-2">
                         <div className="flex gap-1">
@@ -166,6 +186,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
 
 /* ── Corrections (P0d) ── */
 function CorrectTab({ classId, setClassId, date, classes }: any) {
+  const { STATUS_LIST, labelOf, badgeStyle } = useStatusCatalog();
   const { data: register } = useAttendanceRegister(classId || undefined, date || undefined);
   const correct = useCorrectAttendance();
   const [target, setTarget] = useState<any>(null);
@@ -198,12 +219,12 @@ function CorrectTab({ classId, setClassId, date, classes }: any) {
                 {rows.map((r: any) => (
                   <tr key={r.id} className="border-b last:border-0">
                     <td className="px-4 py-2">{r.studentProfile?.partner?.name ?? r.studentProfileId?.slice(0, 8)}</td>
-                    <td className="px-4 py-2"><Badge className={STATUS_STYLE[r.status as AttendanceStatus]}>{STATUS_LABEL[r.status as AttendanceStatus]}</Badge></td>
+                    <td className="px-4 py-2"><Badge style={badgeStyle(r.status)}>{labelOf(r.status)}</Badge></td>
                     <td className="px-4 py-2">
                       {target?.id === r.id ? (
                         <div className="flex flex-wrap items-center gap-1">
                           <select className={sel + ' w-40'} value={target.status} onChange={(e) => setTarget({ ...target, status: e.target.value })}>
-                            {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                            {STATUS_LIST.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
                           </select>
                           <Input placeholder="note" className="h-8 w-32" value={target.correctionNote ?? ''} onChange={(e) => setTarget({ ...target, correctionNote: e.target.value })} />
                           <Button size="sm" onClick={apply} disabled={correct.isPending}><ShieldCheck className="h-4 w-4" /> Save</Button>
@@ -266,10 +287,11 @@ function ThresholdsTab({ classId, setClassId, classes }: any) {
 
 /* ── Analytics (P2) ── */
 function AnalyticsTab({ classId, setClassId, classes, today }: any) {
+  const { STATUS_LIST, labelOf, colorOf } = useStatusCatalog();
   const weekStart = useMemo(() => { const d = new Date(today); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.toISOString().slice(0, 10); }, [today]);
   const { data: weekly } = useAttendanceWeekly(classId || undefined, weekStart);
   const days = useMemo(() => { const out: string[] = []; const d = new Date(weekStart); for (let i = 0; i < 7; i++) { out.push(new Date(d.getTime() + i * 86400000).toISOString().slice(0, 10)); } return out; }, [weekStart]);
-  const series = ['present', 'absent', 'late', 'excused', 'early_departure', 'unexcused'] as const;
+  const series = STATUS_LIST.map((s) => s.code);
 
   return (
     <div className="space-y-3">
@@ -285,7 +307,7 @@ function AnalyticsTab({ classId, setClassId, classes, today }: any) {
           <CardHeader><CardTitle className="text-base">Weekly attendance</CardTitle></CardHeader>
           <CardContent>
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Day</th>{series.map((s) => <th key={s} className="px-2 py-1 capitalize">{STATUS_LABEL[s]}</th>)}</tr></thead>
+              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Day</th>{series.map((s) => <th key={s} className="px-2 py-1 capitalize" style={{ color: colorOf(s) }}>{labelOf(s)}</th>)}</tr></thead>
               <tbody>
                 {days.map((d) => {
                   const row = weekly?.byDate?.[d] ?? {};

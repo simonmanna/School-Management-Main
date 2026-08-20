@@ -9,6 +9,7 @@ import { AdmissionsModule } from './admissions/admissions.module';
 import { AcademicsModule } from './academics/academics.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { LmsModule } from './lms/lms.module';
+import { LessonPlanningModule } from './lms/lesson-planning.module';
 import { ExaminationsModule } from './examinations/examinations.module';
 import { AssessmentModule } from './assessment/assessment.module';
 import { CbtModule } from './cbt/cbt.module';
@@ -22,7 +23,8 @@ import { HostelModule } from './hostel/hostel.module';
 import { CafeteriaModule } from './cafeteria/cafeteria.module';
 import { MealsModule } from './meals/meals.module';
 import { ReportingModule } from './reporting/reporting.module';
-import { DocumentsModule } from './documents/school-documents.module';
+import { SchoolDocumentsModule } from './documents/school-documents.module';
+import { FrontDeskModule } from './front-desk/front-desk.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
 
@@ -43,6 +45,7 @@ import { SchoolController } from './school.controller';
     AcademicsModule,
     AttendanceModule,
     LmsModule,
+    LessonPlanningModule,
     ExaminationsModule,
     AssessmentModule,
     CbtModule,
@@ -60,7 +63,8 @@ import { SchoolController } from './school.controller';
     CafeteriaModule,
     MealsModule,
     ReportingModule,
-    DocumentsModule,
+    SchoolDocumentsModule,
+    FrontDeskModule,
   ],
   controllers: [SchoolController],
   providers: [SchoolService],
@@ -141,13 +145,18 @@ export class SchoolModule implements OnModuleInit {
       ],
     });
 
-    // Lesson plan lifecycle
+    // Lesson plan lifecycle (Phase 1 — full HOD review FSM; reuse WorkflowService).
     this.workflows.register({
       documentType: 'lesson_plan',
       initial: 'draft',
       transitions: [
-        { from: 'draft',     to: 'published', action: 'publish',    permission: 'school:foundation:write' },
-        { from: 'published', to: 'draft',     action: 'unpublish', permission: 'school:foundation:write' },
+        { from: 'draft',          to: 'submitted',       action: 'submit',        permission: 'school:lessonplans:write' },
+        { from: 'submitted',      to: 'needs_revision',  action: 'request_change', permission: 'school:lessonplans:approve' },
+        { from: 'submitted',      to: 'approved',        action: 'approve',       permission: 'school:lessonplans:approve' },
+        { from: 'needs_revision', to: 'submitted',       action: 'resubmit',      permission: 'school:lessonplans:write' },
+        { from: 'needs_revision', to: 'draft',           action: 'revert',        permission: 'school:lessonplans:write' },
+        { from: 'approved',       to: 'archived',        action: 'archive',       permission: 'school:lessonplans:approve' },
+        { from: 'archived',       to: 'draft',           action: 'restore',       permission: 'school:lessonplans:write' },
       ],
     });
 

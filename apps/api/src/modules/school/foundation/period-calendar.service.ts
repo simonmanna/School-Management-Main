@@ -30,10 +30,14 @@ export class CalendarService extends BaseCrudService<SchoolCalendarEvent, Create
     super(prisma.client.schoolCalendarEvent as unknown as CrudDelegate);
   }
 
-  /** Returns events for a given date range. Useful for the dashboard "this week" view. */
+  /** Returns events overlapping the given date range. Overlap semantics:
+   *  startDate <= to  AND  endDate >= from  (so multi-day events that start before
+   *  `from` or end after `to` still appear in the window). Correct for month grids.
+   *  NOTE: this is the LEGACY `/school/calendar` API. New Calendar/Events UI must
+   *  use `/school/calendar-events` (canonical SchoolCalendarEvent contract). */
   async eventsBetween(from: Date, to: Date) {
     return this.prisma.client.schoolCalendarEvent.findMany({
-      where: { startDate: { gte: from }, endDate: { lte: to } },
+      where: { startDate: { lte: to }, endDate: { gte: from } },
       orderBy: { startDate: 'asc' },
     });
   }

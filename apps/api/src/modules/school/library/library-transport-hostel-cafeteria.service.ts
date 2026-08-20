@@ -43,6 +43,7 @@ import type {
 export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBookMetadataDto, UpdateBookMetadataDto> {
   protected readonly entityName = 'BookMetadata';
   protected readonly searchFields = ['isbn'];
+  protected readonly defaultOrderBy = { id: 'desc' } as Record<string, 'asc' | 'desc'>;
   constructor(private readonly prisma: PrismaService) {
     super(prisma.client.bookMetadata as unknown as CrudDelegate);
   }
@@ -52,6 +53,7 @@ export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBoo
 export class BookCopyService extends BaseCrudService<BookCopy, CreateBookCopyDto, UpdateBookCopyDto> {
   protected readonly entityName = 'BookCopy';
   protected readonly searchFields: string[] = [];
+  protected readonly defaultOrderBy = { id: 'desc' } as Record<string, 'asc' | 'desc'>;
   constructor(private readonly prisma: PrismaService) {
     super(prisma.client.bookCopy as unknown as CrudDelegate);
   }
@@ -61,6 +63,7 @@ export class BookCopyService extends BaseCrudService<BookCopy, CreateBookCopyDto
 export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowing>, Partial<Borrowing>> {
   protected readonly entityName = 'Borrowing';
   protected readonly searchFields: string[] = [];
+  protected readonly defaultOrderBy = { id: 'desc' } as Record<string, 'asc' | 'desc'>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -402,8 +405,47 @@ export class HostelAllocationService extends BaseCrudService<HostelAllocation, P
 export class MealPlanService extends BaseCrudService<MealPlan, CreateMealPlanDto, UpdateMealPlanDto> {
   protected readonly entityName = 'MealPlan';
   protected readonly searchFields = ['name'];
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenant: TenantContextService,
+  ) {
     super(prisma.client.mealPlan as unknown as CrudDelegate);
+  }
+
+  /**
+   * Extended update for meal plans: handles the inventory-tracking flag and
+   * (re)links the menus that belong to this plan. `mealMenuIds` (when present)
+   * fully replaces the plan's linked menus; other scalar fields update in place.
+   */
+  async updatePlan(id: string, dto: UpdateMealPlanDto) {
+    const orgId = this.tenant.organizationId;
+    const existing = await this.prisma.client.mealPlan.findFirst({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException(`MealPlan ${id} not found`);
+
+    const scalar: any = {};
+    if (dto.name !== undefined) scalar.name = dto.name;
+    if (dto.type !== undefined) scalar.type = dto.type;
+    if (dto.feeProductId !== undefined) scalar.feeProductId = dto.feeProductId;
+    if (dto.pricePerTerm !== undefined) scalar.pricePerTerm = dto.pricePerTerm;
+    if (dto.isActive !== undefined) scalar.isActive = dto.isActive;
+    if (dto.mealProgramId !== undefined) scalar.mealProgramId = dto.mealProgramId;
+    if (dto.billingModel !== undefined) scalar.billingModel = dto.billingModel;
+    if (dto.fundingModel !== undefined) scalar.fundingModel = dto.fundingModel;
+    if (dto.trackInventory !== undefined) scalar.trackInventory = dto.trackInventory;
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      if (Object.keys(scalar).length) {
+        await tx.mealPlan.updateMany({ where: { id }, data: scalar });
+      }
+      if (dto.mealMenuIds !== undefined) {
+        // Detach from any plan + attach to this one (idempotent, no dupes).
+        await tx.mealMenu.updateMany({ where: { mealPlanId: id }, data: { mealPlanId: null } });
+        if (dto.mealMenuIds.length) {
+          await tx.mealMenu.updateMany({ where: { id: { in: dto.mealMenuIds }, organizationId: orgId }, data: { mealPlanId: id } });
+        }
+      }
+      return tx.mealPlan.findFirst({ where: { id }, include: { menus: { include: { items: true } } } });
+    });
   }
 }
 

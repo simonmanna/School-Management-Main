@@ -77,6 +77,17 @@ async function main() {
   });
   log('school profile: Hilltop High School');
 
+  // ── P-att-status: default attendance status catalog (Absent / Present / Late) ──
+  const statusDefs = [
+    { code: 'present', label: 'Present', color: '#16a34a', isDefault: true, isPresent: true, sortOrder: 1 },
+    { code: 'absent', label: 'Absent', color: '#dc2626', isAbsent: true, sortOrder: 2 },
+    { code: 'late', label: 'Late', color: '#f59e0b', isLate: true, sortOrder: 3 },
+  ];
+  await prisma.attendanceStatusConfig.createMany({
+    data: statusDefs.map((s) => ({ organizationId: O, ...s })),
+  });
+  log(`attendance statuses: ${statusDefs.map((s) => s.label).join(' / ')}`);
+
   const year = await prisma.academicYear.create({
     data: { organizationId: O, name: '2026', startDate: new Date('2026-02-02'), endDate: new Date('2026-11-27'), isCurrent: true },
   });
@@ -451,11 +462,12 @@ async function main() {
 
   // ── Transport (real StudentTransportAssignment) ────────────────────────────
   const route = await prisma.route.create({ data: { organizationId: O, name: 'Kampala–Nakasero', monthlyFee: D(120000) } });
-  const stop = await prisma.stop.create({ data: { organizationId: O, routeId: route.id, name: 'Nakasero Stage', order: 1, pickupTime: '06:45', dropoffTime: '17:30' } });
+  // A Stop is now a standalone place (T1): ordering/timing live on TransportRouteStop.
+  const stop = await prisma.stop.create({ data: { organizationId: O, code: 'NAKASERO-STAGE', name: 'Nakasero Stage' } });
   const transporters = students.slice(12, 24); // a different cohort
   for (const st of transporters) {
     await prisma.studentTransportAssignment.create({
-      data: { organizationId: O, studentProfileId: st.id, routeId: route.id, stopId: stop.id, termId: term.id, startDate: new Date('2026-05-04'), monthlyFee: D(120000), isActive: true },
+      data: { organizationId: O, studentProfileId: st.id, routeId: route.id, stopId: stop.id, pickupStopId: stop.id, dropoffStopId: stop.id, termId: term.id, startDate: new Date('2026-05-04'), monthlyFee: D(120000), status: 'active' },
     });
   }
   ok(`transport: route + ${transporters.length} student bus assignments`);

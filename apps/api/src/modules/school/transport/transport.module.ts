@@ -1,28 +1,43 @@
 import { Module } from '@nestjs/common';
-import {
-  RouteAssignmentService,
-  RouteService,
-  StopService,
-  StudentTransportAssignmentService,
-  VehicleService,
-} from '../library/library-transport-hostel-cafeteria.service';
-import {
-  RouteAssignmentController,
-  RouteController,
-  StopController,
-  StudentTransportAssignmentController,
-  VehicleController,
-} from '../library/library-transport-hostel-cafeteria.controller';
+import { InvoicingModule } from '../../invoicing/invoicing.module';
+import { AccountingModule } from '../../accounting/accounting.module';
+import { TransportConfigService } from './transport-config.service';
+import { TransportFleetService } from './transport-fleet.service';
+import { TransportCrewService } from './transport-crew.service';
+import { TransportEnrollmentService } from './transport-enrollment.service';
+import { TransportScheduleService } from './transport-schedule.service';
+import { TransportTripService } from './transport-trip.service';
+import { TransportBoardingService } from './transport-boarding.service';
+import { TransportSafetyService } from './transport-safety.service';
+import { TransportBillingService } from './transport-billing.service';
+import { TransportController } from './transport.controller';
+import { TransportTripGeneratorWorker } from './transport-trip-generator.worker';
 
 @Module({
-  controllers: [VehicleController, RouteController, StopController, RouteAssignmentController, StudentTransportAssignmentController],
+  imports: [InvoicingModule, AccountingModule],
+  controllers: [TransportController],
   providers: [
-    VehicleService,
-    RouteService,
-    StopService,
-    RouteAssignmentService,
-    StudentTransportAssignmentService,
+    TransportConfigService,
+    TransportFleetService,
+    TransportCrewService,
+    TransportEnrollmentService,
+    TransportScheduleService,
+    TransportTripService,
+    TransportBoardingService,
+    TransportSafetyService,
+    TransportBillingService,
+    TransportTripGeneratorWorker,
   ],
-  exports: [VehicleService, RouteService, StopService, RouteAssignmentService, StudentTransportAssignmentService],
+  exports: [
+    TransportConfigService,
+    TransportFleetService,
+    TransportCrewService,
+    TransportEnrollmentService,
+    TransportScheduleService,
+    TransportTripService,
+    TransportBoardingService,
+    TransportSafetyService,
+    TransportBillingService,
+  ],
 })
 export class TransportModule {}

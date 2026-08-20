@@ -10,6 +10,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsArray,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -215,6 +216,11 @@ export class UpdateMealPlanDto {
   @IsOptional() @IsString() mealProgramId?: string;
   @IsOptional() @IsIn(['term_plan', 'wallet', 'included']) billingModel?: string;
   @IsOptional() @IsIn(['school_funded', 'parent_funded', 'parent_contribution', 'mixed']) fundingModel?: string;
+  /// Opt-in: serving a student on this plan decrements the inventory products
+  /// behind each menu dish and records per-student consumption.
+  @IsOptional() @IsBoolean() trackInventory?: boolean;
+  /// Replace the menus linked to this plan (MealMenu.mealPlanId). Empty array unlinks all.
+  @IsOptional() @IsArray() @IsString({ each: true }) mealMenuIds?: string[];
 }
 
 export class MealTopUpDto {

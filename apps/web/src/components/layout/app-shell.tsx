@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { HeaderComms } from './header-comms';
 import {
   LayoutDashboard,
   Building2,
@@ -14,6 +15,7 @@ import {
   Clock,
   Scale,
   Settings as SettingsIcon,
+  Settings2,
   LogOut,
   Menu,
   ShoppingCart,
@@ -21,6 +23,9 @@ import {
   FilePlus2,
   Coffee,
   Tag,
+  AlertTriangle,
+  Ticket,
+  BadgeDollarSign,
   BarChart3,
   UserCog,
   Shield,
@@ -32,9 +37,11 @@ import {
   BookOpen,
   GraduationCap,
   BookText,
+  Bus,
   ScrollText,
   Smartphone,
   MapPin,
+  School,
   SlidersHorizontal,
   Layers,
   Link2,
@@ -54,21 +61,21 @@ import {
   Wallet,
   Percent,
   Lock,
-  Factory,
   Handshake,
   Wrench,
   Timer,
-  Wine,
-  KeyRound,
   Calculator,
-  Boxes,
-  MessagesSquare,
-  Radio,
-  Zap,
   CalendarClock,
   ChevronDown,
   FileQuestion,
   FileBadge,
+  FileSignature,
+  UserPlus,
+  Award,
+  Eye,
+  PiggyBank,
+  UserCircle,
+  DoorOpen,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -140,6 +147,8 @@ interface NavItem {
   icon: typeof LayoutDashboard;
   permission?: string;
   badge?: string;
+  /** Optional sub-grouping label rendered as a sub-header above the item (expanded mode only). */
+  group?: string;
   /** Per-item feature gate, resolved the same way as section flags. */
   flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL';
 }
@@ -162,31 +171,13 @@ const flagEnabled = (flag?: string): boolean =>
 
 const NAV_SECTIONS: NavSection[] = [
   { items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }] },
+  // ===== School & Academic =====
   {
-    title: 'Communication',
-    icon: MessagesSquare,
-    flag: 'VITE_ENABLE_COMMUNICATION',
-    items: [
-      { to: '/communication', label: 'Inbox', icon: MessagesSquare, permission: PERMISSIONS.communication.conversationRead },
-      { to: '/communication/channels', label: 'Channels', icon: Radio, permission: PERMISSIONS.communication.channelRead },
-      { to: '/communication/rules', label: 'Automation', icon: Zap, permission: PERMISSIONS.communication.channelManage },
-    ],
-  },
-  {
-    title: 'Invoices',
-    icon: ShoppingCart,
-    items: [
-      { to: '/invoices', label: 'Sales/Invoices', icon: Receipt, permission: PERMISSIONS.invoice.read },
-      { to: '/orders', label: 'Orders', icon: ClipboardList },
-      { to: '/credit-notes', label: 'Credit Notes', icon: FileMinus, permission: PERMISSIONS.creditNote.read },
-      { to: '/payments', label: 'Receipts', icon: HandCoins, permission: PERMISSIONS.payment.read },
-      { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock, permission: PERMISSIONS.report.ar },
-    ],
-  },
-  {
-    title: 'CRM',
+    title: 'Front Desk & CRM',
     icon: Users,
     items: [
+      { to: '/school/front-desk', label: 'Front Desk', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
     ],
@@ -204,19 +195,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Document Management',
-    icon: FileText,
-    flag: 'VITE_ENABLE_SCHOOL',
-    items: [
-      { to: '/school/documents', label: 'Documents', icon: FileText, permission: PERMISSIONS.school.read },
-    ],
-  },
-  {
     title: 'Admissions & Enrollment',
     icon: FilePlus2,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/admissions', label: 'Admissions', icon: FilePlus2, permission: PERMISSIONS.school.read },
+      { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
     ],
   },
   {
@@ -233,7 +217,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/calendar', label: 'Calendar & Holidays', icon: CalendarDays, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/policies', label: 'School Policies', icon: FileText, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/custom-fields', label: 'Custom Fields', icon: Hash, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
@@ -245,7 +228,9 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+      { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.enterGrades },
+      { to: '/school/report-card-settings', label: 'Report Card Settings', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams },
+      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/assessment-ops', label: 'Rosters & Assignments', icon: ClipboardList, permission: PERMISSIONS.school.read },
       { to: '/school/results', label: 'Result Spine', icon: ScrollText, permission: PERMISSIONS.school.read },
       { to: '/school/grading-scales', label: 'Grading Scales', icon: SlidersHorizontal, permission: PERMISSIONS.school.read },
@@ -257,15 +242,28 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Attendance Management',
+    title: 'Attendances',
     icon: ClipboardCheck,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.takeAttendance },
+      { to: '/school/attendance/report', label: 'Attendance Report', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/attendance/statuses', label: 'Statuses', icon: Settings2 },
     ],
   },
   {
-    title: 'School Meals / Cafeteria',
+    title: 'Timetable & Calendar',
+    icon: CalendarClock,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
+      { to: '/school/timetable/calendar', label: 'Calendar', icon: CalendarDays, permission: PERMISSIONS.school.read },
+      { to: '/school/timetable/events', label: 'Events', icon: CalendarHeart, permission: PERMISSIONS.school.read },
+      { to: '/school/timetable/trips', label: 'Trips & Field Activities', icon: MapPin, group: 'Activities & Extracurriculars', permission: PERMISSIONS.school.read },
+    ],
+  },
+  {
+    title: 'Meals & Cafeteria',
     icon: Coffee,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
@@ -277,85 +275,23 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Timetable Management',
-    icon: CalendarClock,
+    title: 'Transport Management',
+    icon: Bus,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
+      { to: '/school/transport', label: 'Transport Management', icon: Bus, permission: PERMISSIONS.school.transportRead },
+      { to: '/school/transport?tab=vehicles', label: 'Vehicles', icon: Bus, permission: PERMISSIONS.school.manageFleet },
+      { to: '/school/transport?tab=routes', label: 'Routes', icon: MapPin, permission: PERMISSIONS.school.manageTransport },
+      { to: '/school/transport?tab=stops', label: 'Stops', icon: MapPin, permission: PERMISSIONS.school.manageTransport },
+      { to: '/school/transport?tab=students', label: 'Student Assignments', icon: Users, permission: PERMISSIONS.school.transportEnrollment },
     ],
   },
   {
-    title: 'Fees & School Finance',
-    icon: Receipt,
-    flag: 'VITE_ENABLE_SCHOOL',
-    items: [
-      { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
-    ],
-  },
-  {
-    title: 'Human Resources',
+    title: 'Human Resource & Payroll',
     icon: Users,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/staff', label: 'Staff', icon: Users, permission: PERMISSIONS.school.read },
-    ],
-  },
-  {
-    title: 'Inventory',
-    icon: Package,
-    items: [
-      { to: '/inventory', label: 'Stock Levels', icon: Package, permission: 'inventory:read' },
-      { to: '/inventory/ledger', label: 'Stock Ledger', icon: ScrollText, permission: 'inventory:read' },
-      { to: '/inventory/count', label: 'Stock Count', icon: ClipboardList, permission: 'inventory_count:read' },
-      { to: '/inventory/adjustments', label: 'Stock Adjustments', icon: Scale, permission: 'inventory:move' },
-      { to: '/inventory/transfers', label: 'Stock Transfers', icon: Truck, permission: 'inventory:move' },
-      { to: '/inventory/locations', label: 'Locations', icon: MapPin, permission: PERMISSIONS.inventoryLocation.read },
-      { to: '/products', label: 'Products', icon: Package },
-      { to: '/uom', label: 'Units of Measure', icon: Ruler },
-    ],
-  },
-  {
-    title: 'Beverage Control',
-    icon: Wine,
-    flag: 'VITE_ENABLE_BEVERAGE',
-    items: [
-      { to: '/beverage', label: 'Alcohol Dashboard', icon: BarChart3, permission: PERMISSIONS.beverage.read },
-      { to: '/beverage/count', label: 'Bottle Count', icon: Scale, permission: PERMISSIONS.beverage.count },
-    ],
-  },
-  {
-    title: 'Rentals',
-    icon: KeyRound,
-    flag: 'VITE_ENABLE_RENTAL',
-    items: [
-      { to: '/rental', label: 'Dashboard', icon: CalendarDays, permission: PERMISSIONS.rental.read },
-      { to: '/rental/agreements', label: 'Agreements', icon: FileText, permission: PERMISSIONS.rental.read },
-      { to: '/rental/units', label: 'Rental Units', icon: Boxes, permission: PERMISSIONS.rental.read },
-      { to: '/rental/catalog', label: 'Rates & Packages', icon: Package, permission: PERMISSIONS.rental.read },
-      { to: '/rental/returns', label: 'Returns', icon: ClipboardCheck, permission: PERMISSIONS.rental.read },
-      { to: '/rental/reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.rental.read },
-    ],
-  },
-  {
-    title: 'Repair & Maintenance',
-    icon: Wrench,
-    flag: 'VITE_ENABLE_REPAIR',
-    items: [
-      { to: '/repair', label: 'Dashboard', icon: Wrench, permission: PERMISSIONS.repair.read },
-      { to: '/repair/orders', label: 'Repair Orders', icon: FileText, permission: PERMISSIONS.repair.read },
-      { to: '/repair/jobs', label: 'Work Orders', icon: ClipboardCheck, permission: PERMISSIONS.repair.read },
-      { to: '/repair/technicians', label: 'Technicians', icon: Users, permission: PERMISSIONS.repair.read },
-      { to: '/repair/labour', label: 'Labour Catalog', icon: Timer, permission: PERMISSIONS.repair.read },
-      { to: '/repair/warranties', label: 'Warranties', icon: ShieldCheck, permission: PERMISSIONS.repair.read },
-      { to: '/repair/contracts', label: 'Service Contracts', icon: Handshake, permission: PERMISSIONS.repair.read },
-      { to: '/repair/reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.repair.read },
-    ],
-  },
-  {
-    title: 'Human Resource',
-    icon: Briefcase,
-    flag: 'VITE_ENABLE_HR',
-    items: [
       { to: '/hr', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.hr.read },
       { to: '/hr/employees', label: 'Employees', icon: Users, permission: PERMISSIONS.hr.employee },
       { to: '/hr/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.hr.employee },
@@ -370,6 +306,54 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/hr/advances-loans', label: 'Advances & Loans', icon: HandCoins, permission: PERMISSIONS.hr.payroll },
       { to: '/hr/payroll/settings', label: 'Payroll Settings', icon: SettingsIcon, permission: PERMISSIONS.hr.payroll },
       { to: '/hr/reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.hr.report },
+      { to: '/hr/job-grades', label: 'Job Grades & Salary Structures', icon: GraduationCap, permission: PERMISSIONS.hr.grade },
+      { to: '/hr/contracts', label: 'Contracts', icon: FileSignature, permission: PERMISSIONS.hr.contract },
+      { to: '/hr/recruitment', label: 'Recruitment', icon: UserPlus, permission: PERMISSIONS.hr.recruitment },
+      { to: '/hr/qualifications', label: 'Qualifications & Certifications', icon: Award, permission: PERMISSIONS.hr.qualification },
+      { to: '/hr/training', label: 'Training & CPD', icon: BookOpen, permission: PERMISSIONS.hr.training },
+      { to: '/hr/offboarding', label: 'Offboarding & Settlement', icon: LogOut, permission: PERMISSIONS.hr.offboarding },
+      { to: '/hr/payroll/preview', label: 'Payroll Preview', icon: Eye, permission: PERMISSIONS.hr.payroll },
+      { to: '/hr/my', label: 'My HR', icon: UserCircle, permission: PERMISSIONS.hr.read },
+    ],
+  },
+  {
+    title: 'Document Management',
+    icon: FileText,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/documents', label: 'Documents', icon: FileText, permission: PERMISSIONS.school.read },
+      { to: '/school/library', label: 'Library', icon: BookOpen, permission: PERMISSIONS.school.manageLibrary },
+    ],
+  },
+  // ===== Finance & Accounting =====
+  {
+    title: 'Fees & School Finance',
+    icon: Receipt,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/collect', label: 'Collect', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/waiver-categories', label: 'Waiver Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/waivers', label: 'Fee Waivers', icon: Ticket, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/defaulters', label: 'Fee Defaulters', icon: AlertTriangle, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/bad-debtors', label: 'Bad Debtors', icon: BadgeDollarSign, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/budgeting', label: 'Budgeting', icon: PiggyBank, permission: PERMISSIONS.school.manageFees },
+      { to: '/pos/cash-registers', label: 'Cash Register', icon: Banknote },
+      { to: '/payments', label: 'Receipts', icon: HandCoins },
+      { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock },
+      { to: '/supplier-payments', label: 'Supplier Payments', icon: Banknote },
+      { to: '/accounts/cash-accounts', label: 'Accounts', icon: Wallet },
+    ],
+  },
+  {
+    title: 'Revenue',
+    icon: ShoppingCart,
+    items: [
+      { to: '/invoices', label: 'Sales/Invoices', icon: Receipt, permission: PERMISSIONS.invoice.read },
+      { to: '/orders', label: 'Orders', icon: ClipboardList },
+      { to: '/credit-notes', label: 'Credit Notes', icon: FileMinus, permission: PERMISSIONS.creditNote.read },
+      { to: '/payments', label: 'Receipts', icon: HandCoins, permission: PERMISSIONS.payment.read },
+      { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock, permission: PERMISSIONS.report.ar },
     ],
   },
   {
@@ -392,24 +376,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/expenses/categories', label: 'Expense Categories', icon: Tag, permission: PERMISSIONS.expense.read },
       { to: '/expenses/reports', label: 'Expense Reports', icon: BarChart3, permission: PERMISSIONS.expense.read },
       { to: '/supplier-payments', label: 'Supplier Payments', icon: Banknote, permission: PERMISSIONS.payment.read },
-    ],
-  },
-  {
-    title: 'Cash Flow',
-    icon: HandCoins,
-    items: [
-      { to: '/pos/cash-registers', label: 'Cash Register', icon: Banknote },
-      { to: '/payments', label: 'Receipts', icon: HandCoins },
-      { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock },
-      { to: '/supplier-payments', label: 'Supplier Payments', icon: Banknote },
-      { to: '/accounts/cash-accounts', label: 'Accounts', icon: Wallet },
-    ],
-  },
-  {
-    title: 'Task Management',
-    icon: ClipboardList,
-    items: [
-      { to: '/tasks', label: 'Task Board', icon: ClipboardList },
     ],
   },
   {
@@ -442,6 +408,36 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/reports', label: 'Report Center', icon: BarChart3, permission: PERMISSIONS.report.accounting },
     ],
   },
+  // ===== Supplementary / Assets / Equipment / Settings =====
+  {
+    title: 'Inventory',
+    icon: Package,
+    items: [
+      { to: '/inventory', label: 'Stock Levels', icon: Package, permission: 'inventory:read' },
+      { to: '/inventory/ledger', label: 'Stock Ledger', icon: ScrollText, permission: 'inventory:read' },
+      { to: '/inventory/count', label: 'Stock Count', icon: ClipboardList, permission: 'inventory_count:read' },
+      { to: '/inventory/adjustments', label: 'Stock Adjustments', icon: Scale, permission: 'inventory:move' },
+      { to: '/inventory/transfers', label: 'Stock Transfers', icon: Truck, permission: 'inventory:move' },
+      { to: '/inventory/locations', label: 'Locations', icon: MapPin, permission: PERMISSIONS.inventoryLocation.read },
+      { to: '/products', label: 'Products', icon: Package },
+      { to: '/uom', label: 'Units of Measure', icon: Ruler },
+    ],
+  },
+  {
+    title: 'Repair & Maintenance',
+    icon: Wrench,
+    flag: 'VITE_ENABLE_REPAIR',
+    items: [
+      { to: '/repair', label: 'Dashboard', icon: Wrench, permission: PERMISSIONS.repair.read },
+      { to: '/repair/orders', label: 'Repair Orders', icon: FileText, permission: PERMISSIONS.repair.read },
+      { to: '/repair/jobs', label: 'Work Orders', icon: ClipboardCheck, permission: PERMISSIONS.repair.read },
+      { to: '/repair/technicians', label: 'Technicians', icon: Users, permission: PERMISSIONS.repair.read },
+      { to: '/repair/labour', label: 'Labour Catalog', icon: Timer, permission: PERMISSIONS.repair.read },
+      { to: '/repair/warranties', label: 'Warranties', icon: ShieldCheck, permission: PERMISSIONS.repair.read },
+      { to: '/repair/contracts', label: 'Service Contracts', icon: Handshake, permission: PERMISSIONS.repair.read },
+      { to: '/repair/reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.repair.read },
+    ],
+  },
   {
     title: 'Fixed Assets',
     icon: Landmark,
@@ -452,27 +448,12 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Manufacturing/Bakery',
-    icon: Factory,
+    title: 'Task Management',
+    icon: ClipboardList,
     items: [
-      { to: '/manufacturing', label: 'Production', icon: Factory },
-      { to: '/manufacturing/orders', label: 'Orders', icon: ClipboardList },
-      { to: '/manufacturing/boms', label: 'Recipes (BOM)', icon: ScrollText },
-      { to: '/manufacturing/planning', label: 'Planning', icon: CalendarDays },
-      { to: '/manufacturing/resources', label: 'Work Centres', icon: Boxes },
-      { to: '/manufacturing/reports', label: 'Reports', icon: BarChart3 },
+      { to: '/tasks', label: 'Task Board', icon: ClipboardList },
     ],
   },
-  // {
-  //   title: 'Platform',
-  //   items: [
-  //     { to: '/approvals', label: 'Approvals', icon: ShieldCheck, permission: PERMISSIONS.auditLog.read },
-  //     { to: '/recurring', label: 'Recurring', icon: Repeat },
-  //     { to: '/webhooks', label: 'Webhooks', icon: Webhook },
-  //     { to: '/files', label: 'Files', icon: Boxes },
-  //     { to: '/modules', label: 'Modules', icon: Building2 },
-  //   ],
-  // },
   {
     title: 'Settings',
     icon: SettingsIcon,
@@ -643,14 +624,17 @@ export function AppShell() {
                       (i) => flagEnabled(i.flag) && (!i.permission || hasPermission(i.permission)),
                     );
           if (items.length === 0) return null;
-          const isOpen = !section.title || expanded[section.title];
+          // In collapsed (icon-rail) mode the accordion is hidden, so always
+          // show the items regardless of accordion open-state — otherwise every
+          // titled section's icons would vanish when the sidebar collapses.
+          const isOpen = collapsed || !section.title || expanded[section.title];
           return (
             <div key={idx} className="space-y-0">
               {section.title && !collapsed ? (
                 <button
                   type="button"
                   onClick={() => toggleSection(section.title as string)}
-                  className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-[15px] font-bold uppercase tracking-[0.04em] transition-colors hover:bg-white/10"
+                  className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-[13px] font-semibold uppercase tracking-[0.03em] transition-colors hover:bg-white/10"
                   style={{ color: sb.sidebarActive, borderBottom: `1px solid ${sb.sidebarBorder}`, marginBottom: 2 }}
                   aria-expanded={isOpen}
                 >
@@ -668,11 +652,22 @@ export function AppShell() {
                 />
               ) : null}
               {isOpen &&
-                items.map((item) => {
+                items.map((item, itemIdx) => {
                 const Icon = item.icon;
+                // Sub-group sub-header: show once when the group label changes (expanded mode).
+                const prev = items[itemIdx - 1];
+                const showGroup = !collapsed && item.group && item.group !== prev?.group;
                 return (
+                  <Fragment key={item.to}>
+                    {showGroup && (
+                      <div
+                        className="px-3 pt-2 pb-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]"
+                        style={{ color: sb.sidebarMuted }}
+                      >
+                        {item.group}
+                      </div>
+                    )}
                   <NavLink
-                    key={item.to}
                     to={item.to}
                     end={item.to === '/'}
                     onClick={onItemClick}
@@ -720,8 +715,9 @@ export function AppShell() {
                       </>
                     )}
                   </NavLink>
+                  </Fragment>
                 );
-              })}
+                })}
             </div>
           );
         })}
@@ -748,7 +744,7 @@ export function AppShell() {
               border: '1px solid rgba(255,255,255,0.22)',
             }}
           >
-            <Coffee style={{ width: 18, height: 18, color: '#fff' }} />
+            <School style={{ width: 18, height: 18, color: '#fff' }} />
           </div>
           {!collapsed && (
             <div className="ml-1 flex flex-1 flex-col leading-none">
@@ -765,7 +761,7 @@ export function AppShell() {
                   marginTop: 2,
                 }}
               >
-                Point of Sale
+                School Management
               </span>
             </div>
           )}
@@ -791,7 +787,7 @@ export function AppShell() {
       <aside
         className={cn(
           'sticky top-0 hidden h-screen shrink-0 flex-col transition-all duration-200 md:flex print:hidden',
-          sidebarCollapsed ? 'w-20' : 'w-80',
+          sidebarCollapsed ? 'w-20' : 'w-64',
         )}
         style={{ background: sb.sidebar }}
       >
@@ -802,7 +798,7 @@ export function AppShell() {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-80 flex-col shadow-xl">
+          <aside className="absolute inset-y-0 left-0 flex w-64 flex-col shadow-xl">
             {sidebarInner(false)}
           </aside>
         </div>
@@ -836,6 +832,7 @@ export function AppShell() {
             </div>
             <div className="flex items-center gap-1 sm:gap-2">
               <ThemePicker />
+              <HeaderComms />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button

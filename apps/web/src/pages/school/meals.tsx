@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, UtensilsCrossed, ClipboardCheck, CalendarDays, Play, HandCoins, ChefHat, BarChart3, CreditCard } from 'lucide-react';
 import {
   useMealPrograms,
@@ -7,6 +7,7 @@ import {
   useCreateMealType,
   useMealPlans,
   useCreateMealPlan,
+  useUpdateMealPlan,
   useMealEntitlements,
   useSetEntitlements,
   useTerms,
@@ -16,6 +17,7 @@ import {
   useChangeAssignment,
   useTodaysMeals,
   useOpenMealSession,
+  useMealSessions,
   useMealRoster,
   useMarkMealAttendance,
   useMealMenus,
@@ -31,8 +33,12 @@ import {
   useProductionPlans,
   usePlanProduction,
   useIssueProduction,
+  useMealConsumption,
+  useRecordConsumption,
   type MealAttendanceStatus,
+  type MealConsumptionRow,
 } from '@/features/school/api';
+import { useMenuItems, useMenuCategories, type MenuCategory, type MenuItem } from '@/features/menu/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +68,7 @@ export function SchoolMealsPage() {
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="menus">Menus</TabsTrigger>
           <TabsTrigger value="kitchen">Kitchen</TabsTrigger>
+          <TabsTrigger value="consumption">Consumption</TabsTrigger>
           <TabsTrigger value="finance">Finance</TabsTrigger>
           <TabsTrigger value="pos">Cafeteria POS</TabsTrigger>
           <TabsTrigger value="reports">Reports</TabsTrigger>
@@ -72,6 +79,7 @@ export function SchoolMealsPage() {
         <TabsContent value="attendance" className="pt-4"><AttendanceTab /></TabsContent>
         <TabsContent value="menus" className="pt-4"><MenusTab /></TabsContent>
         <TabsContent value="kitchen" className="pt-4"><KitchenTab /></TabsContent>
+        <TabsContent value="consumption" className="pt-4"><ConsumptionTab /></TabsContent>
         <TabsContent value="finance" className="pt-4"><FinanceTab /></TabsContent>
         <TabsContent value="pos" className="pt-4"><POSTab /></TabsContent>
         <TabsContent value="reports" className="pt-4"><ReportsTab /></TabsContent>
@@ -224,14 +232,20 @@ function MealTypesCard() {
 function PlansCard() {
   const { data } = useMealPlans();
   const create = useCreateMealPlan();
+  const updatePlan = useUpdateMealPlan();
   const types = useMealTypes();
   const setEnt = useSetEntitlements();
+  const catalog = useSchoolMenuCatalog();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [billingModel, setBillingModel] = useState('term_plan');
   const [selectedPlan, setSelectedPlan] = useState('');
   const ent = useMealEntitlements(selectedPlan || undefined);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // Editor state for the selected plan.
+  const plan = data?.data.find((p) => p.id === selectedPlan);
+  const [trackInventory, setTrackInventory] = useState(false);
+  const [menuPicked, setMenuPicked] = useState<Record<string, boolean>>({});
 
   const add = async () => {
     if (!name || !price) return;
@@ -247,11 +261,30 @@ function PlansCard() {
   const pickPlan = (id: string) => {
     setSelectedPlan(id);
     setChecked({});
+    setTrackInventory(false);
+    setMenuPicked({});
   };
-  // seed checkboxes from loaded entitlements
+  // seed checkboxes + editor from loaded plan
   useEffect(() => {
     if (ent.data) setChecked(Object.fromEntries(ent.data.map((e) => [e.mealTypeId, true])));
-  }, [ent.data]);
+    if (plan) {
+      setTrackInventory(!!plan.trackInventory);
+      const linked = new Set((plan.menus ?? []).map((m) => m.id));
+      setMenuPicked(Object.fromEntries([...linked].map((id) => [id, true])));
+    }
+  }, [ent.data, plan]);
+
+  const savePlan = async () => {
+    if (!selectedPlan) return;
+    try {
+      await updatePlan.mutateAsync({
+        id: selectedPlan,
+        trackInventory,
+        mealMenuIds: Object.entries(menuPicked).filter(([, v]) => v).map(([k]) => k),
+      });
+      notify.success('Plan updated');
+    } catch { notify.error('Failed to update plan'); }
+  };
 
   return (
     <Card>
@@ -272,24 +305,69 @@ function PlansCard() {
         <div className="space-y-1">
           <Label>Plan</Label>
           <select className={sel} value={selectedPlan} onChange={(e) => pickPlan(e.target.value)}>
-            <option value="">Select a plan to set entitlements…</option>
+            <option value="">Select a plan to configure…</option>
             {data?.data.map((p) => <option key={p.id} value={p.id}>{p.name} · {money(p.pricePerTerm)}</option>)}
           </select>
         </div>
         {selectedPlan && (
-          <div className="space-y-2 rounded border p-2">
-            <p className="text-xs text-muted-foreground">Meals included in this plan:</p>
-            {types.data?.data.map((t) => (
-              <label key={t.id} className="flex items-center gap-2 text-sm">
+          <div className="space-y-3 rounded border p-2">
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">Meals included in this plan:</p>
+              {types.data?.data.map((t) => (
+                <label key={t.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!checked[t.id]}
+                    onChange={(e) => setChecked((c) => ({ ...c, [t.id]: e.target.checked }))}
+                  />
+                  {t.name}
+                </label>
+              ))}
+              <Button size="sm" variant="outline" className="mt-1 w-full" onClick={saveEntitlements}>Save entitlements</Button>
+            </div>
+
+            <div className="border-t pt-2">
+              <label className="flex items-center gap-2 text-sm font-medium">
                 <input
                   type="checkbox"
-                  checked={!!checked[t.id]}
-                  onChange={(e) => setChecked((c) => ({ ...c, [t.id]: e.target.checked }))}
+                  checked={trackInventory}
+                  onChange={(e) => setTrackInventory(e.target.checked)}
                 />
-                {t.name}
+                Track inventory on serve
               </label>
-            ))}
-            <Button size="sm" variant="outline" className="w-full" onClick={saveEntitlements}>Save entitlements</Button>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                When a student is marked served, decrement the menu dish ingredients from stock and record per-student consumption.
+              </p>
+            </div>
+
+            <div className="border-t pt-2">
+              <p className="mb-1 text-xs text-muted-foreground">Menus included in this plan (pick from the school food catalog):</p>
+              {catalog.isLoading && <p className="text-sm text-muted-foreground">Loading school menu…</p>}
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded border p-2">
+                {catalog.data?.map((cat) => (
+                  <div key={cat.categoryId ?? '__u'}>
+                    <p className="text-xs font-medium uppercase text-muted-foreground">{cat.categoryName}</p>
+                    <div className="space-y-1">
+                      {cat.items.map((it) => (
+                        <label key={it.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted">
+                          <input
+                            type="checkbox"
+                            checked={!!menuPicked[it.id]}
+                            onChange={(e) => setMenuPicked((p) => ({ ...p, [it.id]: e.target.checked }))}
+                          />
+                          <span className="flex-1">{it.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {catalog.data && catalog.data.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No school menu items yet — add them on the Menus tab first.</p>
+                )}
+              </div>
+            </div>
+
+            <Button size="sm" className="w-full" onClick={savePlan}>Save plan (inventory + menus)</Button>
           </div>
         )}
       </CardContent>
@@ -473,9 +551,24 @@ function MenusTab() {
   const [date, setDate] = useState(today());
   const [title, setTitle] = useState('');
 
-  const catalog = useSchoolMenuCatalog();
+  // Real menu items from /menu (same source as the Menu page list).
+  const catalog = useMenuItems({ page: 1, pageSize: 200, search: '' });
+  const cats = useMenuCategories();
   const buildFromPos = useBuildMenuFromPos();
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+
+  // Group the menu items by category, exactly like the Menu page list.
+  const liveCats = (cats.data ?? []).filter((c: MenuCategory) => !c.deletedAt);
+  const items = catalog.data?.data ?? [];
+  const grouped = useMemo(() => {
+    const byCat = new Map<string | null, MenuItem[]>();
+    for (const it of items) {
+      const key = it.categoryId;
+      if (!byCat.has(key)) byCat.set(key, []);
+      byCat.get(key)!.push(it);
+    }
+    return byCat;
+  }, [items]);
 
   const buildFromPosMenu = async () => {
     if (!mealTypeId) { notify.error('Pick a meal type'); return; }
@@ -488,7 +581,7 @@ function MenusTab() {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader><CardTitle className="text-base">Build menu from school food</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Build menu from school menu</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-1">
             <Label>Meal type</Label>
@@ -502,30 +595,55 @@ function MenusTab() {
             <div className="flex-1"><Label>Title</Label><Input placeholder="e.g. Monday Lunch" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
           </div>
           <div className="space-y-2">
-            <Label>Pick dishes from the school menu (Ugandan local food &amp; fruits)</Label>
-            {catalog.isLoading && <p className="text-sm text-muted-foreground">Loading school menu…</p>}
+            <Label>Pick dishes from the menu list</Label>
+            {catalog.isLoading && <p className="text-sm text-muted-foreground">Loading menu…</p>}
             <div className="max-h-64 space-y-3 overflow-y-auto rounded border p-2">
-              {catalog.data?.map((cat) => (
-                <div key={cat.categoryId ?? '__u'}>
-                  <p className="text-xs font-medium uppercase text-muted-foreground">{cat.categoryName}</p>
+              {liveCats.map((cat) => {
+                const its = grouped.get(cat.id) ?? [];
+                if (its.length === 0) return null;
+                return (
+                  <div key={cat.id}>
+                    <p className="text-xs font-medium uppercase text-muted-foreground">{cat.name}</p>
+                    <div className="space-y-1">
+                      {its.map((it) => (
+                        <label key={it.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted">
+                          <input
+                            type="checkbox"
+                            checked={!!picked[it.id]}
+                            onChange={(e) => setPicked((p) => ({ ...p, [it.id]: e.target.checked }))}
+                          />
+                          <span className="flex-1">{it.name}</span>
+                          <span className="text-xs text-muted-foreground">{it.basePrice ? money(it.basePrice) : ''}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {grouped.get(null)?.length ? (
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Uncategorized</p>
                   <div className="space-y-1">
-                    {cat.items.map((it) => (
+                    {grouped.get(null)!.map((it) => (
                       <label key={it.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted">
-                        <input type="checkbox" checked={!!picked[it.id]} onChange={(e) => setPicked((p) => ({ ...p, [it.id]: e.target.checked }))} />
+                        <input
+                          type="checkbox"
+                          checked={!!picked[it.id]}
+                          onChange={(e) => setPicked((p) => ({ ...p, [it.id]: e.target.checked }))}
+                        />
                         <span className="flex-1">{it.name}</span>
-                        {it.basePrice != null && <span className="text-muted-foreground">{money(it.basePrice)}</span>}
                       </label>
                     ))}
                   </div>
                 </div>
-              ))}
-              {catalog.data && catalog.data.length === 0 && (
-                <p className="text-sm text-muted-foreground">No school menu items yet.</p>
+              ) : null}
+              {catalog.data && items.length === 0 && (
+                <p className="text-sm text-muted-foreground">No menu items yet — add them on the Menu page first.</p>
               )}
             </div>
           </div>
           <Button className="w-full" onClick={buildFromPosMenu}>
-            <CalendarDays className="mr-1 h-4 w-4" /> Build menu from school food
+            <CalendarDays className="mr-1 h-4 w-4" /> Build menu from selected dishes
           </Button>
         </CardContent>
       </Card>
@@ -551,6 +669,91 @@ function MenusTab() {
           </ul>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/* ─────────────── Consumption (per-student / per-lunch) ─────────────── */
+
+function ConsumptionTab() {
+  const [date, setDate] = useState(today());
+  const sessions = useMealSessions(date, date);
+  const [sessionId, setSessionId] = useState('');
+  const record = useRecordConsumption();
+  const rows = useMealConsumption(sessionId ? { mealSessionId: sessionId } : {});
+
+  // Aggregate per-student consumption for the selected session.
+  const byStudent = useMemo(() => {
+    const map = new Map<string, { name?: string | null; items: MealConsumptionRow[] }>();
+    for (const r of rows.data ?? []) {
+      const key = r.studentProfileId ?? 'unknown';
+      if (!map.has(key)) map.set(key, { name: r.studentProfile?.partner?.name ?? null, items: [] });
+      map.get(key)!.items.push(r);
+    }
+    return [...map.entries()];
+  }, [rows.data]);
+
+  const recordFor = async (studentProfileId: string, mealMenuId?: string) => {
+    if (!sessionId) { notify.error('Pick a session first'); return; }
+    try { await record.mutateAsync({ mealSessionId: sessionId, studentProfileId, mealMenuId }); notify.success('Consumption recorded'); }
+    catch { notify.error('Record failed'); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Per-lunch consumption</CardTitle></CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div><Label>Date</Label><Input type="date" value={date} onChange={(e) => { setDate(e.target.value); setSessionId(''); }} className="w-44" /></div>
+          <div className="min-w-48">
+            <Label>Session</Label>
+            <select className={sel} value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
+              <option value="">Select…</option>
+              {sessions.data?.map((s: any) => (
+                <option key={s.id} value={s.id}>{s.mealType?.name} · {s.date?.slice(0, 10)} · {s.servedCount ?? 0} served</option>
+              ))}
+            </select>
+          </div>
+          {sessions.isLoading && <span className="text-sm text-muted-foreground">Loading sessions…</span>}
+          {sessions.data && sessions.data.length === 0 && <span className="text-sm text-muted-foreground">No sessions for this date.</span>}
+        </CardContent>
+      </Card>
+
+      {sessionId && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Students served (per-lunch)</CardTitle></CardHeader>
+          <CardContent>
+            {rows.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : byStudent.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No consumption recorded yet for this session. Mark a student served (Attendance tab) or use “Record” to log their lunch against inventory.</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {byStudent.map(([sid, info]: [string, { name?: string | null; items: MealConsumptionRow[] }]) => (
+                  <li key={sid} className="rounded border p-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{info.name ?? sid}</span>
+                      <button
+                        className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground"
+                        onClick={() => recordFor(sid)}
+                        disabled={record.isPending}
+                      >Record / re-log</button>
+                    </div>
+                    <ul className="mt-1 space-y-0.5 pl-2 text-xs text-muted-foreground">
+                      {info.items.map((it: MealConsumptionRow) => (
+                        <li key={it.id} className="flex justify-between">
+                          <span>{it.product?.name ?? it.productId}</span>
+                          <span>{it.quantity} {it.unitCost ? `· ${money(it.unitCost)}/u` : ''}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

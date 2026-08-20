@@ -8,9 +8,10 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
+import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { EVENTS } from '@erp/shared';
 
-/** Enrollment lifecycle FSM: enroll → (transferred_out | withdrawn | completed). */
+/** Enrollment lifecycle FSM: enrolled → (transferred_out | withdrawn | completed). */
 const ENROLLMENT_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
   enrolled: ['transferred_out', 'withdrawn', 'completed'],
   transferred_out: ['enrolled'],
@@ -34,6 +35,37 @@ export class EndEnrollmentDto {
   endedAt?: Date | string;
 }
 
+export class GuardianInput {
+  guardianContactId!: string;
+  relationship!: string;
+  isPrimary?: boolean;
+  canPickup?: boolean;
+  receivesStatements?: boolean;
+}
+
+/** Canonical new-student enrollment (used by AdmissionsService.enrollApplication). */
+export class EnrollNewStudentInput {
+  organizationId!: string;
+  applicationId?: string | null;
+  name!: string;
+  email?: string | null;
+  phone?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  religion?: string | null;
+  house?: string | null;
+  residenceType?: string | null;
+  admissionNo?: string | null;
+  classId!: string;
+  sectionId?: string | null;
+  streamId?: string | null;
+  termId!: string;
+  rollNumber!: string;
+  guardians?: GuardianInput[];
+  customFields?: Record<string, unknown>;
+}
+
 @Injectable()
 export class EnrollmentService {
   constructor(
@@ -41,10 +73,123 @@ export class EnrollmentService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
+    private readonly sequence: SequenceService,
   ) {}
 
-  /** Enroll a student into a class/section/stream for a term. One active enrollment per student+term. */
-  async enroll(dto: EnrollStudentDto): Promise<Enrollment> {
+  /**
+   * Canonical new-student enrollment engine. Creates Partner + StudentProfile +
+   * Enrollment + optional guardians + StudentStatusHistory atomically, then links
+   * the application and returns the entities. Idempotent per (applicationId, termId).
+   */
+  async enrollNewStudent(input: EnrollNewStudentInput): Promise<{ partner: any; profile: any; enrollment: Enrollment }> {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const organizationId = input.organizationId;
+
+      // Idempotency: one active enrollment per application + term.
+      if (input.applicationId) {
+        const prior = await tx.enrollment.findFirst({
+          where: { organizationId, applicationId: input.applicationId, termId: input.termId, status: 'enrolled' },
+        });
+        if (prior) {
+          const profile = await tx.studentProfile.findFirst({ where: { id: prior.studentProfileId } });
+          return { partner: null, profile, enrollment: prior };
+        }
+      }
+
+      const code = await this.sequence.next(`student:${new Date().getUTCFullYear()}`, { prefix: 'STU-', padding: 6 }, tx);
+      const partner = await tx.partner.create({
+        data: {
+          organizationId,
+          code,
+          name: input.name,
+          isCompany: false,
+          isCustomer: true,
+          email: input.email ?? null,
+          phone: input.phone ?? null,
+          customFields: {
+            dateOfBirth: input.dateOfBirth ?? null,
+            gender: input.gender ?? null,
+            nationality: input.nationality ?? null,
+            religion: input.religion ?? null,
+            house: input.house ?? null,
+          },
+        },
+      });
+      const profile = await tx.studentProfile.create({
+        data: {
+          organizationId,
+          partnerId: partner.id,
+          admissionNo: input.admissionNo ?? code,
+          currentClassId: input.classId,
+          currentSectionId: input.sectionId ?? null,
+          currentStreamId: input.streamId ?? null,
+          enrollmentDate: new Date(),
+          dateOfBirth: input.dateOfBirth ? new Date(input.dateOfBirth) : null,
+          gender: input.gender ?? null,
+          nationality: input.nationality ?? null,
+          religion: input.religion ?? null,
+          residenceType: input.residenceType ?? 'day',
+          house: input.house ?? null,
+          status: 'active',
+          customFields: input.customFields ?? {},
+        },
+      });
+      const enrollment = await tx.enrollment.create({
+        data: {
+          organizationId,
+          applicationId: input.applicationId ?? null,
+          studentProfileId: profile.id,
+          classId: input.classId,
+          sectionId: input.sectionId ?? null,
+          streamId: input.streamId ?? null,
+          termId: input.termId,
+          rollNumber: input.rollNumber,
+          status: 'enrolled',
+        },
+      });
+
+      // Student lifecycle history (gap: enrollment previously did not record it).
+      await tx.studentStatusHistory.create({
+        data: {
+          organizationId,
+          studentProfileId: profile.id,
+          fromStatus: 'applicant',
+          toStatus: 'active',
+          reason: 'Enrollment',
+          changedById: this.tenant.userId ?? null,
+        },
+      });
+
+      // Guardian linking inside the same transaction (atomic).
+      if (input.guardians?.length) {
+        for (const g of input.guardians) {
+          await tx.studentGuardian.create({
+            data: {
+              organizationId,
+              studentProfileId: profile.id,
+              guardianContactId: g.guardianContactId,
+              relationship: g.relationship,
+              isPrimary: g.isPrimary ?? false,
+              canPickup: g.canPickup ?? true,
+              receivesStatements: g.receivesStatements ?? true,
+            },
+          });
+        }
+      }
+
+      await tx.enrollmentHistory.create({
+        data: { organizationId, enrollmentId: enrollment.id, toStatus: 'enrolled', reason: 'Initial enrollment', changedById: this.tenant.userId ?? null },
+      });
+
+      await this.audit.recordInTx(tx, { entity: 'StudentProfile', entityId: profile.id, action: 'create', newValues: { partner, profile, enrollment } });
+      this.events.publish(EVENTS.SchoolStudentCreated, { organizationId, studentProfileId: profile.id, partnerId: partner.id, admissionNo: profile.admissionNo });
+      this.events.publish(EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: profile.id });
+      return { partner, profile, enrollment };
+    });
+  }
+
+  /** Enroll an existing student profile into a class/section/stream for a term. One active enrollment per student+term. */
+  async enrollExistingStudent(dto: EnrollStudentDto): Promise<Enrollment> {
     return this.prisma.client.$transaction(async (tx: any) => {
       const organizationId = this.tenant.organizationId;
 
@@ -101,6 +246,11 @@ export class EnrollmentService {
       this.events.publish(EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: dto.studentProfileId });
       return enrollment;
     });
+  }
+
+  /** @deprecated compatibility wrapper — delegates to enrollExistingStudent. Migrate callers. */
+  async enroll(dto: EnrollStudentDto): Promise<Enrollment> {
+    return this.enrollExistingStudent(dto);
   }
 
   /** End an enrollment with a reason (transfer / withdraw). Appends an immutable history row. */

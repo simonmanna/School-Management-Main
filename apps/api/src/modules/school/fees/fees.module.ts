@@ -26,6 +26,8 @@ import { AdvancedFinanceService } from './advanced.service';
 import { BillingController, SchoolPaymentController } from './billing.controller';
 import { AdvancedFinanceController } from './advanced.controller';
 import { PenaltyCronWorker } from './penalty-cron.worker';
+import { BudgetService } from './budget.service';
+import { BudgetController } from './budget.controller';
 
 /**
  * The Fees module depends on DocumentBuilderService + PostingService +
@@ -54,6 +56,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
     BillingController,
     SchoolPaymentController,
     AdvancedFinanceController,
+    BudgetController,
   ],
   providers: [
     FeeStructureService,
@@ -68,6 +71,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
     SchoolPaymentService,
     AdvancedFinanceService,
     PenaltyCronWorker,
+    BudgetService,
   ],
   exports: [
     FeeStructureService,

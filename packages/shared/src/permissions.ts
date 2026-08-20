@@ -376,6 +376,8 @@ export const PERMISSIONS = {
     issueAdmissionOffers: 'school:admissions:offer',
     collectAdmissionFees: 'school:admissions:fee',
     takeAttendance: 'school:attendance:write',
+    // P-att-status: configure the org's attendance status catalog (CRUD).
+    manageAttendanceStatuses: 'school:attendance:status:write',
     /**
      * Marks ENTRY only. Historically this single grant also covered approving
      * marks, exam setup and grading-scale edits — a segregation-of-duty failure,
@@ -398,6 +400,11 @@ export const PERMISSIONS = {
     manageAssignments: 'school:assignments:write',
     gradeAssignments: 'school:assignments:grade',
     submitAssignments: 'school:assignments:submit',
+    // LMS / Lesson Planning (Phase 1)
+    manageLessonPlans: 'school:lessonplans:write',
+    reviewLessonPlans: 'school:lessonplans:review',
+    approveLessonPlans: 'school:lessonplans:approve',
+    lmsRead: 'school:lms:read',
     manageQuestionBank: 'school:questionbank:write',
     authorCbt: 'school:cbt:author',
     takeCbt: 'school:cbt:take',
@@ -413,6 +420,18 @@ export const PERMISSIONS = {
     refundFees: 'school:fees:refund',
     manageLibrary: 'school:library:write',
     manageTransport: 'school:transport:write',
+    transportRead: 'school:transport:read',
+    manageFleet: 'school:transport:fleet',
+    manageCrew: 'school:transport:crew',
+    transportEnrollment: 'school:transport:enrollment',
+    transportDispatch: 'school:transport:dispatch',
+    transportBoarding: 'school:transport:boarding',
+    transportOverride: 'school:transport:override',
+    transportTracking: 'school:transport:tracking',
+    transportIncidents: 'school:transport:incidents',
+    transportBilling: 'school:transport:billing',
+    transportReports: 'school:transport:reports',
+    transportDriverApp: 'school:transport:driver',
     manageHostel: 'school:hostel:write',
     manageCafeteria: 'school:cafeteria:write',
     // Meals module (finer-grained; kitchen roles must not gain finance access).
@@ -602,6 +621,13 @@ export const PERMISSIONS = {
     taxTable: 'hr:tax_table',
     performance: 'hr:performance',
     report: 'hr:report',
+    grade: 'hr:grade',
+    contract: 'hr:contract',
+    recruitment: 'hr:recruitment',
+    qualification: 'hr:qualification',
+    training: 'hr:training',
+    offboarding: 'hr:offboarding',
+    audit: 'hr:audit',
   },
   // ---- Communication platform — messaging + channels ----
   // NB: read/write/send are CAPABILITIES. Per-conversation ACCESS is enforced

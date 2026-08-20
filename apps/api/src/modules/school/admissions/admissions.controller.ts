@@ -46,6 +46,12 @@ export class AdmissionsController {
     return this.admissions.create(dto);
   }
 
+  @Post('identity-matches/:id/review')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  reviewIdentityMatch(@Param('id') id: string, @Body('decision') decision: 'confirmed_same' | 'dismissed') {
+    return this.admissions.reviewIdentityMatch(id, decision);
+  }
+
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
   update(@Param('id') id: string, @Body() dto: UpdateApplicationDto) {
@@ -152,6 +158,79 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.manageStudents)
   reEnroll(@Param('id') id: string, @Body() dto: ReEnrollDto) {
     return this.admissions.reEnroll(id, dto);
+  }
+
+  // ---- Phase 3–5: Cycles, Capacity, Criteria, Scoring, Decisions, Analytics ----
+  @Post('cycles')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  createCycle(@Body() dto: { academicYearId: string; name: string; opensAt?: string; closesAt?: string }) {
+    return this.admissions.createCycle(dto);
+  }
+
+  @Get('cycles')
+  @RequirePermissions(PERMISSIONS.school.read)
+  listCycles(@Query('academicYearId') academicYearId?: string) {
+    return this.admissions.listCycles(academicYearId);
+  }
+
+  @Post('capacity')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  setCapacity(@Body() dto: { admissionCycleId: string; classId: string; capacity: number; sectionId?: string; streamId?: string; campusId?: string; reservedCapacity?: number }) {
+    return this.admissions.setCapacity(dto);
+  }
+
+  @Get('capacity/:cycleId/status')
+  @RequirePermissions(PERMISSIONS.school.read)
+  capacityStatus(@Param('cycleId') cycleId: string) {
+    return this.admissions.capacityStatus(cycleId);
+  }
+
+  @Post('criteria-sets')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  createCriteriaSet(@Body() dto: { admissionCycleId: string; name: string; classId?: string; isDefault?: boolean; criteria: Array<{ name: string; weight: number; maxScore?: number; required?: boolean; passMark?: number }> }) {
+    return this.admissions.createCriteriaSet(dto);
+  }
+
+  @Post(':id/score-weighted')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  scoreApplicationWeighted(@Param('id') id: string, @Body() scores: Record<string, number>) {
+    return this.admissions.scoreApplicationWeighted(id, scores);
+  }
+
+  @Post(':id/decision')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  recordDecision(@Param('id') id: string, @Body('decision') decision: 'accepted' | 'rejected' | 'waitlisted', @Body('reason') reason?: string) {
+    return this.admissions.recordDecision(id, decision, reason);
+  }
+
+  @Get(':id/eligibility')
+  @RequirePermissions(PERMISSIONS.school.read)
+  enrollmentEligibility(@Param('id') id: string) {
+    return this.admissions.enrollmentEligibility(id);
+  }
+
+  @Post('waitlist/:classId/rank')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  rankWaitlist(@Param('classId') classId: string) {
+    return this.admissions.rankWaitlist(classId);
+  }
+
+  @Post('enroll/bulk/preview')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  bulkEnrollPreview(@Body('items') items: Array<{ applicationId: string; classId: string; sectionId?: string; streamId?: string; termId: string; rollNumber: string }>) {
+    return this.admissions.bulkEnrollPreview(items);
+  }
+
+  @Get('metrics/pipeline')
+  @RequirePermissions(PERMISSIONS.school.read)
+  pipelineMetrics() {
+    return this.admissions.pipelineMetrics();
+  }
+
+  @Get('reports/enrollment-summary')
+  @RequirePermissions(PERMISSIONS.school.read)
+  enrollmentSummary(@Query('termId') termId?: string) {
+    return this.admissions.enrollmentSummary(termId);
   }
 
   @Delete(':id')

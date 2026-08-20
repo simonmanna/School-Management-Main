@@ -274,6 +274,31 @@ export const EVENTS = {
   SchoolBookReturned: 'school.library.returned',
   SchoolBookOverdueFined: 'school.library.overdue',
   SchoolTransportAssigned: 'school.transport.assigned',
+  // STMS (full module)
+  SchoolTransportRequestSubmitted: 'school.transport.request.submitted',
+  SchoolTransportRequestApproved: 'school.transport.request.approved',
+  SchoolTransportRequestRejected: 'school.transport.request.rejected',
+  SchoolTransportAssignmentChanged: 'school.transport.assignment.changed',
+  SchoolTransportAssignmentEnded: 'school.transport.assignment.ended',
+  SchoolTransportTripGenerated: 'school.transport.trip.generated',
+  SchoolTransportTripDispatched: 'school.transport.trip.dispatched',
+  SchoolTransportTripStarted: 'school.transport.trip.started',
+  SchoolTransportTripDelayed: 'school.transport.trip.delayed',
+  SchoolTransportTripCompleted: 'school.transport.trip.completed',
+  SchoolTransportTripCancelled: 'school.transport.trip.cancelled',
+  SchoolTransportTripAborted: 'school.transport.trip.aborted',
+  SchoolTransportStudentBoarded: 'school.transport.student.boarded',
+  SchoolTransportStudentDroppedOff: 'school.transport.student.dropped_off',
+  SchoolTransportStudentNoShow: 'school.transport.student.no_show',
+  SchoolTransportStopApproaching: 'school.transport.stop.approaching',
+  SchoolTransportTripUnaccountedStudent: 'school.transport.trip.unaccounted_student',
+  SchoolTransportInspectionFailed: 'school.transport.inspection.failed',
+  SchoolTransportIncidentCreated: 'school.transport.incident.created',
+  SchoolTransportIncidentEmergency: 'school.transport.incident.emergency',
+  SchoolTransportDeviationDetected: 'school.transport.deviation.detected',
+  SchoolTransportSpeedViolation: 'school.transport.speed.violation',
+  SchoolTransportChargePosted: 'school.transport.charge.posted',
+  SchoolTransportDocumentExpiring: 'school.transport.document.expiring',
   // Hostel + cafeteria
   SchoolHostelAllocated: 'school.hostel.allocated',
   SchoolMealTopUp: 'school.meal.topup',
@@ -838,6 +863,31 @@ export interface DomainEventMap {
     studentProfileId: string;
     routeId: string;
   };
+  // STMS (full module)
+  'school.transport.request.submitted': { organizationId: string; requestId: string; studentProfileId: string };
+  'school.transport.request.approved': { organizationId: string; requestId: string; assignmentId?: string; studentProfileId: string };
+  'school.transport.request.rejected': { organizationId: string; requestId: string; studentProfileId: string };
+  'school.transport.assignment.changed': { organizationId: string; assignmentId: string; studentProfileId: string };
+  'school.transport.assignment.ended': { organizationId: string; assignmentId: string; studentProfileId: string };
+  'school.transport.trip.generated': { organizationId: string; tripId: string; scheduleId?: string };
+  'school.transport.trip.dispatched': { organizationId: string; tripId: string; vehicleId?: string; driverCrewId?: string };
+  'school.transport.trip.started': { organizationId: string; tripId: string };
+  'school.transport.trip.delayed': { organizationId: string; tripId: string; delayMinutes: number };
+  'school.transport.trip.completed': { organizationId: string; tripId: string };
+  'school.transport.trip.cancelled': { organizationId: string; tripId: string };
+  'school.transport.trip.aborted': { organizationId: string; tripId: string };
+  'school.transport.student.boarded': { organizationId: string; tripId: string; studentProfileId: string; stopId?: string };
+  'school.transport.student.dropped_off': { organizationId: string; tripId: string; studentProfileId: string; stopId?: string };
+  'school.transport.student.no_show': { organizationId: string; tripId: string; studentProfileId: string };
+  'school.transport.stop.approaching': { organizationId: string; tripId: string; stopId: string; studentProfileId?: string; etaMinutes?: number };
+  'school.transport.trip.unaccounted_student': { organizationId: string; tripId: string; studentProfileId: string };
+  'school.transport.inspection.failed': { organizationId: string; inspectionId: string; vehicleId: string };
+  'school.transport.incident.created': { organizationId: string; incidentId: string; tripId?: string; severity: string };
+  'school.transport.incident.emergency': { organizationId: string; incidentId: string; tripId?: string };
+  'school.transport.deviation.detected': { organizationId: string; tripId?: string; vehicleId: string; alertId?: string };
+  'school.transport.speed.violation': { organizationId: string; tripId?: string; vehicleId: string; alertId?: string };
+  'school.transport.charge.posted': { organizationId: string; chargeId: string; documentId: string; studentProfileId: string; amount: string };
+  'school.transport.document.expiring': { organizationId: string; documentId: string; crewMemberId?: string; vehicleId?: string; expiryDate: string };
   'school.hostel.allocated': {
     organizationId: string;
     allocationId: string;

@@ -11,20 +11,22 @@ import {
   GradingScaleService,
   ReportCardService,
 } from './examinations.service';
+import { ReportCardSettingsService } from './report-card-settings.service';
+import type { ReportCardSettingsDto } from './report-card-settings.service';
 import { ReportCardPdfService } from './report-card-pdf.service';
 import {
   RejectGradesDto,
-  type BulkGradeEntryDto,
-  type CreateExamDto,
-  type CreateExamScheduleDto,
-  type CreateExamTypeDto,
-  type CreateGradingScaleDto,
-  type GenerateReportCardDto,
-  type UpdateExamDto,
-  type UpdateExamScheduleDto,
-  type UpdateExamTypeDto,
-  type UpdateGradingScaleDto,
-  type UpdateReportCardCommentDto,
+  BulkGradeEntryDto,
+  CreateExamDto,
+  CreateExamScheduleDto,
+  CreateExamTypeDto,
+  CreateGradingScaleDto,
+  GenerateReportCardDto,
+  UpdateExamDto,
+  UpdateExamScheduleDto,
+  UpdateExamTypeDto,
+  UpdateGradingScaleDto,
+  UpdateReportCardCommentDto,
 } from './dto.types';
 import { InvigilatorService } from './invigilator.service';
 import { CreateInvigilatorDto, UpdateInvigilatorDto, AssignInvigilatorDto } from './invigilator.dto';
@@ -282,6 +284,25 @@ export class ReportCardController {
       'Content-Length': buf.length,
     });
     return new StreamableFile(buf);
+  }
+}
+
+@Controller('school/report-card-settings')
+export class ReportCardSettingsController {
+  constructor(private readonly service: ReportCardSettingsService) {}
+
+  /** GET the org's report card printable configuration (creates defaults if absent). */
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.read)
+  get() {
+    return this.service.get();
+  }
+
+  /** PATCH the org's report card printable configuration. */
+  @Patch()
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  update(@Body() dto: ReportCardSettingsDto) {
+    return this.service.update(dto);
   }
 }
 

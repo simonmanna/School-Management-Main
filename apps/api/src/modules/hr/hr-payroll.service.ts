@@ -451,10 +451,7 @@ export class HrPayrollService {
 
       const employees = await tx.hrEmployee.findMany({
         where: { organizationId: orgId, isActive: true, deletedAt: null },
-        include: { department: true },
-      });
-      const components = await tx.hrPayrollComponent.findMany({
-        where: { organizationId: orgId, isActive: true, deletedAt: null },
+        include: { department: true, position: true },
       });
       const payeTable = await this.activeTaxTable(tx, orgId, 'PAYE', runDate);
       const pensionTable = await this.activeTaxTable(tx, orgId, 'PENSION', runDate);
@@ -508,6 +505,7 @@ export class HrPayrollService {
         const overtimePay = overtimeHours * otRate * 1.5;
 
         // 2. Allowances (recurring components + per-item allowance lines).
+        const components = await this.resolveComponents(tx, orgId, emp);
         const allowanceLines: any[] = [];
         let allowancesTotal = 0;
         for (const c of components) {
@@ -1279,4 +1277,193 @@ export class HrPayrollService {
       data: { deletedAt: new Date(), status: 'PAID', updatedBy: userId },
     });
   }
+
+  // ── Statutory config (versioned by effectiveFrom) ────────────────────────────
+
+  async listStatutoryConfigs(query: any = {}) {
+    const orgId = this.tenant.organizationId;
+    const where: any = { organizationId: orgId };
+    if (query.configType) where.configType = query.configType;
+    const [rows, total] = await Promise.all([
+      this.prisma.client.hrStatutoryConfig.findMany({ where, orderBy: [{ effectiveFrom: 'desc' }] }),
+      this.prisma.client.hrStatutoryConfig.count({ where }),
+    ]);
+    return { rows, total };
+  }
+
+  async createStatutoryConfig(dto: any) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    if (!dto.code || !dto.name || !dto.effectiveFrom)
+      throw new BadRequestException('code, name and effectiveFrom are required');
+    const existing = await this.prisma.client.hrStatutoryConfig.findFirst({
+      where: { organizationId: orgId, code: String(dto.code).toUpperCase(), effectiveFrom: new Date(dto.effectiveFrom) },
+    });
+    if (existing) throw new BadRequestException('A config with this code+effectiveFrom already exists');
+    return this.prisma.client.hrStatutoryConfig.create({
+      data: {
+        organizationId: orgId,
+        code: String(dto.code).toUpperCase(),
+        name: dto.name,
+        configType: dto.configType ?? 'PENSION',
+        rate: dto.rate ?? null,
+        employerRate: dto.employerRate ?? null,
+        effectiveFrom: new Date(dto.effectiveFrom),
+        isActive: dto.isActive ?? true,
+        createdBy: userId,
+      },
+    });
+  }
+
+  async updateStatutoryConfig(id: string, dto: any) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrStatutoryConfig.findFirst({ where: { id, organizationId: orgId } });
+    if (!row) throw new NotFoundException('Statutory config not found');
+    const data: any = { updatedBy: userId };
+    for (const f of ['name', 'configType', 'rate', 'employerRate', 'isActive']) {
+      if (dto[f] !== undefined) data[f] = dto[f];
+    }
+    if (dto.effectiveFrom !== undefined) data.effectiveFrom = new Date(dto.effectiveFrom);
+    return this.prisma.client.hrStatutoryConfig.update({ where: { id }, data });
+  }
+
+  async deleteStatutoryConfig(id: string) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrStatutoryConfig.findFirst({ where: { id, organizationId: orgId } });
+    if (!row) throw new NotFoundException('Statutory config not found');
+    return this.prisma.client.hrStatutoryConfig.update({ where: { id }, data: { deletedAt: new Date(), updatedBy: userId } });
+  }
+
+  /** The active statutory config for a code as of a date (versioned rules). */
+  private async activeStatutory(tx: any, orgId: string, code: string, asOf: Date) {
+    return tx.hrStatutoryConfig.findFirst({
+      where: { organizationId: orgId, code, deletedAt: null, effectiveFrom: { lte: asOf } },
+      orderBy: { effectiveFrom: 'desc' },
+    });
+  }
+
+  // ── Payroll preview / variance (before approval) ────────────────────────────
+
+  /**
+   * Returns a dry-run-ish preview of a calculated run: totals, headcount,
+   * new/departed employees vs the previous run, large salary variances, and data
+   * quality flags (missing bank/tax info, negative net). The run must be
+   * CALCULATED (or DRAFT — then we compute on the fly).
+   */
+  async previewRun(id: string) {
+    const orgId = this.tenant.organizationId;
+    const run = await this.prisma.client.hrPayrollRun.findFirst({
+      where: { id, organizationId: orgId },
+      include: { period: true, items: { include: { employee: true } } },
+    });
+    if (!run) throw new NotFoundException('Payroll run not found');
+
+    // Reuse calculation if not yet calculated (non-mutating copy of totals).
+    if (run.status === 'DRAFT') {
+      const calc = await this.calculateRun(id);
+      run.items = calc.items;
+      run.totalGross = calc.totalGross;
+      run.totalNet = calc.totalNet;
+      run.totalDeductions = calc.totalDeductions;
+    }
+
+    const items = run.items as any[];
+    const gross = items.reduce((s, i) => s + Number(i.grossPay), 0);
+    const deductions = items.reduce((s, i) => s + Number(i.totalDeductions), 0);
+    const net = items.reduce((s, i) => s + Number(i.netPay), 0);
+
+    const missingBank = items.filter((i) => !i.employee?.bankAccountNumber && !i.employee?.mobileMoneyNumber).length;
+    const missingTax = items.filter((i) => !i.employee?.taxNumber).length;
+    const negativeNet = items.filter((i) => Number(i.netPay) < 0).map((i) => i.employee?.employeeCode);
+
+    // New vs previous run (compare employee sets).
+    const prevRun = await this.prisma.client.hrPayrollRun.findFirst({
+      where: { organizationId: orgId, periodId: run.periodId, id: { not: run.id }, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      include: { items: { select: { employeeId: true, grossPay: true, netPay: true } } },
+    });
+    let newEmployees: string[] = [];
+    let departed: string[] = [];
+    const variances: any[] = [];
+    if (prevRun) {
+      const prevIds = new Set(prevRun.items.map((i: any) => i.employeeId));
+      const curIds = new Set(items.map((i) => i.employeeId));
+      newEmployees = items.filter((i) => !prevIds.has(i.employeeId)).map((i) => i.employee?.employeeCode);
+      departed = prevRun.items.filter((i: any) => !curIds.has(i.employeeId)).map((i: any) => i.employeeId);
+      const prevMap = new Map(prevRun.items.map((i: any) => [i.employeeId, i]));
+      for (const i of items) {
+        const p = prevMap.get(i.employeeId);
+        if (p && Number(p.netPay) > 0) {
+          const pct = ((Number(i.netPay) - Number(p.netPay)) / Number(p.netPay)) * 100;
+          if (Math.abs(pct) >= 15) variances.push({ employeeCode: i.employee?.employeeCode, prevNet: Number(p.netPay), net: Number(i.netPay), pct: Math.round(pct) });
+        }
+      }
+    }
+
+    return {
+      runId: run.id,
+      periodCode: run.period?.periodCode,
+      status: run.status,
+      employeeCount: items.length,
+      totalGross: gross,
+      totalDeductions: deductions,
+      totalNet: net,
+      newEmployees,
+      departedEmployees: departed.length,
+      largeVariances: variances,
+      missingBankDetails: missingBank,
+      missingTaxInfo: missingTax,
+      negativeNetEmployees: negativeNet,
+    };
+  }
+
+  // ── Employee & manager self-service helpers ─────────────────────────────────
+
+  /** Resolve the HrEmployee for the current auth user (for ESS). */
+  async employeeForUser(userId: string) {
+    const orgId = this.tenant.organizationId;
+    return this.prisma.client.hrEmployee.findFirst({
+      where: { organizationId: orgId, userId, deletedAt: null },
+      include: { department: true, position: true },
+    });
+  }
+
+  /** Managers see only their direct reports (supervisorId = manager's employee id). */
+  async teamForManager(managerEmployeeId: string) {
+    const orgId = this.tenant.organizationId;
+    return this.prisma.client.hrEmployee.findMany({
+      where: { organizationId: orgId, supervisorId: managerEmployeeId, deletedAt: null, isActive: true },
+      include: { department: true, position: true },
+    });
+  }
+
+  // ── Grade-aware component resolution (extend calculate) ─────────────────────
+
+  /**
+   * Builds the component list for an employee, preferring grade-specific salary
+   * structures when the employee's position has a grade, falling back to global
+   * recurring components. Returns allowance/deduction component descriptors.
+   */
+  private async resolveComponents(tx: any, orgId: string, emp: any) {
+    const gradeId = emp.position?.gradeId ?? null;
+    if (gradeId) {
+      const structures = await tx.hrSalaryStructure.findMany({
+        where: { organizationId: orgId, gradeId, isActive: true, deletedAt: null },
+        include: { component: true },
+      });
+      if (structures.length > 0) {
+        return structures.map((s: any) => ({
+          ...s.component,
+          calcMethod: s.component.calcMethod,
+          isTaxable: s.component.isTaxable,
+          amount: s.amount ?? s.component.amount,
+          rate: s.rate ?? s.component.rate,
+        }));
+      }
+    }
+    return tx.hrPayrollComponent.findMany({ where: { organizationId: orgId, isActive: true, deletedAt: null } });
+  }
 }
+

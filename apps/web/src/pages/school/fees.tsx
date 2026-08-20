@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Plus, Play, HandCoins, TrendingDown, Trash2, Ticket, GraduationCap, CalendarClock, Gavel, RotateCcw, HeartHandshake, Eraser, PiggyBank, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Plus, Play, TrendingDown, Trash2, Ticket, GraduationCap, CalendarClock, Gavel, RotateCcw, HeartHandshake, PiggyBank, Clock } from 'lucide-react';
 import {
   useFeeStructures,
   useCreateFeeStructure,
@@ -7,10 +8,9 @@ import {
   useCreateFeeSchedule,
   useServiceProducts,
   useAcademicYears,
+  useGenerateBilling,
   useTerms,
   useClasses,
-  useGenerateBilling,
-  useCollectPayment,
   useStudents,
   useStudentStatement,
   useArrearsByClass,
@@ -27,9 +27,6 @@ import {
   useRefundFee,
   useSponsorships,
   useCreateSponsorship,
-  useWaivers,
-  useCreateWaiver,
-  useApplyWaiver,
   useFeeCredits,
   useCreateFeeCredit,
   useApplyCredits,
@@ -44,20 +41,19 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
-
-const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
-const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+import { money, sel, Stat } from './fees-shared';
 
 export function SchoolFeesPage() {
+  const [params, setParams] = useSearchParams();
+  const activeTab = params.get('tab') || 'billing';
   return (
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Fees &amp; Billing</h1>
-        <p className="text-sm text-muted-foreground">Fee structures, term billing, collection and arrears.</p>
+        <p className="text-sm text-muted-foreground">Fee structures, term billing, arrears, discounts, scholarships, installments, penalties, refunds, sponsors, credits and aging.</p>
       </div>
-      <Tabs defaultValue="collect">
+      <Tabs value={activeTab} onValueChange={(v) => setParams(v === 'billing' ? {} : { tab: v })}>
         <TabsList className="flex flex-wrap gap-1">
-          <TabsTrigger value="collect">Collect</TabsTrigger>
           <TabsTrigger value="billing">Billing run</TabsTrigger>
           <TabsTrigger value="structures">Structures</TabsTrigger>
           <TabsTrigger value="discounts">Discounts</TabsTrigger>
@@ -66,12 +62,10 @@ export function SchoolFeesPage() {
           <TabsTrigger value="penalties">Penalties</TabsTrigger>
           <TabsTrigger value="refund">Refund</TabsTrigger>
           <TabsTrigger value="sponsors">Sponsors</TabsTrigger>
-          <TabsTrigger value="waivers">Waivers</TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
           <TabsTrigger value="aging">Aging</TabsTrigger>
           <TabsTrigger value="arrears">Arrears</TabsTrigger>
         </TabsList>
-        <TabsContent value="collect" className="pt-4"><CollectTab /></TabsContent>
         <TabsContent value="billing" className="pt-4"><BillingTab /></TabsContent>
         <TabsContent value="structures" className="pt-4"><StructuresTab /></TabsContent>
         <TabsContent value="discounts" className="pt-4"><DiscountsTab /></TabsContent>
@@ -80,116 +74,10 @@ export function SchoolFeesPage() {
         <TabsContent value="penalties" className="pt-4"><PenaltiesTab /></TabsContent>
         <TabsContent value="refund" className="pt-4"><RefundTab /></TabsContent>
         <TabsContent value="sponsors" className="pt-4"><SponsorsTab /></TabsContent>
-        <TabsContent value="waivers" className="pt-4"><WaiversTab /></TabsContent>
         <TabsContent value="credits" className="pt-4"><CreditsTab /></TabsContent>
         <TabsContent value="aging" className="pt-4"><AgingTab /></TabsContent>
         <TabsContent value="arrears" className="pt-4"><ArrearsTab /></TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-/* ─────────────── Collect payment ─────────────── */
-
-function CollectTab() {
-  const [search, setSearch] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<'cash' | 'bank' | 'mobile_money' | 'card'>('cash');
-  const [reference, setReference] = useState('');
-  const { data: students } = useStudents({ search: search || undefined, pageSize: 20 });
-  const { data: statement } = useStudentStatement(studentId || undefined);
-  const collect = useCollectPayment();
-
-  const submit = async () => {
-    try {
-      const res = await collect.mutateAsync({
-        studentProfileId: studentId,
-        amount: Number(amount),
-        paymentMethod: method,
-        reference: reference || undefined,
-      });
-      if (res.replayed) notify.success('Payment already recorded (idempotent replay)');
-      else notify.success(`Collected ${money(amount)} · ${res.allocations.length} invoice(s) settled`);
-      setAmount('');
-      setReference('');
-    } catch {
-      notify.error('Could not collect payment');
-    }
-  };
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Record a fee payment</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Find student</Label>
-            <input className={sel} placeholder="Search name or admission no…" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <select className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-              <option value="">Select student…</option>
-              {(students?.data ?? []).map((s) => (
-                <option key={s.id} value={s.id}>{s.partner?.name} · {s.admissionNo}</option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Amount</Label>
-              <Input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Method</Label>
-              <select className={sel} value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
-                <option value="cash">Cash</option>
-                <option value="mobile_money">Mobile money</option>
-                <option value="bank">Bank</option>
-                <option value="card">Card</option>
-              </select>
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Reference (e.g. mobile-money txn id)</Label>
-            <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="optional" />
-          </div>
-          <Button onClick={submit} disabled={!studentId || !amount || Number(amount) <= 0 || collect.isPending}>
-            <HandCoins className="h-4 w-4" /> Collect &amp; allocate
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Posts a receipt, allocates oldest-first to open fee invoices, and (for cash on an open session) records the drawer movement.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Statement</CardTitle></CardHeader>
-        <CardContent>
-          {!studentId && <p className="text-sm text-muted-foreground">Select a student to see their fee balance.</p>}
-          {statement && (
-            <>
-              <div className="mb-3 grid grid-cols-3 gap-2 text-center text-sm">
-                <Stat label="Billed" value={money(statement.totalBilled)} />
-                <Stat label="Paid" value={money(statement.totalPaid)} />
-                <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
-              </div>
-              <table className="w-full text-sm">
-                <thead className="text-left text-muted-foreground"><tr><th className="py-1">Invoice</th><th>Total</th><th>Residual</th><th>Status</th></tr></thead>
-                <tbody>
-                  {statement.invoices.map((inv) => (
-                    <tr key={inv.id} className="border-t">
-                      <td className="py-1 font-mono text-xs">{inv.documentNumber}</td>
-                      <td>{money(inv.totalAmount)}</td>
-                      <td>{money(inv.amountResidual)}</td>
-                      <td><Badge>{inv.paymentStatus}</Badge></td>
-                    </tr>
-                  ))}
-                  {statement.invoices.length === 0 && <tr><td colSpan={4} className="py-3 text-muted-foreground">No fee invoices.</td></tr>}
-                </tbody>
-              </table>
-            </>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -266,11 +154,6 @@ function StructuresTab() {
   const [schedTerm, setSchedTerm] = useState('');
   const [schedDue, setSchedDue] = useState('');
 
-  const productName = useMemo(
-    () => Object.fromEntries((products?.data ?? []).map((p) => [p.id, p.name])),
-    [products],
-  );
-
   const addComponent = () => setComponents([...components, { code: '', productId: '', amount: 0 }]);
   const setComp = (i: number, patch: Partial<FeeComponent>) =>
     setComponents(components.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -312,7 +195,7 @@ function StructuresTab() {
               <Label className="text-xs">Academic year</Label>
               <select className={sel} value={academicYearId} onChange={(e) => setYear(e.target.value)}>
                 <option value="">Select…</option>
-                {(years?.data ?? []).map((y) => <option key={y.id} value={y.id}>{y.name}</option>)}
+                {(years?.data ?? []).map((y: any) => <option key={y.id} value={y.id}>{y.name}</option>)}
               </select>
             </div>
           </div>
@@ -330,7 +213,7 @@ function StructuresTab() {
                 <Input placeholder="CODE" value={c.code} onChange={(e) => setComp(i, { code: e.target.value.toUpperCase() })} />
                 <select className={sel} value={c.productId} onChange={(e) => setComp(i, { productId: e.target.value })}>
                   <option value="">Product…</option>
-                  {(products?.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {(products?.data ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <Input type="number" placeholder="amount" value={c.amount || ''} onChange={(e) => setComp(i, { amount: Number(e.target.value) })} />
                 <Button variant="ghost" size="sm" onClick={() => rmComp(i)}><Trash2 className="h-4 w-4" /></Button>
@@ -369,7 +252,7 @@ function StructuresTab() {
               <div key={s.id} className="rounded-md border p-2">
                 <div className="font-medium">{s.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {(s.components ?? []).map((c) => `${c.code} ${money(c.amount)}${c.productId && productName[c.productId] ? '' : ''}`).join(' · ')}
+                  {(s.components ?? []).map((c) => `${c.code} ${money(c.amount)}`).join(' · ')}
                 </div>
                 <div className="mt-1 text-xs">
                   {(schedules?.data ?? []).filter((sc) => sc.feeStructureId === s.id).map((sc) => (
@@ -758,16 +641,7 @@ function RefundTab() {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) {
-  return (
-    <div className="rounded-md border p-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`font-semibold ${tone === 'rose' ? 'text-rose-600' : tone === 'emerald' ? 'text-emerald-600' : ''}`}>{value}</div>
-    </div>
-  );
-}
-
-/* ───────────────────────── Sponsors (P1) ───────────────────────── */
+/* ───────────────────────── Sponsors ───────────────────────── */
 
 function SponsorsTab() {
   const students = useStudents();
@@ -820,62 +694,7 @@ function SponsorsTab() {
   );
 }
 
-/* ───────────────────────── Waivers (P1) ───────────────────────── */
-
-function WaiversTab() {
-  const students = useStudents();
-  const { data: waivers, isLoading } = useWaivers();
-  const create = useCreateWaiver();
-  const apply = useApplyWaiver();
-  const [studentProfileId, setStudentProfileId] = useState('');
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [reason, setReason] = useState('');
-
-  const studentOptions = (students.data?.data ?? []).map((s: any) => ({ value: s.id, label: s.admissionNo ? `${s.admissionNo} · ${s.firstName} ${s.lastName}` : s.id }));
-
-  return (
-    <Card>
-      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Eraser className="h-4 w-4" /> Waivers</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">A waiver forgives an amount the school will not collect — posted Dr Waiver Expense / Cr Accounts Receivable. Distinct from a discount (which reduces the billed amount).</p>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <select className={sel} value={studentProfileId} onChange={(e) => setStudentProfileId(e.target.value)}>
-            <option value="">Student</option>
-            {studentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code e.g. WV-001" />
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
-          <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount" type="number" />
-          <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason" />
-        </div>
-        <Button disabled={!studentProfileId || !amount || create.isPending} onClick={() => create.mutate({ studentProfileId, code, name, amount: Number(amount), reason }, { onSuccess: () => { setCode(''); setName(''); setAmount(''); setReason(''); } })}>
-          <Plus className="h-4 w-4 mr-1" /> Create waiver
-        </Button>
-        <div className="space-y-2 text-sm">
-          {isLoading && <p className="text-muted-foreground">Loading…</p>}
-          {(waivers?.data ?? []).length === 0 && <p className="text-muted-foreground">No waivers yet.</p>}
-          {(waivers?.data ?? []).map((w) => (
-            <div key={w.id} className="flex items-center justify-between rounded-md border p-2">
-              <div>
-                <div className="font-medium">{w.name} <span className="text-xs text-muted-foreground">({w.code})</span></div>
-                <div className="text-xs text-muted-foreground">{money(w.amount)} {w.applied ? '· applied' : '· pending'}</div>
-              </div>
-              {!w.applied && (
-                <Button size="sm" variant="outline" disabled={apply.isPending} onClick={() => apply.mutate(w.id)}>
-                  <Play className="h-4 w-4 mr-1" /> Apply
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-/* ───────────────────────── Credits (P1) ───────────────────────── */
+/* ───────────────────────── Credits ───────────────────────── */
 
 function CreditsTab() {
   const students = useStudents();
@@ -929,7 +748,7 @@ function CreditsTab() {
   );
 }
 
-/* ───────────────────────── Aging (P2) ───────────────────────── */
+/* ───────────────────────── Aging ───────────────────────── */
 
 function AgingTab() {
   const { data, isLoading } = useFeeAging();
