@@ -101,6 +101,8 @@ export class CreateTimetableSlotDto {
   @IsOptional() @IsInt() @Min(1) @Max(4) spanPeriods?: number;
   @IsOptional() @IsIn(['all', 'A', 'B']) cycle?: string;
   @IsOptional() @IsString() teachingRoomId?: string;
+  /** Resolved canonical teaching instance (auto-set from class/section/subject). */
+  @IsOptional() @IsString() courseOfferingId?: string;
 }
 
 export class BulkTimetableSlot {
@@ -141,6 +143,8 @@ export class UpdateTimetableSlotDto {
   @IsOptional() @IsInt() @Min(1) @Max(4) spanPeriods?: number;
   @IsOptional() @IsIn(['all', 'A', 'B']) cycle?: string;
   @IsOptional() @IsString() teachingRoomId?: string;
+  /** Resolved canonical teaching instance (auto-set from class/section/subject). */
+  @IsOptional() @IsString() courseOfferingId?: string;
 }
 
 // ── Curriculum content (Competency / Topic / Unit / LearningObjective) ──────

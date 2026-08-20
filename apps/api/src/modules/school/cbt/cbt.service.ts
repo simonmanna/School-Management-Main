@@ -305,7 +305,6 @@ export class CbtAttemptService {
         // it counts toward the term result aggregation.
         const paper = await tx.paper.findFirst({
           where: { id: attempt.paperId },
-          include: { subject: true },
         });
         await this.bridge.postAttempt(tx, {
           organizationId,

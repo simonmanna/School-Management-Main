@@ -1,0 +1,162 @@
+# Financial Invariants
+
+**Authority: every finance-touching module** — Fees, POS, Inventory, HR Payroll,
+Accounting, Cafeteria, Transport, Admissions. These are hard rules, not
+aspirations. Each has an automated test; the production certification gates
+(see the Fees & Finance hardening plan) verify them.
+
+Frozen by ADR-013. Do not weaken a rule here without a superseding ADR.
+
+---
+
+## Economic-event integrity — the master rule
+
+```
+Every financial change originates as a TYPED ECONOMIC EVENT that persists
+atomically with BOTH its subledger effect AND its accounting effect.
+
+Forbidden anywhere in school finance:
+    document.amountResidual -= amount
+    document.amountPaid    += amount
+with no corresponding typed event.
+
+Event types: INVOICE · PENALTY · PAYMENT · WAIVER · CREDIT_APPLIED
+             REFUND · WRITE_OFF · ADJUSTMENT · REVERSAL
+```
+
+## Document — two independent dimensions
+
+```
+Document.status         draft | posted | paid | cancelled          ← lifecycle
+Document.paymentStatus  not_paid | partial | paid | overpaid        ← settlement
+
+Financially active  ⟺  status IN (posted, paid)
+
+paymentStatus NEVER substitutes for lifecycle filtering.
+```
+
+`draft` and `cancelled` documents never appear in a balance and can never be
+settled by a payment. `paid` is a lifecycle terminal (residual zero) and still
+counts as billed.
+
+## Outstanding AR — expressed as economic events, not allocation rows
+
+```
+Outstanding AR =
+      posted charges
+    + valid debit adjustments
+    + refunded allocated payments        ← re-enters AR
+    − valid payment allocations
+    − valid waivers
+    − valid credit applications
+    − valid write-offs
+```
+
+**Refund rule.** A refund of an *allocated* payment increases outstanding AR. A
+refund of *unallocated* cash does not create AR. The former is represented by
+reversing the original allocation, producing a `REVERSAL` event.
+
+`Document.amountResidual` is the cached projection of this identity, never an
+independent input.
+
+## Economic-entitlement uniqueness
+
+```
+A monetary entitlement must NOT be simultaneously represented as
+refundable/unallocated Payment value AND outstanding FeeCredit value.
+```
+
+## Payment disposition
+
+```
+Payment.amount = allocated + unallocated + refunded + other valid disposition
+allocatedAmount ≤ tenderAmount
+```
+
+## Cash custody — method-aware
+
+```
+Direct cash/bank:   Payment = CashMovement = GL cash/bank
+Provider-settled:   Dr Clearing / Cr AR ; Dr Fees + Dr Bank / Cr Clearing
+                    Payment gross ≠ bank settlement — reconcile through clearing.
+```
+
+## Refund / Credit
+
+```
+refundedAmount           ≤ refundableAmount
+SUM(FeeCreditAllocation) ≤ FeeCredit.amount
+SUM(FeeCredit outstanding) = GL Fee-Credit Liability balance
+```
+
+## Journal
+
+```
+SUM(debits) = SUM(credits)               for every posted entry
+```
+
+## AR ⇄ GL — two modes, never mixed
+
+```
+CURRENT-STATE   current AR subledger        = current GL AR balance
+AS-OF (T)       AR transactions through T   = GL AR transactions through T
+FORBIDDEN       current Document residual   = historical GL balance at T
+```
+
+Per-student works via `JournalLine.partnerId`; aggregate sums the subledger.
+
+## Money precision
+
+```
+Storage      Decimal(20,6) — never float, never a JS number column
+Arithmetic   dec() / round() from kernel/common/money — never JS float math
+Internal     full Decimal precision retained through tax and allocation math
+Display      rounded to currency precision at the presentation edge only (UGX → 0 dp)
+```
+
+## Terminology
+
+```
+amountPaid = REALIZED PAYMENT CONSIDERATION allocated to the document —
+any tender method (cash, bank, mobile money, card, cheque, transfer).
+EXCLUDES non-payment reductions: waivers, credits, write-offs, adjustments.
+```
+
+## Immutability
+
+```
+Posted financial records are immutable. Corrections are performed only through
+compensating/reversal transactions — never by editing the amount, account, date,
+partner, or journal lines of a posted record.
+
+A posted PaymentAllocation is never edited. Reallocation =
+    reverse original allocation → create replacement allocation.
+```
+
+## Concurrency
+
+```
+Financial uniqueness is enforced by DATABASE business-key constraints,
+never solely by application existence checks. Applies to: billing,
+payment imports, credits, waivers, penalty runs.
+```
+
+## Period control
+
+```
+No financial transaction posts into a closed or locked accounting period.
+Reopening requires maker-checker authorization and is itself audited.
+School-term financial close is a SEPARATE school-domain control.
+```
+
+## Tenancy
+
+```
+Every financial query is tenant-scoped, including raw SQL.
+```
+
+## Idempotency
+
+```
+Same external/reference key → same financial transaction → never a duplicate.
+```

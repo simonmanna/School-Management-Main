@@ -46,12 +46,11 @@ export class CbtResultBridgeService {
     if (!subjectId || !classId || !termId) {
       const paper = await tx.paper.findFirst({
         where: { id: paperId },
-        include: { subject: true },
       });
       subjectId = subjectId ?? paper?.subjectId ?? null;
       // Prefer the student's active roster for class/term.
       const roster = await tx.academicRosterMember.findFirst({
-        where: { studentProfileId, roster: { status: 'active' } },
+        where: { studentProfileId, roster: { organizationId } },
         include: { roster: true },
         orderBy: { roster: { capturedAt: 'desc' } },
       });
@@ -59,7 +58,7 @@ export class CbtResultBridgeService {
         classId = classId ?? roster.classId ?? null;
         termId = termId ?? roster.roster.termId ?? null;
       }
-      termId = termId ?? roster?.roster.termId ?? paper?.subject?.termId ?? null;
+      termId = termId ?? roster?.roster.termId ?? null;
     }
     if (!subjectId || !classId || !termId) return; // cannot place into spine
 

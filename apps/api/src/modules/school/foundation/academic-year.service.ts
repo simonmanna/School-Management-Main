@@ -32,6 +32,19 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
 
   async create(dto: CreateAcademicYearDto): Promise<AcademicYear> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Guard: no two academic years may overlap in time (same org).
+      const clash = await tx.academicYear.findFirst({
+        where: {
+          organizationId: this.tenant.organizationId,
+          startDate: { lte: dto.endDate },
+          endDate: { gte: dto.startDate },
+        },
+      });
+      if (clash) {
+        throw new BadRequestException(
+          `Academic year dates overlap with "${clash.name}" (${clash.startDate.toISOString().slice(0, 10)} – ${clash.endDate.toISOString().slice(0, 10)}).`,
+        );
+      }
       // At most one year can be current — if this is current, unset the others.
       if (dto.isCurrent) {
         await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
@@ -75,6 +88,20 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
 
   async create(dto: CreateTermDto): Promise<Term> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Guard: terms within the same academic year must not overlap in time.
+      const clash = await tx.term.findFirst({
+        where: {
+          organizationId: this.tenant.organizationId,
+          academicYearId: dto.academicYearId,
+          startDate: { lte: dto.endDate },
+          endDate: { gte: dto.startDate },
+        },
+      });
+      if (clash) {
+        throw new BadRequestException(
+          `Term dates overlap with "${clash.name}" (${clash.startDate.toISOString().slice(0, 10)} – ${clash.endDate.toISOString().slice(0, 10)}).`,
+        );
+      }
       if (dto.isCurrent) {
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }

@@ -206,6 +206,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/school/admissions', label: 'Admissions', icon: FilePlus2, permission: PERMISSIONS.school.read },
       { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
+      { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
     ],
   },
@@ -223,6 +225,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/curricula', label: 'Curriculum', icon: GitBranch, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/teacher-assignments', label: 'Teacher Assignments', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/policies', label: 'School Policies', icon: FileText, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/custom-fields', label: 'Custom Fields', icon: Hash, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },

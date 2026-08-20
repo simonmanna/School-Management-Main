@@ -17,5 +17,7 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [009](./ADR-009-general-ledger-engine.md) | General Ledger Engine & Posting Service | Accepted |
 | [010](./ADR-010-document-ar-model.md) | Document Framework & Accounts Receivable | Accepted |
 | [011](./ADR-011-vertical-extension-contract.md) | Vertical Extension Contract | Accepted |
+| [012](./ADR-012-table-management.md) | Table Management | Accepted |
+| [013](./ADR-013-school-fee-economic-events.md) | School Fee Economic Events | Accepted |
 
 Template: **Context → Decision → Consequences → Alternatives considered.**

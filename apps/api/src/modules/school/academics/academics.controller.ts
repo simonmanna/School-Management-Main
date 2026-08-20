@@ -2,9 +2,9 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } fr
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { RequireOwnerOrPermission } from '../../../kernel/auth/guards/require-owner-or-permission.decorator';
 import {
   CurriculumService,
-  LessonPlanService,
   TeacherAssignmentService,
   TimetableService,
 } from './academics.service';
@@ -70,54 +70,6 @@ export class CurriculumController {
   @RequirePermissions(PERMISSIONS.school.read)
   versions(@Param('classId') classId: string, @Param('academicYearId') academicYearId: string) {
     return this.service.versions(classId, academicYearId);
-  }
-
-  @Delete(':id')
-  @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
-  remove(@Param('id') id: string) {
-    return this.service.remove(id);
-  }
-}
-
-@Controller('school/lesson-plans')
-export class LessonPlanController {
-  constructor(private readonly service: LessonPlanService) {}
-
-  @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
-  list(@Query() q: PaginationDto) {
-    return this.service.list(q);
-  }
-
-  @Get('by-teacher/:teacherPartnerId')
-  @RequirePermissions(PERMISSIONS.school.read)
-  byTeacher(@Param('teacherPartnerId') id: string) {
-    return this.service.byTeacher(id);
-  }
-
-  @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
-  findOne(@Param('id') id: string) {
-    return this.service.findOne(id);
-  }
-
-  @Post()
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
-  create(@Body() dto: CreateLessonPlanDto) {
-    return this.service.create(dto);
-  }
-
-  @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
-  update(@Param('id') id: string, @Body() dto: UpdateLessonPlanDto) {
-    return this.service.update(id, dto);
-  }
-
-  @Post(':id/publish')
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
-  publish(@Param('id') id: string) {
-    return this.service.publish(id);
   }
 
   @Delete(':id')

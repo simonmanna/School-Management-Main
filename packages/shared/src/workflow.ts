@@ -37,6 +37,7 @@ export type WorkflowState = CanonicalWorkflowState | (string & {});
 /** Auditable actions (ADR-006). */
 export const AUDIT_ACTIONS = [
   'create',
+  'read',
   'update',
   'delete',
   'login',

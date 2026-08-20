@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Play, TrendingDown, Trash2, Ticket, GraduationCap, CalendarClock, Gavel, RotateCcw, HeartHandshake, PiggyBank, Clock } from 'lucide-react';
+import { Plus, Play, TrendingDown, Trash2, GraduationCap, Gavel, RotateCcw, HeartHandshake, PiggyBank, Clock } from 'lucide-react';
 import {
   useFeeStructures,
   useCreateFeeStructure,
@@ -15,12 +15,8 @@ import {
   useStudentStatement,
   useArrearsByClass,
   useDailyCollections,
-  useDiscounts,
-  useCreateDiscount,
   useScholarships,
   useCreateScholarship,
-  useInstallmentPlans,
-  useCreateInstallmentPlan,
   usePenaltyRules,
   useCreatePenaltyRule,
   usePenaltyRuns,
@@ -56,9 +52,17 @@ export function SchoolFeesPage() {
         <TabsList className="flex flex-wrap gap-1">
           <TabsTrigger value="billing">Billing run</TabsTrigger>
           <TabsTrigger value="structures">Structures</TabsTrigger>
-          <TabsTrigger value="discounts">Discounts</TabsTrigger>
+          {/*
+            Phase 0 of the Fees & Finance hardening plan: the Discounts and
+            Installments tabs are hidden because nothing consumes what they
+            save. The billing engine never reads a Discount row, and no invoice
+            or due date is ever generated from an InstallmentPlan — so staff
+            were configuring policy that silently did nothing, which is worse
+            than the feature not existing. A5 either wires them into the fee
+            calculation pipeline or deletes them outright; the tab components
+            below are left in place until that call is made.
+          */}
           <TabsTrigger value="scholarships">Scholarships</TabsTrigger>
-          <TabsTrigger value="installments">Installments</TabsTrigger>
           <TabsTrigger value="penalties">Penalties</TabsTrigger>
           <TabsTrigger value="refund">Refund</TabsTrigger>
           <TabsTrigger value="sponsors">Sponsors</TabsTrigger>
@@ -68,9 +72,7 @@ export function SchoolFeesPage() {
         </TabsList>
         <TabsContent value="billing" className="pt-4"><BillingTab /></TabsContent>
         <TabsContent value="structures" className="pt-4"><StructuresTab /></TabsContent>
-        <TabsContent value="discounts" className="pt-4"><DiscountsTab /></TabsContent>
         <TabsContent value="scholarships" className="pt-4"><ScholarshipsTab /></TabsContent>
-        <TabsContent value="installments" className="pt-4"><InstallmentsTab /></TabsContent>
         <TabsContent value="penalties" className="pt-4"><PenaltiesTab /></TabsContent>
         <TabsContent value="refund" className="pt-4"><RefundTab /></TabsContent>
         <TabsContent value="sponsors" className="pt-4"><SponsorsTab /></TabsContent>
@@ -314,58 +316,17 @@ function ArrearsTab() {
   );
 }
 
-/* ─────────────── Discounts ─────────────── */
-
-function DiscountsTab() {
-  const { data: discounts } = useDiscounts();
-  const create = useCreateDiscount();
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [type, setType] = useState<'percentage' | 'fixed_amount'>('percentage');
-  const [value, setValue] = useState('');
-
-  const save = async () => {
-    try {
-      await create.mutateAsync({ code, name, type, value: Number(value) });
-      notify.success('Discount created');
-      setCode(''); setName(''); setValue('');
-    } catch {
-      notify.error('Could not create discount');
-    }
-  };
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Ticket className="h-4 w-4" /> New discount</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <Input placeholder="Code (e.g. SIBLING)" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <div className="grid grid-cols-2 gap-3">
-            <select className={sel} value={type} onChange={(e) => setType(e.target.value as typeof type)}>
-              <option value="percentage">Percentage</option>
-              <option value="fixed_amount">Fixed amount</option>
-            </select>
-            <Input type="number" placeholder={type === 'percentage' ? 'e.g. 10' : 'amount'} value={value} onChange={(e) => setValue(e.target.value)} />
-          </div>
-          <Button onClick={save} disabled={!code || !name || !value || create.isPending}><Plus className="h-4 w-4" /> Create discount</Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Discounts</CardTitle></CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          {(discounts?.data ?? []).length === 0 && <p className="text-muted-foreground">None yet.</p>}
-          {(discounts?.data ?? []).map((d) => (
-            <div key={d.id} className="rounded-md border p-2">
-              <div className="font-medium">{d.name} <span className="text-xs text-muted-foreground">· {d.code}</span></div>
-              <div className="text-xs text-muted-foreground">{d.type === 'percentage' ? `${d.value}%` : money(d.value)}</div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+/*
+ * Discounts and Installments tabs removed in Phase 0 of the Fees & Finance
+ * hardening plan. Both were full CRUD surfaces over models that nothing
+ * consumed: the billing engine never read a Discount row, and no invoice or
+ * due date was ever generated from an InstallmentPlan. Staff configured policy
+ * that silently did nothing, which is worse than the feature not existing.
+ *
+ * A5 decides per feature - wire it into the fee calculation pipeline, or drop
+ * the model. The API endpoints and Prisma models are untouched; only the
+ * misleading UI is gone. Recover these components from git if A5 wires them.
+ */
 
 /* ─────────────── Scholarships ─────────────── */
 
@@ -424,80 +385,6 @@ function ScholarshipsTab() {
             <div key={s.id} className="rounded-md border p-2">
               <div className="font-medium">{s.name} <span className="text-xs text-muted-foreground">· {s.code}</span></div>
               <div className="text-xs text-muted-foreground">{s.type === 'percent' ? `${s.value}%` : money(s.value)} · from {s.validFrom.slice(0, 10)}</div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* ─────────────── Installments ─────────────── */
-
-function InstallmentsTab() {
-  const { data: plans } = useInstallmentPlans();
-  const { data: students } = useStudents({ search: '', pageSize: 50 });
-  const { data: terms } = useTerms();
-  const create = useCreateInstallmentPlan();
-  const [studentId, setStudentId] = useState('');
-  const [termId, setTermId] = useState('');
-  const [rows, setRows] = useState<Array<{ number: number; dueDate: string; amount: number }>>([{ number: 1, dueDate: '', amount: 0 }]);
-
-  const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const addRow = () => setRows([...rows, { number: rows.length + 1, dueDate: '', amount: 0 }]);
-  const setRow = (i: number, patch: Partial<{ dueDate: string; amount: number }>) =>
-    setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  const rmRow = (i: number) => setRows(rows.filter((_, idx) => idx !== i));
-
-  const save = async () => {
-    try {
-      await create.mutateAsync({ studentProfileId: studentId, termId, totalAmount: total, installments: rows });
-      notify.success('Installment plan created');
-      setStudentId(''); setTermId(''); setRows([{ number: 1, dueDate: '', amount: 0 }]);
-    } catch {
-      notify.error('Could not create installment plan');
-    }
-  };
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><CalendarClock className="h-4 w-4" /> New installment plan</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <select className={sel} value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-            <option value="">Select student…</option>
-            {(students?.data ?? []).map((s) => (
-              <option key={s.id} value={s.id}>{s.partner?.name} · {s.admissionNo}</option>
-            ))}
-          </select>
-          <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}>
-            <option value="">Select term…</option>
-            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
-          </select>
-          <div className="space-y-2">
-            <Label className="text-xs">Installments</Label>
-            {rows.map((r, i) => (
-              <div key={i} className="grid grid-cols-[auto_1fr_1fr_auto] items-center gap-2">
-                <span className="text-xs text-muted-foreground">#{r.number}</span>
-                <Input type="date" value={r.dueDate} onChange={(e) => setRow(i, { dueDate: e.target.value })} />
-                <Input type="number" placeholder="amount" value={r.amount || ''} onChange={(e) => setRow(i, { amount: Number(e.target.value) })} />
-                <Button variant="ghost" size="sm" onClick={() => rmRow(i)}><Trash2 className="h-4 w-4" /></Button>
-              </div>
-            ))}
-            <Button variant="ghost" size="sm" onClick={addRow}><Plus className="h-4 w-4" /> Add installment</Button>
-          </div>
-          <div className="text-sm">Total: <span className="font-semibold">{money(total)}</span></div>
-          <Button onClick={save} disabled={!studentId || !termId || total <= 0 || create.isPending}><Plus className="h-4 w-4" /> Create plan</Button>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">Installment plans</CardTitle></CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          {(plans?.data ?? []).length === 0 && <p className="text-muted-foreground">None yet.</p>}
-          {(plans?.data ?? []).map((p) => (
-            <div key={p.id} className="rounded-md border p-2">
-              <div className="font-medium">Total {money(p.totalAmount)}</div>
-              <div className="text-xs text-muted-foreground">{p.installments.length} installment(s)</div>
             </div>
           ))}
         </CardContent>
@@ -673,7 +560,12 @@ function SponsorsTab() {
           </select>
           <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code e.g. SPN-001" />
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
-          <Input value={capAmount} onChange={(e) => setCapAmount(e.target.value)} placeholder="Cap amount (optional)" type="number" />
+          {/*
+            The cap is recorded and shown on the sponsorship, but nothing
+            enforces it at collection time yet (A5). Labelled so a bursar does
+            not rely on it as a spending control.
+          */}
+          <Input value={capAmount} onChange={(e) => setCapAmount(e.target.value)} placeholder="Cap amount (not yet enforced)" type="number" />
           <Input value={validFrom} onChange={(e) => setValidFrom(e.target.value)} type="date" />
         </div>
         <Button disabled={!studentProfileId || !sponsorId || !code || !name || create.isPending} onClick={() => create.mutate({ studentProfileId, sponsorId, code, name, capAmount: capAmount ? Number(capAmount) : undefined, validFrom }, { onSuccess: () => { setCode(''); setName(''); setCapAmount(''); } })}>
@@ -685,7 +577,9 @@ function SponsorsTab() {
           {(sponsorships?.data ?? []).map((sp) => (
             <div key={sp.id} className="rounded-md border p-2">
               <div className="font-medium">{sp.name} <span className="text-xs text-muted-foreground">({sp.code})</span></div>
-              <div className="text-xs text-muted-foreground">Cap: {sp.capAmount ? money(sp.capAmount) : 'unlimited'} · Valid from {sp.validFrom}</div>
+              <div className="text-xs text-muted-foreground">
+                Cap: {sp.capAmount ? `${money(sp.capAmount)} (recorded, not enforced)` : 'unlimited'} · Valid from {sp.validFrom}
+              </div>
             </div>
           ))}
         </div>

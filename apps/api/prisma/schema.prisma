@@ -105,6 +105,7 @@ enum AddressType {
 
 enum AuditAction {
   create
+  read
   update
   delete
   login
@@ -1627,6 +1628,11 @@ model Document {
   totalAmount          Decimal                 @default(0) @db.Decimal(20, 6)
   amountPaid           Decimal                 @default(0) @db.Decimal(20, 6)
   amountResidual       Decimal                 @default(0) @db.Decimal(20, 6)
+  /// Cumulative amount FORGIVEN on this document (waivers, bad-debt write-offs).
+  /// Distinct from `amountPaid`, which is realized payment consideration only.
+  /// Booking a waiver as payment (the P0-3 defect) made every "collections"
+  /// figure overstate actual money received. FINANCIAL_INVARIANTS §Document.
+  amountWaived         Decimal                 @default(0) @db.Decimal(20, 6)
   paymentStatus        PaymentStatus           @default(not_paid)
   /// POS Order→Invoice split: how this invoice is/was settled. NULL until a
   /// bill is generated. `credit` = postpaid house account (AR), settled later.
@@ -10276,6 +10282,7 @@ model SchoolClass {
   announcements      Announcement[]
   examSchedules      ExamSchedule[]
   streams            Stream[]
+  admissionApplications AdmissionApplication[] @relation("AdmissionApplyingForClass")
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -10753,8 +10760,12 @@ model StaffAttendance {
 }
 
 enum AdmissionStatus {
+  /// Portal/staff draft — not yet submitted. Not counted in the pipeline.
+  draft
   submitted
   under_review
+  /// Submitted but missing required documents; the applicant must complete them.
+  documents_pending
   screening
   interview_scheduled
   interviewed
@@ -10764,6 +10775,10 @@ enum AdmissionStatus {
   waitlisted
   offer_issued
   offer_accepted
+  /// Applicant declined the offer (terminal). Distinct from waitlisted.
+  offer_declined
+  /// Offer lapsed unaccepted (terminal).
+  offer_expired
   rejected
   enrolled
   withdrawn
@@ -10934,6 +10949,17 @@ model AdmissionApplication {
   offerIssuedAt      DateTime?
   offerAcceptedAt    DateTime?
   enrolledAt         DateTime?
+  /// Set when a draft is submitted into the pipeline (draft → submitted).
+  submittedByPortal  Boolean         @default(false)
+  /// How the enquiry reached the school (referral | website | walk_in | agent | sibling | other).
+  sourceOfEnquiry    String?
+  /// Link to an existing student when the applicant is a sibling (analytics + priority).
+  siblingOfStudentId String?
+  /// AES-256-GCM field-level encryption of the national ID (NIN). PII must not
+  /// sit in plaintext customFields where every `school:read` holder can see it.
+  ninCiphertext      String?
+  ninIv              String?
+  ninTag             String?
   customFields       Json            @default("{}")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -10943,6 +10969,7 @@ model AdmissionApplication {
 
   academicYear  AcademicYear          @relation(fields: [academicYearId], references: [id])
   admissionCycle AdmissionCycle?       @relation(fields: [admissionCycleId], references: [id])
+  applyingForClass SchoolClass?        @relation("AdmissionApplyingForClass", fields: [applyingForClassId], references: [id])
   documents     ApplicationDocument[]
   entranceExams EntranceExam[]
   interviews    Interview?
@@ -10953,11 +10980,178 @@ model AdmissionApplication {
   enrollment    Enrollment?
   identityMatches ApplicantIdentityMatch[]
   decision      AdmissionDecision?
+  guardians     AdmissionGuardian[]
+  reviewerAssignments AdmissionReviewerAssignment[]
+  portalTokens  AdmissionPortalToken[]
+  statusHistory AdmissionStatusHistory[]
 
   @@unique([organizationId, applicationNumber])
   @@index([organizationId])
   @@index([academicYearId])
   @@index([status])
+  @@index([organizationId, status, academicYearId])
+}
+
+/// Structured guardian captured on an application. Promoted to a real
+/// Contact + StudentGuardian at enrollment. Previously guardians were 12 flat
+/// strings in customFields, so no enrolled student had any guardian record.
+model AdmissionGuardian {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String
+  firstName      String
+  lastName       String?
+  relationship   String /// father | mother | guardian | other
+  phone          String?
+  altPhone       String?
+  email          String?
+  occupation     String?
+  address        String?
+  isPrimary      Boolean  @default(false)
+  isEmergency    Boolean  @default(false)
+  financiallyResponsible Boolean @default(false)
+  /// Set once promoted to a Contact at enrollment (idempotency + traceability).
+  contactId      String?
+  createdAt      DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+/// Append-only status history for an application. Every FSM transition writes
+/// one row: who, from, to, reason, when. The AuditLog captures it too, but this
+/// is the queryable per-application timeline the UI renders.
+model AdmissionStatusHistory {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String
+  fromStatus     String?
+  toStatus       String
+  action         String
+  reason         String?
+  changedById    String?
+  changedAt      DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+/// Per-cycle admission requirement: a document type or a checklist item that a
+/// submitted application must satisfy. Drives the submission-completeness gate
+/// and the enrollment document gate. `enrollmentEligibility` used to filter on a
+/// `required` flag that did not exist; requirements now have a first-class home.
+model AdmissionRequirement {
+  id               String   @id @default(uuid())
+  organizationId   String
+  admissionCycleId String?
+  /// Optional narrowing to one class/grade (null = applies to the whole cycle).
+  classId          String?
+  /// 'document' | 'field' | 'fee'.
+  kind             String   @default("document")
+  /// For documents: the ApplicationDocument.type this maps to (birth_cert, etc.).
+  code             String
+  label            String
+  required         Boolean  @default(true)
+  /// Gate this requirement applies at: 'submit' | 'enroll'.
+  gate             String   @default("submit")
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([organizationId, admissionCycleId, classId, gate, code])
+  @@index([organizationId])
+  @@index([admissionCycleId])
+}
+
+/// Assignment of an application to a reviewer for independent assessment.
+/// Supports the admissions-committee model: multiple reviewers, each with their
+/// own recommendation, none able to see/alter another's until decision.
+model AdmissionReviewerAssignment {
+  id             String    @id @default(uuid())
+  organizationId String
+  applicationId  String
+  reviewerId     String /// staff/user id
+  role           String    @default("reviewer") /// reviewer | panel_lead | interviewer
+  status         String    @default("assigned") /// assigned | in_progress | completed
+  recommendation String? /// accept | reject | waitlist | borderline
+  score          Float?
+  comments       String?
+  assignedById   String?
+  assignedAt     DateTime  @default(now())
+  completedAt    DateTime?
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, reviewerId])
+  @@index([organizationId])
+  @@index([applicationId])
+  @@index([organizationId, reviewerId, status])
+}
+
+/// Magic-link / OTP token for the applicant-facing portal. The applicant proves
+/// control of an email/phone and receives a scoped token to view + progress
+/// their own application without a full platform account.
+model AdmissionPortalToken {
+  id             String   @id @default(uuid())
+  organizationId String
+  applicationId  String
+  /// SHA-256 of the raw token — the raw value is emailed, never stored.
+  tokenHash      String   @unique
+  email          String?
+  phone          String?
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([applicationId])
+}
+
+/// Offer letter template (Phase 2). Rendered with application data at issue time.
+model AdmissionOfferTemplate {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  /// Handlebars-ish body with {{applicantName}}, {{className}}, {{expiresAt}} tokens.
+  body           String
+  /// Default validity window in days when an offer is issued from this template.
+  validityDays   Int      @default(14)
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([organizationId])
+}
+
+/// Lightweight enquiry / lead captured before a formal application (Phase 5).
+model AdmissionEnquiry {
+  id                String   @id @default(uuid())
+  organizationId    String
+  academicYearId    String?
+  applicantName     String
+  guardianName      String?
+  phone             String?
+  email             String?
+  interestedClassId String?
+  source            String? /// referral | website | walk_in | agent | sibling | other
+  status            String   @default("new") /// new | contacted | converted | closed
+  notes             String?
+  /// Set when the enquiry is converted into an AdmissionApplication.
+  convertedApplicationId String?
+  assignedToId      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  @@index([organizationId])
+  @@index([organizationId, status])
 }
 
 model ApplicationDocument {
@@ -11407,6 +11601,7 @@ model CourseOffering {
   teachers CourseOfferingTeacher[]
   scheduledLessons ScheduledLesson[]
   discussions Discussion[]
+  timetableSlots TimetableSlot[]
 
   @@unique([organizationId, academicYearId, termId, subjectId, classId, sectionId])
   @@index([organizationId])
@@ -11772,6 +11967,10 @@ model TimetableSlot {
   /// Optional link to a managed teaching room (vs the free-text `room` label).
   teachingRoomId   String?
   teachingRoom     TeachingRoom? @relation(fields: [teachingRoomId], references: [id])
+  /// Canonical teaching instance this slot belongs to (CourseOffering spine).
+  /// Backfilled from (class+section+subject+term); nullable during migration.
+  courseOfferingId String?
+  courseOffering   CourseOffering? @relation(fields: [courseOfferingId], references: [id])
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -11790,6 +11989,7 @@ model TimetableSlot {
   @@index([periodId, dayOfWeek])
   @@index([streamId])
   @@index([teachingRoomId])
+  @@index([courseOfferingId])
 }
 
 /// Managed teaching rooms (labs, halls) used for timetable room booking/availability.
@@ -11889,6 +12089,7 @@ model StudentAttendance {
   /// the status code has no matching config row (e.g. legacy / custom value).
   statusCfgId      String?
   minutesLate      Int              @default(0)
+  earlyDepartureMinutes Int?
   reason           String?
   markedById       String?
   markedAt         DateTime         @default(now())
@@ -13446,6 +13647,10 @@ model FeeStructure {
   /// JSON filter: {gradeLevelIds:[...], classIds:[...]}.
   applicableTo   Json      @default("{}")
   isActive       Boolean   @default(true)
+  /// B5 lifecycle: draft | published | archived. Only 'published' is billable.
+  status         String    @default("published")
+  /// The FeeStructureVersion currently in effect (loose ref).
+  currentVersionId String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -13536,6 +13741,12 @@ model Waiver {
   applied            Boolean  @default(false)
   /// Set when the waiver was applied as a bad-debt write-off.
   badDebt            Boolean  @default(false)
+  /// A4 approval workflow: pending | approved | rejected | applied | reversed.
+  /// applyWaiver requires status='approved' and approvedById != createdBy.
+  status             String   @default("pending")
+  approvedById       String?
+  approvedAt         DateTime?
+  rejectionReason    String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   createdBy          String?
@@ -13543,6 +13754,7 @@ model Waiver {
 
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
 
+  @@unique([organizationId, code])
   @@index([organizationId])
   @@index([waiverCategoryId])
   @@index([studentProfileId])
@@ -13563,6 +13775,10 @@ model FeeCredit {
   remaining        Decimal  @db.Decimal(20, 6)
   /// Where the credit came from: 'overpayment' | 'refund' | 'advance' | 'adjustment'.
   source           String   @default("overpayment")
+  /// active | partially_applied | fully_applied | expired | refunded | reversed (A2)
+  status           String   @default("active")
+  /// Whether the outstanding balance may be paid out as a refund (A2.1).
+  isRefundable     Boolean  @default(true)
   /// The payment/document that funded this credit (for traceability).
   sourcePaymentId  String?
   sourceDocumentId String?
@@ -13575,6 +13791,7 @@ model FeeCredit {
 
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
 
+  @@unique([organizationId, code])
   @@index([organizationId])
   @@index([studentProfileId])
 }
@@ -13806,6 +14023,319 @@ model PenaltyAssessment {
   @@index([penaltyRunId])
   @@index([sourceDocumentId])
   @@index([scheduleId])
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FEES & FINANCE — Production-hardening models (ADR-013).
+   Cross-entity FKs are loose refs (String + @@index / @unique), matching the
+   established Waiver.documentId pattern, so existing models gain only fields,
+   never relation back-references. Status columns are String with documented
+   allowed values, matching FeeCredit.source / Scholarship.type.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/// A1.1 — First-class school-domain invoice, bound 1:1 to an accounting
+/// Document. School queries (statement, ledger, defaulters, dashboard) read
+/// this; the accounting engine keeps binding to Document alone. Financial
+/// amounts live on Document and are NOT duplicated here — reading a total means
+/// joining, deliberately, so there is no third number to disagree.
+model SchoolFeeInvoice {
+  id                    String   @id @default(uuid())
+  organizationId        String
+  invoiceNumber         String
+  /// Required 1:1 link. @unique enforces the 1:1 without a Prisma back-relation
+  /// on the (very large) Document model.
+  documentId            String   @unique
+  studentProfileId      String
+  academicYearId        String?
+  termId                String?
+  classId               String?
+  sectionId             String?
+  /// Provenance stamp (B5). Null for legacy/unmapped invoices — harmless
+  /// because DocumentLine already carries the priced snapshot.
+  feeStructureVersionId String?
+  billingRunId          String?
+  /// draft | issued | settled | cancelled | voided. Mirrors the Document
+  /// lifecycle; never diverges from it.
+  status                String   @default("issued")
+  issueDate             DateTime @default(now())
+  dueDate               DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  createdBy             String?
+  updatedBy             String?
+
+  /// Business-key uniqueness (A3): the database, not an app existence check,
+  /// is what makes concurrent billing produce exactly one invoice per student
+  /// per term per fee-structure version.
+  @@unique([organizationId, studentProfileId, termId, feeStructureVersionId])
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([termId])
+  @@index([billingRunId])
+}
+
+/// A2 — the credit subledger. One row per drawdown of a FeeCredit against an
+/// invoice. FeeCredit.remaining is the cached projection of
+/// amount minus SUM(these) plus SUM(reversals).
+model FeeCreditAllocation {
+  id             String   @id @default(uuid())
+  organizationId String
+  feeCreditId    String
+  documentId     String
+  amount         Decimal  @db.Decimal(20, 6)
+  /// posted | reversed
+  status         String   @default("posted")
+  journalEntryId String?
+  reversedById   String?
+  createdAt      DateTime @default(now())
+  createdBy      String?
+
+  @@index([organizationId])
+  @@index([feeCreditId])
+  @@index([documentId])
+}
+
+/// A2 (P1-13) — the typed escape hatch. Every balance change not explained by
+/// invoice / payment / waiver / credit / refund / write-off is a FeeAdjustment.
+/// This is what keeps a bare amountResidual mutation from ever being the way to
+/// "adjust a balance".
+model FeeAdjustment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  code             String
+  studentProfileId String
+  documentId       String?
+  /// debit (increases what the student owes) | credit (decreases it)
+  direction        String
+  amount           Decimal  @db.Decimal(20, 6)
+  reason           String
+  /// draft | pending_approval | approved | posted | rejected | reversed
+  status           String   @default("pending_approval")
+  journalEntryId   String?
+  createdById      String?
+  approvedById     String?
+  approvedAt       DateTime?
+  rejectionReason  String?
+  reversedById     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([documentId])
+}
+
+/// Phase 1.5 — a billing run as a resumable, auditable job rather than a
+/// synchronous HTTP request. Each item commits atomically; the run tolerates
+/// partial failure.
+model BillingRun {
+  id             String   @id @default(uuid())
+  organizationId String
+  termId         String
+  classId        String?
+  /// queued | running | completed | completed_with_failures | cancelled
+  status         String   @default("queued")
+  totalStudents  Int      @default(0)
+  postedCount    Int      @default(0)
+  failedCount    Int      @default(0)
+  skippedCount   Int      @default(0)
+  startedById    String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items BillingRunItem[]
+
+  @@index([organizationId])
+  @@index([termId])
+}
+
+model BillingRunItem {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  billingRunId       String
+  studentProfileId   String
+  /// pending | processing | posted | failed | skipped
+  status             String   @default("pending")
+  documentId         String?
+  schoolFeeInvoiceId String?
+  amount             Decimal? @db.Decimal(20, 6)
+  error              String?
+  retryCount         Int      @default(0)
+  processedAt        DateTime?
+  createdAt          DateTime @default(now())
+
+  billingRun BillingRun @relation(fields: [billingRunId], references: [id], onDelete: Cascade)
+
+  @@unique([billingRunId, studentProfileId])
+  @@index([organizationId])
+  @@index([billingRunId])
+}
+
+/// A4.1 — school-term financial close. A SCHOOL-domain control, deliberately
+/// distinct from accounting fiscal-period close: postings remain governed by
+/// the posting date's FiscalPeriod. Both must pass.
+model TermFinancialClose {
+  id             String   @id @default(uuid())
+  organizationId String
+  termId         String
+  /// open | closed
+  status         String   @default("open")
+  closedById     String?
+  closedAt       DateTime?
+  reopenedById   String?
+  reopenedAt     DateTime?
+  reopenReason   String?
+  /// Frozen totals at close (billed/collected/waived/credited/outstanding).
+  snapshot       Json     @default("{}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, termId])
+  @@index([organizationId])
+}
+
+/// B4 — a mobile-money / bank statement import. File-level audit trail so a
+/// bursar can prove "the statement contained X and the ERP processed Y".
+model PaymentImportBatch {
+  id               String   @id @default(uuid())
+  organizationId   String
+  /// mtn_momo | airtel_money | bank
+  provider         String
+  originalFilename String
+  fileHash         String
+  statementPeriod  String?
+  rowCount         Int      @default(0)
+  totalAmount      Decimal  @default(0) @db.Decimal(20, 6)
+  matchedCount     Int      @default(0)
+  postedCount      Int      @default(0)
+  rejectedCount    Int      @default(0)
+  uploadedById     String?
+  uploadedAt       DateTime @default(now())
+
+  rows PaymentImportRow[]
+
+  /// Batch locking: an identical file for the same provider+period is rejected
+  /// before parsing.
+  @@unique([organizationId, provider, statementPeriod, fileHash])
+  @@index([organizationId])
+}
+
+model PaymentImportRow {
+  id                      String   @id @default(uuid())
+  organizationId          String
+  batchId                 String
+  externalRef             String
+  payerPhone              String?
+  payerName               String?
+  amount                  Decimal  @db.Decimal(20, 6)
+  transactionDate         DateTime?
+  narration               String?
+  /// imported | matched | confirmed | posted | unmatched | duplicate | rejected | failed
+  matchStatus             String   @default("imported")
+  /// high | medium | low | none
+  matchConfidence         String   @default("none")
+  matchedStudentProfileId String?
+  paymentId               String?
+  error                   String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  batch PaymentImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  /// Row-level duplicate guard: a provider transaction reference is unique.
+  @@unique([organizationId, externalRef])
+  @@index([organizationId])
+  @@index([batchId])
+  @@index([matchStatus])
+}
+
+/// B5 — versioned fee structures. FeeStructureVersion freezes a snapshot;
+/// FeeItem is the priced line. Provenance and reproducibility, NOT protection
+/// of the historical invoice (DocumentLine already does that).
+model FeeStructureVersion {
+  id             String    @id @default(uuid())
+  organizationId String
+  feeStructureId String
+  versionNo      Int
+  isImmutable    Boolean   @default(false)
+  publishedAt    DateTime?
+  publishedById  String?
+  createdAt      DateTime  @default(now())
+
+  items FeeItem[]
+
+  @@unique([feeStructureId, versionNo])
+  @@index([organizationId])
+  @@index([feeStructureId])
+}
+
+model FeeItem {
+  id                    String   @id @default(uuid())
+  organizationId        String
+  feeStructureVersionId String
+  code                  String
+  name                  String
+  productId             String?
+  amount                Decimal  @db.Decimal(20, 6)
+  isOptional            Boolean  @default(false)
+  /// one_time | per_term | annual
+  frequency             String   @default("per_term")
+  appliesTo             Json     @default("{}")
+  createdAt             DateTime @default(now())
+
+  version FeeStructureVersion @relation(fields: [feeStructureVersionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([feeStructureVersionId])
+}
+
+/// Phase 0.9 — historical remediation. Corrections to data corrupted by the P0
+/// defects are grouped into approved batches and executed as reversal /
+/// compensating entries, never by editing history. Answers "why did this
+/// student balance change after go-live?".
+model FinancialRemediationBatch {
+  id               String   @id @default(uuid())
+  organizationId   String
+  code             String
+  reason           String
+  sourceReportHash String?
+  /// draft | approved | applied | rejected
+  status           String   @default("draft")
+  createdById      String?
+  approvedById     String?
+  approvedAt       DateTime?
+  appliedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  items FinancialRemediationItem[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model FinancialRemediationItem {
+  id              String   @id @default(uuid())
+  organizationId  String
+  batchId         String
+  sourceType      String
+  sourceId        String
+  discrepancyType String
+  originalAmount  Decimal  @db.Decimal(20, 6)
+  correctedAmount Decimal  @db.Decimal(20, 6)
+  journalEntryId  String?
+  explanation     String?
+  createdAt       DateTime @default(now())
+
+  batch FinancialRemediationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([batchId])
 }
 
 model BookMetadata {

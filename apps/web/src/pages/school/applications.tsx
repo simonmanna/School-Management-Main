@@ -7,39 +7,16 @@ import {
   useAcademicYears,
   useClasses,
   type AdmissionApplication,
-  type AdmissionStatus,
+  type AdmissionAction,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { notify } from '@/lib/notify';
-
-const STATUS_META: Record<AdmissionStatus, { cls: string; label: string }> = {
-  submitted: { cls: 'bg-slate-100 text-slate-700', label: 'Submitted' },
-  under_review: { cls: 'bg-amber-100 text-amber-700', label: 'Under review' },
-  exam_scheduled: { cls: 'bg-sky-100 text-sky-700', label: 'Exam scheduled' },
-  accepted: { cls: 'bg-emerald-100 text-emerald-700', label: 'Accepted' },
-  enrolled: { cls: 'bg-indigo-100 text-indigo-700', label: 'Enrolled' },
-  rejected: { cls: 'bg-rose-100 text-rose-700', label: 'Rejected' },
-  withdrawn: { cls: 'bg-zinc-100 text-zinc-600', label: 'Withdrawn' },
-};
-
-const NEXT_ACTIONS: Record<AdmissionStatus, Array<{ action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw'; label: string; tone: 'default' | 'success' | 'danger' }>> = {
-  submitted: [{ action: 'review', label: 'Start review', tone: 'default' }],
-  under_review: [
-    { action: 'accept', label: 'Accept', tone: 'success' },
-    { action: 'reject', label: 'Reject', tone: 'danger' },
-    { action: 'schedule_exam', label: 'Schedule exam', tone: 'default' },
-  ],
-  exam_scheduled: [
-    { action: 'accept', label: 'Accept', tone: 'success' },
-    { action: 'reject', label: 'Reject', tone: 'danger' },
-  ],
-  accepted: [],
-  enrolled: [],
-  rejected: [],
-  withdrawn: [],
-};
+// Single source of truth for the lifecycle. This page previously carried its own
+// copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
+// 7 of the 15 backend states.
+import { NEXT_ACTIONS, statusMeta } from './_components/admission-status';
 
 export function SchoolApplicationsPage() {
   const navigate = useNavigate();
@@ -52,10 +29,20 @@ export function SchoolApplicationsPage() {
   const yearNameById = useMemo(() => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])), [years]);
   const classNameById = useMemo(() => Object.fromEntries((classes?.data ?? []).map((c) => [c.id, c.name])), [classes]);
 
-  const runAction = async (app: AdmissionApplication, action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw') => {
+  const runAction = async (app: AdmissionApplication, action: AdmissionAction, needsNotes?: boolean) => {
+    let notes: string | undefined;
+    if (needsNotes) {
+      const entered = window.prompt(`Reason for "${action.replace(/_/g, ' ')}"?`);
+      if (entered === null) return;
+      if (!entered.trim()) {
+        notify.error('A reason is required for this action');
+        return;
+      }
+      notes = entered.trim();
+    }
     try {
-      await act.mutateAsync({ id: app.id, action });
-      notify.success(`Application ${action.replace('_', ' ')}`);
+      await act.mutateAsync({ id: app.id, action, notes });
+      notify.success(`Application ${action.replace(/_/g, ' ')}`);
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Action failed');
     }
@@ -104,19 +91,17 @@ export function SchoolApplicationsPage() {
                   <td className="px-4 py-2">{a.applyingForClassId ? classNameByIdExists(classNameById, a.applyingForClassId) : '—'}</td>
                   <td className="px-4 py-2">{yearNameById[a.academicYearId] ?? '—'}</td>
                   <td className="px-4 py-2">
-                    <Badge className={STATUS_META[a.status]?.cls ?? 'bg-slate-100 text-slate-700'}>
-                      {STATUS_META[a.status]?.label ?? a.status}
-                    </Badge>
+                    <Badge className={statusMeta(a.status).cls}>{statusMeta(a.status).label}</Badge>
                   </td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex flex-wrap justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                      {NEXT_ACTIONS[a.status]?.map((n) => (
+                      {(NEXT_ACTIONS[a.status] ?? []).map((n) => (
                         <Button
                           key={n.action}
                           variant={n.tone === 'success' ? 'default' : n.tone === 'danger' ? 'destructive' : 'secondary'}
                           size="sm"
                           disabled={act.isPending}
-                          onClick={() => runAction(a, n.action)}
+                          onClick={() => runAction(a, n.action, n.needsNotes)}
                         >
                           {n.action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
                           {n.action === 'reject' && <XCircle className="h-3.5 w-3.5" />}

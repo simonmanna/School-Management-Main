@@ -405,6 +405,10 @@ export const PERMISSIONS = {
     reviewLessonPlans: 'school:lessonplans:review',
     approveLessonPlans: 'school:lessonplans:approve',
     lmsRead: 'school:lms:read',
+    // Teacher self-service scopes (owner-only writes). Used by @RequireOwnerOrPermission
+    // so a teacher portal session can edit only its own rows without the broad write grant.
+    ownLessonPlans: 'school:lessonplans:own',
+    ownTimetable: 'school:timetable:own',
     manageQuestionBank: 'school:questionbank:write',
     authorCbt: 'school:cbt:author',
     takeCbt: 'school:cbt:take',
@@ -418,6 +422,17 @@ export const PERMISSIONS = {
     readDocuments: 'school:documents:read',
     collectPayments: 'school:fees:collect',
     refundFees: 'school:fees:refund',
+    // Money-forgiving and money-creating actions. Separated from the blanket
+    // `school:fees:write` in Phase 0 of the Fees & Finance hardening plan:
+    // one permission previously let a single bursar edit fee structures,
+    // create a waiver, apply it, and write off a debt with no second pair of
+    // eyes anywhere — while the platform's own journal entries have enforced
+    // maker-checker all along. A4 adds the approval workflow behind these;
+    // holding one is already required to reach the endpoint.
+    approveWaivers: 'school:fees:waiver:approve',
+    approveCredits: 'school:fees:credit:approve',
+    approveRefunds: 'school:fees:refund:approve',
+    writeOffFees: 'school:fees:writeoff',
     manageLibrary: 'school:library:write',
     manageTransport: 'school:transport:write',
     transportRead: 'school:transport:read',

@@ -219,64 +219,6 @@ export class CurriculumService extends BaseCrudService<Curriculum, CreateCurricu
 }
 
 @Injectable()
-export class LessonPlanService extends BaseCrudService<LessonPlan, CreateLessonPlanDto, UpdateLessonPlanDto> {
-  protected readonly entityName = 'LessonPlan';
-  protected readonly searchFields = ['title', 'objectives'];
-  protected readonly defaultInclude = { subject: true };
-
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly tenant: TenantContextService,
-    private readonly audit: AuditService,
-    private readonly events: EventBus,
-  ) {
-    super(prisma.client.lessonPlan as unknown as CrudDelegate);
-  }
-
-  /**
-   * Publish a lesson plan — simple status flip with audit + event.
-   * A real WorkflowService transition would be used in production for
-   * permission gating; we keep this lean for the sprint scope.
-   */
-  async publish(id: string) {
-    return this.prisma.client.$transaction(async (tx: any) => {
-      const before = await tx.lessonPlan.findFirst({ where: { id } });
-      if (!before) throw new NotFoundException(`LessonPlan ${id} not found`);
-      const updated = await tx.lessonPlan.updateMany({
-        where: { id },
-        data: { status: 'published', publishedAt: new Date() },
-      });
-      if (updated.count === 0) throw new NotFoundException(`LessonPlan ${id} not found`);
-      const after = await tx.lessonPlan.findFirst({ where: { id } });
-      await this.audit.recordInTx(tx, {
-        entity: 'LessonPlan',
-        entityId: id,
-        // 'publish' is not an AuditAction enum value — that write would throw and
-        // roll back the publish. Publishing is a status update.
-        action: 'update',
-        oldValues: { status: before.status },
-        newValues: { status: 'published', action: 'publish' },
-      });
-      this.events.publish(EVENTS.SchoolLessonPlanPublished, {
-        organizationId: this.tenant.organizationId,
-        lessonPlanId: id,
-        subjectId: before.subjectId,
-        classId: before.classId ?? undefined,
-      });
-      return after;
-    });
-  }
-
-  async byTeacher(teacherPartnerId: string) {
-    return this.prisma.client.lessonPlan.findMany({
-      where: { teacherPartnerId },
-      orderBy: { weekOf: 'desc' },
-      include: { subject: true },
-    });
-  }
-}
-
-@Injectable()
 export class TeacherAssignmentService extends BaseCrudService<TeacherAssignment, CreateTeacherAssignmentDto, UpdateTeacherAssignmentDto> {
   protected readonly entityName = 'TeacherAssignment';
   protected readonly searchFields: string[] = [];
@@ -313,8 +255,30 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   protected readonly searchFields: string[] = [];
   protected readonly defaultInclude = { subject: true, period: true, teacher: true };
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenant: TenantContextService,
+  ) {
     super(prisma.client.timetableSlot as unknown as CrudDelegate);
+  }
+
+  /**
+   * Resolve the canonical CourseOffering for a slot (class+section+subject+term),
+   * so timetable rows hang off the teaching-instance spine. Best-effort: returns
+   * null when no matching offering exists yet (caller may create one via LMS).
+   */
+  private async resolveCourseOffering(
+    tx: any,
+    slot: { classId: string; sectionId?: string | null; subjectId: string },
+  ): Promise<string | null> {
+    const where: Record<string, unknown> = {
+      organizationId: this.tenant.organizationId,
+      classId: slot.classId,
+      sectionId: slot.sectionId ?? null,
+      subjectId: slot.subjectId,
+    };
+    const offering = await tx.courseOffering.findFirst({ where });
+    return offering?.id ?? null;
   }
 
   /**
@@ -324,10 +288,11 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   async detectConflicts(slot: CreateTimetableSlotDto, excludeSlotId?: string): Promise<string[]> {
     // Breaks and free periods are intentionally not bookable resources — skip.
     if (slot.type === 'break' || slot.type === 'free') return [];
+    const organizationId = this.tenant.organizationId;
     const conflicts: string[] = [];
     const excl = excludeSlotId ? { id: { not: excludeSlotId } } : {};
     const base = (extra: Record<string, unknown>) => ({
-      organizationId: undefined as any, // tenancy extension fills this
+      organizationId,
       dayOfWeek: slot.dayOfWeek,
       ...extra,
       ...excl,
@@ -382,7 +347,13 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     if (conflicts.length > 0) {
       throw new BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
     }
-    return super.create(dto);
+    // Hang the slot off the canonical CourseOffering spine (best-effort).
+    const courseOfferingId = await this.resolveCourseOffering(this.prisma.client, {
+      classId: dto.classId,
+      sectionId: dto.sectionId ?? null,
+      subjectId: dto.subjectId,
+    });
+    return super.create({ ...dto, courseOfferingId: courseOfferingId ?? undefined });
   }
 
   /**
@@ -404,13 +375,19 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
       teacherPartnerId: dto.teacherPartnerId ?? existing.teacherPartnerId ?? undefined,
       campusId: dto.campusId ?? existing.campusId ?? undefined,
       room: dto.room ?? existing.room ?? undefined,
+      courseOfferingId: existing.courseOfferingId ?? undefined,
     };
 
     const conflicts = await this.detectConflicts(merged, id);
     if (conflicts.length > 0) {
       throw new BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
     }
-    return super.update(id, dto);
+
+    // Re-resolve the spine if the class/section/subject changed.
+    const courseOfferingId = await this.resolveCourseOffering(this.prisma.client, merged);
+    const updateData: UpdateTimetableSlotDto = { ...dto };
+    if (courseOfferingId) (updateData as any).courseOfferingId = courseOfferingId;
+    return super.update(id, updateData);
   }
 
   /**
@@ -431,9 +408,19 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
       });
       const created = [];
       for (const slot of dto.slots) {
+        const courseOfferingId = await this.resolveCourseOffering(tx, {
+          classId: dto.classId,
+          sectionId: dto.sectionId ?? null,
+          subjectId: slot.subjectId,
+        });
         created.push(
           await tx.timetableSlot.create({
-            data: { ...slot, classId: dto.classId, sectionId: dto.sectionId ?? null },
+            data: {
+              ...slot,
+              classId: dto.classId,
+              sectionId: dto.sectionId ?? null,
+              ...(courseOfferingId ? { courseOfferingId } : {}),
+            },
           }),
         );
       }

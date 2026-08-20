@@ -365,6 +365,16 @@ export const ORG_SCOPED = new Set<string>([
   'AdmissionCriteriaSet',
   'AdmissionCriterion',
   'AdmissionDecision',
+  // Admissions Phase 1/2/3/5 — guardians, status history, requirements, reviewer
+  // assignments, portal tokens, offer templates, enquiries. Each carries a
+  // non-null organizationId; omitting any one is a cross-tenant leak.
+  'AdmissionGuardian',
+  'AdmissionStatusHistory',
+  'AdmissionRequirement',
+  'AdmissionReviewerAssignment',
+  'AdmissionPortalToken',
+  'AdmissionOfferTemplate',
+  'AdmissionEnquiry',
   'Enrollment',
   'Curriculum',
   'CurriculumSubject',
@@ -702,6 +712,10 @@ export const SOFT_DELETE = new Set<string>([
   'StaffProfile',
   'Position',
   'AdmissionApplication',
+  // Admissions config masters carry deletedAt (offer templates + enquiries are
+  // soft-deleted so historical offers/enquiries keep resolving their names).
+  'AdmissionOfferTemplate',
+  'AdmissionEnquiry',
   'Curriculum',
   // LMS Phase 1 — course offerings, activities, plan templates and discussions
   // all carry deletedAt; without them a soft-deleted row kept being returned.

@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AdmissionApplication } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { EncryptionService } from '../../../kernel/encryption/encryption.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import type {
@@ -53,8 +54,12 @@ import { EnrollmentService, type EnrollNewStudentInput } from '../people/enrollm
  * documentation/other consumers.
  */
 const ADMISSION_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
-  submitted: ['review', 'withdraw'],
-  under_review: ['review', 'screen', 'schedule_exam', 'accept', 'reject', 'waitlist', 'withdraw'],
+  // Phase 1: a draft is a not-yet-submitted application (portal or front desk).
+  draft: ['submit', 'withdraw'],
+  submitted: ['review', 'request_documents', 'withdraw'],
+  // Missing required documents — the applicant completes them, then it re-enters review.
+  documents_pending: ['resolve_documents', 'reject', 'withdraw'],
+  under_review: ['review', 'screen', 'request_documents', 'schedule_interview', 'schedule_exam', 'accept', 'reject', 'waitlist', 'withdraw'],
   screening: ['schedule_interview', 'schedule_exam', 'reject', 'withdraw'],
   interview_scheduled: ['schedule_interview', 'complete_interview', 'reschedule', 'reject', 'withdraw'],
   interviewed: ['schedule_exam', 'exam_done', 'score', 'accept', 'reject', 'waitlist', 'withdraw'],
@@ -63,12 +68,84 @@ const ADMISSION_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
   scored: ['score', 'accept', 'reject', 'waitlist', 'withdraw'],
   exam_scheduled: ['exam_done', 'score', 'accept', 'reject', 'waitlist', 'withdraw'],
   accepted: ['waitlist', 'issue_offer', 'withdraw'],
-  waitlisted: ['issue_offer', 'withdraw'],
-  offer_issued: ['accept_offer', 'decline_offer', 'withdraw'],
-  offer_accepted: ['enroll'],
+  waitlisted: ['issue_offer', 'reject', 'withdraw'],
+  offer_issued: ['accept_offer', 'decline_offer', 'expire_offer', 'withdraw'],
+  offer_accepted: ['enroll', 'withdraw'],
+  // A lapsed offer can be re-issued (offer_expired → offer_issued) rather than
+  // forcing the applicant to reapply.
+  offer_expired: ['issue_offer', 'withdraw'],
+  offer_declined: [],
   rejected: [],
   withdrawn: [],
   enrolled: [],
+};
+
+/** action → resulting status. The single source of truth for every transition. */
+const STATUS_MAP: Record<string, string> = {
+  submit: 'submitted',
+  review: 'under_review',
+  request_documents: 'documents_pending',
+  resolve_documents: 'under_review',
+  screen: 'screening',
+  schedule_interview: 'interview_scheduled',
+  complete_interview: 'interviewed',
+  reschedule: 'interview_scheduled',
+  schedule_exam: 'exam_scheduled',
+  exam_done: 'interviewed',
+  score: 'scored',
+  accept: 'accepted',
+  reject: 'rejected',
+  waitlist: 'waitlisted',
+  issue_offer: 'offer_issued',
+  accept_offer: 'offer_accepted',
+  // Fixed semantics: declining an offer is terminal (offer_declined), not a
+  // silent bounce back onto the waitlist.
+  decline_offer: 'offer_declined',
+  expire_offer: 'offer_expired',
+  enroll: 'enrolled',
+  withdraw: 'withdrawn',
+};
+
+/** action → domain event. Actions without a dedicated event simply publish nothing. */
+const EVENT_MAP: Record<string, string> = {
+  submit: EVENTS.SchoolAdmissionSubmitted,
+  review: EVENTS.SchoolAdmissionUnderReview,
+  screen: EVENTS.SchoolAdmissionScreened,
+  schedule_interview: EVENTS.SchoolAdmissionInterviewScheduled,
+  complete_interview: EVENTS.SchoolAdmissionInterviewed,
+  reschedule: EVENTS.SchoolAdmissionInterviewScheduled,
+  schedule_exam: EVENTS.SchoolAdmissionExamScheduled,
+  exam_done: EVENTS.SchoolAdmissionInterviewed,
+  score: EVENTS.SchoolAdmissionScored,
+  accept: EVENTS.SchoolAdmissionAccepted,
+  reject: EVENTS.SchoolAdmissionRejected,
+  waitlist: EVENTS.SchoolAdmissionWaitlisted,
+  issue_offer: EVENTS.SchoolAdmissionOfferIssued,
+  accept_offer: EVENTS.SchoolAdmissionOfferAccepted,
+  decline_offer: EVENTS.SchoolAdmissionOfferDeclined,
+  enroll: EVENTS.SchoolAdmissionEnrolled,
+  withdraw: EVENTS.SchoolAdmissionWithdrawn,
+};
+
+/** action → AuditLog action enum. Everything else is an 'update'. */
+const AUDIT_ACTION_MAP: Record<string, 'update' | 'approve' | 'reject' | 'cancel'> = {
+  accept: 'approve',
+  accept_offer: 'approve',
+  reject: 'reject',
+  decline_offer: 'cancel',
+  withdraw: 'cancel',
+};
+
+/** Milestone timestamps stamped on the application as it moves through the funnel. */
+const TIMESTAMP_MAP: Record<string, string> = {
+  screen: 'screenedAt',
+  complete_interview: 'interviewedAt',
+  schedule_exam: 'examScheduledAt',
+  score: 'scoredAt',
+  accept: 'acceptedAt',
+  issue_offer: 'offerIssuedAt',
+  accept_offer: 'offerAcceptedAt',
+  enroll: 'enrolledAt',
 };
 
 /**
@@ -98,6 +175,7 @@ interface EnrollmentTarget {
  */
 @Injectable()
 export class AdmissionsService extends BaseCrudService<AdmissionApplication, CreateApplicationDto, UpdateApplicationDto> {
+  private readonly logger = new Logger('AdmissionsService');
   protected readonly entityName = 'AdmissionApplication';
   protected readonly searchFields: string[] = ['applicationNumber', 'applicantFirstName', 'applicantLastName'];
   protected readonly defaultInclude = {
@@ -106,6 +184,8 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     entranceExams: { include: { subject: true } },
     waitingList: true,
     enrollment: true,
+    guardians: true,
+    offerLetter: true,
   };
 
   constructor(
@@ -115,8 +195,53 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     private readonly events: EventBus,
     private readonly sequence: SequenceService,
     private readonly enrollment: EnrollmentService,
+    private readonly encryption: EncryptionService,
   ) {
     super(prisma.client.admissionApplication as unknown as CrudDelegate);
+  }
+
+  /**
+   * Override the base CRUD update: `nin` must be encrypted into its three
+   * columns rather than written as a plaintext field, and `guardians` is a
+   * relation the flat updateMany cannot set — so both are transformed/stripped
+   * here before delegating.
+   */
+  async update(id: string, dto: UpdateApplicationDto): Promise<AdmissionApplication> {
+    const { nin, guardians, ...rest } = dto as any;
+    const data: Record<string, unknown> = { ...rest };
+    if (nin !== undefined) {
+      const enc = this.encryption.encrypt(nin);
+      data.ninCiphertext = enc?.ciphertext ?? null;
+      data.ninIv = enc?.iv ?? null;
+      data.ninTag = enc?.tag ?? null;
+    }
+    const res = await this.prisma.client.admissionApplication.updateMany({ where: { id }, data });
+    if (res.count === 0) throw new NotFoundException(`AdmissionApplication ${id} not found`);
+    // Replace the structured guardians when the caller sends a new set.
+    if (Array.isArray(guardians)) {
+      const app = await this.prisma.client.admissionApplication.findFirst({ where: { id }, select: { organizationId: true } });
+      await this.prisma.client.admissionGuardian.deleteMany({ where: { applicationId: id, contactId: null } });
+      for (const g of guardians) {
+        await this.prisma.client.admissionGuardian.create({
+          data: {
+            organizationId: app!.organizationId,
+            applicationId: id,
+            firstName: g.firstName,
+            lastName: g.lastName ?? null,
+            relationship: g.relationship,
+            phone: g.phone ?? null,
+            altPhone: g.altPhone ?? null,
+            email: g.email ?? null,
+            occupation: g.occupation ?? null,
+            address: g.address ?? null,
+            isPrimary: g.isPrimary ?? false,
+            isEmergency: g.isEmergency ?? false,
+            financiallyResponsible: g.financiallyResponsible ?? false,
+          },
+        });
+      }
+    }
+    return this.findOne(id);
   }
 
   async create(dto: CreateApplicationDto): Promise<AdmissionApplication> {
@@ -159,10 +284,15 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         { prefix: 'APP-', padding: 6 },
         tx,
       );
+      // NIN is PII: store it AES-256-GCM encrypted, never in plaintext
+      // customFields where every `school:read` holder could read it.
+      const nin = this.encryption.encrypt(dto.nin);
+      const status = dto.asDraft ? 'draft' : 'submitted';
       const row = await tx.admissionApplication.create({
         data: {
           organizationId,
           academicYearId: dto.academicYearId,
+          admissionCycleId: dto.admissionCycleId ?? null,
           applicationNumber,
           applicantFirstName: dto.applicantFirstName,
           applicantLastName: dto.applicantLastName,
@@ -170,34 +300,130 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           applicantGender: dto.applicantGender ?? null,
           applyingForClassId: dto.applyingForClassId ?? null,
           parentContactId: dto.parentContactId ?? null,
+          sourceOfEnquiry: dto.sourceOfEnquiry ?? null,
+          siblingOfStudentId: dto.siblingOfStudentId ?? null,
+          ninCiphertext: nin?.ciphertext ?? null,
+          ninIv: nin?.iv ?? null,
+          ninTag: nin?.tag ?? null,
           customFields: dto.customFields ?? {},
-          status: 'submitted',
+          status,
         },
       });
 
-      // Phase-2 identity/deduplication: find likely-duplicate existing people
-      // (students or prior applicants) so an admissions officer can confirm or
-      // dismiss — never auto-merge. Supports the reapplication invariant.
-      await this.computeIdentityMatches(tx, organizationId, row);
+      // Structured guardians (Phase 1) — no longer 12 flat strings in customFields.
+      // Promoted to real Contact + StudentGuardian rows at enrollment.
+      if (dto.guardians?.length) {
+        for (const g of dto.guardians) {
+          await tx.admissionGuardian.create({
+            data: {
+              organizationId,
+              applicationId: row.id,
+              firstName: g.firstName,
+              lastName: g.lastName ?? null,
+              relationship: g.relationship,
+              phone: g.phone ?? null,
+              altPhone: g.altPhone ?? null,
+              email: g.email ?? null,
+              occupation: g.occupation ?? null,
+              address: g.address ?? null,
+              isPrimary: g.isPrimary ?? false,
+              isEmergency: g.isEmergency ?? false,
+              financiallyResponsible: g.financiallyResponsible ?? false,
+            },
+          });
+        }
+      }
+
+      await tx.admissionStatusHistory.create({
+        data: { organizationId, applicationId: row.id, fromStatus: null, toStatus: status, action: 'create', changedById: this.tenant.userId ?? null },
+      });
 
       await this.audit.recordInTx(tx, {
         entity: 'AdmissionApplication',
         entityId: row.id,
         action: 'create',
-        newValues: row,
+        newValues: { ...row, ninCiphertext: undefined, ninIv: undefined, ninTag: undefined },
       });
-      this.events.publish(EVENTS.SchoolAdmissionSubmitted, {
-        organizationId,
-        applicationId: row.id,
-        applicationNumber: row.applicationNumber,
-      });
-      // Silence "unused variable" warnings for the normalized form
-      // (kept for future expansion — the same normalization can be
-      // applied to customFields free-text values).
+      // A draft is not yet in the pipeline, so it does not announce a submission.
+      if (status === 'submitted') {
+        this.events.publish(EVENTS.SchoolAdmissionSubmitted, {
+          organizationId,
+          applicationId: row.id,
+          applicationNumber: row.applicationNumber,
+        });
+      }
       void normalizedFirst;
       void normalizedLast;
       return row;
+    }).then(async (row: AdmissionApplication) => {
+      // Phase-2 identity/deduplication runs AFTER the create commits — it is
+      // advisory (a reviewable match queue, never an auto-merge), so it must not
+      // hold write locks on the create transaction, and it is now an indexed
+      // lookup rather than a full-table scan of every student and application.
+      try {
+        await this.computeIdentityMatches(this.prisma.client, this.tenant.organizationId, row);
+      } catch (err) {
+        this.logger.warn(`identity matching failed for ${row.id}: ${(err as Error).message}`);
+      }
+      return row;
     });
+  }
+
+  /**
+   * Submit a draft into the pipeline (draft → submitted), or when required
+   * documents/fields are missing, park it in documents_pending instead. This is
+   * the server-side completeness gate the front-desk and portal both call.
+   */
+  async submitApplication(applicationId: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const app = await tx.admissionApplication.findFirst({
+        where: { id: applicationId },
+        include: { documents: true, guardians: true },
+      });
+      if (!app) throw new NotFoundException(`Application ${applicationId} not found`);
+      if (app.status !== 'draft') {
+        throw new BadRequestException(`Only a draft application can be submitted (status=${app.status}).`);
+      }
+
+      const missing = await this.missingSubmitRequirements(tx, app);
+      await this.applyReview(tx, applicationId, 'submit');
+      if (missing.length) {
+        // It is submitted, but incomplete — route it to documents_pending so the
+        // applicant is chased for what is missing rather than silently accepted.
+        await this.applyReview(tx, applicationId, 'request_documents', `Missing: ${missing.join(', ')}`);
+      }
+      return { applicationId, status: missing.length ? 'documents_pending' : 'submitted', missing };
+    });
+  }
+
+  /**
+   * The required items a submitted application must satisfy, resolved from
+   * AdmissionRequirement (gate='submit') for the application's cycle/class.
+   * Returns the labels of anything not yet present.
+   */
+  private async missingSubmitRequirements(tx: any, app: any): Promise<string[]> {
+    const reqs = await tx.admissionRequirement.findMany({
+      where: {
+        organizationId: app.organizationId,
+        gate: 'submit',
+        required: true,
+        OR: [
+          { admissionCycleId: app.admissionCycleId ?? undefined },
+          { admissionCycleId: null },
+        ],
+        AND: [{ OR: [{ classId: app.applyingForClassId ?? undefined }, { classId: null }] }],
+      },
+    });
+    const docTypes = new Set((app.documents ?? []).map((d: any) => d.type));
+    const missing: string[] = [];
+    for (const r of reqs) {
+      if (r.kind === 'document' && !docTypes.has(r.code)) missing.push(r.label);
+      if (r.kind === 'field') {
+        const present = app[r.code] != null || (app.customFields ?? {})[r.code] != null;
+        if (!present) missing.push(r.label);
+      }
+    }
+    return missing;
   }
 
   /**
@@ -207,49 +433,109 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * phone/email, and stored national/birth-cert ids. Each match is a reviewable
    * ApplicantIdentityMatch row — the system never merges or blocks automatically.
    */
-  private async computeIdentityMatches(tx: any, organizationId: string, app: { id: string; applicantFirstName: string; applicantLastName: string; applicantDob: Date | null; parentContactId?: string | null }) {
+  private async computeIdentityMatches(client: any, organizationId: string, app: { id: string; applicantFirstName: string; applicantLastName: string; applicantDob: Date | null; parentContactId?: string | null }) {
     const matches: Array<{ candidateType: string; candidateId: string; candidateName: string; matchMethod: string; matchScore: number }> = [];
     const first = app.applicantFirstName.trim().toLowerCase();
     const last = app.applicantLastName.trim().toLowerCase();
-    const dobIso = app.applicantDob ? app.applicantDob.toISOString().slice(0, 10) : null;
 
-    // Students: match by name + DOB, or by guardian contact phone/email.
-    const students = await tx.studentProfile.findMany({
-      where: { organizationId },
-      include: { partner: true, guardians: { include: { guardianContact: true } } },
-    });
-    for (const s of students) {
-      const sFirst = (s.partner?.name ?? '').trim().toLowerCase();
-      const nameHit = sFirst.includes(first) || first.includes(sFirst);
-      const dobHit = s.dateOfBirth && dobIso && s.dateOfBirth.toISOString().slice(0, 10) === dobIso;
-      if (nameHit && dobHit) {
-        matches.push({ candidateType: 'student', candidateId: s.id, candidateName: s.partner?.name ?? '', matchMethod: 'name_dob', matchScore: 90 });
-        continue;
-      }
-      if (app.parentContactId && s.guardians?.some((g: any) => g.guardianContactId === app.parentContactId)) {
-        matches.push({ candidateType: 'student', candidateId: s.id, candidateName: s.partner?.name ?? '', matchMethod: 'guardian_phone', matchScore: 70 });
+    // The old version loaded EVERY student (with partner + guardians) and EVERY
+    // application into memory on each create, then substring-matched in JS —
+    // seconds-to-OOM at scale. These are now bounded, indexed lookups:
+    //   • students sharing the applicant's exact DOB (indexed column),
+    //   • students sharing a guardian contact (indexed FK),
+    //   • prior applications sharing DOB (or exact last name when DOB is absent).
+    // The fuzzy name comparison then runs over a handful of rows, not the table.
+    const nameLooseHit = (a: string, b: string) => a === b || a.includes(b) || b.includes(a);
+
+    if (app.applicantDob) {
+      const dobStudents = await client.studentProfile.findMany({
+        where: { organizationId, dateOfBirth: app.applicantDob },
+        include: { partner: { select: { name: true } } },
+        take: 50,
+      });
+      for (const s of dobStudents) {
+        const sName = (s.partner?.name ?? '').trim().toLowerCase();
+        if (nameLooseHit(sName, first) || sName.includes(last)) {
+          matches.push({ candidateType: 'student', candidateId: s.id, candidateName: s.partner?.name ?? '', matchMethod: 'name_dob', matchScore: 90 });
+        }
       }
     }
 
-    // Prior applicants in other academic years (reapplication invariant).
-    const prior = await tx.admissionApplication.findMany({
-      where: { organizationId, NOT: { id: app.id } },
+    // Students sharing a guardian contact — indexed on StudentGuardian.guardianContactId.
+    if (app.parentContactId) {
+      const links = await client.studentGuardian.findMany({
+        where: { organizationId, guardianContactId: app.parentContactId },
+        include: { studentProfile: { include: { partner: { select: { name: true } } } } },
+        take: 50,
+      });
+      for (const l of links) {
+        if (l.studentProfile && !matches.some((m) => m.candidateId === l.studentProfile.id)) {
+          matches.push({ candidateType: 'student', candidateId: l.studentProfile.id, candidateName: l.studentProfile.partner?.name ?? '', matchMethod: 'guardian_phone', matchScore: 70 });
+        }
+      }
+    }
+
+    // Prior applicants (reapplication invariant): narrowed by DOB when present,
+    // otherwise by an exact last-name match — never the whole table.
+    const prior = await client.admissionApplication.findMany({
+      where: {
+        organizationId,
+        NOT: { id: app.id },
+        ...(app.applicantDob
+          ? { applicantDob: app.applicantDob }
+          : { applicantLastName: { equals: app.applicantLastName.trim(), mode: 'insensitive' } }),
+      },
+      take: 50,
     });
     for (const p of prior) {
       const pFirst = (p.applicantFirstName ?? '').trim().toLowerCase();
       const pLast = (p.applicantLastName ?? '').trim().toLowerCase();
-      const pDob = p.applicantDob ? p.applicantDob.toISOString().slice(0, 10) : null;
-      const nameHit = (pFirst.includes(first) || first.includes(pFirst)) && (pLast.includes(last) || last.includes(pLast));
-      const dobHit = dobIso && pDob === dobIso;
-      if (nameHit && dobHit) {
+      if (nameLooseHit(pFirst, first) && nameLooseHit(pLast, last)) {
         matches.push({ candidateType: 'applicant', candidateId: p.id, candidateName: `${p.applicantFirstName} ${p.applicantLastName}`, matchMethod: 'name_dob', matchScore: 80 });
       }
     }
 
     for (const m of matches) {
-      await tx.applicantIdentityMatch.create({
+      await client.applicantIdentityMatch.create({
         data: { organizationId, applicationId: app.id, ...m },
       });
+    }
+  }
+
+  /**
+   * Promote the application's AdmissionGuardian rows into real Contact +
+   * StudentGuardian records for the freshly-enrolled student. Idempotent: a
+   * guardian already promoted (contactId set) is skipped, so a retried enroll
+   * does not duplicate guardians. Contacts belong to the student's own Partner,
+   * matching the convention in people/guardian.service.ts.
+   */
+  private async promoteGuardians(tx: any, applicationId: string, organizationId: string, partnerId: string, studentProfileId: string) {
+    const guardians = await tx.admissionGuardian.findMany({ where: { applicationId } });
+    for (const g of guardians) {
+      if (g.contactId) continue;
+      const contact = await tx.contact.create({
+        data: {
+          organizationId,
+          partnerId,
+          firstName: g.firstName,
+          lastName: g.lastName ?? null,
+          email: g.email ?? null,
+          phone: g.phone ?? null,
+          isPrimary: g.isPrimary,
+        },
+      });
+      await tx.studentGuardian.create({
+        data: {
+          organizationId,
+          studentProfileId,
+          guardianContactId: contact.id,
+          relationship: g.relationship,
+          isPrimary: g.isPrimary,
+          canPickup: true,
+          receivesStatements: g.financiallyResponsible || g.isPrimary,
+        },
+      });
+      await tx.admissionGuardian.updateMany({ where: { id: g.id }, data: { contactId: contact.id } });
     }
   }
 
@@ -260,6 +546,34 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     return this.prisma.client.applicantIdentityMatch.update({
       where: { id: matchId },
       data: { status: decision, reviewedById: this.tenant.userId ?? null, reviewedAt: new Date() },
+    });
+  }
+
+  /**
+   * Reveal the decrypted NIN for one application. Deliberately a separate,
+   * audited endpoint rather than a field on the list/detail payload — the NIN is
+   * encrypted at rest precisely so it is not handed to every `school:read` holder.
+   */
+  async revealNin(applicationId: string): Promise<{ nin: string | null }> {
+    const app = await this.prisma.client.admissionApplication.findFirst({ where: { id: applicationId } });
+    if (!app) throw new NotFoundException(`Application ${applicationId} not found`);
+    const nin = app.ninCiphertext
+      ? this.encryption.decrypt({ ciphertext: app.ninCiphertext, iv: app.ninIv!, tag: app.ninTag! })
+      : null;
+    await this.audit.record({
+      entity: 'AdmissionApplication',
+      entityId: applicationId,
+      action: 'read',
+      newValues: { field: 'nin', revealed: nin != null },
+    });
+    return { nin };
+  }
+
+  /** The append-only status timeline for one application (newest first). */
+  async statusHistory(applicationId: string) {
+    return this.prisma.client.admissionStatusHistory.findMany({
+      where: { applicationId },
+      orderBy: { changedAt: 'desc' },
     });
   }
 
@@ -315,8 +629,14 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // Same transaction as the status change: a student can no longer be created
       // and left behind an application still sitting in 'offer_accepted'.
       const { profile, partner, enrollment } = await this.enrollment.enrollNewStudent(input, tx);
+
+      // Promote the application's structured guardians into real Contact +
+      // StudentGuardian rows. Previously guardians lived as flat strings in
+      // customFields and were dropped on the floor at enrollment, so every
+      // enrolled student had zero guardians (no fee payer, no emergency contact).
+      await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
+
       await this.applyReview(tx, app.id, 'enroll');
-      await tx.admissionApplication.updateMany({ where: { id: app.id }, data: { enrolledAt: new Date() } });
 
       this.events.publish(EVENTS.SchoolAdmissionEnrolled, {
         organizationId,
@@ -559,15 +879,28 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   }
 
   /**
-   * Expire every issued offer whose expiresAt has passed. Called by the offer
-   * expiry job; safe to run repeatedly. Returns the number of offers expired.
+   * Expire every issued offer whose expiresAt has passed, AND move its still-in-flight
+   * application to offer_expired. Called by the offer-expiry cron; safe to re-run.
+   * Only applications still sitting in offer_issued are transitioned — one already
+   * accepted/declined is left as-is.
    */
   async expireLapsedOffers(now: Date = new Date()) {
-    const res = await this.prisma.client.offerLetter.updateMany({
+    const lapsed = await this.prisma.client.offerLetter.findMany({
       where: { status: { in: ['issued', 'viewed'] }, expiresAt: { lt: now } },
-      data: { status: 'expired' },
+      select: { applicationId: true },
     });
-    return { expired: res.count };
+    let expired = 0;
+    for (const o of lapsed) {
+      await this.prisma.client.$transaction(async (tx: any) => {
+        await tx.offerLetter.updateMany({ where: { applicationId: o.applicationId }, data: { status: 'expired' } });
+        const app = await tx.admissionApplication.findFirst({ where: { id: o.applicationId } });
+        if (app && app.status === 'offer_issued') {
+          await this.applyReview(tx, o.applicationId, 'expire_offer', 'Offer lapsed unaccepted');
+        }
+      });
+      expired++;
+    }
+    return { expired };
   }
 
   async declineOffer(applicationId: string) {
@@ -772,62 +1105,60 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * an existing transaction. Shared by the interview/score/offer helpers so the
    * FSM guard + audit trail stay consistent with review().
    */
+  /**
+   * The single canonical transition engine. Every status change in the module —
+   * review(), the interview/score/offer helpers, recordDecision, enroll — routes
+   * through here, so the FSM guard, the milestone timestamp, the append-only
+   * status history, the AuditLog row and the domain event are applied uniformly
+   * and cannot be bypassed. `review()` used to carry a second copy of all of this.
+   */
   private async applyReview(tx: any, applicationId: string, action: string, reason?: string) {
-    const statusMap: Record<string, string> = {
-      review: 'under_review',
-      screen: 'screening',
-      schedule_interview: 'interview_scheduled',
-      complete_interview: 'interviewed',
-      reschedule: 'interview_scheduled',
-      schedule_exam: 'exam_scheduled',
-      exam_done: 'interviewed',
-      score: 'scored',
-      accept: 'accepted',
-      reject: 'rejected',
-      waitlist: 'waitlisted',
-      issue_offer: 'offer_issued',
-      accept_offer: 'offer_accepted',
-      decline_offer: 'waitlisted',
-      enroll: 'enrolled',
-      withdraw: 'withdrawn',
-    };
-    const newStatus = statusMap[action];
+    const newStatus = STATUS_MAP[action];
+    if (!newStatus) throw new BadRequestException(`Unknown admission action: ${action}`);
     const before = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
     if (!before) throw new NotFoundException(`Application ${applicationId} not found`);
     this.assertTransition(before.status, action);
+
+    const stampField = TIMESTAMP_MAP[action];
     await tx.admissionApplication.updateMany({
       where: { id: applicationId },
-      data: { status: newStatus, ...(reason ? { decisionNotes: reason } : {}) },
+      data: {
+        status: newStatus,
+        ...(reason ? { decisionNotes: reason } : {}),
+        ...(stampField ? { [stampField]: new Date() } : {}),
+      },
     });
+
+    // Queryable per-application timeline the UI renders (the AuditLog is the
+    // system-wide record; this is the admissions-scoped one).
+    await tx.admissionStatusHistory.create({
+      data: {
+        organizationId: before.organizationId,
+        applicationId,
+        fromStatus: before.status,
+        toStatus: newStatus,
+        action,
+        reason: reason ?? null,
+        changedById: this.tenant.userId ?? null,
+      },
+    });
+
     await this.audit.recordInTx(tx, {
       entity: 'AdmissionApplication',
       entityId: applicationId,
-      action: 'update' as const,
+      action: AUDIT_ACTION_MAP[action] ?? 'update',
       oldValues: { status: before.status },
       newValues: { status: newStatus, action, reason },
     });
-    this.events.publish(
-      (
-        {
-          review: EVENTS.SchoolAdmissionUnderReview,
-          screen: EVENTS.SchoolAdmissionScreened,
-          schedule_interview: EVENTS.SchoolAdmissionInterviewScheduled,
-          complete_interview: EVENTS.SchoolAdmissionInterviewed,
-          reschedule: EVENTS.SchoolAdmissionInterviewScheduled,
-          schedule_exam: EVENTS.SchoolAdmissionExamScheduled,
-          exam_done: EVENTS.SchoolAdmissionInterviewed,
-          score: EVENTS.SchoolAdmissionScored,
-          accept: EVENTS.SchoolAdmissionAccepted,
-          reject: EVENTS.SchoolAdmissionRejected,
-          waitlist: EVENTS.SchoolAdmissionWaitlisted,
-          issue_offer: EVENTS.SchoolAdmissionOfferIssued,
-          accept_offer: EVENTS.SchoolAdmissionOfferAccepted,
-          decline_offer: EVENTS.SchoolAdmissionOfferDeclined,
-          withdraw: EVENTS.SchoolAdmissionWithdrawn,
-        } as Record<string, string>
-      )[action] as any,
-      { organizationId: this.tenant.organizationId, applicationId, reason: action },
-    );
+
+    const eventName = EVENT_MAP[action];
+    if (eventName) {
+      this.events.publish(eventName as any, {
+        organizationId: this.tenant.organizationId,
+        applicationId,
+        reason: reason ?? action,
+      });
+    }
     return { id: applicationId, status: newStatus };
   }
 
@@ -905,111 +1236,15 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     });
   }
 
-  async review(applicationId: string, action:
-    | 'review' | 'screen' | 'schedule_interview' | 'complete_interview' | 'reschedule'
-    | 'schedule_exam' | 'exam_done' | 'score' | 'accept' | 'reject' | 'waitlist'
-    | 'issue_offer' | 'accept_offer' | 'decline_offer' | 'withdraw', notes?: string) {
+  /**
+   * Public transition entrypoint. Now a thin wrapper over the shared engine —
+   * it used to carry a second, drifting copy of the status map, guard, audit and
+   * event logic (with `decline_offer` still mapped to the wrong target).
+   */
+  async review(applicationId: string, action: string, notes?: string) {
     return this.prisma.client.$transaction(async (tx: any) => {
-      const statusMap: Record<string, string> = {
-        review: 'under_review',
-        screen: 'screening',
-        schedule_interview: 'interview_scheduled',
-        complete_interview: 'interviewed',
-        reschedule: 'interview_scheduled',
-        schedule_exam: 'exam_scheduled',
-        exam_done: 'interviewed',
-        score: 'scored',
-        accept: 'accepted',
-        reject: 'rejected',
-        waitlist: 'waitlisted',
-        issue_offer: 'offer_issued',
-        accept_offer: 'offer_accepted',
-        decline_offer: 'waitlisted',
-        withdraw: 'withdrawn',
-      };
-      const newStatus = statusMap[action];
-      if (!newStatus) {
-        throw new BadRequestException(`Unknown admission action: ${action}`);
-      }
-
-      const before = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
-      if (!before) throw new NotFoundException(`Application ${applicationId} not found`);
-
-      // P0-7 (C8): state machine guard. The old code blindly wrote
-      // whatever status the caller asked for. The new code checks
-      // that the requested action is allowed from the current
-      // status. Rejected/withdrawn/enrolled are terminal.
-      const allowed = ADMISSION_TRANSITIONS[before.status] ?? [];
-      if (!allowed.includes(action)) {
-        throw new BadRequestException(
-          `Cannot ${action} an application in status '${before.status}'. ` +
-            `Allowed actions from '${before.status}': [${allowed.join(', ') || '(none — terminal)'}].`,
-        );
-      }
-
-      const updated = await tx.admissionApplication.updateMany({
-        where: { id: applicationId },
-        data: { status: newStatus, decisionNotes: notes ?? null },
-      });
-      if (updated.count === 0) throw new NotFoundException(`Application ${applicationId} not found`);
-      const after = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
-      // Map the admission transition to a valid AuditAction enum value — the
-      // raw action ('review'/'accept'/...) is not one, so the audit write threw
-      // a Prisma validation error and rolled back the whole transition. The
-      // domain action is preserved in newValues.
-      const auditAction: 'update' | 'approve' | 'reject' | 'cancel' = (
-        {
-          review: 'update',
-          screen: 'update',
-          schedule_interview: 'update',
-          complete_interview: 'update',
-          reschedule: 'update',
-          schedule_exam: 'update',
-          exam_done: 'update',
-          score: 'update',
-          accept: 'approve',
-          reject: 'reject',
-          waitlist: 'update',
-          issue_offer: 'update',
-          accept_offer: 'approve',
-          decline_offer: 'cancel',
-          withdraw: 'cancel',
-        } as const
-      )[action];
-      await this.audit.recordInTx(tx, {
-        entity: 'AdmissionApplication',
-        entityId: applicationId,
-        action: auditAction,
-        oldValues: { status: before.status },
-        newValues: { status: newStatus, action, notes },
-      });
-      this.events.publish(
-        (
-          {
-            review: EVENTS.SchoolAdmissionUnderReview,
-            screen: EVENTS.SchoolAdmissionScreened,
-            schedule_interview: EVENTS.SchoolAdmissionInterviewScheduled,
-            complete_interview: EVENTS.SchoolAdmissionInterviewed,
-            reschedule: EVENTS.SchoolAdmissionInterviewScheduled,
-            schedule_exam: EVENTS.SchoolAdmissionExamScheduled,
-            exam_done: EVENTS.SchoolAdmissionInterviewed,
-            score: EVENTS.SchoolAdmissionScored,
-            accept: EVENTS.SchoolAdmissionAccepted,
-            reject: EVENTS.SchoolAdmissionRejected,
-            waitlist: EVENTS.SchoolAdmissionWaitlisted,
-            issue_offer: EVENTS.SchoolAdmissionOfferIssued,
-            accept_offer: EVENTS.SchoolAdmissionOfferAccepted,
-            decline_offer: EVENTS.SchoolAdmissionOfferDeclined,
-            withdraw: EVENTS.SchoolAdmissionWithdrawn,
-          } as Record<string, string>
-        )[action] as any,
-        {
-          organizationId: this.tenant.organizationId,
-          applicationId,
-          reason: notes,
-        },
-      );
-      return after;
+      await this.applyReview(tx, applicationId, action, notes);
+      return tx.admissionApplication.findFirst({ where: { id: applicationId } });
     });
   }
 

@@ -22,6 +22,7 @@ import { OneTimeTokenService } from './auth/one-time-token.service';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { ModuleEnabledGuard } from './module-loader/module-enabled.guard';
+import { RequireOwnerOrPermissionGuard } from './auth/guards/require-owner-or-permission.guard';
 import { WorkflowService } from './workflow/workflow.service';
 import { WorkflowRegistry } from './workflow/workflow.registry';
 import { IdempotencyService } from './idempotency/idempotency.service';
@@ -100,6 +101,7 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: ModuleEnabledGuard },
+    { provide: APP_GUARD, useClass: RequireOwnerOrPermissionGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
   exports: [

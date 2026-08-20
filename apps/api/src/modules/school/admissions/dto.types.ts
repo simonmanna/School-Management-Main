@@ -22,14 +22,36 @@ import { Type } from 'class-transformer';
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
 
+export class AdmissionGuardianDto {
+  @IsString() @IsNotEmpty() firstName!: string;
+  @IsOptional() @IsString() lastName?: string;
+  @IsString() @IsNotEmpty() relationship!: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() altPhone?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() occupation?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsBoolean() isPrimary?: boolean;
+  @IsOptional() @IsBoolean() isEmergency?: boolean;
+  @IsOptional() @IsBoolean() financiallyResponsible?: boolean;
+}
+
 export class CreateApplicationDto {
   @IsString() @IsNotEmpty() academicYearId!: string;
+  @IsOptional() @IsString() admissionCycleId?: string;
   @IsString() @IsNotEmpty() applicantFirstName!: string;
   @IsString() @IsNotEmpty() applicantLastName!: string;
   @IsOptional() @IsString() applicantDob?: string;
   @IsOptional() @IsIn([...GENDERS]) applicantGender?: (typeof GENDERS)[number];
   @IsOptional() @IsString() applyingForClassId?: string;
   @IsOptional() @IsString() parentContactId?: string;
+  /// National ID / NIN — stored AES-256-GCM encrypted, never in plaintext customFields.
+  @IsOptional() @IsString() nin?: string;
+  @IsOptional() @IsString() sourceOfEnquiry?: string;
+  @IsOptional() @IsString() siblingOfStudentId?: string;
+  /// When true the application is created as a `draft` (portal / save-and-continue).
+  @IsOptional() @IsBoolean() asDraft?: boolean;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
@@ -41,6 +63,10 @@ export class UpdateApplicationDto {
   @IsOptional() @IsIn([...GENDERS]) applicantGender?: (typeof GENDERS)[number];
   @IsOptional() @IsString() applyingForClassId?: string;
   @IsOptional() @IsString() parentContactId?: string;
+  @IsOptional() @IsString() nin?: string;
+  @IsOptional() @IsString() sourceOfEnquiry?: string;
+  @IsOptional() @IsString() siblingOfStudentId?: string;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 

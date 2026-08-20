@@ -58,10 +58,45 @@ export class AdmissionsController {
     return this.admissions.update(id, dto);
   }
 
+  /**
+   * The action union here listed only 5 of the 15 the service accepts, which is
+   * part of why the UI never exposed screening, interviews, scoring or waitlisting.
+   * `review()` validates the action against the FSM regardless, so an unknown
+   * action is a 400, not a bad write.
+   */
   @Post(':id/review')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  review(@Param('id') id: string, @Body('action') action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw', @Body('notes') notes?: string) {
+  review(
+    @Param('id') id: string,
+    @Body('action')
+    action:
+      | 'review' | 'screen' | 'schedule_interview' | 'complete_interview' | 'reschedule'
+      | 'schedule_exam' | 'exam_done' | 'score' | 'accept' | 'reject' | 'waitlist'
+      | 'issue_offer' | 'accept_offer' | 'decline_offer' | 'withdraw',
+    @Body('notes') notes?: string,
+  ) {
     return this.admissions.review(id, action, notes);
+  }
+
+  /** Submit a draft into the pipeline (draft → submitted | documents_pending). */
+  @Post(':id/submit')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  submit(@Param('id') id: string) {
+    return this.admissions.submitApplication(id);
+  }
+
+  /** The append-only status timeline for one application. */
+  @Get(':id/history')
+  @RequirePermissions(PERMISSIONS.school.read)
+  history(@Param('id') id: string) {
+    return this.admissions.statusHistory(id);
+  }
+
+  /** Reveal the decrypted NIN (separately audited PII access). */
+  @Post(':id/reveal-nin')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  revealNin(@Param('id') id: string) {
+    return this.admissions.revealNin(id);
   }
 
   @Post(':id/exam-score')

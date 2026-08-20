@@ -9,7 +9,8 @@ import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { EVENTS } from '@erp/shared';
-import { dec, ZERO } from '../../../kernel/common/money';
+import { dec, round, ZERO } from '../../../kernel/common/money';
+import { ACTIVE_FEE_STATUSES, OPEN_FEE_WHERE, POSTED_FEE_WHERE, SCHOOL_FEE_SOURCE_TYPES } from './fee-document.constants';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -112,13 +113,10 @@ export class AdvancedFinanceService {
     });
     const partnerIdSet = [...new Set(partnerIds.map((p) => p.partnerId))];
 
+    // P0-7: financially-active documents only. Without the status filter a
+    // draft or cancelled invoice inflated the sponsor's billed total.
     const invoices = await this.prisma.client.document.findMany({
-      where: {
-        organizationId,
-        partnerId: { in: partnerIdSet },
-        documentType: 'sales_invoice',
-        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-      },
+      where: { ...POSTED_FEE_WHERE, organizationId, partnerId: { in: partnerIdSet } },
       select: { id: true, partnerId: true, totalAmount: true, amountResidual: true },
     });
     const waivers = await this.prisma.client.waiver.findMany({
@@ -200,75 +198,102 @@ export class AdvancedFinanceService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const docs = await tx.document.findMany({
         where: {
+          ...OPEN_FEE_WHERE,
           organizationId,
           partnerId: student.partnerId,
-          documentType: 'sales_invoice',
-          paymentStatus: { in: ['not_paid', 'partial'] },
-          sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-          amountResidual: { gt: 0 },
           ...(waiver.documentId ? { id: waiver.documentId } : {}),
         },
         orderBy: { issueDate: 'asc' },
       });
 
-      let remaining = Number(waiver.amount);
+      // P0-3: money math in Decimal, not JS floats (FINANCIAL_INVARIANTS
+      // §Money precision). A percentage-derived waiver produces fractions that
+      // float arithmetic silently drifts on.
+      let remaining = round(dec(waiver.amount), 6);
       const settled: string[] = [];
       for (const doc of docs) {
-        if (remaining <= 0) break;
-        const residual = Number(doc.amountResidual);
-        if (residual <= 0) continue;
-        const take = Math.min(remaining, residual);
-        const newResidual = residual - take;
+        if (remaining.lessThanOrEqualTo(ZERO)) break;
+        const residual = dec(doc.amountResidual);
+        if (residual.lessThanOrEqualTo(ZERO)) continue;
+        const take = Prisma.Decimal.min(remaining, residual);
+        const newResidual = residual.minus(take);
         await tx.document.update({
           where: { id: doc.id },
           data: {
             amountResidual: newResidual,
-            amountPaid: Number(doc.amountPaid) + take,
-            paymentStatus: newResidual <= 0 ? 'paid' : 'partial',
+            // P0-3: a waiver is FORGIVEN money, not RECEIVED money. This used
+            // to do `amountPaid + take`, which made every collections report
+            // count forgiven balances as cash in the drawer. It now accrues to
+            // amountWaived and amountPaid is left strictly alone.
+            amountWaived: dec(doc.amountWaived ?? 0).plus(take),
+            paymentStatus: newResidual.lessThanOrEqualTo(ZERO) ? 'paid' : 'partial',
           },
         });
-        remaining -= take;
+        remaining = remaining.minus(take);
         settled.push(doc.id);
       }
-      if (remaining > 0) {
-        // Waiver exceeds open invoices — leave the remainder unapplied (can be
-        // applied later when new invoices are generated).
-        await tx.waiver.update({ where: { id: waiver.id }, data: { applied: false, reason: `${waiver.reason ?? ''} (partial: ${remaining} unapplied)` } });
-        return { ...waiver, applied: false, settledDocumentIds: settled };
+
+      const appliedAmount = round(dec(waiver.amount), 6).minus(remaining);
+
+      // P0-2: the GL post below MUST happen on every path that mutated a
+      // document. The previous code returned from inside this callback when
+      // `remaining > 0` — and returning COMMITS. That silently reduced the AR
+      // subledger while leaving the general ledger untouched, producing a
+      // permanent divergence nothing in the system detected.
+      //
+      // A waiver that exceeds the student's open invoices is still a partial
+      // application: post for what was actually applied, and leave the waiver
+      // open so the remainder can attach to future invoices.
+      if (appliedAmount.greaterThan(ZERO)) {
+        const arAccount = await this.accounts.receivableAccount(null, tx);
+        const waiverAccount = await this.resolver.ensureByCode(
+          'FEE-WAIVER',
+          { name: 'Fee Waiver Expense', categoryKey: 'expense', mappingKey: 'fee_waiver' },
+          tx,
+        );
+        await this.posting.post(
+          {
+            journalCode: 'GEN',
+            date: new Date(),
+            description: `Fee waiver · ${waiver.code}`,
+            sourceType: 'school_waiver',
+            sourceId: waiver.id,
+            lines: [
+              { accountId: waiverAccount, debit: appliedAmount.toString(), description: 'Fee waiver expense' },
+              { accountId: arAccount, credit: appliedAmount.toString(), partnerId: student.partnerId, description: 'AR waived' },
+            ],
+          },
+          tx,
+        );
       }
 
-      // GL: Dr Waiver Expense / Cr AR.
-      const arAccount = await this.accounts.receivableAccount(null, tx);
-      const waiverAccount = await this.resolver.ensureByCode(
-        'FEE-WAIVER',
-        { name: 'Fee Waiver Expense', categoryKey: 'expense', mappingKey: 'fee_waiver' },
-        tx,
-      );
-      const appliedAmount = Number(waiver.amount) - remaining;
-      await this.posting.post(
-        {
-          journalCode: 'GEN',
-          date: new Date(),
-          description: `Fee waiver · ${waiver.code}`,
-          sourceType: 'school_waiver',
-          sourceId: waiver.id,
-          lines: [
-            { accountId: waiverAccount, debit: appliedAmount.toString(), description: 'Fee waiver expense' },
-            { accountId: arAccount, credit: appliedAmount.toString(), partnerId: student.partnerId, description: 'AR waived' },
-          ],
+      const fullyApplied = remaining.lessThanOrEqualTo(ZERO);
+      const updated = await tx.waiver.update({
+        where: { id: waiver.id },
+        data: {
+          applied: fullyApplied,
+          ...(fullyApplied
+            ? {}
+            : { reason: `${waiver.reason ?? ''} (partial: ${remaining.toString()} unapplied)` }),
         },
-        tx,
-      );
-
-      const updated = await tx.waiver.update({ where: { id: waiver.id }, data: { applied: true } });
-      await this.audit.recordInTx(tx, { entity: 'Waiver', entityId: waiver.id, action: 'update', newValues: { settledDocumentIds: settled } });
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'Waiver',
+        entityId: waiver.id,
+        action: 'update',
+        newValues: {
+          settledDocumentIds: settled,
+          appliedAmount: appliedAmount.toString(),
+          unappliedAmount: remaining.toString(),
+        },
+      });
       this.events.publish(EVENTS.SchoolWaiverApplied, {
         organizationId,
         waiverId: waiver.id,
         studentProfileId: waiver.studentProfileId,
         amount: appliedAmount.toString(),
       });
-      return { ...updated, settledDocumentIds: settled };
+      return { ...updated, settledDocumentIds: settled, appliedAmount: appliedAmount.toString() };
     });
   }
 
@@ -367,14 +392,7 @@ export class AdvancedFinanceService {
         orderBy: { createdAt: 'asc' },
       });
       const docs = await tx.document.findMany({
-        where: {
-          organizationId,
-          partnerId: student.partnerId,
-          documentType: 'sales_invoice',
-          paymentStatus: { in: ['not_paid', 'partial'] },
-          sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-          amountResidual: { gt: 0 },
-        },
+        where: { ...OPEN_FEE_WHERE, organizationId, partnerId: student.partnerId },
         orderBy: { issueDate: 'asc' },
       });
 
@@ -402,7 +420,11 @@ export class AdvancedFinanceService {
           where: { id: doc.id },
           data: {
             amountResidual: newResidual,
-            amountPaid: Number(doc.amountPaid) + take,
+            // P0-3: drawing down a stored-value credit is not a cash receipt.
+            // This used to increment amountPaid, so applying a credit inflated
+            // reported collections exactly as a waiver did. The credit
+            // subledger (FeeCreditAllocation, A2) becomes the record of what
+            // was applied; amountPaid stays reserved for realized payment.
             paymentStatus: newResidual <= 0 ? 'paid' : 'partial',
           },
         });
@@ -455,14 +477,7 @@ export class AdvancedFinanceService {
     const asOf = asOfStr ? new Date(asOfStr) : new Date();
     const organizationId = this.tenant.organizationId;
     const docs = await this.prisma.client.document.findMany({
-      where: {
-        organizationId,
-        documentType: 'sales_invoice',
-        status: { in: ['posted'] },
-        paymentStatus: { in: ['not_paid', 'partial'] },
-        amountResidual: { gt: 0 },
-        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-      },
+      where: { ...OPEN_FEE_WHERE, organizationId },
       include: { partner: true },
       orderBy: { dueDate: 'asc' },
     });
@@ -659,10 +674,21 @@ export class AdvancedFinanceService {
     return { waiverId: wid, applied };
   }
 
-  /** Shared per-student AR aggregation over school fee documents. */
+  /**
+   * Shared per-student AR aggregation over school fee documents.
+   *
+   * Runs on `prisma.raw`, which bypasses the tenancy extension — so the
+   * organizationId predicate below is load-bearing, not decorative.
+   *
+   * Every caller-supplied value is a bound parameter. The previous version
+   * interpolated `classId` and `onlyStudentId` straight into the SQL string
+   * with hand-rolled quote-doubling as the only defence; that is one missed
+   * escape away from injection on a financial query, and quote-doubling is not
+   * sufficient under non-standard-conforming-strings settings. `$3`/`$4` are
+   * NULL-guarded so a single query text serves both the filtered and unfiltered
+   * cases.
+   */
   private async studentArRows(org: string, asOf: Date, classId?: string, onlyStudentId?: string) {
-    const clsFilter = classId ? ` AND sp."currentClassId" = '${classId.replace(/'/g, "''")}'` : '';
-    const stuFilter = onlyStudentId ? ` AND sp."id" = '${onlyStudentId.replace(/'/g, "''")}'` : '';
     return this.prisma.raw.$queryRawUnsafe<Record<string, any>[]>(
       `SELECT sp."id" AS "studentProfileId",
               COALESCE(p."name", sp."id") AS "studentName",
@@ -684,16 +710,21 @@ export class AdvancedFinanceService {
        ) w ON w."studentProfileId" = sp."id"
        WHERE d."organizationId" = $2
          AND d."documentType" = 'sales_invoice'
-         AND d."status" = 'posted'
+         AND d."status" = ANY($3::text[])
          AND d."paymentStatus" IN ('not_paid','partial')
          AND d."amountResidual" > 0
-         AND d."sourceType" IN ('school_fee','school_penalty','library_fine','school_meal')
+         AND d."sourceType" = ANY($4::text[])
          AND ($1::timestamp >= d."issueDate")
-         ${clsFilter}
-         ${stuFilter}
+         AND ($5::text IS NULL OR sp."currentClassId" = $5)
+         AND ($6::text IS NULL OR sp."id" = $6)
        GROUP BY sp."id", sp."partnerId", p."name", sp."admissionNo", c."name", w."waived"
        HAVING SUM(d."amountResidual") > 0`,
-      asOf.toISOString(), org,
+      asOf.toISOString(),
+      org,
+      [...ACTIVE_FEE_STATUSES],
+      [...SCHOOL_FEE_SOURCE_TYPES],
+      classId ?? null,
+      onlyStudentId ?? null,
     );
   }
 }

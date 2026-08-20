@@ -51,17 +51,22 @@ export class AdvancedFinanceController {
     return this.finance.listWaivers(studentProfileId);
   }
 
+  // Phase 0: applying a waiver forgives real receivable. It no longer shares a
+  // permission with "edit a fee structure" — see PERMISSIONS.school.approveWaivers.
   @Post('waivers/:id/apply')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.manageFees)
+  @RequirePermissions(PERMISSIONS.school.approveWaivers)
   applyWaiver(@Param('id') id: string) {
     return this.finance.applyWaiver(id);
   }
 
   /* Fee credits */
+  // Phase 0: creating a credit mints a balance-sheet liability (Dr AR / Cr
+  // Fee-Credit Liability) with no funding source required — P1-2. Gated behind
+  // its own permission until A2 makes an explicit origin mandatory.
   @Post('credits')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.manageFees)
+  @RequirePermissions(PERMISSIONS.school.approveCredits)
   createCredit(@Body() dto: any) {
     return this.finance.createCredit(dto);
   }
@@ -126,9 +131,10 @@ export class AdvancedFinanceController {
     return this.finance.badDebtors(asOf, thresholdDays ? Number(thresholdDays) : 90, classId);
   }
 
+  // Phase 0: a write-off permanently forgives the whole outstanding balance.
   @Post('bad-debtors/:studentProfileId/write-off')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.manageFees)
+  @RequirePermissions(PERMISSIONS.school.writeOffFees)
   writeOffBadDebt(@Param('studentProfileId') studentProfileId: string, @Body() dto: any) {
     return this.finance.writeOffBadDebt(studentProfileId, dto ?? {});
   }

@@ -56,6 +56,9 @@ import { SchoolAdmissionsPage } from '@/pages/school/admissions';
 import { SchoolEnrollmentSummaryPage } from '@/pages/school/enrollment-summary';
 import { SchoolApplicationsPage } from '@/pages/school/applications';
 import { SchoolApplicationFormPage } from '@/pages/school/application-form';
+import { SchoolAdmissionsAnalyticsPage } from '@/pages/school/admissions-analytics';
+import { SchoolAdmissionsConfigPage } from '@/pages/school/admissions-config';
+import { SchoolApplyTrackPage } from '@/pages/school/apply-track';
 import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
@@ -78,6 +81,8 @@ import { SchoolClassesPage } from '@/pages/school/classes';
 import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolStreamsPage } from '@/pages/school/streams';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
+import { SchoolCurriculaPage } from '@/pages/school/curricula';
+import { SchoolTeacherAssignmentsPage } from '@/pages/school/teacher-assignments';
 import { SchoolCalendarPage } from '@/pages/school/calendar';
 import { SchoolEventsPage } from '@/pages/school/events';
 import { SchoolPoliciesPage } from '@/pages/school/policies';
@@ -245,6 +250,8 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       {/* Digital Menu — customer-facing public route (no auth, no shell). */}
       <Route path="/menu/:branchId/:tableId" element={<DigitalMenuPage />} />
+      {/* Applicant portal — magic-link tracking page (no auth, no shell). */}
+      <Route path="/apply/track" element={<SchoolApplyTrackPage />} />
       <Route element={<ProtectedRoute />}>
         {/* KDS — full-screen kitchen monitor, chrome-less (no sidebar/header). */}
         <Route path="/pos/kds" element={<KdsPage />} />
@@ -459,6 +466,8 @@ export function App() {
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
           <Route path="/school/meals" element={<SchoolMealsPage />} />
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
+          <Route path="/school/admissions/analytics" element={<SchoolAdmissionsAnalyticsPage />} />
+          <Route path="/school/admissions/config" element={<SchoolAdmissionsConfigPage />} />
           <Route path="/school/admissions/enrollment-summary" element={<SchoolEnrollmentSummaryPage />} />
           <Route path="/school/applications/new" element={<SchoolApplicationFormPage />} />
           <Route path="/school/applications/:id" element={<SchoolApplicationFormPage />} />
@@ -473,6 +482,8 @@ export function App() {
           <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
           <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
+          <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
+          <Route path="/school/teacher-assignments" element={<SchoolTeacherAssignmentsPage />} />
           <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
           <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />
           <Route path="/school/timetable/events" element={<SchoolEventsPage />} />

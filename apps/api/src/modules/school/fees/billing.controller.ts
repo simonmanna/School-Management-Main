@@ -46,9 +46,14 @@ export class SchoolPaymentController {
     return this.payments.collect(dto);
   }
 
+  // Phase 0: paying money OUT now requires an approval permission in addition
+  // to the operational refund permission. P0-6 showed the payment engine's
+  // overpayment guard never fires on a customer refund, so until A2.1 moves the
+  // canonical entitlement check into the engine itself, the authorisation
+  // boundary is doing the work.
   @Post('refund')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.refundFees)
+  @RequirePermissions(PERMISSIONS.school.refundFees, PERMISSIONS.school.approveRefunds)
   refund(@Body() dto: RefundFeeDto) {
     return this.payments.refundFee(dto);
   }

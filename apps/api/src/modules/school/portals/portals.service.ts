@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
+import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
 
 /**
  * PortalsService — composes existing services to build role-specific dashboards.
@@ -125,18 +126,47 @@ export class PortalsService {
     return { total, present, late, absent, rate: total > 0 ? Math.round(((present + late * 0.5) / total) * 100) : 0 };
   }
 
+  /**
+   * Outstanding fee balance for one student's Partner.
+   *
+   * P0-1/P0-7 fix. The previous query was wrong twice over:
+   *
+   *  1. `paymentStatus: { in: ['partial', 'paid'] }` excluded `not_paid`, so a
+   *     freshly-billed student who had paid nothing — the largest debtor there
+   *     is — showed a balance of ZERO to their own parent. `ReportingService`
+   *     had already found and documented this exact bug; the portal copy was
+   *     never updated.
+   *  2. `sourceType: 'school_fee'` dropped penalties, library fines and meal
+   *     charges, so the figure disagreed with the bursar's statement.
+   *
+   * It also applied no `status` filter, letting draft and cancelled documents
+   * into the total. All three are now handled by the shared constant.
+   *
+   * Scoped to POSTED_FEE_WHERE (financially active) rather than OPEN_FEE_WHERE
+   * so `total` means "billed" and matches the bursar statement's billed figure.
+   * Fully-settled invoices carry a zero residual, so they add nothing to the
+   * balance while still counting as billed.
+   *
+   * Aggregated in the database rather than summed in JS — the old version
+   * loaded every matching document row to add up two columns.
+   *
+   * NOTE (P0-4, fixed in A1): `paid` is still derived as billed − balance, so it
+   * counts waived and credited amounts as if they were money received. The
+   * honest figure comes from PaymentAllocation, which arrives with
+   * SchoolFinanceQueryService; this method then delegates to it.
+   */
   private async feeBalance(partnerId: string) {
-    const docs = await this.prisma.client.document.findMany({
-      where: {
-        partnerId,
-        documentType: 'sales_invoice',
-        sourceType: 'school_fee',
-        paymentStatus: { in: ['partial', 'paid'] },
-      },
-    });
-    const total = docs.reduce((s, d) => s + Number(d.totalAmount), 0);
-    const paid = docs.reduce((s, d) => s + Number(d.amountPaid), 0);
-    return { total, paid, balance: total - paid, invoiceCount: docs.length };
+    const where = { ...POSTED_FEE_WHERE, partnerId };
+    const [agg, invoiceCount] = await Promise.all([
+      this.prisma.client.document.aggregate({
+        where,
+        _sum: { totalAmount: true, amountResidual: true },
+      }),
+      this.prisma.client.document.count({ where }),
+    ]);
+    const total = Number(agg._sum.totalAmount ?? 0);
+    const balance = Number(agg._sum.amountResidual ?? 0);
+    return { total, paid: total - balance, balance, invoiceCount };
   }
 
   private async recentAnnouncements(classId: string | null | undefined) {

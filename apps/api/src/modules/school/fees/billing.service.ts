@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { dec, round, ZERO } from '../../../kernel/common/money';
+import { OPEN_FEE_WHERE, POSTED_FEE_WHERE } from './fee-document.constants';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
@@ -84,6 +85,20 @@ export class BillingService {
       include: { feeStructure: true },
     });
     if (schedules.length === 0) throw new BadRequestException(`No fee schedule configured for term ${dto.termId}`);
+
+    // P0-5 pre-flight: refuse the run up-front if any fee product carries tax.
+    //
+    // The loop below overwrites the document builder's totals with
+    // `totalAmount: subtotal`, discarding taxAmount, while the journal it posts
+    // credits BOTH revenue and output tax. Any non-zero tax therefore makes the
+    // entry unbalanced, PostingService rejects it, and the run dies PART WAY
+    // THROUGH — some students invoiced, the rest not, and the failing student
+    // left holding an orphaned draft document. Failing before the first write
+    // turns a corrupting partial run into a clean, actionable error.
+    //
+    // A3 removes the overwrite so tax flows through correctly; this guard comes
+    // out with it.
+    await this.assertNoTaxableComponents(schedules);
 
     const created: any[] = [];
     const skipped: any[] = [];
@@ -292,6 +307,41 @@ export class BillingService {
     }
 
     return { count: created.length, documents: created, skipped };
+  }
+
+  /**
+   * P0-5 guard. Collects every productId referenced by the term's fee
+   * structures and rejects the billing run if any of them resolves to a
+   * non-zero tax. Removed in A3 once the totals overwrite is gone.
+   */
+  private async assertNoTaxableComponents(schedules: any[]): Promise<void> {
+    const productIds = [
+      ...new Set(
+        schedules
+          .flatMap((sch) => ((sch.feeStructure?.components as unknown as FeeComponent[]) ?? []))
+          .map((c) => c?.productId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (productIds.length === 0) return;
+
+    // Only a tax with a non-zero rate is a problem: groupForPosting skips lines
+    // whose taxAmount is zero, so a zero-rated product still balances.
+    const taxed = await this.prisma.client.product.findMany({
+      where: { id: { in: productIds }, tax: { is: { rate: { gt: 0 } } } },
+      select: { id: true, name: true, tax: { select: { name: true, rate: true } } },
+    });
+    if (taxed.length === 0) return;
+
+    const names = taxed
+      .map((p) => `${p.name} (${p.tax?.name} ${p.tax?.rate}%)`)
+      .join(', ');
+    throw new BadRequestException(
+      `Cannot generate billing: fee product(s) [${names}] carry a sales tax. School fee ` +
+        `invoicing does not yet post output tax correctly — the journal would be unbalanced ` +
+        `and the run would fail part way through, leaving some students billed and others not. ` +
+        `Remove the tax from these products, or wait for the A3 tax fix.`,
+    );
   }
 
   private appliesTo(filter: any, classId: string): boolean {
@@ -596,8 +646,11 @@ export class SchoolPaymentService {
 
       if (dto.allocations?.length) {
         const ids = dto.allocations.map((a) => a.documentId);
+        // P0-7: constrain to financially-active documents. Passing the id of a
+        // draft or cancelled invoice used to settle it — real money allocated
+        // against a receivable that does not exist.
         const docsById = await tx.document.findMany({
-          where: { id: { in: ids }, organizationId, partnerId },
+          where: { ...POSTED_FEE_WHERE, id: { in: ids }, organizationId, partnerId },
         });
         const docMap = new Map<string, any>(docsById.map((d: any) => [d.id, d]));
         for (const a of dto.allocations) {
@@ -613,18 +666,14 @@ export class SchoolPaymentService {
       } else {
         const docs = dto.documentIds?.length
           ? await tx.document.findMany({
-              where: { id: { in: dto.documentIds }, organizationId, partnerId },
+              where: { ...POSTED_FEE_WHERE, id: { in: dto.documentIds }, organizationId, partnerId },
               orderBy: { issueDate: 'asc' },
             })
           : await tx.document.findMany({
-              where: {
-                organizationId,
-                partnerId,
-                documentType: 'sales_invoice',
-                paymentStatus: { in: ['not_paid', 'partial'] },
-                sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-                amountResidual: { gt: 0 },
-              },
+              // P0-7: OPEN_FEE_WHERE adds the `status` predicate this query
+              // never had. Without it the oldest-first auto-fill would happily
+              // spend a parent's tender on a cancelled invoice.
+              where: { ...OPEN_FEE_WHERE, organizationId, partnerId },
               orderBy: { issueDate: 'asc' },
             });
 
@@ -694,9 +743,35 @@ export class SchoolPaymentService {
    * Reuses the platform's single payment writer via `createCustomerRefund`
    * (outbound with counterAccount='receivable'), so the GL leg is Dr Accounts
    * Receivable / Cr Cash|Bank — the exact mirror of a collection, never a
-   * phantom payable. The inbound overpayment credit the original collection
-   * left on the Payment row is what funds the refund; the engine's own
-   * validation rejects a refund that would overdraw the partner's AR.
+   * phantom payable.
+   *
+   * P0-6. The docstring here previously claimed "the engine's own validation
+   * rejects a refund that would overdraw the partner's AR". That was false.
+   * `PaymentService.createCustomerRefund` runs its overpayment guard only when
+   * `counterType === 'payable'` (a vendor bill); a customer refund is outbound
+   * against a *receivable*, so the guard was skipped by construction. Combined
+   * with this method computing `overpaymentCredit` and then deliberately not
+   * enforcing it, any student with zero entitlement could be refunded any
+   * amount — real cash out of the drawer against nothing.
+   *
+   * Phase 0 applies a deliberately CONSERVATIVE cap: the GREATER of unallocated
+   * inbound receipts and outstanding fee credits — never their SUM. Those two
+   * can describe the same money: `createCredit` does not draw down
+   * `Payment.unallocatedAmount`, so an overpayment converted into a credit is
+   * represented on both sides at once (P1-3). Summing them would authorise
+   * double the real entitlement.
+   *
+   * MAX rather than MIN because the two are not both populated in the ordinary
+   * case. A plain overpayment leaves unallocated funds with no FeeCredit row at
+   * all, and an adjustment-funded credit exists with nothing unallocated; MIN
+   * would return zero for both and reject every legitimate refund. MAX equals
+   * the true entitlement when the pots overlap, and understates it when they
+   * are genuinely distinct — wrong in the safe direction.
+   *
+   * This is a floor, not the final rule. A2.1 replaces it with the canonical
+   * `refundableAmount` (eligible payments − allocated − refunded − converted,
+   * plus refundable credits) enforced inside the payment engine itself, where
+   * every caller gets it rather than just this one.
    *
    * Idempotency: a replayed `reference` returns the original refund rather
    * than paying out twice (mobile-money reversal retries).
@@ -720,18 +795,33 @@ export class SchoolPaymentService {
         }
       }
 
-      // Optional safeguard: cap at the student's available overpayment credit
-      // (unallocated inbound receipts). A refund above this creates a negative
-      // AR balance — allowed for withdrawals, but we surface the figure so the
-      // caller is explicit. We do NOT block it; the bursar owns the decision.
-      const inbound = await tx.payment.findMany({
+      // Unallocated inbound receipts — money taken but not yet applied.
+      const inboundAgg = await tx.payment.aggregate({
         where: { organizationId, partnerId: student.partnerId, direction: 'inbound' },
-        select: { unallocatedAmount: true },
+        _sum: { unallocatedAmount: true },
       });
-      const overpaymentCredit = inbound.reduce(
-        (sum: number, p: any) => sum + Number(p.unallocatedAmount ?? 0),
-        0,
-      );
+      const unallocated = dec(inboundAgg._sum.unallocatedAmount ?? 0);
+
+      // Outstanding stored-value credits held by this student.
+      const creditAgg = await tx.feeCredit.aggregate({
+        where: { organizationId, studentProfileId: student.id, isActive: true },
+        _sum: { remaining: true },
+      });
+      const creditOutstanding = dec(creditAgg._sum.remaining ?? 0);
+
+      // MAX, never the SUM — see the P0-6/P1-3 note above.
+      const refundable = round(Prisma.Decimal.max(unallocated, creditOutstanding), 6);
+      const overpaymentCredit = refundable.toNumber();
+
+      const wanted = round(dec(dto.amount), 6);
+      if (wanted.greaterThan(refundable)) {
+        throw new BadRequestException(
+          `Refund of ${wanted.toString()} exceeds this student's refundable entitlement of ` +
+            `${refundable.toString()} (unallocated receipts ${unallocated.toString()}, ` +
+            `outstanding credits ${creditOutstanding.toString()}). Record the overpayment or ` +
+            `credit that funds this refund first.`,
+        );
+      }
 
       const refund: any = await this.payments.createCustomerRefund(
         {

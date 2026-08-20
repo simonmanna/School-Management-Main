@@ -7,6 +7,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
+import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
 import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
 
 /**
@@ -314,12 +315,11 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     // portal show a real balance. Billed = sum of fee-document totals; balance =
     // sum of their residuals; paid is the difference (derived from the invoices
     // themselves, so it always reconciles).
+    // P0-7: scope to financially active documents. The previous query applied
+    // no `status` filter at all, so draft invoices (never issued) and cancelled
+    // invoices (withdrawn) were both counted in the student's billed total.
     const invoices = await this.prisma.client.document.findMany({
-      where: {
-        partnerId: profile.partnerId,
-        documentType: 'sales_invoice',
-        sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-      },
+      where: { ...POSTED_FEE_WHERE, partnerId: profile.partnerId },
       orderBy: { issueDate: 'desc' },
       select: {
         id: true,
@@ -340,6 +340,11 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
 
     const totalBilled = invoices.reduce((s, d) => s + Number(d.totalAmount), 0);
     const balance = invoices.reduce((s, d) => s + Number(d.amountResidual), 0);
+    // NOTE (P0-4, fixed in A1): derived by subtraction, so waived and credited
+    // amounts are reported as if money had been received — and this figure will
+    // not reconcile with the `payments` array rendered beside it. The honest
+    // number is SUM(PaymentAllocation); it arrives with
+    // SchoolFinanceQueryService, which this method then delegates to.
     const totalPaid = totalBilled - balance;
 
     return {

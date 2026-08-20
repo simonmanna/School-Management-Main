@@ -198,8 +198,10 @@ export function useSections() {
  * available actions, so the record was stranded in the UI.
  */
 export type AdmissionStatus =
+  | 'draft'
   | 'submitted'
   | 'under_review'
+  | 'documents_pending'
   | 'screening'
   | 'interview_scheduled'
   | 'interviewed'
@@ -209,13 +211,18 @@ export type AdmissionStatus =
   | 'waitlisted'
   | 'offer_issued'
   | 'offer_accepted'
+  | 'offer_declined'
+  | 'offer_expired'
   | 'enrolled'
   | 'rejected'
   | 'withdrawn';
 
 /** Every action the admission FSM accepts on `POST /school/admissions/:id/review`. */
 export type AdmissionAction =
+  | 'submit'
   | 'review'
+  | 'request_documents'
+  | 'resolve_documents'
   | 'screen'
   | 'schedule_interview'
   | 'complete_interview'
@@ -229,6 +236,7 @@ export type AdmissionAction =
   | 'issue_offer'
   | 'accept_offer'
   | 'decline_offer'
+  | 'expire_offer'
   | 'withdraw';
 
 export interface AdmissionApplication {
@@ -291,12 +299,18 @@ export interface AdmissionEligibility {
 
 export interface CreateAdmissionInput {
   academicYearId: string;
+  admissionCycleId?: string;
   applicantFirstName: string;
   applicantLastName: string;
   applicantDob?: string;
   applicantGender?: 'male' | 'female' | 'other';
   applyingForClassId?: string;
   parentContactId?: string;
+  nin?: string;
+  sourceOfEnquiry?: string;
+  siblingOfStudentId?: string;
+  asDraft?: boolean;
+  guardians?: AdmissionGuardianInput[];
   customFields?: Record<string, unknown>;
 }
 
@@ -307,6 +321,8 @@ export interface UpdateAdmissionInput {
   applicantGender?: 'male' | 'female' | 'other';
   applyingForClassId?: string;
   parentContactId?: string;
+  sourceOfEnquiry?: string;
+  siblingOfStudentId?: string;
   customFields?: Record<string, unknown>;
 }
 
@@ -404,6 +420,251 @@ export function useAdmissionEligibility(id?: string) {
     queryKey: ['school', 'admissions', 'eligibility', id],
     enabled: !!id,
     queryFn: async () => (await api.get<AdmissionEligibility>(`${S}/admissions/${id}/eligibility`)).data,
+  });
+}
+
+/* ── Phase 1–5: submit gate, timeline, guardians, committee, config, analytics, portal ── */
+
+export interface AdmissionGuardianInput {
+  firstName: string;
+  lastName?: string;
+  relationship: string;
+  phone?: string;
+  altPhone?: string;
+  email?: string;
+  occupation?: string;
+  address?: string;
+  isPrimary?: boolean;
+  isEmergency?: boolean;
+  financiallyResponsible?: boolean;
+}
+
+export interface AdmissionStatusHistoryRow {
+  id: string;
+  fromStatus?: string | null;
+  toStatus: string;
+  action: string;
+  reason?: string | null;
+  changedById?: string | null;
+  changedAt: string;
+}
+
+export interface AdmissionReviewerAssignment {
+  id: string;
+  applicationId: string;
+  reviewerId: string;
+  role: string;
+  status: 'assigned' | 'in_progress' | 'completed';
+  recommendation?: string | null;
+  score?: number | null;
+  comments?: string | null;
+  assignedAt: string;
+  completedAt?: string | null;
+}
+
+export interface AdmissionCommitteeSummary {
+  applicationId: string;
+  assigned: number;
+  completed: number;
+  quorumMet: boolean;
+  tally: Record<string, number>;
+  leaning: string | null;
+  averageScore: number | null;
+}
+
+export interface AdmissionRequirement {
+  id: string;
+  admissionCycleId?: string | null;
+  classId?: string | null;
+  kind: 'document' | 'field' | 'fee';
+  code: string;
+  label: string;
+  required: boolean;
+  gate: 'submit' | 'enroll';
+  sortOrder: number;
+}
+
+export interface AdmissionOfferTemplate {
+  id: string;
+  name: string;
+  body: string;
+  validityDays: number;
+  isDefault: boolean;
+}
+
+export interface AdmissionEnquiry {
+  id: string;
+  applicantName: string;
+  guardianName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  interestedClassId?: string | null;
+  source?: string | null;
+  status: 'new' | 'contacted' | 'converted' | 'closed';
+  notes?: string | null;
+  convertedApplicationId?: string | null;
+  createdAt: string;
+}
+
+export interface AdmissionFunnel {
+  drafts: number;
+  total: number;
+  stages: { submitted: number; reviewed: number; accepted: number; offered: number; offerAccepted: number; enrolled: number };
+  buckets: { waitlisted: number; rejected: number };
+  conversion: { acceptanceRate: number; offerAcceptanceRate: number; enrollmentRate: number; overallYield: number };
+  byStatus: Record<string, number>;
+}
+
+export function useSubmitApplication() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/admissions/${id}/submit`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+export function useAdmissionHistory(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'history', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionStatusHistoryRow[]>(`${S}/admissions/${id}/history`)).data,
+  });
+}
+
+export function useRevealNin() {
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<{ nin: string | null }>(`${S}/admissions/${id}/reveal-nin`)).data,
+  });
+}
+
+/* Committee / reviewers */
+export function useAdmissionReviewers(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'reviewers', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionReviewerAssignment[]>(`${S}/admissions/${id}/reviewers`)).data,
+  });
+}
+
+export function useCommitteeSummary(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'committee', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionCommitteeSummary>(`${S}/admissions/${id}/committee-summary`)).data,
+  });
+}
+
+export function useAssignReviewers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reviewerIds, role }: { id: string; reviewerIds: string[]; role?: string }) =>
+      (await api.post(`${S}/admissions/${id}/reviewers`, { reviewerIds, role })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'reviewers', v.id] }),
+  });
+}
+
+export function useSubmitReview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assignmentId, recommendation, score, comments }: { assignmentId: string; recommendation: string; score?: number; comments?: string }) =>
+      (await api.post(`${S}/admissions/reviews/${assignmentId}`, { recommendation, score, comments })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+/* Requirements */
+export function useAdmissionRequirements(admissionCycleId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'requirements', admissionCycleId ?? 'all'],
+    queryFn: async () => (await api.get<AdmissionRequirement[]>(`${S}/admissions/requirements`, { params: admissionCycleId ? { admissionCycleId } : {} })).data,
+  });
+}
+
+export function useUpsertRequirement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: Partial<AdmissionRequirement>) => (await api.put(`${S}/admissions/requirements`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'requirements'] }),
+  });
+}
+
+export function useDeleteRequirement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/admissions/requirements/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'requirements'] }),
+  });
+}
+
+/* Offer templates */
+export function useOfferTemplates() {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'offer-templates'],
+    queryFn: async () => (await api.get<AdmissionOfferTemplate[]>(`${S}/admissions/offer-templates`)).data,
+  });
+}
+
+export function useUpsertOfferTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: Partial<AdmissionOfferTemplate>) => (await api.put(`${S}/admissions/offer-templates`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'offer-templates'] }),
+  });
+}
+
+export function useDeleteOfferTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/admissions/offer-templates/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'offer-templates'] }),
+  });
+}
+
+/* Enquiries */
+export function useEnquiries(status?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'enquiries', status ?? 'all'],
+    queryFn: async () => (await api.get<AdmissionEnquiry[]>(`${S}/admissions/enquiries`, { params: status ? { status } : {} })).data,
+  });
+}
+
+export function useCreateEnquiry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: Partial<AdmissionEnquiry>) => (await api.post(`${S}/admissions/enquiries`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'enquiries'] }),
+  });
+}
+
+export function useUpdateEnquiry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; status?: string; notes?: string }) =>
+      (await api.put(`${S}/admissions/enquiries/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions', 'enquiries'] }),
+  });
+}
+
+/* Analytics */
+export function useAdmissionFunnel(academicYearId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'funnel', academicYearId ?? 'all'],
+    queryFn: async () => (await api.get<AdmissionFunnel>(`${S}/admissions/analytics/funnel`, { params: academicYearId ? { academicYearId } : {} })).data,
+  });
+}
+
+export function useAdmissionBySource(academicYearId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'by-source', academicYearId ?? 'all'],
+    queryFn: async () => (await api.get<Array<{ source: string; count: number }>>(`${S}/admissions/analytics/by-source`, { params: academicYearId ? { academicYearId } : {} })).data,
+  });
+}
+
+/* Portal link (staff-issued) */
+export function useIssuePortalLink() {
+  return useMutation({
+    mutationFn: async ({ id, email }: { id: string; email: string }) =>
+      (await api.post<{ issued: boolean; devToken?: string }>(`${S}/admissions/portal/${id}/link`, { email })).data,
   });
 }
 
@@ -1216,6 +1477,131 @@ export function useSubjects() {
   return useQuery({
     queryKey: ['school', 'subjects'],
     queryFn: async () => (await api.get<Paginated<Subject>>(`${S}/subjects`, { params: { pageSize: 200 } })).data,
+  });
+}
+
+/* ───────────────────────── Curriculum (versioned foundation) ───────────────────────── */
+
+export interface Curriculum {
+  id: string;
+  classId: string;
+  academicYearId: string;
+  name: string;
+  description?: string | null;
+  version: number;
+  status: 'draft' | 'published' | 'archived';
+  parentVersionId?: string | null;
+  publishedAt?: string | null;
+  archivedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useCurricula() {
+  return useQuery({
+    queryKey: ['school', 'curricula'],
+    queryFn: async () => (await api.get<Curriculum[]>(`${S}/curricula`, { params: { pageSize: 300 } })).data,
+  });
+}
+
+export function useCreateCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { classId: string; academicYearId: string; name: string; description?: string; subjects: { subjectId: string; periodsPerWeek: number; isCore: boolean }[] }) =>
+      (await api.post<Curriculum>(`${S}/curricula`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+export function useUpdateCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; name?: string; description?: string }) =>
+      (await api.patch<Curriculum>(`${S}/curricula/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+export function usePublishCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<Curriculum>(`${S}/curricula/${id}/publish`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+export function useArchiveCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<Curriculum>(`${S}/curricula/${id}/archive`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+export function useCloneCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<Curriculum>(`${S}/curricula/${id}/clone`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+export function useDeleteCurriculum() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/curricula/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'curricula'] }),
+  });
+}
+
+/* ───────────────────────── Teacher Assignments ───────────────────────── */
+
+export interface TeacherAssignment {
+  id: string;
+  teacherPartnerId: string;
+  subjectId: string;
+  classId: string;
+  sectionId?: string | null;
+  streamId?: string | null;
+  termId?: string | null;
+  periodsPerWeek: number;
+  createdAt: string;
+  updatedAt: string;
+  subject?: Subject;
+  schoolClass?: { id: string; name: string; gradeLevel?: { name: string } };
+  section?: { id: string; name: string } | null;
+}
+
+export function useTeacherAssignments() {
+  return useQuery({
+    queryKey: ['school', 'teacher-assignments'],
+    queryFn: async () => (await api.get<TeacherAssignment[]>(`${S}/teacher-assignments`, { params: { pageSize: 400 } })).data,
+  });
+}
+
+export function useCreateTeacherAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { teacherPartnerId: string; subjectId: string; classId: string; sectionId?: string; termId?: string; periodsPerWeek?: number }) =>
+      (await api.post<TeacherAssignment>(`${S}/teacher-assignments`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teacher-assignments'] }),
+  });
+}
+
+export function useUpdateTeacherAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; periodsPerWeek?: number; sectionId?: string; termId?: string }) =>
+      (await api.patch<TeacherAssignment>(`${S}/teacher-assignments/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teacher-assignments'] }),
+  });
+}
+
+export function useDeleteTeacherAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/teacher-assignments/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teacher-assignments'] }),
   });
 }
 

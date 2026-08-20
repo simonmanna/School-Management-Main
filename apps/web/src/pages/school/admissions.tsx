@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
-import { Plus, FilePlus2, Send, CheckCircle2, XCircle, CalendarClock, LogOut } from 'lucide-react';
+import { Plus, FilePlus2, Send, CheckCircle2, XCircle, CalendarClock, LogOut, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import {
   useAdmissions,
   useCreateAdmission,
   useAdmissionAction,
   useEnrollAdmission,
+  useIssueAdmissionOffer,
+  useAcceptAdmissionOffer,
+  useDeclineAdmissionOffer,
+  useAdmissionEligibility,
   useAcademicYears,
   useClasses,
   useTerms,
   type AdmissionApplication,
-  type AdmissionStatus,
+  type AdmissionAction,
   type CreateAdmissionInput,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,41 +23,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
-
-const STATUS_META: Record<AdmissionStatus, { cls: string; label: string }> = {
-  submitted: { cls: 'bg-slate-100 text-slate-700', label: 'Submitted' },
-  under_review: { cls: 'bg-amber-100 text-amber-700', label: 'Under review' },
-  exam_scheduled: { cls: 'bg-sky-100 text-sky-700', label: 'Exam scheduled' },
-  accepted: { cls: 'bg-emerald-100 text-emerald-700', label: 'Accepted' },
-  enrolled: { cls: 'bg-indigo-100 text-indigo-700', label: 'Enrolled' },
-  rejected: { cls: 'bg-rose-100 text-rose-700', label: 'Rejected' },
-  withdrawn: { cls: 'bg-zinc-100 text-zinc-600', label: 'Withdrawn' },
-};
-
-/** Actions available from each status (mirrors the backend FSM). */
-const NEXT_ACTIONS: Record<AdmissionStatus, Array<{ action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw'; label: string; tone: 'default' | 'success' | 'danger' }>> = {
-  submitted: [{ action: 'review', label: 'Start review', tone: 'default' }],
-  under_review: [
-    { action: 'accept', label: 'Accept', tone: 'success' },
-    { action: 'reject', label: 'Reject', tone: 'danger' },
-    { action: 'schedule_exam', label: 'Schedule exam', tone: 'default' },
-  ],
-  exam_scheduled: [
-    { action: 'accept', label: 'Accept', tone: 'success' },
-    { action: 'reject', label: 'Reject', tone: 'danger' },
-  ],
-  accepted: [],
-  enrolled: [],
-  rejected: [],
-  withdrawn: [],
-};
+import { NEXT_ACTIONS, offerStage, statusMeta } from './_components/admission-status';
 
 export function SchoolAdmissionsPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
   const [enrollForm, setEnrollForm] = useState<Record<string, string>>({});
-  const [actionNotes] = useState<Record<string, string>>({});
+  const [offerFor, setOfferFor] = useState<AdmissionApplication | null>(null);
+  const [offerForm, setOfferForm] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<string>('');
 
   const { data, isLoading } = useAdmissions({ pageSize: 50 });
   const { data: years } = useAcademicYears();
@@ -62,8 +41,18 @@ export function SchoolAdmissionsPage() {
   const create = useCreateAdmission();
   const act = useAdmissionAction();
   const enroll = useEnrollAdmission();
+  const issueOffer = useIssueAdmissionOffer();
+  const acceptOffer = useAcceptAdmissionOffer();
+  const declineOffer = useDeclineAdmissionOffer();
+  // Surfaces exactly why an applicant cannot be enrolled yet (documents, fee,
+  // capacity) instead of letting the operator discover it from a failed POST.
+  const { data: eligibility } = useAdmissionEligibility(enrollFor?.id);
 
-  const rows = useMemo(() => data?.data ?? [], [data]);
+  const allRows = useMemo(() => data?.data ?? [], [data]);
+  const rows = useMemo(
+    () => (statusFilter ? allRows.filter((a) => a.status === statusFilter) : allRows),
+    [allRows, statusFilter],
+  );
   const yearNameById = useMemo(
     () => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])),
     [years],
@@ -96,28 +85,87 @@ export function SchoolAdmissionsPage() {
       await create.mutateAsync(dto);
       notify.success('Application submitted');
       setOpen(false);
+      setForm({});
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Could not create application');
     }
   };
 
-  const runAction = async (app: AdmissionApplication, action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw') => {
+  const runAction = async (app: AdmissionApplication, action: AdmissionAction, needsNotes?: boolean) => {
+    // Decisions must carry a reason. The old page declared an `actionNotes` state
+    // and never set it, so every accept/reject/withdraw was recorded with no
+    // rationale at all.
+    let notes: string | undefined;
+    if (needsNotes) {
+      const entered = window.prompt(`Reason for "${action.replace(/_/g, ' ')}"?`);
+      if (entered === null) return;
+      if (!entered.trim()) {
+        notify.error('A reason is required for this action');
+        return;
+      }
+      notes = entered.trim();
+    }
     try {
-      await act.mutateAsync({ id: app.id, action, notes: actionNotes[app.id] || undefined });
-      notify.success(`Application ${action.replace('_', ' ')}`);
+      await act.mutateAsync({ id: app.id, action, notes });
+      notify.success(`Application ${action.replace(/_/g, ' ')}`);
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Action failed');
+    }
+  };
+
+  const openOffer = (app: AdmissionApplication) => {
+    const in14Days = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+    setOfferFor(app);
+    setOfferForm({
+      expiresAt: in14Days,
+      body: `We are pleased to offer ${app.applicantFirstName} ${app.applicantLastName} a place${
+        app.applyingForClassId ? ` in ${classNameById[app.applyingForClassId] ?? 'the requested class'}` : ''
+      }.`,
+    });
+  };
+
+  const submitOffer = async () => {
+    if (!offerFor) return;
+    if (!offerForm.expiresAt) {
+      notify.error('An offer expiry date is required');
+      return;
+    }
+    try {
+      await issueOffer.mutateAsync({
+        id: offerFor.id,
+        body: offerForm.body || undefined,
+        expiresAt: new Date(`${offerForm.expiresAt}T23:59:59`).toISOString(),
+      });
+      notify.success('Offer issued');
+      setOfferFor(null);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not issue offer');
+    }
+  };
+
+  const respondToOffer = async (app: AdmissionApplication, accept: boolean) => {
+    try {
+      if (accept) await acceptOffer.mutateAsync(app.id);
+      else await declineOffer.mutateAsync(app.id);
+      notify.success(accept ? 'Offer accepted' : 'Offer declined');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not record the offer response');
     }
   };
 
   const openEnroll = (app: AdmissionApplication) => {
     const firstTerm = (terms?.data ?? [])[0]?.id ?? '';
     setEnrollFor(app);
+    // Seeded from the APPLICATION being enrolled. This used to read the
+    // new-application dialog's state (`form.applicantGender` / `form.applicantDob`),
+    // so students were created with whatever was left over in that form.
     setEnrollForm({
       classId: app.applyingForClassId ?? (classes?.data ?? [])[0]?.id ?? '',
       termId: firstTerm,
       rollNumber: '',
       name: `${app.applicantFirstName} ${app.applicantLastName}`,
+      gender: app.applicantGender ?? '',
+      dateOfBirth: app.applicantDob ? String(app.applicantDob).slice(0, 10) : '',
     });
   };
 
@@ -134,8 +182,8 @@ export function SchoolAdmissionsPage() {
         rollNumber: enrollForm.rollNumber,
         student: {
           name: enrollForm.name,
-          gender: (form.applicantGender || undefined) as 'male' | 'female' | 'other' | undefined,
-          dateOfBirth: form.applicantDob || undefined,
+          gender: (enrollForm.gender || undefined) as 'male' | 'female' | 'other' | undefined,
+          dateOfBirth: enrollForm.dateOfBirth || undefined,
         },
       });
       notify.success('Student enrolled from application');
@@ -145,80 +193,115 @@ export function SchoolAdmissionsPage() {
     }
   };
 
+  const busy = act.isPending || issueOffer.isPending || acceptOffer.isPending || declineOffer.isPending;
+
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Admissions</h1>
-          <p className="text-sm text-muted-foreground">Applications, review workflow and enrollment.</p>
+          <p className="text-sm text-muted-foreground">Applications, review workflow, offers and enrollment.</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" /> New application
-        </Button>
+        <div className="flex items-center gap-2">
+          <select
+            className="rounded-md border bg-card px-3 py-2 text-sm"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="">All statuses</option>
+            {[...new Set(allRows.map((a) => a.status))].map((s) => (
+              <option key={s} value={s}>{statusMeta(s).label}</option>
+            ))}
+          </select>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> New application
+          </Button>
+        </div>
       </div>
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead className="border-b text-left text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">Application no.</th>
-                <th className="px-4 py-2 font-medium">Applicant</th>
-                <th className="px-4 py-2 font-medium">Applying for</th>
-                <th className="px-4 py-2 font-medium">Academic year</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
-              )}
-              {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No applications yet. Create the first one.</td></tr>
-              )}
-              {rows.map((a) => (
-                <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
-                  <td className="px-4 py-2 font-mono text-xs">{a.applicationNumber}</td>
-                  <td className="px-4 py-2 font-medium">
-                    {a.applicantFirstName} {a.applicantLastName}
-                  </td>
-                  <td className="px-4 py-2">{a.applyingForClassId ? classNameById[a.applyingForClassId] ?? '—' : '—'}</td>
-                  <td className="px-4 py-2">{yearNameById[a.academicYearId] ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <Badge className={STATUS_META[a.status]?.cls ?? 'bg-slate-100 text-slate-700'}>
-                      {STATUS_META[a.status]?.label ?? a.status}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex flex-wrap justify-end gap-1">
-                      {NEXT_ACTIONS[a.status]?.map((n) => (
-                        <Button
-                          key={n.action}
-                          variant={n.tone === 'success' ? 'default' : n.tone === 'danger' ? 'destructive' : 'secondary'}
-                          size="sm"
-                          disabled={act.isPending}
-                          onClick={() => runAction(a, n.action)}
-                        >
-                          {n.action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
-                          {n.action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
-                          {n.action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
-                          {n.action === 'review' && <Send className="h-3.5 w-3.5" />}
-                          {n.action === 'withdraw' && <LogOut className="h-3.5 w-3.5" />}
-                          {n.label}
-                        </Button>
-                      ))}
-                      {a.status === 'accepted' && (
-                        <Button variant="default" size="sm" disabled={enroll.isPending} onClick={() => openEnroll(a)}>
-                          <CheckCircle2 className="h-3.5 w-3.5" /> Enroll
-                        </Button>
-                      )}
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b text-left text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Application no.</th>
+                  <th className="px-4 py-2 font-medium">Applicant</th>
+                  <th className="px-4 py-2 font-medium">Applying for</th>
+                  <th className="px-4 py-2 font-medium">Academic year</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {isLoading && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                )}
+                {!isLoading && rows.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                    {statusFilter ? 'No applications in this status.' : 'No applications yet. Create the first one.'}
+                  </td></tr>
+                )}
+                {rows.map((a) => {
+                  const meta = statusMeta(a.status);
+                  const stage = offerStage(a.status);
+                  return (
+                    <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
+                      <td className="px-4 py-2 font-mono text-xs">{a.applicationNumber}</td>
+                      <td className="px-4 py-2 font-medium">
+                        {a.applicantFirstName} {a.applicantLastName}
+                      </td>
+                      <td className="px-4 py-2">{a.applyingForClassId ? classNameById[a.applyingForClassId] ?? '—' : '—'}</td>
+                      <td className="px-4 py-2">{yearNameById[a.academicYearId] ?? '—'}</td>
+                      <td className="px-4 py-2">
+                        <Badge className={meta.cls}>{meta.label}</Badge>
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {(NEXT_ACTIONS[a.status] ?? []).map((n) => (
+                            <Button
+                              key={n.action}
+                              variant={n.tone === 'success' ? 'default' : n.tone === 'danger' ? 'destructive' : 'secondary'}
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => runAction(a, n.action, n.needsNotes)}
+                            >
+                              {n.action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                              {n.action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
+                              {n.action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
+                              {n.action === 'review' && <Send className="h-3.5 w-3.5" />}
+                              {n.action === 'withdraw' && <LogOut className="h-3.5 w-3.5" />}
+                              {n.label}
+                            </Button>
+                          ))}
+                          {stage === 'issue' && (
+                            <Button variant="default" size="sm" disabled={busy} onClick={() => openOffer(a)}>
+                              <Mail className="h-3.5 w-3.5" /> Issue offer
+                            </Button>
+                          )}
+                          {stage === 'respond' && (
+                            <>
+                              <Button variant="default" size="sm" disabled={busy} onClick={() => respondToOffer(a, true)}>
+                                <ThumbsUp className="h-3.5 w-3.5" /> Offer accepted
+                              </Button>
+                              <Button variant="destructive" size="sm" disabled={busy} onClick={() => respondToOffer(a, false)}>
+                                <ThumbsDown className="h-3.5 w-3.5" /> Offer declined
+                              </Button>
+                            </>
+                          )}
+                          {stage === 'enroll' && (
+                            <Button variant="default" size="sm" disabled={enroll.isPending} onClick={() => openEnroll(a)}>
+                              <CheckCircle2 className="h-3.5 w-3.5" /> Enroll
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -268,12 +351,51 @@ export function SchoolAdmissionsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Issue offer dialog */}
+      <Dialog open={!!offerFor} onOpenChange={(v) => { if (!v) setOfferFor(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Issue offer to {offerFor?.applicantFirstName} {offerFor?.applicantLastName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Field label="Offer expires on" required>
+              <Input type="date" value={offerForm.expiresAt ?? ''} onChange={(e) => setOfferForm({ ...offerForm, expiresAt: e.target.value })} />
+            </Field>
+            <Field label="Offer letter text">
+              <textarea
+                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
+                rows={4}
+                value={offerForm.body ?? ''}
+                onChange={(e) => setOfferForm({ ...offerForm, body: e.target.value })}
+              />
+            </Field>
+            <p className="text-xs text-muted-foreground">
+              The offer cannot be accepted after the expiry date.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOfferFor(null)}>Cancel</Button>
+            <Button onClick={submitOffer} disabled={issueOffer.isPending}>
+              <Mail className="h-4 w-4" /> Issue offer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Enroll dialog */}
       <Dialog open={!!enrollFor} onOpenChange={(v) => { if (!v) setEnrollFor(null); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enroll {enrollFor?.applicantFirstName} {enrollFor?.applicantLastName}</DialogTitle>
           </DialogHeader>
+          {eligibility && eligibility.status === 'BLOCKED' && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">This applicant cannot be enrolled yet:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {eligibility.missing.map((m) => <li key={m}>{m}</li>)}
+              </ul>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Class" required>
               <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.classId ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, classId: e.target.value })}>
@@ -293,10 +415,21 @@ export function SchoolAdmissionsPage() {
             <Field label="Roll number" required>
               <Input value={enrollForm.rollNumber ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, rollNumber: e.target.value })} />
             </Field>
+            <Field label="Date of birth">
+              <Input type="date" value={enrollForm.dateOfBirth ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, dateOfBirth: e.target.value })} />
+            </Field>
+            <Field label="Gender">
+              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.gender ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, gender: e.target.value })}>
+                <option value="">—</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </Field>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEnrollFor(null)}>Cancel</Button>
-            <Button onClick={submitEnroll} disabled={enroll.isPending}>
+            <Button onClick={submitEnroll} disabled={enroll.isPending || eligibility?.status === 'BLOCKED'}>
               <CheckCircle2 className="h-4 w-4" /> Enroll student
             </Button>
           </DialogFooter>
