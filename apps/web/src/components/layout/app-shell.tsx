@@ -183,7 +183,6 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Users,
     items: [
       { to: '/school/front-desk', label: 'Front Desk', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
     ],
@@ -206,6 +205,7 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/admissions', label: 'Admissions', icon: FilePlus2, permission: PERMISSIONS.school.read },
+      { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
     ],
   },
