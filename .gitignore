@@ -51,3 +51,10 @@ apps/api/p8_*.js
 apps/api/.p45/
 apps/api/.p5/
 openeducat_19.zip
+
+# Scratch / build byproducts (fees & finance hardening cleanup)
+apps/api/*.err
+apps/api/diff_err*.txt
+apps/api/prisma/_gen_tmp.prisma
+apps/web/vite.config.d.ts
+apps/web/vite.config.js
