@@ -3182,5 +3182,164 @@ export function useCheckoutFrontDeskLog() {
   return useMutation({ mutationFn: async ({ id, notes }: { id: string; notes?: string }) => (await api.patch<FrontDeskLog>(`${S}/front-desk/${id}/checkout`, { notes })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'front-desk'] }) });
 }
 
+/* ───────────────────────── LMS (Lesson Planning + Basic LMS) ───────────────────────── */
+/* Phases 1-5: Course Offering, Lesson Plans, Templates, Scheduled Lessons,
+   Discussions, Homework, Evidence/Mastery, Reporting. Backend controller: /school/lp */
+
+const LP = `${S}/lp`;
+
+export interface CourseOffering {
+  id: string;
+  academicYearId: string;
+  termId: string;
+  subjectId: string;
+  classId: string;
+  sectionId: string | null;
+  curriculumId: string;
+  teacherPartnerIds: string[];
+}
+
+export function useCourseOfferings(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'lp', 'course-offerings', termId ?? 'all'],
+    queryFn: async () => (await api.get<CourseOffering[]>(`${LP}/course-offerings`, { params: termId ? { termId } : {} })).data,
+  });
+}
+export function useCreateCourseOffering() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<CourseOffering>(`${LP}/course-offerings`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'course-offerings'] }) });
+}
+export function useUpsertCourseOfferingFromTeacherAssignment() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (teacherAssignmentId: string) => (await api.post<CourseOffering>(`${LP}/course-offerings/from-teacher-assignment`, { teacherAssignmentId })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'course-offerings'] }) });
+}
+
+export interface LessonPlan {
+  id: string;
+  courseOfferingId: string | null;
+  curriculumVersionId: string | null;
+  unitId: string | null;
+  topicId: string | null;
+  subtopic: string | null;
+  title: string;
+  objectives: string[];
+  materials: string[];
+  workflowStatus: string;
+  version: number;
+  subjectId: string;
+}
+export function useLessonPlans(params: { courseOfferingId?: string; status?: string; termId?: string } = {}) {
+  return useQuery({
+    queryKey: ['school', 'lp', 'lesson-plans', params],
+    queryFn: async () => (await api.get<any[]>(`${LP}/lesson-plans`, { params })).data,
+  });
+}
+export function useLessonPlan(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'lp', 'lesson-plan', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<any>(`${LP}/lesson-plans/${id}`)).data,
+  });
+}
+export function useCreateLessonPlan() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/lesson-plans`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+export function useUpdateLessonPlan() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.put<any>(`${LP}/lesson-plans/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+export function useTransitionLessonPlan() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, action, requestedChanges }: any) => (await api.post<any>(`${LP}/lesson-plans/${id}/transition`, { action, requestedChanges })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+export function useCreateFromTimetable() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/lesson-plans/from-timetable`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+export function useArchiveLessonPlan() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.post<any>(`${LP}/lesson-plans/${id}/archive`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+
+export interface LessonPlanTemplate { id: string; name: string; subjectId: string; templateJson: any; isPublic: boolean }
+export function useLessonPlanTemplates() {
+  return useQuery({ queryKey: ['school', 'lp', 'templates'], queryFn: async () => (await api.get<LessonPlanTemplate[]>(`${LP}/templates`)).data });
+}
+export function useCreateLessonPlanTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<LessonPlanTemplate>(`${LP}/templates`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'templates'] }) });
+}
+export function useInstantiateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post<any>(`${LP}/templates/${id}/instantiate`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+}
+
+export function useTeacherDashboard(teacherPartnerId: string) {
+  return useQuery({ queryKey: ['school', 'lp', 'teacher-dashboard', teacherPartnerId], enabled: !!teacherPartnerId, queryFn: async () => (await api.get<any>(`${LP}/teacher-dashboard`, { params: { teacherPartnerId } })).data });
+}
+export function useLessonPlanCoverage(subjectId?: string, termId?: string) {
+  return useQuery({ queryKey: ['school', 'lp', 'coverage', subjectId, termId], enabled: !!subjectId, queryFn: async () => (await api.get<any>(`${LP}/curriculum-coverage`, { params: { subjectId, termId } })).data });
+}
+
+/* Phase 2: Scheduled lessons / delivery */
+export function useScheduledLessons(params: { courseOfferingId?: string; status?: string } = {}) {
+  return useQuery({ queryKey: ['school', 'lp', 'scheduled-lessons', params], queryFn: async () => (await api.get<any[]>(`${LP}/scheduled-lessons`, { params })).data });
+}
+export function useCreateScheduledLesson() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/scheduled-lessons`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'scheduled-lessons'] }) });
+}
+export function useDeliverLesson() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/scheduled-lessons/deliver`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'scheduled-lessons'] }) });
+}
+
+/* Phase 3: Discussions + Homework */
+export function useDiscussions(courseOfferingId?: string) {
+  return useQuery({ queryKey: ['school', 'lp', 'discussions', courseOfferingId ?? 'all'], queryFn: async () => (await api.get<any[]>(`${LP}/discussions`, { params: courseOfferingId ? { courseOfferingId } : {} })).data });
+}
+export function useDiscussion(id?: string) {
+  return useQuery({ queryKey: ['school', 'lp', 'discussion', id], enabled: !!id, queryFn: async () => (await api.get<any>(`${LP}/discussions/${id}`)).data });
+}
+export function useCreateDiscussion() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/discussions`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'discussions'] }) });
+}
+export function useAddPost() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post<any>(`${LP}/discussions/${id}/posts`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'discussions'] }) });
+}
+export function useSubmitHomework() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/homework/submit`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'homework'] }) });
+}
+export function useGradeHomework() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/homework/grade`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'homework'] }) });
+}
+
+/* Phase 4: Evidence + mastery */
+export function useRecordEvidence() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post<any>(`${LP}/evidence`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'mastery'] }) });
+}
+export function useRecomputeObjective() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { studentProfileId: string; learningObjectiveId: string }) => (await api.post<any>(`${LP}/mastery/objective/recompute`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'mastery'] }) });
+}
+export function useRecomputeCourse() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { studentProfileId: string; courseOfferingId: string }) => (await api.post<any>(`${LP}/mastery/course/recompute`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'mastery'] }) });
+}
+
+/* Phase 5: Reporting */
+export function useObjectiveMastery(params: { learningObjectiveId?: string; studentProfileId?: string } = {}) {
+  return useQuery({ queryKey: ['school', 'lp', 'reporting', 'objective-mastery', params], queryFn: async () => (await api.get<any[]>(`${LP}/reporting/objective-mastery`, { params })).data });
+}
+export function useCourseProgress(params: { courseOfferingId?: string } = {}) {
+  return useQuery({ queryKey: ['school', 'lp', 'reporting', 'course-progress', params], queryFn: async () => (await api.get<any[]>(`${LP}/reporting/course-progress`, { params })).data });
+}
+
 
 

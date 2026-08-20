@@ -11645,6 +11645,7 @@ model Discussion {
 
   courseOffering CourseOffering? @relation(fields: [courseOfferingId], references: [id])
   lessonPlan LessonPlan? @relation(fields: [lessonPlanId], references: [id])
+  posts DiscussionPost[]
 
   @@index([organizationId])
   @@index([courseOfferingId])
@@ -11661,6 +11662,8 @@ model DiscussionPost {
   pinned       Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  discussion Discussion @relation(fields: [discussionId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([discussionId])
@@ -11995,6 +11998,8 @@ model HomeworkSubmission {
   gradedAt         DateTime?
   feedback         String?
   status           String    @default("assigned") // 'assigned' | 'submitted' | 'late' | 'graded'
+  /// Phase 1 bridge: one submission → one StudentAssessment (the gradebook row).
+  studentAssessmentId String?
 
   assignment     HomeworkAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   studentProfile StudentProfile     @relation(fields: [studentProfileId], references: [id])
@@ -12002,6 +12007,7 @@ model HomeworkSubmission {
   @@unique([assignmentId, studentProfileId])
   @@index([organizationId])
   @@index([studentProfileId])
+  @@index([studentAssessmentId])
 }
 
 model LearningResource {

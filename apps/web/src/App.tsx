@@ -83,6 +83,15 @@ import { SchoolEventsPage } from '@/pages/school/events';
 import { SchoolPoliciesPage } from '@/pages/school/policies';
 import { SchoolCustomFieldsPage } from '@/pages/school/custom-fields';
 import { SchoolRolesPage } from '@/pages/school/roles';
+import { SchoolLmsCourseOfferingsPage } from '@/pages/school/lms/course-offerings';
+import { SchoolLmsLessonPlansPage } from '@/pages/school/lms/lesson-plans';
+import { SchoolLmsTemplatesPage } from '@/pages/school/lms/templates';
+import { SchoolLmsScheduledLessonsPage } from '@/pages/school/lms/scheduled-lessons';
+import { SchoolLmsDiscussionsPage } from '@/pages/school/lms/discussions';
+import { SchoolLmsHomeworkPage } from '@/pages/school/lms/homework';
+import { SchoolLmsTeacherDashboardPage } from '@/pages/school/lms/teacher-dashboard';
+import { SchoolLmsMasteryPage } from '@/pages/school/lms/mastery';
+import { SchoolLmsCoveragePage } from '@/pages/school/lms/coverage';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -481,6 +490,15 @@ export function App() {
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
+          <Route path="/school/lms/course-offerings" element={<SchoolLmsCourseOfferingsPage />} />
+          <Route path="/school/lms/lesson-plans" element={<SchoolLmsLessonPlansPage />} />
+          <Route path="/school/lms/templates" element={<SchoolLmsTemplatesPage />} />
+          <Route path="/school/lms/scheduled-lessons" element={<SchoolLmsScheduledLessonsPage />} />
+          <Route path="/school/lms/discussions" element={<SchoolLmsDiscussionsPage />} />
+          <Route path="/school/lms/homework" element={<SchoolLmsHomeworkPage />} />
+          <Route path="/school/lms/teacher-dashboard" element={<SchoolLmsTeacherDashboardPage />} />
+          <Route path="/school/lms/mastery" element={<SchoolLmsMasteryPage />} />
+          <Route path="/school/lms/coverage" element={<SchoolLmsCoveragePage />} />
           <Route path="/school/cbt" element={<SchoolCbtPage />} />
           <Route path="/school/certification" element={<SchoolCertificationPage />} />
           <Route path="/school/documents" element={<SchoolDocumentsPage />} />

@@ -21,7 +21,6 @@ import {
   ShoppingCart,
   Truck,
   FilePlus2,
-  Coffee,
   Tag,
   AlertTriangle,
   Ticket,
@@ -76,6 +75,13 @@ import {
   PiggyBank,
   UserCircle,
   DoorOpen,
+  Presentation,
+  BookCopy,
+  FileStack,
+  CalendarCheck,
+  MessagesSquare,
+  Target,
+  GitBranch,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -263,15 +269,19 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Meals & Cafeteria',
-    icon: Coffee,
+    title: 'LMS & Lesson Planning',
+    icon: Presentation,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/meals', label: 'Meals & Cafeteria', icon: Coffee, permission: PERMISSIONS.school.read },
-      { to: '/menu', label: 'Menu', icon: Coffee },
-      { to: '/menu/modifiers', label: 'Modifiers', icon: Tag },
-      { to: '/menu/combos', label: 'Combos', icon: Package },
-      { to: '/menu/accompaniments', label: 'Accompaniments', icon: Tag },
+      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/homework', label: 'Homework & Tasks', icon: ClipboardList, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/teacher-dashboard', label: 'My Teaching', icon: UserCog, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead },
     ],
   },
   {
