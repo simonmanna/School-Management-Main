@@ -28,8 +28,17 @@ function makeService(): { service: BillingService; mocks: MockContext } {
       studentProfile: { findMany: jest.fn() },
       feeSchedule: { findMany: jest.fn() },
       document: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
-      studentFeeAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
+      // A3 batched the per-student lookups: one findMany each, up front.
+      studentFeeAssignment: { findMany: jest.fn().mockResolvedValue([]) },
       scholarship: { findMany: jest.fn().mockResolvedValue([]) },
+      discount: { findMany: jest.fn().mockResolvedValue([]) },
+      schoolFeeInvoice: { create: jest.fn() },
+      // P0-5 pre-flight: generateForTerm now refuses to run when any fee
+      // product carries a non-zero sales tax, because the totals overwrite in
+      // the loop would unbalance the journal and abort the run part way
+      // through. Default to "no taxed products" so the existing math tests
+      // exercise the path they were written for.
+      product: { findMany: jest.fn().mockResolvedValue([]) },
       organization: { findFirst: jest.fn() },
       $transaction: jest.fn(),
     },
@@ -44,6 +53,7 @@ function makeService(): { service: BillingService; mocks: MockContext } {
     posting as any,
     determination as any,
     dmsTypes as any,
+    { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
   );
   return { service, mocks: { prisma, tenant, events, sequence, documentBuilder, posting, determination } };
 }
@@ -128,7 +138,10 @@ describe('BillingService — generateForTerm math', () => {
     ]);
   });
 
-  it('rethrows non-P2002 errors from the inner $transaction', async () => {
+  it('records a per-student failure instead of aborting the whole run (A3)', async () => {
+    // A3 contract: a run of 2,000 students must not die because one student's
+    // transaction failed. Non-P2002 errors are captured in `failed[]` with the
+    // rest of the run continuing — "1,000 POSTED / 1 FAILED / 999 PENDING".
     const { service, mocks } = makeService();
     const student = {
       id: 's1', partnerId: 'p1', admissionNo: 'STU-001',
@@ -138,13 +151,18 @@ describe('BillingService — generateForTerm math', () => {
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
       id: 'sch1', dueDate: new Date(),
       feeStructure: {
-        id: 'fs1', applicableTo: {}, components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
+        id: 'fs1', academicYearId: 'ay1', applicableTo: {},
+        components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
       },
     }]);
     mocks.prisma.client.$transaction.mockRejectedValueOnce({
       code: 'P2003',  // foreign-key violation, NOT P2002
       message: 'Foreign key constraint failed',
     });
-    await expect(service.generateForTerm({ termId: 'term_1' })).rejects.toMatchObject({ code: 'P2003' });
+    const result = await service.generateForTerm({ termId: 'term_1' });
+    expect(result.count).toBe(0);
+    expect(result.failed).toEqual([
+      { studentProfileId: 's1', error: 'Foreign key constraint failed' },
+    ]);
   });
 });

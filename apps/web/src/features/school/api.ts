@@ -3871,3 +3871,238 @@ export function useCourseProgress(params: { courseOfferingId?: string } = {}) {
 
 
 
+
+
+/* Fees & Finance production-hardening hooks (Phases 1-5). */
+
+export interface StudentBalance {
+  studentProfileId: string;
+  billed: number; collected: number; waived: number; credited: number; adjusted: number;
+  balance: number; invoiceCount: number;
+}
+export function useStudentBalance(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'balance', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<StudentBalance>(`${S}/finance/students/${studentProfileId}/balance`)).data,
+  });
+}
+
+export interface LedgerRow {
+  date: string; ledgerType: string; sourceType: string; sourceId: string;
+  reference: string; description: string; debit: number; credit: number; balance: number;
+}
+export interface StudentLedger { studentProfileId: string; rows: LedgerRow[]; closingBalance: number }
+export function useStudentLedger(studentProfileId?: string, range?: { from?: string; to?: string }) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'ledger', studentProfileId, range?.from, range?.to],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<StudentLedger>(`${S}/finance/students/${studentProfileId}/ledger`, { params: range })).data,
+  });
+}
+
+export interface ArGlReconciliation {
+  arControlAccountId: string; subledgerTotal: number; glTotal: number; variance: number;
+  perStudent: Array<{ partnerId: string; subledger: number; gl: number; variance: number }>;
+}
+export function useArGlReconciliation() {
+  return useQuery({
+    queryKey: ['school', 'finance', 'recon', 'ar-gl'],
+    queryFn: async () => (await api.get<ArGlReconciliation>(`${S}/finance/reconciliation/ar-gl`)).data,
+  });
+}
+export interface CreditLiabilityReconciliation { outstanding: number; glBalance: number; variance: number }
+export function useCreditLiabilityReconciliation() {
+  return useQuery({
+    queryKey: ['school', 'finance', 'recon', 'credit'],
+    queryFn: async () => (await api.get<CreditLiabilityReconciliation>(`${S}/finance/reconciliation/credit-liability`)).data,
+  });
+}
+
+export interface BillingRun {
+  id: string; termId: string; classId?: string | null; status: string;
+  totalStudents: number; postedCount: number; failedCount: number; skippedCount: number;
+  createdAt: string; completedAt?: string | null;
+}
+export function useBillingRuns() {
+  return useQuery({
+    queryKey: ['school', 'billing-runs'],
+    queryFn: async () => (await api.get<BillingRun[]>(`${S}/billing-runs`)).data,
+  });
+}
+export function useBillingRun(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'billing-runs', id],
+    enabled: !!id,
+    refetchInterval: (q: any) =>
+      q.state.data?.run?.status === 'running' || q.state.data?.run?.status === 'queued' ? 1500 : false,
+    queryFn: async () => (await api.get<{ run: BillingRun; items: any[] }>(`${S}/billing-runs/${id}`)).data,
+  });
+}
+export function useStartBillingRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { termId: string; classId?: string }) =>
+      (await api.post<BillingRun>(`${S}/billing-runs`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'billing-runs'] }),
+  });
+}
+export function useProcessBillingRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, limit }: { id: string; limit?: number }) =>
+      (await api.post(`${S}/billing-runs/${id}/process`, {}, { params: { limit } })).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'billing-runs', v.id] });
+      qc.invalidateQueries({ queryKey: ['school', 'billing-runs'] });
+    },
+  });
+}
+
+export function useApproveWaiver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/finance/waivers/${id}/approve`, {})).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+  });
+}
+export function useRejectWaiver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) =>
+      (await api.post(`${S}/finance/waivers/${id}/reject`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'waivers'] }),
+  });
+}
+
+export interface FeeAdjustment {
+  id: string; code: string; studentProfileId: string; documentId?: string | null;
+  direction: string; amount: string; reason: string; status: string; createdAt: string;
+}
+export function useAdjustments(status?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'adjustments', status],
+    queryFn: async () => (await api.get<FeeAdjustment[]>(`${S}/finance/adjustments`, { params: { status } })).data,
+  });
+}
+export function useCreateAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      studentProfileId: string; documentId: string; direction: 'debit' | 'credit'; amount: number; reason: string;
+    }) => (await api.post(`${S}/finance/adjustments`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'adjustments'] }),
+  });
+}
+export function useApproveAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/finance/adjustments/${id}/approve`, {})).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'adjustments'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'balance'] });
+    },
+  });
+}
+export function useRejectAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) =>
+      (await api.post(`${S}/finance/adjustments/${id}/reject`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'adjustments'] }),
+  });
+}
+
+export interface TermCloseStatus { id: string; termId: string; status: string; closedAt?: string | null; snapshot?: any }
+export function useTermCloseStatus(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'term-close', termId],
+    enabled: !!termId,
+    queryFn: async () => (await api.get<TermCloseStatus | null>(`${S}/finance/terms/${termId}/close-status`)).data,
+  });
+}
+export function useCloseTerm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (termId: string) => (await api.post(`${S}/finance/terms/${termId}/close`, {})).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'term-close'] }),
+  });
+}
+export function useReopenTerm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ termId, reason }: { termId: string; reason?: string }) =>
+      (await api.post(`${S}/finance/terms/${termId}/reopen`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'term-close'] }),
+  });
+}
+
+export interface PaymentImportBatch {
+  id: string; provider: string; originalFilename: string; statementPeriod?: string | null;
+  rowCount: number; totalAmount: string; matchedCount: number; postedCount: number; rejectedCount: number; uploadedAt: string;
+}
+export function usePaymentImportBatches() {
+  return useQuery({
+    queryKey: ['school', 'finance', 'imports'],
+    queryFn: async () => (await api.get<PaymentImportBatch[]>(`${S}/finance/imports`)).data,
+  });
+}
+export function usePaymentImportBatch(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'imports', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<{ batch: PaymentImportBatch; rows: any[] }>(`${S}/finance/imports/${id}`)).data,
+  });
+}
+export function useImportPayments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { provider: string; filename: string; statementPeriod?: string; rows: any[] }) =>
+      (await api.post(`${S}/finance/imports`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'finance', 'imports'] }),
+  });
+}
+export function useConfirmImportRow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ batchId, rowId, studentProfileId }: { batchId: string; rowId: string; studentProfileId?: string }) =>
+      (await api.post(`${S}/finance/imports/${batchId}/rows/${rowId}/confirm`, { studentProfileId })).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'finance', 'imports', v.batchId] }),
+  });
+}
+
+export function usePublishFeeStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/fee-structures/${id}/publish`, {})).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] }),
+  });
+}
+export function useFeeStructureVersions(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'fee-structures', id, 'versions'],
+    enabled: !!id,
+    queryFn: async () => (await api.get<any[]>(`${S}/fee-structures/${id}/versions`)).data,
+  });
+}
+
+export interface SchoolFeeInvoiceRow {
+  id: string; invoiceNumber: string; documentId: string; studentProfileId: string;
+  termId?: string | null; classId?: string | null; status: string; issueDate: string; dueDate?: string | null;
+  documentNumber?: string; totalAmount: number; amountResidual: number; amountPaid: number; amountWaived: number; paymentStatus?: string;
+}
+export function useSchoolInvoices(params: { studentProfileId?: string; termId?: string; status?: string; page?: number; pageSize?: number } = {}) {
+  return useQuery({
+    queryKey: ['school', 'invoices', params],
+    queryFn: async () =>
+      (await api.get<{ data: SchoolFeeInvoiceRow[]; total: number; page: number; pageSize: number }>(`${S}/finance/invoices`, { params })).data,
+  });
+}
+export function useSchoolInvoice(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'invoices', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<{ invoice: any; document: any }>(`${S}/finance/invoices/${id}`)).data,
+  });
+}

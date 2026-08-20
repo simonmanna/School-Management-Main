@@ -346,6 +346,12 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/dashboard', label: 'Finance Dashboard', icon: Receipt, permission: PERMISSIONS.school.read },
+      { to: '/school/fees/invoices', label: 'Fee Invoices', icon: Receipt, permission: PERMISSIONS.school.read },
+      { to: '/school/fees/ledger', label: 'Student Ledger', icon: Receipt, permission: PERMISSIONS.school.read },
+      { to: '/school/fees/billing-runs', label: 'Billing Runs', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/adjustments', label: 'Adjustments', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/reconciliation', label: 'Payment Reconciliation', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/collect', label: 'Record Fee Payments', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/waiver-categories', label: 'Waiver Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/waivers', label: 'Fee Waivers', icon: Ticket, permission: PERMISSIONS.school.manageFees },

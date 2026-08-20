@@ -165,10 +165,64 @@ export class AdvancedFinanceService {
         reason: dto.reason ?? null,
         documentId: dto.documentId ?? null,
         applied: false,
+        status: 'pending',
+        createdBy: this.tenant.userId ?? null,
       },
     });
     await this.audit.record({ entity: 'Waiver', entityId: row.id, action: 'create', newValues: row });
     return row;
+  }
+
+  /**
+   * A4 maker-checker: approve a pending waiver. The approver must differ from
+   * the creator, mirroring the platform's journal-entry rule
+   * (posting.service.ts). Only an approved waiver may be applied.
+   */
+  async approveWaiver(waiverId: string) {
+    const organizationId = this.tenant.organizationId;
+    const approverId = this.tenant.userId ?? null;
+    const waiver = await this.prisma.client.waiver.findFirst({ where: { id: waiverId, organizationId } });
+    if (!waiver) throw new NotFoundException(`Waiver ${waiverId} not found`);
+    if (waiver.status === 'approved' || waiver.applied) return waiver;
+    if (waiver.status !== 'pending') {
+      throw new BadRequestException(`Waiver ${waiver.code} is ${waiver.status}, not pending`);
+    }
+    if (approverId && waiver.createdBy && approverId === waiver.createdBy) {
+      throw new BadRequestException(
+        'The user who created a waiver cannot approve it (maker-checker).',
+      );
+    }
+    const updated = await this.prisma.client.waiver.update({
+      where: { id: waiver.id },
+      data: { status: 'approved', approvedById: approverId, approvedAt: new Date() },
+    });
+    await this.audit.record({ entity: 'Waiver', entityId: waiver.id, action: 'approve', newValues: { approvedById: approverId } });
+    this.events.publish('school.fee.waiver.approved', {
+      organizationId,
+      waiverId: waiver.id,
+      studentProfileId: waiver.studentProfileId,
+      approvedById: approverId ?? 'system',
+    });
+    return updated;
+  }
+
+  /** A4: reject a pending waiver with a reason. */
+  async rejectWaiver(waiverId: string, reason?: string) {
+    const organizationId = this.tenant.organizationId;
+    const waiver = await this.prisma.client.waiver.findFirst({ where: { id: waiverId, organizationId } });
+    if (!waiver) throw new NotFoundException(`Waiver ${waiverId} not found`);
+    const updated = await this.prisma.client.waiver.update({
+      where: { id: waiver.id },
+      data: { status: 'rejected', rejectionReason: reason ?? null },
+    });
+    await this.audit.record({ entity: 'Waiver', entityId: waiver.id, action: 'reject', newValues: { reason } });
+    this.events.publish('school.fee.waiver.rejected', {
+      organizationId,
+      waiverId: waiver.id,
+      studentProfileId: waiver.studentProfileId,
+      reason,
+    });
+    return updated;
   }
 
   listWaivers(studentProfileId?: string) {
@@ -191,6 +245,14 @@ export class AdvancedFinanceService {
     const waiver = await this.prisma.client.waiver.findFirst({ where: { id: waiverId, organizationId } });
     if (!waiver) throw new NotFoundException(`Waiver ${waiverId} not found`);
     if (waiver.applied) return waiver;
+    // A4: a waiver forgives real receivable, so it must clear maker-checker
+    // approval before it can touch the ledger. Bad-debt write-offs create their
+    // waiver already approved (see writeOffBadDebt).
+    if (waiver.status !== 'approved') {
+      throw new BadRequestException(
+        `Waiver ${waiver.code} must be approved before it can be applied (current status: ${waiver.status}).`,
+      );
+    }
 
     const student = await this.prisma.client.studentProfile.findFirst({ where: { id: waiver.studentProfileId } });
     if (!student) throw new NotFoundException(`Student ${waiver.studentProfileId} not found`);
@@ -273,7 +335,7 @@ export class AdvancedFinanceService {
         data: {
           applied: fullyApplied,
           ...(fullyApplied
-            ? {}
+            ? { status: 'applied' }
             : { reason: `${waiver.reason ?? ''} (partial: ${remaining.toString()} unapplied)` }),
         },
       });
@@ -319,6 +381,23 @@ export class AdvancedFinanceService {
     const amount = dec(dto.amount);
     if (amount.lessThanOrEqualTo(ZERO)) throw new BadRequestException('Credit amount must be positive');
 
+    // P1-2 / ADR-013: a credit mints a balance-sheet liability, so it must name
+    // an explicit, legitimate origin. A bare createCredit call can no longer
+    // fabricate value from nothing.
+    const source = dto.source ?? 'overpayment';
+    const ALLOWED = ['overpayment', 'refund_conversion', 'approved_adjustment', 'opening_balance'];
+    if (!ALLOWED.includes(source)) {
+      throw new BadRequestException(
+        `Fee credit origin must be one of ${ALLOWED.join(', ')} — got '${source}'.`,
+      );
+    }
+    if (source === 'overpayment' && !dto.sourcePaymentId) {
+      throw new BadRequestException(
+        'An overpayment credit must reference the sourcePaymentId that funds it, so the ' +
+          'entitlement is counted once (refunds cannot double-count it).',
+      );
+    }
+
     return this.prisma.client.$transaction(async (tx: any) => {
       const code = await this.sequence.next(`feecredit:${new Date().getUTCFullYear()}`, { prefix: 'CR-', padding: 6 }, tx);
       const row = await tx.feeCredit.create({
@@ -328,7 +407,7 @@ export class AdvancedFinanceService {
           code,
           amount,
           remaining: amount,
-          source: dto.source ?? 'advance',
+          source,
           sourcePaymentId: dto.sourcePaymentId ?? null,
           sourceDocumentId: dto.sourceDocumentId ?? null,
           expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
@@ -362,7 +441,7 @@ export class AdvancedFinanceService {
         feeCreditId: row.id,
         studentProfileId: dto.studentProfileId,
         amount: amount.toString(),
-        source: dto.source ?? 'advance',
+        source,
       });
       return row;
     });
@@ -443,9 +522,21 @@ export class AdvancedFinanceService {
           },
           tx,
         );
+        // A2: record the drawdown as a typed FeeCreditAllocation — the credit
+        // subledger. FeeCredit.remaining becomes the cached projection of
+        // amount − SUM(these).
+        const cid = credits[creditIdx].id;
+        await tx.feeCreditAllocation.create({
+          data: {
+            organizationId,
+            feeCreditId: cid,
+            documentId: doc.id,
+            amount: take,
+            status: 'posted',
+          },
+        });
         creditRemaining -= take;
         totalApplied += take;
-        const cid = credits[creditIdx].id;
         usedByCredit.set(cid, (usedByCredit.get(cid) ?? 0) + take);
         if (creditRemaining <= 0) {
           creditIdx++;
@@ -453,16 +544,26 @@ export class AdvancedFinanceService {
         }
       }
 
-      // Persist drawn-down balances.
+      // Persist drawn-down balances + lifecycle status (A2). remaining stays a
+      // derived cache; status reflects how much of the credit is spent.
       for (const [id, used] of usedByCredit) {
         const credit = credits.find((c: any) => c.id === id)!;
         const newRemaining = Number(credit.remaining) - used;
+        const status = newRemaining <= 0 ? 'fully_applied' : 'partially_applied';
         await tx.feeCredit.update({
           where: { id },
-          data: { remaining: newRemaining, isActive: newRemaining > 0 },
+          data: { remaining: newRemaining, isActive: newRemaining > 0, status },
         });
       }
 
+      if (totalApplied > 0) {
+        this.events.publish(EVENTS.SchoolFeeCreditApplied, {
+          organizationId,
+          studentProfileId,
+          totalApplied: totalApplied.toString(),
+          appliedCreditIds: [...usedByCredit.keys()],
+        });
+      }
       return { studentProfileId, totalApplied: totalApplied.toString(), appliedCreditIds: [...usedByCredit.keys()] };
     });
   }
@@ -663,12 +764,14 @@ export class AdvancedFinanceService {
       reason: dto.reason ?? 'Written off as bad debt',
       documentId: dto.documentId,
     });
-    // mark badDebt + apply (raw SQL; generated client is stale)
+    // A write-off IS the authorized action (gated by school:fees:writeoff), so
+    // the waiver it produces is approved in the same step — it does not go
+    // through the separate approval queue. Mark badDebt + approved, then apply.
     const wid = (waiver as any).id;
-    await this.prisma.raw.$queryRawUnsafe(
-      `UPDATE "Waiver" SET "badDebt" = true WHERE "id" = $1 AND "organizationId" = $2`,
-      wid, org,
-    );
+    await this.prisma.client.waiver.update({
+      where: { id: wid },
+      data: { badDebt: true, status: 'approved', approvedById: this.tenant.userId ?? null, approvedAt: new Date() },
+    });
     const applied = await this.applyWaiver(wid);
     this.audit.record({ entity: 'Waiver', entityId: wid, action: 'update', newValues: { balance, studentProfileId, badDebtWriteOff: true } });
     return { waiverId: wid, applied };

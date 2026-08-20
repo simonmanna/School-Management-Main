@@ -109,6 +109,7 @@ function makeService() {
     { post: postingPost } as any,
     { mapped: jest.fn(), receivableAccount: jest.fn() } as any,
     { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') } as any,
+    { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
   );
 
   const mocks: Mocks = {

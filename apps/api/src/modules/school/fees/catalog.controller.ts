@@ -59,6 +59,18 @@ export class FeeStructureController {
     return this.service.update(id, dto);
   }
 
+  @Get(':id/versions')
+  @RequirePermissions(PERMISSIONS.school.read)
+  versions(@Param('id') id: string) {
+    return this.service.listVersions(id);
+  }
+
+  @Post(':id/publish')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  publish(@Param('id') id: string) {
+    return this.service.publish(id);
+  }
+
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions(PERMISSIONS.school.manageFees)

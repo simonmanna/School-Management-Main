@@ -269,6 +269,14 @@ export const EVENTS = {
   SchoolSponsorshipCreated: 'school.fee.sponsorship.created',
   SchoolWaiverApplied: 'school.fee.waiver.applied',
   SchoolFeeCreditCreated: 'school.fee.credit.created',
+  SchoolFeeCreditApplied: 'school.fee.credit.applied',
+  SchoolFeeAdjustmentPosted: 'school.fee.adjustment.posted',
+  SchoolWaiverApproved: 'school.fee.waiver.approved',
+  SchoolWaiverRejected: 'school.fee.waiver.rejected',
+  SchoolBillingRunCompleted: 'school.fee.billing.completed',
+  SchoolPaymentImportPosted: 'school.fee.import.batch.posted',
+  SchoolTermClosed: 'school.fee.term.closed',
+  SchoolTermReopened: 'school.fee.term.reopened',
   // Library + transport
   SchoolBookBorrowed: 'school.library.borrowed',
   SchoolBookReturned: 'school.library.returned',
@@ -797,6 +805,7 @@ export interface DomainEventMap {
   'school.fee.invoice.posted': {
     organizationId: string;
     documentId: string;
+    schoolFeeInvoiceId?: string;
     studentProfileId: string;
     amount: string;
   };
@@ -844,6 +853,54 @@ export interface DomainEventMap {
     studentProfileId: string;
     amount: string;
     source: string;
+  };
+  'school.fee.credit.applied': {
+    organizationId: string;
+    studentProfileId: string;
+    totalApplied: string;
+    appliedCreditIds: string[];
+  };
+  'school.fee.adjustment.posted': {
+    organizationId: string;
+    adjustmentId: string;
+    studentProfileId: string;
+    direction: string;
+    amount: string;
+  };
+  'school.fee.waiver.approved': {
+    organizationId: string;
+    waiverId: string;
+    studentProfileId: string;
+    approvedById: string;
+  };
+  'school.fee.waiver.rejected': {
+    organizationId: string;
+    waiverId: string;
+    studentProfileId: string;
+    reason?: string;
+  };
+  'school.fee.billing.completed': {
+    organizationId: string;
+    billingRunId: string;
+    postedCount: number;
+    failedCount: number;
+  };
+  'school.fee.import.batch.posted': {
+    organizationId: string;
+    batchId: string;
+    postedCount: number;
+    totalAmount: string;
+  };
+  'school.fee.term.closed': {
+    organizationId: string;
+    termId: string;
+    closedById: string;
+  };
+  'school.fee.term.reopened': {
+    organizationId: string;
+    termId: string;
+    reopenedById: string;
+    reason?: string;
   };
   'school.library.borrowed': {
     organizationId: string;

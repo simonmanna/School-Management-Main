@@ -53,6 +53,19 @@ export class AdvancedFinanceController {
 
   // Phase 0: applying a waiver forgives real receivable. It no longer shares a
   // permission with "edit a fee structure" — see PERMISSIONS.school.approveWaivers.
+  @Post('waivers/:id/approve')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.approveWaivers)
+  approveWaiver(@Param('id') id: string) {
+    return this.finance.approveWaiver(id);
+  }
+
+  @Post('waivers/:id/reject')
+  @RequirePermissions(PERMISSIONS.school.approveWaivers)
+  rejectWaiver(@Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.finance.rejectWaiver(id, body?.reason);
+  }
+
   @Post('waivers/:id/apply')
   @Idempotent()
   @RequirePermissions(PERMISSIONS.school.approveWaivers)

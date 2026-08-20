@@ -15,6 +15,8 @@ import { PaymentService } from '../../invoicing/payment/payment.service';
 // module import edge is required.
 import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
+import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { FinanceControlsService } from './finance-controls.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 
 /**
@@ -46,6 +48,7 @@ export class BillingService {
     private readonly posting: PostingService,
     private readonly determination: AccountDeterminationService,
     private readonly dmsTypes: DmsTypeResolver,
+    private readonly controls: FinanceControlsService,
   ) {}
 
   /**
@@ -70,111 +73,257 @@ export class BillingService {
   async generateForTerm(dto: GenerateBillingDto) {
     const organizationId = this.tenant.organizationId;
 
-    // Resolve target students (outside tx — read-only).
+    // A4.1: no fee posting into a financially-closed term.
+    await this.controls.assertTermOpen(dto.termId);
+
     const studentWhere: any = { status: 'active' };
     if (dto.classId) studentWhere.currentClassId = dto.classId;
     const students = await this.prisma.client.studentProfile.findMany({
       where: studentWhere,
-      include: { currentClass: true },
+      include: { currentClass: { include: { gradeLevel: true } } },
     });
     if (students.length === 0) throw new BadRequestException('No active students found for billing');
 
-    // Find FeeSchedule for the term.
     const schedules = await this.prisma.client.feeSchedule.findMany({
       where: { termId: dto.termId },
       include: { feeStructure: true },
     });
     if (schedules.length === 0) throw new BadRequestException(`No fee schedule configured for term ${dto.termId}`);
 
-    // P0-5 pre-flight: refuse the run up-front if any fee product carries tax.
-    //
-    // The loop below overwrites the document builder's totals with
-    // `totalAmount: subtotal`, discarding taxAmount, while the journal it posts
-    // credits BOTH revenue and output tax. Any non-zero tax therefore makes the
-    // entry unbalanced, PostingService rejects it, and the run dies PART WAY
-    // THROUGH — some students invoiced, the rest not, and the failing student
-    // left holding an orphaned draft document. Failing before the first write
-    // turns a corrupting partial run into a clean, actionable error.
-    //
-    // A3 removes the overwrite so tax flows through correctly; this guard comes
-    // out with it.
-    await this.assertNoTaxableComponents(schedules);
+    // A3 perf: batch the per-student lookups that the old loop issued one query
+    // at a time. One assignment query, one scholarship query, one discount
+    // query for the whole run instead of O(students × 3) round-trips (P1-9).
+    const studentIds = students.map((s) => s.id);
+    const now = new Date();
+    const [assignments, scholarships, discounts] = await Promise.all([
+      this.prisma.client.studentFeeAssignment.findMany({
+        where: { organizationId, termId: dto.termId, studentProfileId: { in: studentIds } },
+      }),
+      this.prisma.client.scholarship.findMany({
+        where: {
+          organizationId,
+          studentProfileId: { in: studentIds },
+          isActive: true,
+          validFrom: { lte: now },
+          OR: [{ validTo: null }, { validTo: { gte: now } }],
+        },
+      }),
+      this.prisma.client.discount.findMany({ where: { organizationId, isActive: true } }),
+    ]);
+    const assignByStudent = new Map<string, any>(assignments.map((a) => [a.studentProfileId, a]));
+    const scholarshipsByStudent = new Map<string, any[]>();
+    for (const sc of scholarships) {
+      const arr = scholarshipsByStudent.get(sc.studentProfileId) ?? [];
+      arr.push(sc);
+      scholarshipsByStudent.set(sc.studentProfileId, arr);
+    }
 
     const created: any[] = [];
     const skipped: any[] = [];
+    const failed: any[] = [];
+
     for (const s of students) {
-      // Find a schedule whose FeeStructure is applicable to this student's class.
-      const schedule = schedules.find((sch) => this.appliesTo(sch.feeStructure.applicableTo as any, s.currentClassId ?? ''));
+      const schedule = schedules.find((sch) =>
+        this.appliesTo(sch.feeStructure.applicableTo as any, s.currentClassId ?? ''),
+      );
       if (!schedule) continue;
 
       const feeStructure = schedule.feeStructure;
       const components = (feeStructure.components as unknown as FeeComponent[]) ?? [];
+      const customDiscount = (assignByStudent.get(s.id)?.customDiscount ?? {}) as Record<string, number>;
+      const studentScholarships = scholarshipsByStudent.get(s.id) ?? [];
 
-      // Resolve per-student overrides and scholarships (outside tx — read-only).
-      const studentAssignment = await this.prisma.client.studentFeeAssignment.findFirst({
-        where: {
-          studentProfileId: s.id,
-          feeStructureId: feeStructure.id,
-          termId: dto.termId,
-        },
-      });
-      const customDiscount = (studentAssignment?.customDiscount ?? {}) as Record<string, number>;
-
-      const scholarships = await this.prisma.client.scholarship.findMany({
-        where: {
-          studentProfileId: s.id,
-          isActive: true,
-          validFrom: { lte: new Date() },
-          OR: [{ validTo: null }, { validTo: { gte: new Date() } }],
-        },
-      });
-
-      // Build document lines from components with discount + scholarship applied.
-      const lines = components.map((c) => {
-        const override = customDiscount[c.code];
-        const baseAmount = override != null ? override : c.amount;
-        let lineDiscount = 0;
-        for (const sch of scholarships) {
-          if (sch.type === 'percent') lineDiscount += (baseAmount * Number(sch.value)) / 100;
-          else if (sch.type === 'fixed') lineDiscount += Number(sch.value);
-        }
-        const finalAmount = Math.max(0, baseAmount - lineDiscount);
-        return {
-          productId: c.productId,
-          description: c.code,
-          quantity: 1,
-          unitPrice: baseAmount,
-          discountPercent: baseAmount > 0 ? (lineDiscount / baseAmount) * 100 : 0,
-        };
-      });
+      const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s);
+      if (lines.length === 0) continue;
 
       const issueDate = new Date();
       const reference = `TERM-${dto.termId}`;
 
-      // P0-6: move the dedupe check + create inside one $transaction
-      // so a concurrent call cannot insert a duplicate. The new
-      // @@unique([organizationId, sourceType, sourceId, reference])
-      // is the database-level safety net.
-      let document: any;
       try {
-        document = await this.prisma.client.$transaction(async (tx: any) => {
-          const existing = await tx.document.findFirst({
-            where: {
-              organizationId,
-              partnerId: s.partnerId,
-              sourceType: 'school_fee',
-              sourceId: schedule.id,
-              reference,
-            },
-          });
-          if (existing) return { _skipped: true, documentId: existing.id } as any;
+        const result = await this.billStudentTransaction(s, schedule, feeStructure, dto, lines, issueDate, reference);
 
-          // P2A: build the invoice through the invoicing DocumentBuilderService
-          // rather than a raw create. The raw path omitted `documentTypeId`,
-          // which became a required FK when the DMS registry landed — so the
-          // ported billing run would throw on every invoice. The builder also
-          // resolves the document number, computes line/tax/totals, and sets
-          // amountResidual + paymentStatus, replacing the hand-rolled versions.
+        if ((result as any)._skipped) {
+          skipped.push({ studentProfileId: s.id, documentId: (result as any).documentId, reason: 'already_billed' });
+          continue;
+        }
+
+        const doc = (result as any).doc;
+        created.push(doc);
+        this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
+          organizationId,
+          documentId: doc.id,
+          schoolFeeInvoiceId: (result as any).sfi.id,
+          studentProfileId: s.id,
+          amount: doc.totalAmount.toString(),
+        });
+      } catch (err: any) {
+        // P0-6 / A3: a concurrent insert of the same (org, sourceType, sourceId,
+        // reference) or the SchoolFeeInvoice business key raises P2002 — treat
+        // as already-billed. Any other error is recorded per-student rather than
+        // aborting the whole run.
+        if (err?.code === 'P2002') {
+          const existing = await this.prisma.client.document.findFirst({
+            where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
+          });
+          if (existing) {
+            skipped.push({ studentProfileId: s.id, documentId: existing.id, reason: 'already_billed' });
+            continue;
+          }
+        }
+        failed.push({ studentProfileId: s.id, error: err?.message ?? String(err) });
+      }
+    }
+
+    return { count: created.length, documents: created, skipped, failed };
+  }
+
+  /**
+   * A3.1 canonical line calculation. Deterministic precedence:
+   *   base (component amount, or per-student override)
+   *     → percentage discounts + percentage scholarships (per line)
+   *     → fixed discounts (per matching line)
+   *     → fixed scholarships (distributed PRO-RATA across lines by base)
+   *
+   * The pro-rata distribution is the P1-5 fix: the old loop added the FULL fixed
+   * scholarship value to every line, so a 100k scholarship against a 5-component
+   * structure discounted 500k. A fixed award is now split once across the lines.
+   */
+  private computeLines(
+    components: FeeComponent[],
+    customDiscount: Record<string, number>,
+    discounts: any[],
+    scholarships: any[],
+    student: any,
+  ): Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> {
+    const classId = student.currentClassId ?? '';
+    const gradeLevelId = student.currentClass?.gradeLevelId ?? '';
+
+    const bases = components.map((c) => {
+      const override = customDiscount[c.code];
+      return override != null ? Number(override) : Number(c.amount);
+    });
+    const baseTotal = bases.reduce((s, b) => s + b, 0);
+
+    // Fixed scholarship pool, distributed pro-rata by base.
+    const fixedScholarshipPool = scholarships
+      .filter((sc) => sc.type === 'fixed')
+      .reduce((s, sc) => s + Number(sc.value), 0);
+    const percentScholarship = scholarships
+      .filter((sc) => sc.type === 'percent')
+      .reduce((s, sc) => s + Number(sc.value), 0);
+
+    return components.map((c, i) => {
+      const base = bases[i];
+      if (base <= 0) {
+        return { productId: c.productId, description: c.code, quantity: 1, unitPrice: base, discountPercent: 0 };
+      }
+
+      // Matching discounts for this component.
+      let percentDiscount = 0;
+      let fixedDiscount = 0;
+      for (const d of discounts) {
+        if (!this.discountApplies(d.appliesTo, classId, gradeLevelId, c.code)) continue;
+        if (d.type === 'percentage') percentDiscount += Number(d.value);
+        else fixedDiscount += Number(d.value); // fixed_amount
+      }
+
+      const proRataFixedScholarship = baseTotal > 0 ? (fixedScholarshipPool * base) / baseTotal : 0;
+      const lineDiscountAmount =
+        (base * (percentDiscount + percentScholarship)) / 100 + fixedDiscount + proRataFixedScholarship;
+      const cappedDiscount = Math.min(lineDiscountAmount, base);
+      const discountPercent = (cappedDiscount / base) * 100;
+
+      return { productId: c.productId, description: c.code, quantity: 1, unitPrice: base, discountPercent };
+    });
+  }
+
+
+  /**
+   * Bill ONE student for a term (Phase 1.5 worker entry point). Resolves the
+   * applicable schedule + this student's discounts/scholarships, then runs the
+   * same atomic transaction the bulk path uses. Returns a per-item outcome the
+   * BillingRun worker records; never throws for the "already billed" case.
+   */
+  async billSingleStudent(
+    studentProfileId: string,
+    termId: string,
+  ): Promise<{ status: 'posted' | 'skipped'; documentId?: string; schoolFeeInvoiceId?: string; amount?: string }> {
+    const organizationId = this.tenant.organizationId;
+    const s = await this.prisma.client.studentProfile.findFirst({
+      where: { id: studentProfileId, status: 'active' },
+      include: { currentClass: { include: { gradeLevel: true } } },
+    });
+    if (!s) return { status: 'skipped' };
+
+    const schedules = await this.prisma.client.feeSchedule.findMany({
+      where: { termId },
+      include: { feeStructure: true },
+    });
+    const schedule = schedules.find((sch) =>
+      this.appliesTo(sch.feeStructure.applicableTo as any, s.currentClassId ?? ''),
+    );
+    if (!schedule) return { status: 'skipped' };
+
+    const feeStructure = schedule.feeStructure;
+    const components = (feeStructure.components as unknown as FeeComponent[]) ?? [];
+    const [assignment, studentScholarships, discounts] = await Promise.all([
+      this.prisma.client.studentFeeAssignment.findFirst({ where: { organizationId, termId, studentProfileId } }),
+      this.prisma.client.scholarship.findMany({
+        where: {
+          organizationId, studentProfileId, isActive: true,
+          validFrom: { lte: new Date() },
+          OR: [{ validTo: null }, { validTo: { gte: new Date() } }],
+        },
+      }),
+      this.prisma.client.discount.findMany({ where: { organizationId, isActive: true } }),
+    ]);
+    const customDiscount = (assignment?.customDiscount ?? {}) as Record<string, number>;
+    const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s);
+    if (lines.length === 0) return { status: 'skipped' };
+
+    const issueDate = new Date();
+    const reference = `TERM-${termId}`;
+    try {
+      const result = await this.billStudentTransaction(s, schedule, feeStructure, { termId } as GenerateBillingDto, lines, issueDate, reference);
+      if ((result as any)._skipped) return { status: 'skipped', documentId: (result as any).documentId };
+      const doc = (result as any).doc;
+      this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
+        organizationId, documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id,
+        studentProfileId, amount: doc.totalAmount.toString(),
+      });
+      return { status: 'posted', documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id, amount: doc.totalAmount.toString() };
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        const existing = await this.prisma.client.document.findFirst({
+          where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
+        });
+        if (existing) return { status: 'skipped', documentId: existing.id };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * A3: one student's billing as a single atomic transaction. Extracted so the
+   * synchronous bulk run (generateForTerm) and the resumable per-item worker
+   * (BillingRunService) share the exact same commit unit.
+   */
+  private billStudentTransaction(
+    s: any,
+    schedule: any,
+    feeStructure: any,
+    dto: GenerateBillingDto,
+    lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }>,
+    issueDate: Date,
+    reference: string,
+  ): Promise<any> {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.$transaction(async (tx: any) => {
+          const existing = await tx.document.findFirst({
+            where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
+          });
+          if (existing) return { _skipped: true, documentId: existing.id };
+
           const createdDoc = await this.documentBuilder.createDocument(
             tx,
             'sales_invoice',
@@ -186,162 +335,93 @@ export class BillingService {
               notes: `Term fee for ${s.admissionNo}`,
               sourceType: 'school_fee',
             },
-            lines.map((l) => ({
-              productId: l.productId,
-              description: l.description,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-              discountPercent: l.discountPercent,
-            })),
+            lines,
           );
-          // The header input carries sourceType but not sourceId; set it so the
-          // (org, sourceType, sourceId, reference) dedup key is unique per
-          // schedule and the penalty run can trace invoices back to it.
-          await tx.document.update({
-            where: { id: createdDoc.id },
-            data: { sourceId: schedule.id },
-          });
-          // Re-load with lines + partner for the GL post below.
+          await tx.document.update({ where: { id: createdDoc.id }, data: { sourceId: schedule.id } });
+
           const full = await tx.document.findFirst({
             where: { id: createdDoc.id },
             include: { lines: true, partner: true },
           });
-          return { _skipped: false, doc: full! };
-        });
-      } catch (err: any) {
-        // P0-6: race condition safety net. A concurrent process
-        // inserted the same (org, sourceType, sourceId, reference)
-        // between our findFirst and our create. The unique
-        // constraint raised P2002. Treat it as "already exists".
-        if (err?.code === 'P2002') {
-          const existing = await this.prisma.client.document.findFirst({
-            where: {
+
+          // A3 / P0-5: post the builder's OWN totals. The old code overwrote
+          // totalAmount with subtotal (dropping tax) while crediting revenue AND
+          // tax — an unbalanced entry that PostingService rejected, killing the
+          // run mid-way on any taxable fee. We now debit AR by totalAmount and
+          // let the tax legs balance it.
+          const { counterAccount, itemByAccount, taxByAccount } = await this.documentBuilder.groupForPosting(
+            tx,
+            full,
+            'sales',
+          );
+          const totalAmount = dec(full.totalAmount);
+          const journalLines: any[] = [
+            { accountId: counterAccount, debit: totalAmount.toString(), partnerId: full.partnerId, description: `Invoice ${full.documentNumber}` },
+          ];
+          for (const [accountId, amount] of itemByAccount) {
+            journalLines.push({ accountId, credit: amount.toString(), partnerId: full.partnerId, description: 'Revenue' });
+          }
+          for (const [accountId, amount] of taxByAccount) {
+            journalLines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
+          }
+
+          const entry = await this.posting.post(
+            {
+              journalCode: 'SALES',
+              date: issueDate,
+              description: `School fee · ${full.documentNumber}`,
+              sourceType: 'school_fee_invoice',
+              sourceId: full.id,
+              lines: journalLines,
+            },
+            tx,
+          );
+
+          const postedDoc = await tx.document.update({
+            where: { id: full.id },
+            data: { status: 'posted', paymentStatus: 'not_paid', journalEntryId: entry.id, postedAt: new Date() },
+            include: { lines: true, partner: true },
+          });
+
+          // A1.1: the first-class school invoice, 1:1 with the Document. The
+          // business-key unique index makes concurrent billing produce exactly
+          // one per (student, term) — the database, not an app check, is the
+          // guarantee (A3).
+          const invoiceNumber = await this.sequence.next(
+            `schoolfeeinvoice:${issueDate.getUTCFullYear()}`,
+            { prefix: 'SFI-', padding: 6 },
+            tx,
+          );
+          const sfi = await tx.schoolFeeInvoice.create({
+            data: {
               organizationId,
-              partnerId: s.partnerId,
-              sourceType: 'school_fee',
-              sourceId: schedule.id,
-              reference,
+              invoiceNumber,
+              documentId: postedDoc.id,
+              studentProfileId: s.id,
+              academicYearId: feeStructure.academicYearId,
+              termId: dto.termId,
+              classId: s.currentClassId ?? null,
+              sectionId: s.currentSectionId ?? null,
+              status: 'issued',
+              issueDate,
+              dueDate: schedule.dueDate ? new Date(schedule.dueDate) : null,
             },
           });
-          if (existing) {
-            skipped.push({ studentProfileId: s.id, documentId: existing.id, reason: 'already_billed' });
-            continue;
-          }
-        }
-        throw err;
-      }
 
-      if ((document as any)._skipped) {
-        skipped.push({ studentProfileId: s.id, documentId: (document as any).documentId, reason: 'already_billed' });
-        continue;
-      }
-
-      const createdDoc = (document as any).doc;
-
-      // Post to the GL. We did the per-document work in a tx; the
-      // post happens outside that tx so a slow GL post doesn't hold
-      // a write lock on the document row. If the post fails the
-      // document remains 'draft' and a retry of the billing run
-      // will pick it up via the findFirst check (no duplicate).
-      const subtotal = createdDoc.lines.reduce((sum: number, l: any) => sum + Number(l.subtotal), 0);
-      const discountTotal = createdDoc.lines.reduce((sum: number, l: any) => sum + (Number(l.unitPrice) - Number(l.subtotal)), 0);
-
-      const { counterAccount, itemByAccount, taxByAccount } = await this.documentBuilder.groupForPosting(
-        this.prisma.client as any,
-        createdDoc,
-        'sales',
-      );
-
-      const journalLines: any[] = [
-        { accountId: counterAccount, debit: subtotal.toString(), partnerId: createdDoc.partnerId, description: `Invoice ${createdDoc.documentNumber}` },
-      ];
-      for (const [accountId, amount] of itemByAccount) {
-        journalLines.push({ accountId, credit: amount.toString(), partnerId: createdDoc.partnerId, description: 'Revenue' });
-      }
-      for (const [accountId, amount] of taxByAccount) {
-        journalLines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
-      }
-
-      const entry = await this.posting.post(
-        {
-          journalCode: 'SALES',
-          date: issueDate,
-          description: `School fee · ${createdDoc.documentNumber}`,
-          sourceType: 'school_fee_invoice',
-          sourceId: createdDoc.id,
-          lines: journalLines,
-        },
-        this.prisma.client as any,
-      );
-
-      // Promote the document to 'posted'.
-      const updatedDoc = await this.prisma.client.document.update({
-        where: { id: createdDoc.id },
-        data: {
-          subtotal,
-          discountTotal,
-          totalAmount: subtotal,
-          amountResidual: subtotal,
-          amountPaid: 0,
-          paymentStatus: 'not_paid',
-          status: 'posted',
-          journalEntryId: entry.id,
-          postedAt: new Date(),
-        },
-        include: { lines: true, partner: true },
-      });
-
-      created.push(updatedDoc);
-      this.events.publish(EVENTS.SchoolFeeInvoiceDrafted, {
-        organizationId,
-        documentId: updatedDoc.id,
-        studentProfileId: s.id,
-        amount: updatedDoc.totalAmount.toString(),
-      });
-      this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
-        organizationId,
-        documentId: updatedDoc.id,
-        studentProfileId: s.id,
-        amount: updatedDoc.totalAmount.toString(),
-      });
-    }
-
-    return { count: created.length, documents: created, skipped };
+          return { _skipped: false, doc: postedDoc, sfi };
+    });
   }
 
-  /**
-   * P0-5 guard. Collects every productId referenced by the term's fee
-   * structures and rejects the billing run if any of them resolves to a
-   * non-zero tax. Removed in A3 once the totals overwrite is gone.
-   */
-  private async assertNoTaxableComponents(schedules: any[]): Promise<void> {
-    const productIds = [
-      ...new Set(
-        schedules
-          .flatMap((sch) => ((sch.feeStructure?.components as unknown as FeeComponent[]) ?? []))
-          .map((c) => c?.productId)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
-    if (productIds.length === 0) return;
-
-    // Only a tax with a non-zero rate is a problem: groupForPosting skips lines
-    // whose taxAmount is zero, so a zero-rated product still balances.
-    const taxed = await this.prisma.client.product.findMany({
-      where: { id: { in: productIds }, tax: { is: { rate: { gt: 0 } } } },
-      select: { id: true, name: true, tax: { select: { name: true, rate: true } } },
-    });
-    if (taxed.length === 0) return;
-
-    const names = taxed
-      .map((p) => `${p.name} (${p.tax?.name} ${p.tax?.rate}%)`)
-      .join(', ');
-    throw new BadRequestException(
-      `Cannot generate billing: fee product(s) [${names}] carry a sales tax. School fee ` +
-        `invoicing does not yet post output tax correctly — the journal would be unbalanced ` +
-        `and the run would fail part way through, leaving some students billed and others not. ` +
-        `Remove the tax from these products, or wait for the A3 tax fix.`,
-    );
+  /** True when a Discount.appliesTo JSON filter matches this student + fee code. */
+  private discountApplies(appliesTo: any, classId: string, gradeLevelId: string, feeCode: string): boolean {
+    if (!appliesTo || typeof appliesTo !== 'object') return true;
+    const classIds: string[] = Array.isArray(appliesTo.classIds) ? appliesTo.classIds : [];
+    const gradeLevelIds: string[] = Array.isArray(appliesTo.gradeLevelIds) ? appliesTo.gradeLevelIds : [];
+    const feeCodes: string[] = Array.isArray(appliesTo.feeCodes) ? appliesTo.feeCodes : [];
+    if (classIds.length && !classIds.includes(classId)) return false;
+    if (gradeLevelIds.length && !gradeLevelIds.includes(gradeLevelId)) return false;
+    if (feeCodes.length && !feeCodes.includes(feeCode)) return false;
+    return true;
   }
 
   private appliesTo(filter: any, classId: string): boolean {
@@ -597,6 +677,7 @@ export class SchoolPaymentService {
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
     private readonly payments: PaymentService,
+    private readonly finance: SchoolFinanceQueryService,
   ) {}
 
   /**
@@ -795,31 +876,19 @@ export class SchoolPaymentService {
         }
       }
 
-      // Unallocated inbound receipts — money taken but not yet applied.
-      const inboundAgg = await tx.payment.aggregate({
-        where: { organizationId, partnerId: student.partnerId, direction: 'inbound' },
-        _sum: { unallocatedAmount: true },
-      });
-      const unallocated = dec(inboundAgg._sum.unallocatedAmount ?? 0);
-
-      // Outstanding stored-value credits held by this student.
-      const creditAgg = await tx.feeCredit.aggregate({
-        where: { organizationId, studentProfileId: student.id, isActive: true },
-        _sum: { remaining: true },
-      });
-      const creditOutstanding = dec(creditAgg._sum.remaining ?? 0);
-
-      // MAX, never the SUM — see the P0-6/P1-3 note above.
-      const refundable = round(Prisma.Decimal.max(unallocated, creditOutstanding), 6);
-      const overpaymentCredit = refundable.toNumber();
+      // A2.1: the canonical refundable entitlement, computed once in the query
+      // service so every caller shares the same definition. It subtracts the
+      // portion of an overpayment already converted into a FeeCredit
+      // (entitlement uniqueness, P1-3) and adds refundable outstanding credits.
+      const refundableNum = await this.finance.refundableAmount(student.partnerId, student.id);
+      const refundable = round(dec(refundableNum), 6);
+      const overpaymentCredit = refundableNum;
 
       const wanted = round(dec(dto.amount), 6);
       if (wanted.greaterThan(refundable)) {
         throw new BadRequestException(
           `Refund of ${wanted.toString()} exceeds this student's refundable entitlement of ` +
-            `${refundable.toString()} (unallocated receipts ${unallocated.toString()}, ` +
-            `outstanding credits ${creditOutstanding.toString()}). Record the overpayment or ` +
-            `credit that funds this refund first.`,
+            `${refundable.toString()}. Record the overpayment or credit that funds this refund first.`,
         );
       }
 

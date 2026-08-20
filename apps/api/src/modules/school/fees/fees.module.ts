@@ -28,6 +28,14 @@ import { AdvancedFinanceController } from './advanced.controller';
 import { PenaltyCronWorker } from './penalty-cron.worker';
 import { BudgetService } from './budget.service';
 import { BudgetController } from './budget.controller';
+import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { SchoolFinanceQueryController } from './school-finance-query.controller';
+import { FinanceControlsService } from './finance-controls.service';
+import { FinanceControlsController } from './finance-controls.controller';
+import { BillingRunService } from './billing-run.service';
+import { BillingRunController } from './billing-run.controller';
+import { PaymentReconciliationService } from './payment-reconciliation.service';
+import { PaymentReconciliationController } from './payment-reconciliation.controller';
 
 /**
  * The Fees module depends on DocumentBuilderService + PostingService +
@@ -57,6 +65,10 @@ import { BudgetController } from './budget.controller';
     SchoolPaymentController,
     AdvancedFinanceController,
     BudgetController,
+    SchoolFinanceQueryController,
+    FinanceControlsController,
+    BillingRunController,
+    PaymentReconciliationController,
   ],
   providers: [
     FeeStructureService,
@@ -72,6 +84,10 @@ import { BudgetController } from './budget.controller';
     AdvancedFinanceService,
     PenaltyCronWorker,
     BudgetService,
+    SchoolFinanceQueryService,
+    FinanceControlsService,
+    BillingRunService,
+    PaymentReconciliationService,
   ],
   exports: [
     FeeStructureService,
@@ -86,6 +102,9 @@ import { BudgetController } from './budget.controller';
     SchoolPaymentService,
     AdvancedFinanceService,
     PenaltyCronWorker,
+    SchoolFinanceQueryService,
+    FinanceControlsService,
+    BillingRunService,
   ],
 })
 export class FeesModule implements OnApplicationBootstrap {

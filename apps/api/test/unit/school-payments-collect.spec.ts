@@ -40,11 +40,13 @@ function makeService(openInvoices: any[] = [], existingPayment: any = null) {
   const createReceipt = jest.fn().mockResolvedValue({ id: 'pay_1' });
   const payments = { createReceipt };
 
+  const finance = { refundableAmount: jest.fn().mockResolvedValue(0) };
   const service = new SchoolPaymentService(
     prisma as any,
     tenant as any,
     events as any,
     payments as any,
+    finance as any,
   );
 
   return { service, documentFindMany, createReceipt, events, paymentFindFirst };

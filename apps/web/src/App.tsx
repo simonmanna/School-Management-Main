@@ -39,6 +39,14 @@ import { SchoolWaiversPage } from '@/pages/school/fees-subpages';
 import { SchoolFeeDefaultersPage } from '@/pages/school/fees-subpages';
 import { SchoolBadDebtorsPage } from '@/pages/school/fees-subpages';
 import { SchoolBudgetingPage } from '@/pages/school/fees-subpages';
+import {
+  SchoolStudentLedgerPage,
+  SchoolFinanceDashboardPage,
+  SchoolBillingRunsPage,
+  SchoolAdjustmentsPage,
+  SchoolReconciliationPage,
+  SchoolInvoicesPage,
+} from '@/pages/school/finance-pages';
 import { SchoolAttendancePage } from '@/pages/school/attendance';
 import { SchoolAttendanceStatusesPage } from '@/pages/school/attendance-statuses';
 import { SchoolAttendanceReportPage } from '@/pages/school/attendance-report';
@@ -456,6 +464,13 @@ export function App() {
           <Route path="/school/fees/defaulters" element={<SchoolFeeDefaultersPage />} />
           <Route path="/school/fees/bad-debtors" element={<SchoolBadDebtorsPage />} />
           <Route path="/school/fees/budgeting" element={<SchoolBudgetingPage />} />
+          <Route path="/school/fees/dashboard" element={<SchoolFinanceDashboardPage />} />
+          <Route path="/school/fees/invoices" element={<SchoolInvoicesPage />} />
+          <Route path="/school/fees/billing-runs" element={<SchoolBillingRunsPage />} />
+          <Route path="/school/fees/adjustments" element={<SchoolAdjustmentsPage />} />
+          <Route path="/school/fees/reconciliation" element={<SchoolReconciliationPage />} />
+          <Route path="/school/students/:id/ledger" element={<SchoolStudentLedgerPage />} />
+          <Route path="/school/fees/ledger" element={<SchoolStudentLedgerPage />} />
           <Route path="/school/attendance" element={<SchoolAttendancePage />} />
           <Route path="/school/attendance/statuses" element={<SchoolAttendanceStatusesPage />} />
           <Route path="/school/attendance/report" element={<SchoolAttendanceReportPage />} />

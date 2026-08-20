@@ -63,6 +63,67 @@ export class FeeStructureService extends BaseCrudService<FeeStructure, CreateFee
       return row;
     });
   }
+
+  /**
+   * B5: publish a fee structure — freeze its current components JSON as an
+   * immutable FeeStructureVersion with priced FeeItems, and stamp it current.
+   * Editing a published structure later creates version N+1 (provenance +
+   * reproducibility). DocumentLine already protects historical invoices, so a
+   * version exists for traceability, not to guard old money.
+   */
+  async publish(id: string) {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const structure = await tx.feeStructure.findFirst({ where: { id, organizationId } });
+      if (!structure) throw new NotFoundException(`FeeStructure ${id} not found`);
+      const last = await tx.feeStructureVersion.findFirst({
+        where: { organizationId, feeStructureId: id },
+        orderBy: { versionNo: 'desc' },
+      });
+      const versionNo = (last?.versionNo ?? 0) + 1;
+      const version = await tx.feeStructureVersion.create({
+        data: {
+          organizationId,
+          feeStructureId: id,
+          versionNo,
+          isImmutable: true,
+          publishedAt: new Date(),
+          publishedById: this.tenant.userId ?? null,
+        },
+      });
+      const components = (structure.components as any[]) ?? [];
+      for (const c of components) {
+        await tx.feeItem.create({
+          data: {
+            organizationId,
+            feeStructureVersionId: version.id,
+            code: c.code ?? 'FEE',
+            name: c.name ?? c.code ?? 'Fee',
+            productId: c.productId ?? null,
+            amount: c.amount ?? 0,
+            isOptional: c.isOptional ?? false,
+            frequency: c.frequency ?? 'per_term',
+            appliesTo: c.appliesTo ?? {},
+          },
+        });
+      }
+      await tx.feeStructure.update({
+        where: { id },
+        data: { status: 'published', currentVersionId: version.id },
+      });
+      await this.audit.recordInTx(tx, { entity: 'FeeStructureVersion', entityId: version.id, action: 'create', newValues: { versionNo } });
+      return version;
+    });
+  }
+
+  async listVersions(id: string) {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.feeStructureVersion.findMany({
+      where: { organizationId, feeStructureId: id },
+      include: { items: true },
+      orderBy: { versionNo: 'desc' },
+    });
+  }
 }
 
 @Injectable()

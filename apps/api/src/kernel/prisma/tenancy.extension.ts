@@ -477,6 +477,21 @@ export const ORG_SCOPED = new Set<string>([
   'Waiver',
   'WaiverCategory',
   'FeeCredit',
+  // Fees & Finance production-hardening models (ADR-013). A model missing from
+  // ORG_SCOPED is a silent cross-tenant leak, so these are registered the
+  // moment they exist.
+  'SchoolFeeInvoice',
+  'FeeCreditAllocation',
+  'FeeAdjustment',
+  'BillingRun',
+  'BillingRunItem',
+  'TermFinancialClose',
+  'PaymentImportBatch',
+  'PaymentImportRow',
+  'FeeStructureVersion',
+  'FeeItem',
+  'FinancialRemediationBatch',
+  'FinancialRemediationItem',
   'Budget',
   'SchoolCalendarEvent',
   'SchoolPolicy',
