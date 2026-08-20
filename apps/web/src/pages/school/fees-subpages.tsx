@@ -60,7 +60,7 @@ export function SchoolFeesCollectPage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Collect Fees</h1>
+        <h1 className="text-xl font-semibold">Record Fee Payments</h1>
         <p className="text-sm text-muted-foreground">Record a fee payment, allocate it to open invoices, and print a receipt.</p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

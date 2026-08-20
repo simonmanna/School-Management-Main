@@ -342,7 +342,7 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
-      { to: '/school/fees/collect', label: 'Collect', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/collect', label: 'Record Fee Payments', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/waiver-categories', label: 'Waiver Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/waivers', label: 'Fee Waivers', icon: Ticket, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/defaulters', label: 'Fee Defaulters', icon: AlertTriangle, permission: PERMISSIONS.school.manageFees },
