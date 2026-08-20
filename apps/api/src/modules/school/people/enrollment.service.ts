@@ -81,8 +81,15 @@ export class EnrollmentService {
    * Enrollment + optional guardians + StudentStatusHistory atomically, then links
    * the application and returns the entities. Idempotent per (applicationId, termId).
    */
-  async enrollNewStudent(input: EnrollNewStudentInput): Promise<{ partner: any; profile: any; enrollment: Enrollment }> {
-    return this.prisma.client.$transaction(async (tx: any) => {
+  async enrollNewStudent(
+    input: EnrollNewStudentInput,
+    outerTx?: any,
+  ): Promise<{ partner: any; profile: any; enrollment: Enrollment }> {
+    // Accepts an existing transaction client so a caller that must also mutate its
+    // own aggregate (AdmissionsService.enroll marks the application enrolled) can
+    // do the whole thing in one atomic unit. Prisma cannot nest interactive
+    // transactions, so the caller passes its tx rather than us opening a second.
+    const run = async (tx: any) => {
       const organizationId = input.organizationId;
 
       // Idempotency: one active enrollment per application + term.
@@ -185,7 +192,8 @@ export class EnrollmentService {
       this.events.publish(EVENTS.SchoolStudentCreated, { organizationId, studentProfileId: profile.id, partnerId: partner.id, admissionNo: profile.admissionNo });
       this.events.publish(EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: profile.id });
       return { partner, profile, enrollment };
-    });
+    };
+    return outerTx ? run(outerTx) : this.prisma.client.$transaction(run);
   }
 
   /** Enroll an existing student profile into a class/section/stream for a term. One active enrollment per student+term. */

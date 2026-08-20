@@ -63,9 +63,15 @@ export class FilesController {
     return this.files.listForOwner(ownerType, ownerId);
   }
 
+  /**
+   * The id here is attacker-controlled, so this must be the ownership-checked
+   * path. `signDownload` performs no lookup and would happily sign another
+   * tenant's file id — which is how one org could mint a working download link
+   * for another org's applicant documents.
+   */
   @Post(':id/signed-url')
-  signedUrl(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.files.signDownload(id);
+  signedUrl(@Param('id') id: string) {
+    return this.files.signDownloadForCaller(id);
   }
 
   /** Public-ish: the token proves the caller has the URL. No Bearer needed. */
@@ -75,9 +81,10 @@ export class FilesController {
     @Param('id') id: string,
     @Query('token') token: string,
     @Query('expires') expires: string,
+    @Query('org') org: string,
     @Res() res: Response,
   ) {
-    const file = await this.files.resolveSignedDownload(id, token, expires);
+    const file = await this.files.resolveSignedDownload(id, token, expires, org);
     res.setHeader('Content-Type', file.contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
     if (this.files['driver'] === 'local') {

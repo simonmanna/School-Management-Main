@@ -249,11 +249,22 @@ export class CollectFeePaymentDto {
   @IsOptional() @IsString() cashSessionId?: string;
   @IsOptional() @IsString() bankAccountId?: string;
 
-  /** Optional document IDs to allocate against. If empty, allocates oldest-first. */
+  /** Optional document IDs to allocate against (full residual each). If empty, allocates oldest-first. */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   documentIds?: string[];
+
+  /**
+   * Optional explicit per-invoice allocation. When present, each entry's
+   * `amount` is applied to that invoice (capped at its residual) and ONLY
+   * these invoices are touched — no oldest-first auto-fill that could
+   * silently spend the tender elsewhere. `documentIds` is ignored when this
+   * is set. Used by the Record Fee Payments wizard's Allocation step.
+   */
+  @IsOptional()
+  @IsArray()
+  allocations?: Array<{ documentId: string; amount: number }>;
 
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsString() notes?: string;

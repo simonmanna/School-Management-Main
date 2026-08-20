@@ -2,7 +2,7 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { createReadStream, createWriteStream, statSync } from 'node:fs';
 import { mkdir, unlink } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
-import { createHash, randomBytes, createHmac } from 'node:crypto';
+import { createHash, randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -99,33 +99,74 @@ export class FilesService {
   }
 
   /** Issue a signed download URL. Token is HMAC-SHA256 over id+expiresAt. */
+  /**
+   * Mint a signed download URL for a file the CALLER ALREADY RESOLVED inside its
+   * own tenant. The owning organizationId is bound into the HMAC payload and
+   * echoed in the URL, so a token minted for org A cannot be redeemed against a
+   * row belonging to org B — `resolveSignedDownload` re-checks it against the
+   * stored row.
+   *
+   * Do NOT call this with a file id that came straight off the wire: it performs
+   * no ownership check. Use `signDownloadForCaller` for that.
+   */
   signDownload(fileId: string): { url: string; expiresAt: string } {
+    return this.sign(fileId, this.tenant.organizationId);
+  }
+
+  /**
+   * Ownership-checked variant for the `POST /files/:id/signed-url` route, where
+   * the id is attacker-controlled. Reads through the tenant-scoped client, so a
+   * file belonging to another organization is simply not found.
+   *
+   * Previously this route called `signDownload` directly, which does no lookup at
+   * all — any authenticated user could mint a working download link for ANY file
+   * id in the cluster, including another school's applicant ID scans.
+   */
+  async signDownloadForCaller(fileId: string): Promise<{ url: string; expiresAt: string }> {
+    const file = await this.prisma.client.file.findFirst({
+      where: { id: fileId, deletedAt: null },
+      select: { id: true, organizationId: true },
+    });
+    if (!file) throw new NotFoundException('File not found');
+    return this.sign(file.id, file.organizationId);
+  }
+
+  private sign(fileId: string, organizationId: string): { url: string; expiresAt: string } {
     const exp = Date.now() + FilesService.SIGN_TTL_MS;
     const sig = createHmac('sha256', this.signingSecret)
-      .update(`${fileId}:${exp}`)
+      .update(`${fileId}:${exp}:${organizationId}`)
       .digest('hex');
-    const url = `/api/v1/files/${fileId}/download?token=${sig}&expires=${exp}`;
+    const url = `/api/v1/files/${fileId}/download?token=${sig}&expires=${exp}&org=${encodeURIComponent(organizationId)}`;
     return { url, expiresAt: new Date(exp).toISOString() };
   }
 
   /** Verify the signed URL token. Returns the file if valid, else throws. */
-  async resolveSignedDownload(fileId: string, token: string, expires: string) {
+  async resolveSignedDownload(fileId: string, token: string, expires: string, org: string) {
     const exp = Number(expires);
     if (!Number.isFinite(exp) || Date.now() > exp) {
       throw new BadRequestException('Signed URL has expired');
     }
-    const expected = createHmac('sha256', this.signingSecret).update(`${fileId}:${exp}`).digest('hex');
-    if (expected !== token) {
+    if (!org) throw new BadRequestException('Invalid signed URL token');
+    const expected = createHmac('sha256', this.signingSecret)
+      .update(`${fileId}:${exp}:${org}`)
+      .digest('hex');
+    const provided = Buffer.from(token ?? '', 'utf8');
+    const wanted = Buffer.from(expected, 'utf8');
+    if (provided.length !== wanted.length || !timingSafeEqual(provided, wanted)) {
       throw new BadRequestException('Invalid signed URL token');
     }
     // The download route is @Public (an <img> carries no auth), so there is no
     // tenant context. `File` is org-scoped, so reading via `prisma.client` would
     // throw "No tenant context" in the tenancy extension. Use the unscoped `raw`
-    // client — the valid HMAC token is itself the authorization for this fileId.
-    const file = await this.prisma.raw.file.findFirst({ where: { id: fileId, deletedAt: null } });
+    // client — but scope the read by the SIGNED org, so a valid token authorizes
+    // exactly one file in exactly one tenant and nothing else.
+    const file = await this.prisma.raw.file.findFirst({
+      where: { id: fileId, organizationId: org, deletedAt: null },
+    });
     if (!file) throw new NotFoundException('File not found');
     // When a tenant context does exist (authenticated caller), still enforce the
-    // org boundary for private files; for anonymous callers the token suffices.
+    // org boundary for private files; for anonymous callers the signed org above
+    // is the authorization.
     const currentOrg = this.tenant.optionalOrganizationId;
     if (file.visibility === 'private' && currentOrg && file.organizationId !== currentOrg) {
       throw new NotFoundException('File not found');

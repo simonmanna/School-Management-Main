@@ -354,6 +354,17 @@ export const ORG_SCOPED = new Set<string>([
   'AdmissionFee',
   'OfferLetter',
   'WaitingList',
+  // Admissions Phase 2/3 — identity matching, cycles, capacity, criteria,
+  // decisions. These were live cross-tenant read/write paths: e.g.
+  // admissions.service.ts reviewIdentityMatch() and capacityStatus() look up
+  // by id with no org predicate, so one school could read (and confirm/dismiss)
+  // another school's applicant matches and capacity plan.
+  'ApplicantIdentityMatch',
+  'AdmissionCycle',
+  'AdmissionCapacity',
+  'AdmissionCriteriaSet',
+  'AdmissionCriterion',
+  'AdmissionDecision',
   'Enrollment',
   'Curriculum',
   'CurriculumSubject',
@@ -391,6 +402,8 @@ export const ORG_SCOPED = new Set<string>([
   'LessonDelivery',
   'Discussion',
   'DiscussionPost',
+  'LearningOutcome',
+  'StudentOutcomeAchievement',
   'LearningObjectiveEvidence',
   'LearningObjectiveProgress',
   'StudentCourseProgress',
@@ -400,10 +413,14 @@ export const ORG_SCOPED = new Set<string>([
   'GradeEntry',
   'GradingScale',
   'ReportCard',
+  'ReportCardSettings',
   'AcademicTranscript',
   // Exam operations (A4)
   'ExamVenue',
   'ExamRegistration',
+  'Invigilator',
+  'InvigilatorAssignment',
+  'QuestionPaper',
   // Assessment core (A1)
   'AssessmentPolicy',
   'AssessmentComponent',
@@ -448,7 +465,9 @@ export const ORG_SCOPED = new Set<string>([
   'PenaltyRule',
   'Sponsorship',
   'Waiver',
+  'WaiverCategory',
   'FeeCredit',
+  'Budget',
   'SchoolCalendarEvent',
   'SchoolPolicy',
   'CustomField',
@@ -522,6 +541,7 @@ export const ORG_SCOPED = new Set<string>([
   'MealConsumption',
   'MealWaste',
   'MealAccountTransaction',
+  'FrontDeskLog',
   'SchoolDashboardCache',
 ]);
 
@@ -683,14 +703,23 @@ export const SOFT_DELETE = new Set<string>([
   'Position',
   'AdmissionApplication',
   'Curriculum',
+  // LMS Phase 1 — course offerings, activities, plan templates and discussions
+  // all carry deletedAt; without them a soft-deleted row kept being returned.
+  'CourseOffering',
+  'LearningActivity',
+  'LessonPlanTemplate',
+  'Discussion',
   'HomeworkAssignment',
   'LearningResource',
   'Announcement',
   'ExamType',
   'Exam',
   'GradingScale',
-  // Exam operations (A4) — ExamVenue has a deletedAt; ExamRegistration does not.
+  // Exam operations (A4) — ExamVenue, Invigilator and QuestionPaper have a
+  // deletedAt; ExamRegistration and InvigilatorAssignment do not.
   'ExamVenue',
+  'Invigilator',
+  'QuestionPaper',
   // Assessment core (A1) — the four with a deletedAt column. MarkEntry and
   // MarkAdjustment are append-only ledgers with no deletedAt.
   'AssessmentPolicy',
@@ -715,16 +744,21 @@ export const SOFT_DELETE = new Set<string>([
   'FeeStructure',
   'Discount',
   'Scholarship',
+  'SchoolPolicy',
+  'CustomField',
+  'LearningOutcome',
+  'StudentTransportAssignment',
   'Vehicle',
   'Route',
   'Stop',
   // STMS roots (config-ish masters soft-deleted so history resolves names).
-  'TransportSettings',
+  // NOTE: TransportSettings and TransportTrip are deliberately absent — they
+  // carry no deletedAt column, and listing them here made the extension
+  // inject `deletedAt: null` into a column that does not exist.
   'TransportZone',
   'TransportRouteVersion',
   'TransportCrewMember',
   'TransportSchedule',
-  'TransportTrip',
   'TransportFeePlan',
   'TransportIncident',
   'TransportGeofence',

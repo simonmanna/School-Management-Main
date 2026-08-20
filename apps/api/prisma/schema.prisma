@@ -10968,9 +10968,16 @@ model ApplicationDocument {
   type           String
   fileId         String
   uploadedAt     DateTime  @default(now())
+  /// Mandatory before the applicant may be enrolled. `enrollmentEligibility()`
+  /// already filtered on this flag, but the column did not exist — so the
+  /// document gate silently matched nothing and never blocked an enrollment.
+  required       Boolean   @default(false)
   verified       Boolean   @default(false)
   verifiedById   String?
   verifiedAt     DateTime?
+  /// Why a reviewer rejected the document, so the applicant can be told what to
+  /// replace. Null while the document is unreviewed or accepted.
+  rejectionReason String?
 
   application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   file        File                 @relation("applicationDocuments", fields: [fileId], references: [id])

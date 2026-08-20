@@ -585,37 +585,59 @@ export class SchoolPaymentService {
         }
       }
 
-      // Choose the invoices to settle. Explicit documentIds win; otherwise
-      // every open school-sourced invoice, oldest issue date first. Fresh
-      // invoices from generateForTerm carry paymentStatus 'not_paid', so the
-      // open set is ['not_paid','partial'] with a positive residual.
-      const docs = dto.documentIds?.length
-        ? await tx.document.findMany({
-            where: { id: { in: dto.documentIds }, organizationId, partnerId },
-            orderBy: { issueDate: 'asc' },
-          })
-        : await tx.document.findMany({
-            where: {
-              organizationId,
-              partnerId,
-              documentType: 'sales_invoice',
-              paymentStatus: { in: ['not_paid', 'partial'] },
-              sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-              amountResidual: { gt: 0 },
-            },
-            orderBy: { issueDate: 'asc' },
-          });
+      // Choose the invoices + amounts to settle.
+      //  1. Explicit `allocations` (wizard Allocation step): use exactly these
+      //     {documentId, amount} entries. Each amount is capped at that
+      //     invoice's residual and validated; we touch ONLY these invoices.
+      //  2. Explicit `documentIds` (convenience full-pay): settle each in full.
+      //  3. Neither: open school-sourced invoices, oldest issue date first,
+      //     auto-filled up to the tender (the legacy behaviour).
+      let allocations: Array<{ documentId: string; amount: number }> = [];
 
-      // Build oldest-first allocations up to the payment amount, in Decimal.
-      let remaining = round(dec(dto.amount), 6);
-      const allocations: Array<{ documentId: string; amount: number }> = [];
-      for (const doc of docs) {
-        if (remaining.lessThanOrEqualTo(ZERO)) break;
-        const residual = dec(doc.amountResidual);
-        if (residual.lessThanOrEqualTo(ZERO)) continue;
-        const take = Prisma.Decimal.min(remaining, residual);
-        allocations.push({ documentId: doc.id, amount: take.toNumber() });
-        remaining = remaining.minus(take);
+      if (dto.allocations?.length) {
+        const ids = dto.allocations.map((a) => a.documentId);
+        const docsById = await tx.document.findMany({
+          where: { id: { in: ids }, organizationId, partnerId },
+        });
+        const docMap = new Map<string, any>(docsById.map((d: any) => [d.id, d]));
+        for (const a of dto.allocations) {
+          const doc = docMap.get(a.documentId);
+          if (!doc) continue;
+          const residual = dec(doc.amountResidual);
+          if (residual.lessThanOrEqualTo(ZERO)) continue;
+          const want = round(dec(a.amount), 6);
+          if (want.lessThanOrEqualTo(ZERO)) continue;
+          const take = Prisma.Decimal.min(want, residual);
+          allocations.push({ documentId: doc.id, amount: take.toNumber() });
+        }
+      } else {
+        const docs = dto.documentIds?.length
+          ? await tx.document.findMany({
+              where: { id: { in: dto.documentIds }, organizationId, partnerId },
+              orderBy: { issueDate: 'asc' },
+            })
+          : await tx.document.findMany({
+              where: {
+                organizationId,
+                partnerId,
+                documentType: 'sales_invoice',
+                paymentStatus: { in: ['not_paid', 'partial'] },
+                sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
+                amountResidual: { gt: 0 },
+              },
+              orderBy: { issueDate: 'asc' },
+            });
+
+        // Build oldest-first allocations up to the payment amount, in Decimal.
+        let remaining = round(dec(dto.amount), 6);
+        for (const doc of docs) {
+          if (remaining.lessThanOrEqualTo(ZERO)) break;
+          const residual = dec(doc.amountResidual);
+          if (residual.lessThanOrEqualTo(ZERO)) continue;
+          const take = Prisma.Decimal.min(remaining, residual);
+          allocations.push({ documentId: doc.id, amount: take.toNumber() });
+          remaining = remaining.minus(take);
+        }
       }
 
       // Delegate to the single payment writer. It posts the GL leg, updates
@@ -655,10 +677,12 @@ export class SchoolPaymentService {
         where: { id: receipt.id },
         include: { allocations: true },
       });
+      const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
+      const unallocatedAmt = Math.max(0, Number(dto.amount) - allocatedTotal);
       return {
         payment,
         allocations,
-        unallocated: remaining.toNumber(),
+        unallocated: unallocatedAmt,
         replayed: false,
       };
     });

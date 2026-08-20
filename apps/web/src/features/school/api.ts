@@ -783,6 +783,8 @@ export function useCollectPayment() {
       paymentMethod: 'cash' | 'bank' | 'mobile_money' | 'card';
       cashSessionId?: string;
       reference?: string;
+      paymentDate?: string;
+      allocations?: Array<{ documentId: string; amount: number }>;
     }) => (await api.post<CollectResult>(`${S}/payments/collect`, dto)).data,
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });

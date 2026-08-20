@@ -72,14 +72,23 @@ export class AdmissionsController {
 
   @Post(':id/documents')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  addDocument(@Param('id') id: string, @Body('type') type: string, @Body('fileId') fileId: string) {
-    return this.admissions.addDocument(id, type, fileId);
+  addDocument(
+    @Param('id') id: string,
+    @Body('type') type: string,
+    @Body('fileId') fileId: string,
+    @Body('required') required?: boolean,
+  ) {
+    return this.admissions.addDocument(id, type, fileId, required);
   }
 
   @Post('documents/:documentId/verify')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  verifyDocument(@Param('documentId') id: string, @Body('verified') verified: boolean) {
-    return this.admissions.verifyDocument(id, verified);
+  verifyDocument(
+    @Param('documentId') id: string,
+    @Body('verified') verified: boolean,
+    @Body('rejectionReason') rejectionReason?: string,
+  ) {
+    return this.admissions.verifyDocument(id, verified, rejectionReason);
   }
 
   @Post('enroll')
@@ -140,6 +149,30 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
   chargeApplicationFee(@Param('id') id: string, @Body() dto: ChargeFeeDto) {
     return this.admissions.chargeApplicationFee(id, dto);
+  }
+
+  /**
+   * Settle (or waive) the application fee. `markFeePaid` previously had no
+   * caller at all, so a raised fee invoice could never be marked paid and the
+   * enrollment fee gate could never be satisfied.
+   *
+   * NOTE (Phase 2): the fine-grained grants `school:admissions:fee`,
+   * `:interview` and `:offer` exist in PERMISSIONS but are not applied here yet.
+   * PermissionsGuard ANDs the required list, so narrowing these routes without
+   * first backfilling the grant onto existing admissions roles would lock out
+   * every current user. Do the role backfill and the narrowing together.
+   */
+  @Post(':id/fee/settle')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  settleApplicationFee(@Param('id') id: string, @Body('waived') waived?: boolean) {
+    return this.admissions.markFeePaid(id, waived === true);
+  }
+
+  /** Expire every issued offer whose expiresAt has passed. Safe to re-run. */
+  @Post('offers/expire-lapsed')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  expireLapsedOffers() {
+    return this.admissions.expireLapsedOffers();
   }
 
   @Post('students/transfer-in')
