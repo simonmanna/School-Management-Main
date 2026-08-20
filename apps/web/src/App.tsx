@@ -82,7 +82,7 @@ import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolStreamsPage } from '@/pages/school/streams';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
-import { SchoolTeacherAssignmentsPage } from '@/pages/school/teacher-assignments';
+import { SchoolTeachingLoadPage } from '@/pages/school/teaching-load';
 import { SchoolCalendarPage } from '@/pages/school/calendar';
 import { SchoolEventsPage } from '@/pages/school/events';
 import { SchoolPoliciesPage } from '@/pages/school/policies';
@@ -483,7 +483,7 @@ export function App() {
           <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
-          <Route path="/school/teacher-assignments" element={<SchoolTeacherAssignmentsPage />} />
+          <Route path="/school/teaching-load" element={<SchoolTeachingLoadPage />} />
           <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
           <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />
           <Route path="/school/timetable/events" element={<SchoolEventsPage />} />
