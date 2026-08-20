@@ -301,6 +301,12 @@
   body { background: #fff; color: #000; }
   main  { padding: 0 !important; overflow: visible !important; }
   .no-print { display: none !important; }
+  /* Print only the fee receipt region (rendered after a successful payment). */
+  body * { visibility: hidden; }
+  .print-receipt, .print-receipt * { visibility: visible; }
+  .print-receipt {
+    position: absolute; left: 0; top: 0; width: 100%; max-width: none; margin: 0; border: 0 !important;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

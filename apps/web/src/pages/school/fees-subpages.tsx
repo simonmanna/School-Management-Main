@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2 } from 'lucide-react';
+import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2, Printer } from 'lucide-react';
 import {
   useCollectPayment,
   useStudents,
+  useStudent,
   useStudentStatement,
+  useSchoolProfile,
+  useTerms,
   useWaiverCategories,
   useCreateWaiverCategory,
   useUpdateWaiverCategory,
@@ -18,6 +21,7 @@ import {
   useCreateBudget,
   useDeleteBudget,
   type WaiverCategory,
+  type CollectResult,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,6 +31,73 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
 import { money, sel, Stat } from './fees-shared';
+
+/* ───────────────────────── Fee Receipt (printable) ───────────────────────── */
+
+function FeeReceipt({ result, student, statement, profile, termName }: {
+  result: CollectResult;
+  student: any;
+  statement: any;
+  profile: any;
+  termName?: string;
+}) {
+  const cur = profile?.currencyCode || 'UGX';
+  const fmt = (n: number | string) => `${cur} ${Number(n).toLocaleString()}`;
+  const allocationRows = result.allocations.map((a) => {
+    const inv = statement?.invoices?.find((i: any) => i.id === a.documentId);
+    return { doc: inv?.documentNumber ?? a.documentId.slice(0, 8), amount: a.amount };
+  });
+  const totalPaid = result.allocations.reduce((s, a) => s + Number(a.amount), 0);
+  const balance = statement?.balance ?? 0;
+
+  return (
+    <div className="print-receipt mx-auto my-6 max-w-md border p-6 text-sm">
+      <div className="text-center">
+        <div className="text-lg font-bold">{profile?.name ?? 'School Receipt'}</div>
+        {profile?.phone && <div className="text-xs">Tel: {profile.phone}</div>}
+        {profile?.address && <div className="text-xs">{profile.address}</div>}
+        <div className="mt-2 text-base font-bold underline">FEES PAYMENT RECEIPT</div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-y-1 text-xs">
+        <div><span className="text-muted-foreground">Name:</span> {student?.partner?.name ?? '—'}</div>
+        <div><span className="text-muted-foreground">Reg No:</span> {student?.admissionNo ?? '—'}</div>
+        <div><span className="text-muted-foreground">Gender:</span> {student?.gender ?? '—'}</div>
+        <div><span className="text-muted-foreground">Class:</span> {student?.currentClass?.name ?? '—'}</div>
+        <div><span className="text-muted-foreground">Term:</span> {termName ?? '—'}</div>
+        <div />
+        <div><span className="text-muted-foreground">Receipt No.:</span> {result.payment?.paymentNumber ?? result.payment?.id?.slice(0, 12) ?? '—'}</div>
+        <div><span className="text-muted-foreground">Mode:</span> {result.payment?.paymentMethod ?? '—'}</div>
+        <div><span className="text-muted-foreground">Date:</span> {result.payment?.paymentDate ? new Date(result.payment.paymentDate).toLocaleDateString() : '—'}</div>
+      </div>
+
+      <table className="mt-4 w-full border text-sm">
+        <thead>
+          <tr className="border bg-muted/40"><th className="px-2 py-1 text-left">#</th><th className="px-2 py-1 text-left">Description</th><th className="px-2 py-1 text-right">Amount Paid</th></tr>
+        </thead>
+        <tbody>
+          {allocationRows.map((r, i) => (
+            <tr key={i} className="border">
+              <td className="px-2 py-1">{i + 1}</td>
+              <td className="px-2 py-1">Fee payment · {r.doc}</td>
+              <td className="px-2 py-1 text-right">{fmt(r.amount)}</td>
+            </tr>
+          ))}
+          {allocationRows.length === 0 && (
+            <tr className="border"><td className="px-2 py-1">1</td><td className="px-2 py-1">Fee payment</td><td className="px-2 py-1 text-right">{fmt(totalPaid)}</td></tr>
+          )}
+        </tbody>
+      </table>
+
+      <div className="mt-3 text-right text-sm">
+        <div><span className="text-muted-foreground">Total Paid:</span> <b>{fmt(totalPaid)}</b></div>
+        <div><span className="text-muted-foreground">Fees Balance:</span> <b>{fmt(balance)}</b></div>
+      </div>
+
+      <div className="mt-4 text-center text-sm font-medium text-emerald-600">Thank you for your payment!</div>
+    </div>
+  );
+}
 
 /* ───────────────────────── Collect (3-step wizard) ───────────────────────── */
 
@@ -58,7 +129,11 @@ export function SchoolFeesCollectPage() {
 
   const { data: students } = useStudents({ search: search || undefined, pageSize: 20 });
   const { data: statement } = useStudentStatement(studentId || undefined);
+  const { data: profile } = useSchoolProfile();
+  const { data: terms } = useTerms();
+  const { data: student } = useStudent(studentId || undefined);
   const collect = useCollectPayment();
+  const [receipt, setReceipt] = useState<CollectResult | null>(null);
 
   const number = Number(amount) || 0;
   const openInvoices = statement?.invoices?.filter((i: any) => Number(i.amountResidual) > 0) ?? [];
@@ -107,6 +182,7 @@ export function SchoolFeesCollectPage() {
       });
       if (res.replayed) notify.success('Payment already recorded (idempotent replay)');
       else notify.success(`Collected ${money(amount)} · ${res.allocations.length} invoice(s) settled`);
+      setReceipt(res);
       reset();
     } catch {
       notify.error('Could not collect payment');
@@ -299,6 +375,25 @@ export function SchoolFeesCollectPage() {
           </CardContent>
         </Card>
       </div>
+
+      {receipt && (
+        <div className="no-print space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">Receipt</h2>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setReceipt(null)}>Close</Button>
+              <Button onClick={() => window.print()}><Printer className="mr-1 h-4 w-4" /> Print Receipt</Button>
+            </div>
+          </div>
+          <FeeReceipt
+            result={receipt}
+            student={student}
+            statement={statement}
+            profile={profile}
+            termName={terms?.data?.find((t: any) => t.isCurrent)?.name}
+          />
+        </div>
+      )}
     </div>
   );
 }

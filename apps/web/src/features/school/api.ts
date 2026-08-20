@@ -65,6 +65,21 @@ const S = '/school';
 
 /* ───────────────────────── Overview ───────────────────────── */
 
+export interface SchoolProfile {
+  id?: string;
+  name?: string;
+  phone?: string | null;
+  address?: string | null;
+  currencyCode?: string;
+  country?: string;
+}
+export function useSchoolProfile() {
+  return useQuery({
+    queryKey: ['school', 'profile'],
+    queryFn: async () => (await api.get<SchoolProfile>(`${S}/profile`)).data,
+  });
+}
+
 export function useSchoolOverview() {
   return useQuery({
     queryKey: ['school', 'overview'],
@@ -174,14 +189,47 @@ export function useSections() {
 
 /* ───────────────────────── Admissions ───────────────────────── */
 
+/**
+ * Mirrors the backend `AdmissionStatus` enum in full.
+ *
+ * This used to list 7 of the 15 states. Anything the backend put into
+ * `screening`, `interview_scheduled`, `interviewed`, `scored`, `waitlisted`,
+ * `offer_issued` or `offer_accepted` rendered as a bare enum string with no
+ * available actions, so the record was stranded in the UI.
+ */
 export type AdmissionStatus =
   | 'submitted'
   | 'under_review'
+  | 'screening'
+  | 'interview_scheduled'
+  | 'interviewed'
   | 'exam_scheduled'
+  | 'scored'
   | 'accepted'
+  | 'waitlisted'
+  | 'offer_issued'
+  | 'offer_accepted'
   | 'enrolled'
   | 'rejected'
   | 'withdrawn';
+
+/** Every action the admission FSM accepts on `POST /school/admissions/:id/review`. */
+export type AdmissionAction =
+  | 'review'
+  | 'screen'
+  | 'schedule_interview'
+  | 'complete_interview'
+  | 'reschedule'
+  | 'schedule_exam'
+  | 'exam_done'
+  | 'score'
+  | 'accept'
+  | 'reject'
+  | 'waitlist'
+  | 'issue_offer'
+  | 'accept_offer'
+  | 'decline_offer'
+  | 'withdraw';
 
 export interface AdmissionApplication {
   id: string;
@@ -193,9 +241,52 @@ export interface AdmissionApplication {
   applyingForClassId?: string | null;
   academicYearId: string;
   status: AdmissionStatus;
+  feeStatus?: 'unpaid' | 'pending' | 'paid' | 'waived';
+  parentContactId?: string | null;
+  admissionCycleId?: string | null;
+  decisionNotes?: string | null;
   customFields?: Record<string, unknown>;
   createdAt: string;
   academicYear?: { id: string; name: string } | null;
+  offerLetter?: AdmissionOffer | null;
+  documents?: AdmissionDocument[];
+}
+
+export interface AdmissionOffer {
+  id: string;
+  applicationId: string;
+  status: 'issued' | 'viewed' | 'accepted' | 'declined' | 'expired' | 'withdrawn';
+  issuedAt: string;
+  expiresAt?: string | null;
+  acceptedAt?: string | null;
+  declinedAt?: string | null;
+  conditions?: string | null;
+  body?: string | null;
+  version: number;
+}
+
+export interface AdmissionDocument {
+  id: string;
+  applicationId: string;
+  type: string;
+  fileId: string;
+  required: boolean;
+  verified: boolean;
+  rejectionReason?: string | null;
+  uploadedAt: string;
+}
+
+/** Result of `GET /school/admissions/:id/eligibility` — the enrollment gate. */
+export interface AdmissionEligibility {
+  applicationId: string;
+  status: 'READY' | 'BLOCKED';
+  missing: string[];
+  capacity?: {
+    capacity: number;
+    reservedCapacity: number;
+    occupied: number;
+    available: number;
+  } | null;
 }
 
 export interface CreateAdmissionInput {
@@ -260,10 +351,59 @@ export function useAdmissionAction() {
       notes,
     }: {
       id: string;
-      action: 'review' | 'accept' | 'reject' | 'schedule_exam' | 'withdraw';
+      action: AdmissionAction;
       notes?: string;
     }) => (await api.post(`${S}/admissions/${id}/review`, { action, notes })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+/**
+ * Offer lifecycle. Without these the pipeline could not be completed from the
+ * UI at all: `accepted` was a dead end, and the Enroll button called an endpoint
+ * that requires `offer_accepted`.
+ */
+export function useIssueAdmissionOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, body, expiresAt, templateId }: { id: string; body?: string; expiresAt?: string; templateId?: string }) =>
+      (await api.post<AdmissionOffer>(`${S}/admissions/${id}/offer`, { body, expiresAt, templateId })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+export function useAcceptAdmissionOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/admissions/${id}/offer/accept`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+export function useDeclineAdmissionOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${S}/admissions/${id}/offer/decline`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+/** Records the admissions committee's decision (accept / reject / waitlist). */
+export function useRecordAdmissionDecision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, decision, reason }: { id: string; decision: 'accepted' | 'rejected' | 'waitlisted'; reason?: string }) =>
+      (await api.post(`${S}/admissions/${id}/decision`, { decision, reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'admissions'] }),
+  });
+}
+
+/** The enrollment gate — required documents, fee settlement and seat availability. */
+export function useAdmissionEligibility(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'eligibility', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionEligibility>(`${S}/admissions/${id}/eligibility`)).data,
   });
 }
 
@@ -768,7 +908,7 @@ export function useGenerateBilling() {
 }
 
 export interface CollectResult {
-  payment: { id: string; paymentNumber?: string; amount: string } | null;
+  payment: { id: string; paymentNumber?: string; amount: string; paymentMethod?: string; paymentDate?: string } | null;
   allocations: Array<{ documentId: string; amount: number }>;
   unallocated: number;
   replayed: boolean;
