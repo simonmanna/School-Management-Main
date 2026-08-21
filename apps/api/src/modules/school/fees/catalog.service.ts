@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type {
   Discount,
+  FeeCategory,
   FeeSchedule,
   FeeStructure,
   InstallmentPlan,
@@ -17,6 +18,7 @@ import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-
 import { EVENTS } from '@erp/shared';
 import type {
   CreateDiscountDto,
+  CreateFeeCategoryDto,
   CreateFeeScheduleDto,
   CreateFeeStructureDto,
   CreateInstallmentPlanDto,
@@ -24,6 +26,7 @@ import type {
   CreateScholarshipDto,
   CreateStudentFeeAssignmentDto,
   UpdateDiscountDto,
+  UpdateFeeCategoryDto,
   UpdateFeeScheduleDto,
   UpdateFeeStructureDto,
   UpdateInstallmentPlanDto,
@@ -248,5 +251,22 @@ export class PenaltyRunService {
       where: { scheduleId },
       orderBy: { runAt: 'desc' },
     });
+  }
+}
+
+/**
+ * P2 — Fee Categories catalog. A standalone, reusable master of fee types that
+ * FeeStructures reference by `code`. Soft-delete + org-scoped via the tenancy
+ * extension (FeeCategory is registered in SOFT_DELETE + ORG_SCOPED there).
+ */
+@Injectable()
+export class FeeCategoryService extends BaseCrudService<FeeCategory, CreateFeeCategoryDto, UpdateFeeCategoryDto> {
+  protected readonly entityName = 'FeeCategory';
+  protected readonly searchFields = ['name', 'code'];
+  protected readonly defaultOrderBy = { paymentOrder: 'asc' } as Record<string, 'asc' | 'desc'>;
+  protected readonly defaultInclude = undefined;
+
+  constructor(private readonly prisma: PrismaService) {
+    super(prisma.client.feeCategory as unknown as CrudDelegate);
   }
 }

@@ -31,6 +31,9 @@ import {
   ShieldCheck,
   ClipboardList,
   ClipboardCheck,
+  ChefHat,
+  CreditCard,
+  UtensilsCrossed,
   PanelLeftClose,
   PanelLeft,
   BookOpen,
@@ -54,7 +57,6 @@ import {
   CalendarDays,
   CalendarRange,
   CalendarHeart,
-  Hash,
   Briefcase,
   FileClock,
   Wallet,
@@ -225,10 +227,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/curricula', label: 'Curriculum', icon: GitBranch, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/teaching-load', label: 'Teaching Load', icon: Users, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/policies', label: 'School Policies', icon: FileText, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/custom-fields', label: 'Custom Fields', icon: Hash, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
     ],
   },
@@ -237,10 +236,11 @@ const NAV_SECTIONS: NavSection[] = [
     icon: BookText,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
+      { to: '/school/my-marking', label: 'My Marking', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
+      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/report-card-settings', label: 'Report Card Settings', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams },
-      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/assessment-ops', label: 'Rosters & Assignments', icon: ClipboardList, permission: PERMISSIONS.school.read },
       { to: '/school/results', label: 'Result Spine', icon: ScrollText, permission: PERMISSIONS.school.read },
       { to: '/school/grading-scales', label: 'Grading Scales', icon: SlidersHorizontal, permission: PERMISSIONS.school.read },
@@ -277,15 +277,15 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Presentation,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/homework', label: 'Homework & Tasks', icon: ClipboardList, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/teacher-dashboard', label: 'My Teaching', icon: UserCog, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead },
-      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead },
+      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy },
+      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation },
+      { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack },
+      { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck },
+      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare },
+      { to: '/school/lms/homework', label: 'Homework & Tasks', icon: ClipboardList },
+      { to: '/school/lms/teacher-dashboard', label: 'My Teaching', icon: UserCog },
+      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target },
+      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch },
     ],
   },
   {
@@ -346,6 +346,9 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/categories', label: 'Fee Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/structures', label: 'Fee Structures', icon: Layers, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/schedules', label: 'Fee Schedules', icon: CalendarClock, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/dashboard', label: 'Finance Dashboard', icon: Receipt, permission: PERMISSIONS.school.read },
       { to: '/school/fees/invoices', label: 'Fee Invoices', icon: Receipt, permission: PERMISSIONS.school.read },
       { to: '/school/fees/ledger', label: 'Student Ledger', icon: Receipt, permission: PERMISSIONS.school.read },
@@ -426,6 +429,24 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/year-end-close', label: 'Year-End Close', icon: Lock, permission: PERMISSIONS.fiscalPeriod.update },
       { to: '/balance-sheet', label: 'Balance Sheet', icon: Landmark, permission: PERMISSIONS.report.accounting },
       { to: '/reports', label: 'Report Center', icon: BarChart3, permission: PERMISSIONS.report.accounting },
+    ],
+  },
+  // ===== Meals & Cafeteria =====
+  {
+    title: 'Meals & Cafeteria',
+    icon: UtensilsCrossed,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/meals?tab=today', label: 'Today’s Meals', icon: CalendarDays, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=planning', label: 'Programs & Plans', icon: ClipboardList, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=assignments', label: 'Student Assignments', icon: Users, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=attendance', label: 'Meal Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=menus', label: 'Menus', icon: UtensilsCrossed, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=kitchen', label: 'Kitchen & Production', icon: ChefHat, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=consumption', label: 'Consumption', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=finance', label: 'Meal Finance', icon: HandCoins, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=pos', label: 'Cafeteria POS', icon: CreditCard, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.school.read },
     ],
   },
   // ===== Supplementary / Assets / Equipment / Settings =====
@@ -807,7 +828,7 @@ export function AppShell() {
       <aside
         className={cn(
           'sticky top-0 hidden h-screen shrink-0 flex-col transition-all duration-200 md:flex print:hidden',
-          sidebarCollapsed ? 'w-20' : 'w-64',
+          sidebarCollapsed ? 'w-20' : 'w-72',
         )}
         style={{ background: sb.sidebar }}
       >
@@ -818,7 +839,7 @@ export function AppShell() {
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-64 flex-col shadow-xl">
+          <aside className="absolute inset-y-0 left-0 flex w-72 flex-col shadow-xl">
             {sidebarInner(false)}
           </aside>
         </div>

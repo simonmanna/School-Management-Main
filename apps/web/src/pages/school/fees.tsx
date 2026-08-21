@@ -137,7 +137,7 @@ function BillingTab() {
 
 /* ─────────────── Fee structures ─────────────── */
 
-function StructuresTab() {
+export function StructuresTab() {
   const { data: structures } = useFeeStructures();
   const { data: schedules } = useFeeSchedules();
   const { data: years } = useAcademicYears();

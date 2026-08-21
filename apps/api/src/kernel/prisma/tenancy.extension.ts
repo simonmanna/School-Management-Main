@@ -468,6 +468,7 @@ export const ORG_SCOPED = new Set<string>([
   'Certificate',
   'FeeStructure',
   'FeeSchedule',
+  'FeeCategory',
   'StudentFeeAssignment',
   'Discount',
   'Scholarship',
@@ -771,6 +772,7 @@ export const SOFT_DELETE = new Set<string>([
   // (a certificate is revoked/voided, never soft-deleted).
   'ExternalExamResult',
   'FeeStructure',
+  'FeeCategory',
   'Discount',
   'Scholarship',
   'SchoolPolicy',

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, UtensilsCrossed, ClipboardCheck, CalendarDays, Play, HandCoins, ChefHat, BarChart3, CreditCard } from 'lucide-react';
 import {
   useMealPrograms,
@@ -52,6 +53,15 @@ const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function SchoolMealsPage() {
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') ?? 'today';
+  const [activeTab, setActiveTab] = useState(initialTab);
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t) setActiveTab(t);
+  }, [searchParams]);
+  const validTabs = ['today', 'planning', 'assignments', 'attendance', 'menus', 'kitchen', 'consumption', 'finance', 'pos', 'reports'];
+  const tab = validTabs.includes(activeTab) ? activeTab : 'today';
   return (
     <div className="space-y-4 p-6">
       <div>
@@ -60,7 +70,7 @@ export function SchoolMealsPage() {
           Meal programs, plans &amp; eligibility, daily sessions &amp; attendance, and menus.
         </p>
       </div>
-      <Tabs defaultValue="today">
+      <Tabs value={tab} onValueChange={setActiveTab} defaultValue="today">
         <TabsList>
           <TabsTrigger value="today">Today&apos;s Meals</TabsTrigger>
           <TabsTrigger value="planning">Planning</TabsTrigger>

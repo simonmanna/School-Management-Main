@@ -387,6 +387,26 @@ async function ensureStudents(campuses: { main: any; annex: any }, gradeLevels: 
   return created.length;
 }
 
+async function ensureFeeCategories() {
+  const cats = [
+    { code: 'TUITION', name: 'School Fees', type: 'mandatory', paymentOrder: 1 },
+    { code: 'REGISTRATION', name: 'Registration Fees', type: 'mandatory', paymentOrder: 2 },
+    { code: 'UNIFORM', name: 'School Uniform', type: 'mandatory', paymentOrder: 3 },
+    { code: 'TRANSPORT', name: 'Transport', type: 'optional', paymentOrder: 4 },
+    { code: 'MEAL', name: 'Meals', type: 'optional', paymentOrder: 5 },
+    { code: 'SWIMMING', name: 'Swimming', type: 'optional', paymentOrder: 6 },
+    { code: 'LAB', name: 'Laboratory', type: 'mandatory', paymentOrder: 7 },
+    { code: 'ACTIVITY', name: 'Activity', type: 'mandatory', paymentOrder: 8 },
+  ];
+  for (const c of cats) {
+    await prisma.feeCategory.upsert({
+      where: { organizationId_code: { organizationId: ORG_ID, code: c.code } },
+      create: { organizationId: ORG_ID, code: c.code, name: c.name, type: c.type, paymentOrder: c.paymentOrder, isActive: true },
+      update: {},
+    });
+  }
+}
+
 async function ensureFeeStructure(academicYear: any, term1: any) {
   // Find or create a Tuition product
   const tuition = await prisma.product.upsert({
@@ -414,6 +434,21 @@ async function ensureFeeStructure(academicYear: any, term1: any) {
     create: { organizationId: ORG_ID, code: 'ACTIVITY', name: 'Activity Fee', productType: 'service', salesPrice: 30_000 },
     update: {},
   });
+  const registration = await prisma.product.upsert({
+    where: { organizationId_code: { organizationId: ORG_ID, code: 'REGISTRATION' } },
+    create: { organizationId: ORG_ID, code: 'REGISTRATION', name: 'Registration Fee', productType: 'service', salesPrice: 50_000 },
+    update: {},
+  });
+  const uniform = await prisma.product.upsert({
+    where: { organizationId_code: { organizationId: ORG_ID, code: 'UNIFORM' } },
+    create: { organizationId: ORG_ID, code: 'UNIFORM', name: 'School Uniform', productType: 'service', salesPrice: 120_000 },
+    update: {},
+  });
+  const swimming = await prisma.product.upsert({
+    where: { organizationId_code: { organizationId: ORG_ID, code: 'SWIMMING' } },
+    create: { organizationId: ORG_ID, code: 'SWIMMING', name: 'Swimming', productType: 'service', salesPrice: 100_000 },
+    update: {},
+  });
 
   const fs = await prisma.feeStructure.upsert({
     where: { organizationId_name_academicYearId: { organizationId: ORG_ID, name: 'Standard Term Fees', academicYearId: academicYear.id } },
@@ -423,8 +458,11 @@ async function ensureFeeStructure(academicYear: any, term1: any) {
       academicYearId: academicYear.id,
       components: [
         { code: 'TUITION', productId: tuition.id, amount: 800_000 },
+        { code: 'REGISTRATION', productId: registration.id, amount: 50_000 },
+        { code: 'UNIFORM', productId: uniform.id, amount: 120_000 },
         { code: 'TRANSPORT', productId: transport.id, amount: 200_000, isOptional: true },
         { code: 'MEAL', productId: meal.id, amount: 250_000, isOptional: true },
+        { code: 'SWIMMING', productId: swimming.id, amount: 100_000, isOptional: true },
         { code: 'LAB', productId: lab.id, amount: 50_000 },
         { code: 'ACTIVITY', productId: activity.id, amount: 30_000 },
       ],
@@ -541,6 +579,7 @@ async function main() {
   const gradeLevels = await prisma.gradeLevel.findMany({ where: { organizationId: ORG_ID }, orderBy: { order: 'asc' } });
   const studentCount = await ensureStudents(campuses, gradeLevels, await prisma.subject.findMany({ where: { organizationId: ORG_ID } }));
   const fs = await ensureFeeStructure(year, terms[0]);
+  await ensureFeeCategories();
   console.log(`✅ Done.`);
   console.log(`   - Organization: Sunrise Academy (${ORG_ID})`);
   console.log(`   - Campuses: 2 (Main + Annex)`);

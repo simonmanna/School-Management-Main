@@ -4,6 +4,7 @@ import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import {
   DiscountService,
+  FeeCategoryService,
   FeeScheduleService,
   FeeStructureService,
   InstallmentPlanService,
@@ -16,6 +17,7 @@ import {
 // class-validator metadata off the runtime class, which `import type` erases.
 import {
   CreateDiscountDto,
+  CreateFeeCategoryDto,
   CreateFeeScheduleDto,
   CreateFeeStructureDto,
   CreateInstallmentPlanDto,
@@ -23,6 +25,7 @@ import {
   CreateScholarshipDto,
   CreateStudentFeeAssignmentDto,
   UpdateDiscountDto,
+  UpdateFeeCategoryDto,
   UpdateFeeScheduleDto,
   UpdateFeeStructureDto,
   UpdateInstallmentPlanDto,
@@ -339,5 +342,41 @@ export class PenaltyRunController {
   @RequirePermissions(PERMISSIONS.school.read)
   get(@Param('id') id: string) {
     return this.service.get(id);
+  }
+}
+
+@Controller('school/fee-categories')
+export class FeeCategoryController {
+  constructor(private readonly service: FeeCategoryService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.read)
+  list(@Query() q: PaginationDto) {
+    return this.service.list(q);
+  }
+
+  @Get(':id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  findOne(@Param('id') id: string) {
+    return this.service.findOne(id);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  create(@Body() dto: CreateFeeCategoryDto) {
+    return this.service.create(dto as any);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  update(@Param('id') id: string, @Body() dto: UpdateFeeCategoryDto) {
+    return this.service.update(id, dto as any);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 }

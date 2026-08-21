@@ -33,6 +33,9 @@ import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolStudentsPage } from '@/pages/school/students';
 import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
+import { SchoolFeeCategoriesPage } from '@/pages/school/fee-categories';
+import { SchoolFeeStructuresPage } from '@/pages/school/fee-structures';
+import { SchoolFeeSchedulesPage } from '@/pages/school/fee-schedules';
 import { SchoolFeesCollectPage } from '@/pages/school/fees-subpages';
 import { SchoolWaiverCategoriesPage } from '@/pages/school/fees-subpages';
 import { SchoolWaiversPage } from '@/pages/school/fees-subpages';
@@ -71,6 +74,8 @@ import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
+import { SchoolMyMarkingPage } from '@/pages/school/my-marking';
+import { SchoolMarksheetPage } from '@/pages/school/marksheet';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
@@ -458,6 +463,9 @@ export function App() {
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
+          <Route path="/school/fees/categories" element={<SchoolFeeCategoriesPage />} />
+          <Route path="/school/fees/structures" element={<SchoolFeeStructuresPage />} />
+          <Route path="/school/fees/schedules" element={<SchoolFeeSchedulesPage />} />
           <Route path="/school/fees/collect" element={<SchoolFeesCollectPage />} />
           <Route path="/school/fees/waiver-categories" element={<SchoolWaiverCategoriesPage />} />
           <Route path="/school/fees/waivers" element={<SchoolWaiversPage />} />
@@ -510,6 +518,8 @@ export function App() {
           <Route path="/school/management/custom-fields" element={<SchoolCustomFieldsPage />} />
           <Route path="/school/management/roles" element={<SchoolRolesPage />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
+          <Route path="/school/my-marking" element={<SchoolMyMarkingPage />} />
+          <Route path="/school/marksheet/:assessmentId" element={<SchoolMarksheetPage />} />
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
           <Route path="/school/grading-scales" element={<SchoolGradingScalePage />} />

@@ -3,6 +3,7 @@ import { AccountingModule } from '../../accounting/accounting.module';
 import { InvoicingModule } from '../../invoicing/invoicing.module';
 import {
   DiscountService,
+  FeeCategoryService,
   FeeScheduleService,
   FeeStructureService,
   InstallmentPlanService,
@@ -13,6 +14,7 @@ import {
 } from './catalog.service';
 import {
   DiscountController,
+  FeeCategoryController,
   FeeScheduleController,
   FeeStructureController,
   InstallmentPlanController,
@@ -54,6 +56,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
   imports: [InvoicingModule, AccountingModule],
   controllers: [
     FeeStructureController,
+    FeeCategoryController,
     FeeScheduleController,
     StudentFeeAssignmentController,
     DiscountController,
@@ -72,6 +75,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
   ],
   providers: [
     FeeStructureService,
+    FeeCategoryService,
     FeeScheduleService,
     StudentFeeAssignmentService,
     DiscountService,
@@ -91,6 +95,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
   ],
   exports: [
     FeeStructureService,
+    FeeCategoryService,
     FeeScheduleService,
     StudentFeeAssignmentService,
     DiscountService,

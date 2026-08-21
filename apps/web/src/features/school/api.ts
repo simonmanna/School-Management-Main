@@ -1100,6 +1100,49 @@ export interface FeeSchedule {
   feeStructure?: { name: string } | null;
 }
 
+export interface FeeCategory {
+  id: string;
+  code: string;
+  name: string;
+  type: 'mandatory' | 'optional';
+  description: string | null;
+  paymentOrder: number;
+  isActive: boolean;
+}
+
+export function useFeeCategories() {
+  return useQuery({
+    queryKey: ['school', 'fee-categories'],
+    queryFn: async () => (await api.get<Paginated<FeeCategory>>(`${S}/fee-categories`, { params: { pageSize: 200 } })).data,
+  });
+}
+
+export function useCreateFeeCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { code: string; name: string; type: 'mandatory' | 'optional'; description?: string; paymentOrder?: number; isActive?: boolean }) =>
+      (await api.post<FeeCategory>(`${S}/fee-categories`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-categories'] }),
+  });
+}
+
+export function useUpdateFeeCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; code?: string; name?: string; type?: 'mandatory' | 'optional'; description?: string; paymentOrder?: number; isActive?: boolean }) =>
+      (await api.patch<FeeCategory>(`${S}/fee-categories/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-categories'] }),
+  });
+}
+
+export function useDeleteFeeCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/fee-categories/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-categories'] }),
+  });
+}
+
 export interface ServiceProduct {
   id: string;
   code: string;
@@ -1575,7 +1618,7 @@ export interface TeacherAssignment {
 export function useTeacherAssignments() {
   return useQuery({
     queryKey: ['school', 'teacher-assignments'],
-    queryFn: async () => (await api.get<TeacherAssignment[]>(`${S}/teacher-assignments`, { params: { pageSize: 400 } })).data,
+    queryFn: async () => (await api.get<Paginated<TeacherAssignment>>(`${S}/teacher-assignments`, { params: { pageSize: 400 } })).data.data,
   });
 }
 
@@ -2166,9 +2209,29 @@ export interface ReportCard {
   generatedAt?: string;
 }
 
-export interface ReportCardSettings {
+/**
+ * An ordered, tickable list (student biodata fields, table columns, page
+ * blocks). Order is significant — it is the print order.
+ */
+export interface ReportCardColumnItem {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+/**
+ * The resolved report card configuration. The server merges stored values over
+ * registry defaults, so every key is always present. Keys are open-ended: the
+ * field registry is served by `useReportCardSettingsSchema`, and the settings
+ * UI renders whatever it describes — a new server-side option needs no change
+ * here. The named members below are the ones other pages read directly.
+ */
+export interface ReportCardSettings extends Record<string, unknown> {
   id: string;
   organizationId: string;
+  presetKey: string | null;
+
+  // Visibility (also stored as real columns for the report card viewer).
   showSchoolLogo: boolean;
   showStudentPhoto: boolean;
   showWatermark: boolean;
@@ -2178,29 +2241,106 @@ export interface ReportCardSettings {
   showTermEndDate: boolean;
   showFeesBalance: boolean;
   showSchoolMotto: boolean;
+
+  // Header palette.
   schoolNameColor: string;
   schoolAddressColor: string;
   contactColor: string;
   websiteColor: string;
   emailColor: string;
   reportTitleColor: string;
+
+  // Ordered lists.
+  studentFields: ReportCardColumnItem[];
+  tableColumns: ReportCardColumnItem[];
+  blockOrder: ReportCardColumnItem[];
 }
+
+export type ReportCardFieldType =
+  | 'boolean' | 'color' | 'number' | 'text' | 'textarea' | 'select' | 'list' | 'columns';
+
+export interface ReportCardFieldDef {
+  key: string;
+  label: string;
+  type: ReportCardFieldType;
+  group: string;
+  default: unknown;
+  help?: string;
+  options?: Array<{ value: string; label: string }>;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  column?: boolean;
+  showIf?: { key: string; equals?: unknown };
+  locked?: string[];
+}
+
+export interface ReportCardSettingsSchema {
+  groups: Array<{ key: string; label: string; description: string; icon: string }>;
+  fields: ReportCardFieldDef[];
+  presets: Array<{ key: string; label: string; description: string; overrides: Record<string, unknown> }>;
+  defaults: Record<string, unknown>;
+}
+
+const RCS_KEY = ['school', 'report-card-settings'] as const;
 
 export function useReportCardSettings() {
   return useQuery({
-    queryKey: ['school', 'report-card-settings'],
+    queryKey: RCS_KEY,
     queryFn: async () => (await api.get<ReportCardSettings>(`${S}/report-card-settings`)).data,
+  });
+}
+
+/**
+ * The field registry that drives the settings UI. Static for the life of a
+ * deployment, so it is cached indefinitely rather than refetched per mount.
+ */
+export function useReportCardSettingsSchema() {
+  return useQuery({
+    queryKey: ['school', 'report-card-settings', 'schema'],
+    queryFn: async () => (await api.get<ReportCardSettingsSchema>(`${S}/report-card-settings/schema`)).data,
+    staleTime: Infinity,
   });
 }
 
 export function useUpdateReportCardSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: Partial<ReportCardSettings>) =>
+    mutationFn: async (dto: Record<string, unknown>) =>
       (await api.patch<ReportCardSettings>(`${S}/report-card-settings`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'report-card-settings'] }),
-    });
-    }
+    onSuccess: (data) => {
+      qc.setQueryData(RCS_KEY, data);
+      qc.invalidateQueries({ queryKey: RCS_KEY });
+    },
+  });
+}
+
+/** Replace the whole configuration with a named preset. */
+export function useApplyReportCardPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (key: string) =>
+      (await api.post<ReportCardSettings>(`${S}/report-card-settings/preset`, { key })).data,
+    onSuccess: (data) => {
+      qc.setQueryData(RCS_KEY, data);
+      qc.invalidateQueries({ queryKey: RCS_KEY });
+    },
+  });
+}
+
+/** Reset to defaults — the whole card, or one settings group. */
+export function useResetReportCardSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (group?: string) =>
+      (await api.post<ReportCardSettings>(`${S}/report-card-settings/reset`, { group })).data,
+    onSuccess: (data) => {
+      qc.setQueryData(RCS_KEY, data);
+      qc.invalidateQueries({ queryKey: RCS_KEY });
+    },
+  });
+}
 
     /* ───────────────── Fee Waivers & Categories ───────────────── */
 
@@ -2715,10 +2855,14 @@ export function useAssessmentTransition() {
 
 /* ── A1 Marking (SoD: enter vs approve) ────────────────────────────────────── */
 
+// Shape returned by GET /marking/by-assessment/:id (raw StudentAssessment rows).
+// NOTE: the API does NOT return studentName — the UI maps it from useClassRoster().
 export interface MarkRow {
-  studentAssessmentId: string; studentProfileId: string; studentName: string; admissionNo?: string | null;
-  participation: string; score?: number | null; firstMark?: number | null; secondMark?: number | null;
-  adjustedScore?: number | null; status: string; round?: string; comment?: string | null;
+  id: string; studentProfileId: string; classId?: string | null;
+  participation: string;
+  maxScore?: number | null; originalScore?: number | null; effectiveScore?: number | null; percentage?: number | null;
+  status: string; approvalStatus?: string; version?: number;
+  studentName?: string;
 }
 export function useMarksByAssessment(assessmentId: string | undefined) {
   return useQuery({

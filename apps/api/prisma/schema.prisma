@@ -12803,6 +12803,15 @@ model ReportCardSettings {
   emailColor               String   @default("#000000")
   reportTitleColor         String   @default("#000000")
 
+  /// Every option added after v1 lives here, keyed by the field registry in
+  /// report-card-settings.schema.ts — page size, typography, table columns,
+  /// block order, comment/footer text, and so on. Storing them as JSON keeps
+  /// new customisation options migration-free.
+  config                   Json      @default("{}")
+  /// Last named preset applied ('classic' | 'modern' | 'minimal' | 'bold' |
+  /// 'formal'), or null once the configuration has been hand-tuned.
+  presetKey                String?
+
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
@@ -14292,6 +14301,34 @@ model FeeItem {
 
   @@index([organizationId])
   @@index([feeStructureVersionId])
+}
+
+/// P2 — Reusable fee category master (the "Fee Categories" catalog). A
+/// standalone, tenant-scoped lookup of fee types (School Fees, Registration
+/// Fees, Transport, Swimming, …) that FeeStructures reference by `code`. This
+/// is the primitive the legacy fork was missing: a category was only ever an
+/// ad-hoc string inside a structure's `components` JSON, so it could not be
+/// reused or governed. `type` mirrors the competitor's Mandatory/Optional flag;
+/// `paymentOrder` drives display/processing sequence.
+model FeeCategory {
+  id             String   @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  /// 'mandatory' | 'optional'
+  type           String   @default("mandatory")
+  description    String?
+  /// Display/processing order (Payment Order in the competitor UI).
+  paymentOrder   Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdBy      String?
+  updatedBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
 }
 
 /// Phase 0.9 — historical remediation. Corrections to data corrupted by the P0

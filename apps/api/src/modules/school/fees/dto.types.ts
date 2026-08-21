@@ -294,6 +294,32 @@ export class RefundFeeDto {
   @IsOptional() @IsString() notes?: string;
 }
 
+/* ── Fee Categories (standalone catalog master) ── */
+
+export class CreateFeeCategoryDto {
+  @IsString() @IsNotEmpty() code!: string; // e.g. 'TUITION', 'REGISTRATION', 'SWIMMING'
+  @IsString() @IsNotEmpty() name!: string; // e.g. 'School Fees'
+
+  /** 'mandatory' | 'optional' — mirrors the competitor Mandatory/Optional flag. */
+  @IsIn(['mandatory', 'optional'])
+  type!: 'mandatory' | 'optional';
+
+  @IsOptional() @IsString() description?: string;
+
+  @IsOptional() @IsInt() @Min(0) paymentOrder?: number;
+
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class UpdateFeeCategoryDto {
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsIn(['mandatory', 'optional']) type?: 'mandatory' | 'optional';
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(0) paymentOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
 /* ── Budgeting ── */
 export class CreateBudgetDto {
   @IsString() @IsNotEmpty() category!: string;
