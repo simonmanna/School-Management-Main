@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   DEFAULT_PAGE,
   DEFAULT_PAGE_SIZE,
@@ -6,6 +7,7 @@ import {
   type PaginatedResult,
   type PaginationQuery,
 } from '@erp/shared';
+import { SOFT_DELETE } from '../../kernel/prisma/tenancy.extension';
 
 /** Minimal structural shape of a Prisma model delegate used by the base service. */
 export interface CrudDelegate {
@@ -19,6 +21,8 @@ export interface CrudDelegate {
   create(args: any): Promise<any>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateMany(args: any): Promise<{ count: number }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  deleteMany(args: any): Promise<{ count: number }>;
 }
 
 /**
@@ -85,17 +89,45 @@ export abstract class BaseCrudService<T = any, CreateInput = any, UpdateInput = 
   }
 
   async create(data: CreateInput): Promise<T> {
-    return (await this.delegate.create({ data, include: this.defaultInclude })) as T;
+    try {
+      return (await this.delegate.create({ data, include: this.defaultInclude })) as T;
+    } catch (err) {
+      // A duplicate unique value (e.g. reusing an existing code) must surface as
+      // a clean 409, not an unhandled 500. This mirrors the handling in update().
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException(`${this.entityName} with these details already exists`);
+      }
+      throw err;
+    }
   }
 
   async update(id: string, data: UpdateInput): Promise<T> {
-    const res = await this.delegate.updateMany({ where: { id }, data });
-    if (res.count === 0) throw new NotFoundException(`${this.entityName} ${id} not found`);
-    return this.findOne(id);
+    try {
+      const res = await this.delegate.updateMany({ where: { id }, data });
+      if (res.count === 0) throw new NotFoundException(`${this.entityName} ${id} not found`);
+      return this.findOne(id);
+    } catch (err) {
+      // A duplicate unique value (e.g. renaming to an existing name) must surface
+      // as a clean 409, not an unhandled 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException(`${this.entityName} update conflicts with an existing record`);
+      }
+      throw err;
+    }
   }
 
   async remove(id: string): Promise<void> {
-    const res = await this.delegate.updateMany({ where: { id }, data: { deletedAt: new Date() } });
+    // Models registered in the tenancy extension's SOFT_DELETE set carry a
+    // `deletedAt` column and must be soft-deleted. Models without it (e.g.
+    // TeacherAssignment, Bed, Borrowing, FeeSchedule, …) would 500 on the
+    // `deletedAt` write — fall back to a hard delete for those. `entityName`
+    // mirrors the Prisma model name for the vast majority of services.
+    if (SOFT_DELETE.has(this.entityName)) {
+      const res = await this.delegate.updateMany({ where: { id }, data: { deletedAt: new Date() } });
+      if (res.count === 0) throw new NotFoundException(`${this.entityName} ${id} not found`);
+      return;
+    }
+    const res = await this.delegate.deleteMany({ where: { id } });
     if (res.count === 0) throw new NotFoundException(`${this.entityName} ${id} not found`);
   }
 }

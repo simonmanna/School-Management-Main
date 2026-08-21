@@ -139,6 +139,33 @@ export class FeeScheduleService extends BaseCrudService<FeeSchedule, CreateFeeSc
     super(prisma.client.feeSchedule as unknown as CrudDelegate);
   }
 
+  /**
+   * Prisma 6 no longer coerces a date-only string ("YYYY-MM-DD") into a
+   * DateTime, so a `dueDate` coming from an `<input type="date">` (which sends
+   * exactly that shape) would throw PrismaClientValidationError → HTTP 500.
+   * Normalize any date-only value to a full ISO-8601 timestamp before create.
+   */
+  async create(data: CreateFeeScheduleDto): Promise<FeeSchedule> {
+    const coerced = { ...data };
+    if (typeof coerced.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(coerced.dueDate)) {
+      coerced.dueDate = `${coerced.dueDate}T00:00:00.000Z` as unknown as CreateFeeScheduleDto['dueDate'];
+    }
+    if (coerced.lateFeePolicy && typeof coerced.lateFeePolicy === 'object') {
+      const p = coerced.lateFeePolicy as unknown as Record<string, unknown>;
+      if (typeof p.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.from)) p.from = `${p.from}T00:00:00.000Z`;
+      if (typeof p.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.to)) p.to = `${p.to}T00:00:00.000Z`;
+    }
+    return super.create(coerced as CreateFeeScheduleDto);
+  }
+
+  async update(id: string, data: UpdateFeeScheduleDto): Promise<FeeSchedule> {
+    const coerced = { ...(data as Record<string, unknown>) };
+    if (typeof coerced.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(coerced.dueDate)) {
+      coerced.dueDate = `${coerced.dueDate}T00:00:00.000Z`;
+    }
+    return super.update(id, coerced as UpdateFeeScheduleDto);
+  }
+
   async forTerm(termId: string) {
     return this.prisma.client.feeSchedule.findMany({
       where: { termId },
