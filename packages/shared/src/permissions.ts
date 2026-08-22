@@ -400,6 +400,12 @@ export const PERMISSIONS = {
     manageAssignments: 'school:assignments:write',
     gradeAssignments: 'school:assignments:grade',
     submitAssignments: 'school:assignments:submit',
+    // LMS course delivery (Moodle-shaped, ADR-014). Coarse controller gate; the
+    // fine-grained per-course authorization is the LMS capability system
+    // (LmsRoleAssignment × LmsContext), checked inside handlers.
+    manageCourses: 'school:courses:write',
+    teachCourses: 'school:courses:teach',
+    enrolLearners: 'school:courses:enrol',
     // LMS / Lesson Planning (Phase 1)
     manageLessonPlans: 'school:lessonplans:write',
     reviewLessonPlans: 'school:lessonplans:review',

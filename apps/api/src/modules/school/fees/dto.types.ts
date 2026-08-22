@@ -24,19 +24,50 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/**
+ * One priced line inside a FeeStructure.
+ *
+ * `code` is the FeeCategory code — that is the join between the reusable
+ * Fee Categories catalog and a structure. `feeCategoryId` carries the hard
+ * reference so a category rename does not orphan the component, and
+ * `isOptional` is denormalised off the category's `type` at save time so the
+ * billing engine can decide "bill everyone" vs "bill only opted-in students"
+ * without a second query per component.
+ *
+ * `productId` is optional: with no product the invoice line falls back to
+ * AccountDeterminationService's default revenue account, which is what a
+ * school that has not modelled fee products in the catalog wants. Requiring it
+ * was why a bursar could not save a structure at all.
+ */
 export class FeeComponent {
   @IsString()
   @IsNotEmpty()
-  code!: string; // 'TUITION', 'TRANSPORT', 'MEAL', 'LAB', 'EXAM', 'LIBRARY', 'ACTIVITY'
+  code!: string; // FeeCategory.code — 'TUITION', 'TRANSPORT', 'SWIMMING', …
 
+  /** Human label shown on the invoice line (defaults to `code`). */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  productId!: string; // FK to Product (type=service)
+  name?: string;
+
+  /** FK to FeeCategory. */
+  @IsOptional()
+  @IsString()
+  feeCategoryId?: string;
+
+  /** FK to Product (type=service). Optional — see class doc. */
+  @IsOptional()
+  @IsString()
+  productId?: string;
 
   @IsNumber()
   @Min(0)
   amount!: number;
 
+  /**
+   * True when the component comes from an *optional* FeeCategory. Optional
+   * components are billed ONLY to students with a matching StudentOptionalFee
+   * opt-in for the term.
+   */
   @IsOptional()
   @IsBoolean()
   isOptional?: boolean;
@@ -318,6 +349,34 @@ export class UpdateFeeCategoryDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsInt() @Min(0) paymentOrder?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+/* ── Student optional fees (P3) ── */
+
+export class UpsertStudentOptionalFeeDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+
+  /** Null/omitted amount means "use the fee structure component amount". */
+  @IsOptional() @IsNumber() @Min(0) amount?: number | null;
+
+  @IsOptional() @IsBoolean() isActive?: boolean;
+
+  @IsOptional() @IsString() notes?: string;
+}
+
+/**
+ * Bulk save from the Optional Fees roster screen: one term + one category,
+ * many students. Rows with `amount == null` and `isActive === false` are
+ * removed rather than stored, so unticking a student cleanly un-bills them.
+ */
+export class BulkStudentOptionalFeeDto {
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsString() @IsNotEmpty() feeCategoryId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpsertStudentOptionalFeeDto)
+  rows!: UpsertStudentOptionalFeeDto[];
 }
 
 /* ── Budgeting ── */

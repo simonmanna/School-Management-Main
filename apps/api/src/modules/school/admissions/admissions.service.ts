@@ -1349,14 +1349,20 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     reservedCapacity?: number;
   }) {
     const organizationId = this.tenant.organizationId;
+    // Prisma 6 requires every column of a compound-unique constraint to be present
+    // and non-null in an upsert `where`; pad a null nullable FK with a sentinel for
+    // the lookup key (the real (possibly-null) value is still written in `create`).
+    const SENT = '__none__';
+    const sectionKey = dto.sectionId ?? SENT;
+    const streamKey = dto.streamId ?? SENT;
     return this.prisma.client.admissionCapacity.upsert({
       where: {
         organizationId_admissionCycleId_classId_sectionId_streamId: {
           organizationId,
           admissionCycleId: dto.admissionCycleId,
           classId: dto.classId,
-          sectionId: dto.sectionId ?? null,
-          streamId: dto.streamId ?? null,
+          sectionId: sectionKey,
+          streamId: streamKey,
         },
       } as any,
       create: { organizationId, ...dto },

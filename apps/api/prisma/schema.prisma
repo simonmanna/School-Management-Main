@@ -10188,6 +10188,7 @@ model Term {
   teacherAssignments TeacherAssignment[]
   exams               Exam[]
   feeAssignments      StudentFeeAssignment[]
+  optionalFees        StudentOptionalFee[]
   installmentPlans    InstallmentPlan[]
   mealPlanAssignments MealPlanAssignment[]
   budgets            Budget[]
@@ -10477,6 +10478,7 @@ model StudentProfile {
   enrollments         Enrollment[]
   gradeEntries        GradeEntry[]
   feeAssignments      StudentFeeAssignment[]
+  optionalFees        StudentOptionalFee[]
   scholarships        Scholarship[]
   sponsorships        Sponsorship[]
   waivers             Waiver[]
@@ -11594,6 +11596,19 @@ model CourseOffering {
   /// Specific Curriculum version row (point at a published Curriculum, not a bare class).
   curriculumId     String
   status           String   @default("active") // active | archived
+  /// ── Moodle-shaped course settings (ADR-014). ──
+  format               CourseFormat @default(weeks)
+  numSections          Int          @default(14)
+  startDate            DateTime?
+  endDate              DateTime?
+  summary              String?
+  summaryFormat        String       @default("html")
+  visible              Boolean      @default(true)
+  groupMode            GroupMode    @default(none)
+  forceGroupMode       Boolean      @default(false)
+  completionEnabled    Boolean      @default(true)
+  showGradesToStudents Boolean      @default(true)
+  categoryId           String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   deletedAt        DateTime?
@@ -11602,6 +11617,13 @@ model CourseOffering {
   scheduledLessons ScheduledLesson[]
   discussions Discussion[]
   timetableSlots TimetableSlot[]
+  sections           CourseSection[]
+  modules            CourseModule[]
+  enrolmentMethods   CourseEnrolmentMethod[]
+  enrolments         CourseEnrolment[]
+  groups             LmsGroup[]
+  groupings          LmsGrouping[]
+  completionCriteria CourseCompletionCriteria[]
 
   @@unique([organizationId, academicYearId, termId, subjectId, classId, sectionId])
   @@index([organizationId])
@@ -11838,9 +11860,14 @@ model Discussion {
   organizationId   String
   courseOfferingId String?
   lessonPlanId     String?
+  /// mod_forum link: the CourseModule this thread belongs to, and its group scope.
+  courseModuleId   String?
+  forumGroupId     String?
   title            String
   body             String?
   createdById      String?
+  pinned           Boolean  @default(false)
+  locked           Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   deletedAt        DateTime?
@@ -11852,6 +11879,7 @@ model Discussion {
   @@index([organizationId])
   @@index([courseOfferingId])
   @@index([lessonPlanId])
+  @@index([courseModuleId])
 }
 
 model DiscussionPost {
@@ -12303,6 +12331,7 @@ enum AssessmentSourceType {
   assignment
   exam_session
   quiz
+  lms_activity
 }
 
 enum AssessmentStatus {
@@ -12497,6 +12526,11 @@ model ExamSchedule {
   sitting         String?
   isResit         Boolean  @default(false)
   venueId         String?
+  /// Marks lock — an admin freezes entry for this paper. Distinct from the
+  /// GradeEntry approval workflow (which is SoD-guarded); this is the plain
+  /// "no more edits" switch the exam office actually asks for.
+  marksLockedAt   DateTime?
+  marksLockedById String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -12907,6 +12941,9 @@ model Assessment {
   sourceRef         String?
   status            AssessmentStatus @default(draft)
   dueAt             DateTime?
+  /// Moodle grade-item hide/lock (ADR-014 §3.5).
+  hiddenFromStudents Boolean @default(false)
+  lockedAt          DateTime?
   version           Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -13527,6 +13564,8 @@ model QuizResponse {
   /// Client sequence for this question — the highest valid one wins.
   sequenceNumber Int      @default(0)
   response       Json     @default("{}")
+  /// Question-behaviour state (tries used, penalty accrued) for interactive/adaptive modes.
+  stepData       Json     @default("{}")
   autoScore      Decimal? @db.Decimal(8, 2)
   isCorrect      Boolean?
   needsManual    Boolean  @default(false)
@@ -14327,8 +14366,43 @@ model FeeCategory {
   updatedAt      DateTime @updatedAt
   deletedAt      DateTime?
 
+  studentOptionalFees StudentOptionalFee[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
+}
+
+/// P3 — per-student opt-in to an OPTIONAL fee category for one term.
+///
+/// A *mandatory* category bills every student inside the fee structure's scope
+/// automatically. An *optional* one (Swimming, Transport, Boarding extras, …)
+/// must never be force-billed: it only reaches a student's invoice when a row
+/// exists here. `amount` overrides the structure component's price when set,
+/// which is how one structure can charge two students different swimming fees
+/// without cloning the structure.
+model StudentOptionalFee {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  termId           String
+  feeCategoryId    String
+  /// Per-student amount. Null = fall back to the structure component amount.
+  amount           Decimal? @db.Decimal(20, 6)
+  isActive         Boolean  @default(true)
+  notes            String?
+  createdBy        String?
+  updatedBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  term           Term           @relation(fields: [termId], references: [id])
+  feeCategory    FeeCategory    @relation(fields: [feeCategoryId], references: [id])
+
+  @@unique([organizationId, studentProfileId, termId, feeCategoryId])
+  @@index([organizationId])
+  @@index([termId, feeCategoryId])
+  @@index([studentProfileId])
 }
 
 /// Phase 0.9 — historical remediation. Corrections to data corrupted by the P0
@@ -16306,4 +16380,1048 @@ model FrontDeskLog {
   @@index([organizationId])
   @@index([partnerId])
   @@index([status])
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  MOODLE-SHAPED LMS  (ADR-014)                                              ║
+// ║  docs/architecture/LMS-MOODLE-ARCHITECTURE.md                             ║
+// ║  All models below are additive. Cross-aggregate links are FK-less string  ║
+// ║  ids (the existing LMS idiom: LearningObjectiveEvidence.sourceId etc.);   ║
+// ║  real relations exist only inside the LMS aggregate.                      ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+// ─────────────────────── P0 · Context & capability ───────────────────────
+
+enum LmsContextLevel {
+  system
+  organization
+  category
+  course
+  activity
+  user
+}
+
+/// Access-control permission verbs (Moodle's roles/allow/prevent/prohibit).
+enum LmsPermission {
+  inherit
+  allow
+  prevent
+  prohibit
+}
+
+/// Materialised-path context tree. path e.g. '/org-1/cat-3/course-88/cm-412/'.
+model LmsContext {
+  id             String          @id @default(uuid())
+  organizationId String
+  level          LmsContextLevel
+  /// The row this context wraps: CourseOffering.id, CourseModule.id, CourseCategory.id, userId…
+  instanceId     String?
+  parentId       String?
+  path           String
+  depth          Int             @default(0)
+  createdAt      DateTime        @default(now())
+
+  parent          LmsContext?             @relation("LmsCtxTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children        LmsContext[]            @relation("LmsCtxTree")
+  roleAssignments LmsRoleAssignment[]
+  overrides       LmsCapabilityOverride[]
+
+  @@unique([organizationId, level, instanceId])
+  @@index([organizationId, path])
+  @@index([parentId])
+}
+
+/// Role definition. archetype ∈ manager|coursecreator|editingteacher|teacher|student|parent|observer|guest.
+model LmsRole {
+  id             String            @id @default(uuid())
+  organizationId String
+  shortname      String
+  name           String
+  archetype      String
+  sortOrder      Int               @default(0)
+  /// Context levels at which this role may be assigned.
+  assignableAt   LmsContextLevel[]
+  createdAt      DateTime          @default(now())
+
+  capabilities LmsRoleCapability[]
+  assignments  LmsRoleAssignment[]
+
+  @@unique([organizationId, shortname])
+  @@index([organizationId])
+}
+
+model LmsRoleCapability {
+  id         String        @id @default(uuid())
+  roleId     String
+  capability String
+  permission LmsPermission @default(inherit)
+
+  role LmsRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, capability])
+  @@index([capability])
+}
+
+model LmsRoleAssignment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  contextId        String
+  roleId           String
+  /// Exactly one principal. Staff carry a userId; students a studentProfileId.
+  userId           String?
+  studentProfileId String?
+  /// Enrolment component that created it, for auto-sync reconciliation.
+  sourceComponent  String?
+  createdAt        DateTime @default(now())
+
+  context LmsContext @relation(fields: [contextId], references: [id], onDelete: Cascade)
+  role    LmsRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([contextId, roleId, userId, studentProfileId])
+  @@index([organizationId, userId])
+  @@index([organizationId, studentProfileId])
+  @@index([roleId])
+}
+
+/// Per-context capability override ("permissions in this context").
+model LmsCapabilityOverride {
+  id         String        @id @default(uuid())
+  contextId  String
+  roleId     String
+  capability String
+  permission LmsPermission
+
+  context LmsContext @relation(fields: [contextId], references: [id], onDelete: Cascade)
+
+  @@unique([contextId, roleId, capability])
+  @@index([contextId])
+}
+
+// ─────────────────────── P1 · Course spine ───────────────────────
+
+enum CourseFormat {
+  weeks
+  topics
+  single_activity
+  social
+  flexible
+}
+
+enum GroupMode {
+  none
+  separate
+  visible
+}
+
+enum CompletionMode {
+  none
+  manual
+  automatic
+}
+
+/// Optional browse tree above offerings (department / stage / subject area).
+model CourseCategory {
+  id             String   @id @default(uuid())
+  organizationId String
+  parentId       String?
+  name           String
+  description    String?
+  path           String
+  depth          Int      @default(0)
+  sortOrder      Int      @default(0)
+  visible        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  parent   CourseCategory?  @relation("CourseCatTree", fields: [parentId], references: [id])
+  children CourseCategory[] @relation("CourseCatTree")
+
+  @@index([organizationId, path])
+}
+
+/// Moodle course_sections. sectionNo 0 = "General" (always visible, no dates).
+model CourseSection {
+  id               String    @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  sectionNo        Int
+  name             String?
+  summary          String?
+  visible          Boolean   @default(true)
+  /// Availability tree (see AvailabilityService). null = always available.
+  availability     Json?
+  /// For format=weeks: the Monday of the week this section covers.
+  weekOf           DateTime?
+  /// Ordered CourseModule ids — one-write drag reorder (Moodle sequence).
+  sequence         String[]  @default([])
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  modules        CourseModule[]
+
+  @@unique([courseOfferingId, sectionNo])
+  @@index([organizationId])
+  @@index([courseOfferingId])
+}
+
+/// Registry of installed activity types (Moodle's `modules` table).
+model LmsActivityType {
+  id                     String  @id @default(uuid())
+  name                   String  @unique
+  label                  String
+  icon                   String  @default("Square")
+  gradable               Boolean @default(false)
+  supportsGroups         Boolean @default(false)
+  supportsCompletionAuto Boolean @default(true)
+  hasSubmissions         Boolean @default(false)
+  visible                Boolean @default(true)
+  sortOrder              Int     @default(0)
+}
+
+/// Moodle course_modules — the spine row for every placed activity.
+model CourseModule {
+  id               String         @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  sectionId        String
+  activityType     String
+  /// Polymorphic FK into the per-type instance table (plugin-enforced integrity).
+  instanceId       String
+  idnumber         String?
+  sequence         Int            @default(0)
+  visible          Boolean        @default(true)
+  visibleOnPage    Boolean        @default(true)
+  availability     Json?
+  groupMode        GroupMode      @default(none)
+  groupingId       String?
+  completionMode   CompletionMode @default(manual)
+  completionRules  Json           @default("{}")
+  /// Set when gradable: the single Assessment this module owns (FK-less). Marks never live here.
+  assessmentId     String?        @unique
+  openAt           DateTime?
+  dueAt            DateTime?
+  cutoffAt         DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+
+  courseOffering CourseOffering           @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  section        CourseSection            @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  completions    CourseModuleCompletion[]
+
+  @@index([organizationId, courseOfferingId])
+  @@index([activityType, instanceId])
+  @@index([sectionId])
+  @@index([organizationId, dueAt])
+}
+
+// ─────────────────────── P2 · content activity instances ───────────────────────
+
+model ModResource {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// FK-less link to LearningResource (the file), or a raw fileId.
+  resourceId     String?
+  fileId         String?
+  displayMode    String   @default("auto")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ModUrl {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  externalUrl    String
+  display        String   @default("new_window")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ModPage {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  content        String   @default("")
+  contentFormat  String   @default("html")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ModLabel {
+  id             String   @id @default(uuid())
+  organizationId String
+  content        String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ModFolder {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// FK-less list of LmsFile / fileIds.
+  fileIds        String[] @default([])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ─────────────────────── P3 · adapter activity instances ───────────────────────
+
+/// Wraps the existing Assignment/AssignmentSubmission chain (Moodle mod_assign).
+model ModAssign {
+  id                 String    @id @default(uuid())
+  organizationId     String
+  name               String
+  intro              String?
+  /// FK-less link to the existing Assignment row that carries the real submission/grade tables.
+  assignmentId       String?
+  /// FK-less link to a migrated HomeworkAssignment (dual-read during P3).
+  homeworkId         String?
+  allowSubmissionsFrom DateTime?
+  dueDate            DateTime?
+  cutoffDate         DateTime?
+  maxScore           Decimal   @default(100) @db.Decimal(8, 2)
+  submissionTypes    String[]  @default(["online_text", "file"])
+  maxAttempts        Int       @default(1)
+  teamSubmission     Boolean   @default(false)
+  blindMarking       Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+/// Wraps the existing Discussion/DiscussionPost chain (Moodle mod_forum).
+model ModForum {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// general | eachuser | single | qanda | news.
+  forumType      String   @default("general")
+  /// optional|forced|auto|disabled.
+  subscription   String   @default("optional")
+  maxAttachments Int      @default(2)
+  ratingScale    Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions ModForumSubscription[]
+}
+
+model ModForumSubscription {
+  id               String   @id @default(uuid())
+  organizationId   String
+  forumId          String
+  userId           String?
+  studentProfileId String?
+  createdAt        DateTime @default(now())
+
+  forum ModForum @relation(fields: [forumId], references: [id], onDelete: Cascade)
+
+  @@unique([forumId, userId, studentProfileId])
+  @@index([forumId])
+}
+
+// ─────────────────────── P4 · enrolment / groups / completion ───────────────────────
+
+enum EnrolMethod {
+  roster_sync
+  manual
+  self
+  cohort
+  guest
+}
+
+enum EnrolStatus {
+  active
+  suspended
+}
+
+enum CompletionState {
+  incomplete
+  complete
+  complete_pass
+  complete_fail
+}
+
+model CourseEnrolmentMethod {
+  id               String      @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  method           EnrolMethod
+  enabled          Boolean     @default(true)
+  config           Json        @default("{}")
+  defaultRoleId    String?
+  sortOrder        Int         @default(0)
+  createdAt        DateTime    @default(now())
+
+  courseOffering CourseOffering    @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  enrolments     CourseEnrolment[]
+
+  @@unique([courseOfferingId, method])
+  @@index([organizationId])
+}
+
+model CourseEnrolment {
+  id               String      @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  methodId         String
+  studentProfileId String?
+  userId           String?
+  status           EnrolStatus @default(active)
+  startedAt        DateTime?
+  endsAt           DateTime?
+  lastAccessAt     DateTime?
+  createdAt        DateTime    @default(now())
+
+  courseOffering CourseOffering        @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  method         CourseEnrolmentMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  @@unique([courseOfferingId, studentProfileId, userId])
+  @@index([organizationId, studentProfileId])
+  @@index([courseOfferingId])
+}
+
+model LmsGroup {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  name             String
+  description      String?
+  enrolmentKey     String?
+  createdAt        DateTime @default(now())
+
+  courseOffering CourseOffering   @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  members        LmsGroupMember[]
+
+  @@unique([courseOfferingId, name])
+  @@index([organizationId])
+}
+
+model LmsGroupMember {
+  id               String   @id @default(uuid())
+  groupId          String
+  studentProfileId String?
+  userId           String?
+  createdAt        DateTime @default(now())
+
+  group LmsGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, studentProfileId, userId])
+  @@index([groupId])
+}
+
+model LmsGrouping {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  name             String
+  groupIds         String[] @default([])
+  createdAt        DateTime @default(now())
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+
+  @@unique([courseOfferingId, name])
+}
+
+model CourseModuleCompletion {
+  id               String          @id @default(uuid())
+  organizationId   String
+  courseModuleId   String
+  studentProfileId String
+  state            CompletionState @default(incomplete)
+  viewed           Boolean         @default(false)
+  overriddenById   String?
+  completedAt      DateTime?
+  updatedAt        DateTime        @updatedAt
+
+  courseModule CourseModule @relation(fields: [courseModuleId], references: [id], onDelete: Cascade)
+
+  @@unique([courseModuleId, studentProfileId])
+  @@index([organizationId, studentProfileId])
+}
+
+model CourseCompletionCriteria {
+  id               String   @id @default(uuid())
+  organizationId   String
+  courseOfferingId String
+  criteriaType     String
+  courseModuleId   String?
+  minGrade         Decimal? @db.Decimal(5, 2)
+  byDate           DateTime?
+  aggregation      String   @default("all")
+  createdAt        DateTime @default(now())
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, courseOfferingId])
+}
+
+// ─────────────────────── P5 · gradebook additions ───────────────────────
+
+model AssessmentGradeOverride {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentAssessmentId String   @unique
+  overriddenScore     Decimal  @db.Decimal(8, 2)
+  reason              String?
+  overriddenById      String
+  createdAt           DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+model StudentAssessmentHistory {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentAssessmentId String
+  oldScore            Decimal? @db.Decimal(8, 2)
+  newScore            Decimal? @db.Decimal(8, 2)
+  source              String
+  changedById         String?
+  changedAt           DateTime @default(now())
+
+  @@index([organizationId, studentAssessmentId])
+}
+
+// ─────────────────────── P6 · quiz depth ───────────────────────
+
+model ModQuiz {
+  id               String   @id @default(uuid())
+  organizationId   String
+  name             String
+  intro            String?
+  /// FK-less optional link to a pre-built QuestionPaper.
+  questionPaperId  String?
+  timeLimitSec     Int?
+  attemptsAllowed  Int      @default(0)
+  gradingMethod    String   @default("highest")
+  navMethod        String   @default("free")
+  shuffleQuestions Boolean  @default(false)
+  shuffleAnswers   Boolean  @default(true)
+  behaviour        String   @default("deferredfeedback")
+  reviewOptions    Json     @default("{}")
+  overallFeedback  Json     @default("[]")
+  maxScore         Decimal  @default(100) @db.Decimal(8, 2)
+  openAt           DateTime?
+  closeAt          DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  slots     QuizSlot[]
+  overrides QuizOverride[]
+}
+
+/// Question categories: a tree OWNED BY A CONTEXT (course bank vs shared org bank).
+model QuestionCategory {
+  id             String   @id @default(uuid())
+  organizationId String
+  contextId      String
+  parentId       String?
+  name           String
+  info           String?
+  path           String
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, contextId])
+}
+
+/// Moodle 4.x question versioning: edits create a version; live attempts keep theirs.
+model QuestionVersion {
+  id         String   @id @default(uuid())
+  questionId String
+  version    Int
+  status     String   @default("ready")
+  snapshot   Json
+  createdAt  DateTime @default(now())
+
+  @@unique([questionId, version])
+  @@index([questionId])
+}
+
+model QuizSlot {
+  id                String   @id @default(uuid())
+  organizationId    String
+  quizId            String
+  page              Int      @default(1)
+  slotNo            Int
+  questionId        String?
+  questionVersionId String?
+  randomCategoryId  String?
+  randomIncludeSub  Boolean  @default(false)
+  randomTags        String[] @default([])
+  maxMark           Decimal  @default(1) @db.Decimal(8, 2)
+  requirePrevious   Boolean  @default(false)
+
+  quiz ModQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, slotNo])
+  @@index([quizId])
+}
+
+model QuizOverride {
+  id               String    @id @default(uuid())
+  organizationId   String
+  quizId           String
+  studentProfileId String?
+  groupId          String?
+  openAt           DateTime?
+  closeAt          DateTime?
+  timeLimitSec     Int?
+  attemptsAllowed  Int?
+  createdAt        DateTime  @default(now())
+
+  quiz ModQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([quizId])
+}
+
+// ─────────────────────── P7 · events, reports, badges ───────────────────────
+
+/// Moodle's standard log — one row per mutation, written by the plugin base.
+model LmsEvent {
+  id               String   @id @default(uuid())
+  organizationId   String
+  eventName        String
+  component        String
+  action           String
+  target           String
+  contextId        String?
+  courseOfferingId String?
+  courseModuleId   String?
+  objectId         String?
+  userId           String?
+  studentProfileId String?
+  other            Json     @default("{}")
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, courseOfferingId, createdAt])
+  @@index([organizationId, studentProfileId, createdAt])
+  @@index([organizationId, component, action])
+}
+
+model LmsBadge {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  imageUrl       String?
+  /// manual | course_completion | activity_completion | grade.
+  criteriaType   String   @default("manual")
+  criteria       Json     @default("{}")
+  courseOfferingId String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  awards LmsBadgeAward[]
+
+  @@index([organizationId])
+}
+
+model LmsBadgeAward {
+  id               String   @id @default(uuid())
+  organizationId   String
+  badgeId          String
+  studentProfileId String?
+  userId           String?
+  awardedAt        DateTime @default(now())
+  awardedById      String?
+
+  badge LmsBadge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([badgeId, studentProfileId, userId])
+  @@index([organizationId])
+}
+
+// ─────────────────────── P8 · standards & extra activity instances ───────────────────────
+
+model ModChoice {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  allowMultiple  Boolean  @default(false)
+  allowUpdate    Boolean  @default(true)
+  limitAnswers   Boolean  @default(false)
+  showResults    String   @default("after_answer")
+  publishAnon    Boolean  @default(false)
+  options        Json     @default("[]")
+  closeAt        DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  answers ModChoiceAnswer[]
+}
+
+model ModChoiceAnswer {
+  id               String   @id @default(uuid())
+  organizationId   String
+  choiceId         String
+  optionKey        String
+  studentProfileId String?
+  userId           String?
+  createdAt        DateTime @default(now())
+
+  choice ModChoice @relation(fields: [choiceId], references: [id], onDelete: Cascade)
+
+  @@index([choiceId])
+}
+
+model ModGlossary {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  allowComments  Boolean  @default(false)
+  allowDuplicate Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  entries ModGlossaryEntry[]
+}
+
+model ModGlossaryEntry {
+  id             String   @id @default(uuid())
+  organizationId String
+  glossaryId     String
+  concept        String
+  definition     String
+  aliases        String[] @default([])
+  approved       Boolean  @default(true)
+  authorId       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  glossary ModGlossary @relation(fields: [glossaryId], references: [id], onDelete: Cascade)
+
+  @@index([glossaryId])
+}
+
+model ModWiki {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// collaborative | individual.
+  wikiMode       String   @default("collaborative")
+  firstPageTitle String   @default("Home")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  pages ModWikiPage[]
+}
+
+model ModWikiPage {
+  id        String   @id @default(uuid())
+  organizationId String
+  wikiId    String
+  title     String
+  content   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wiki     ModWiki          @relation(fields: [wikiId], references: [id], onDelete: Cascade)
+  versions ModWikiVersion[]
+
+  @@unique([wikiId, title])
+  @@index([wikiId])
+}
+
+model ModWikiVersion {
+  id        String   @id @default(uuid())
+  pageId    String
+  version   Int
+  content   String
+  authorId  String?
+  createdAt DateTime @default(now())
+
+  page ModWikiPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, version])
+}
+
+model ModLesson {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  gradable       Boolean  @default(false)
+  maxScore       Decimal  @default(100) @db.Decimal(8, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  pages ModLessonPage[]
+}
+
+model ModLessonPage {
+  id           String   @id @default(uuid())
+  organizationId String
+  lessonId     String
+  title        String
+  content      String   @default("")
+  /// content | question.
+  pageType     String   @default("content")
+  qtype        String?
+  sequence     Int      @default(0)
+  /// Branches: [{ label, answer?, correct?, jumpToPageId? }].
+  branches     Json     @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  lesson ModLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([lessonId])
+}
+
+model ModFeedback {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  anonymous      Boolean  @default(true)
+  multipleSubmit Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  items     ModFeedbackItem[]
+  responses ModFeedbackResponse[]
+}
+
+model ModFeedbackItem {
+  id             String   @id @default(uuid())
+  organizationId String
+  feedbackId     String
+  label          String
+  /// text | textarea | multichoice | rating | info.
+  itemType       String   @default("text")
+  required       Boolean  @default(false)
+  options        Json     @default("[]")
+  sequence       Int      @default(0)
+
+  feedback ModFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId])
+}
+
+model ModFeedbackResponse {
+  id               String   @id @default(uuid())
+  organizationId   String
+  feedbackId       String
+  studentProfileId String?
+  userId           String?
+  answers          Json     @default("{}")
+  submittedAt      DateTime @default(now())
+
+  feedback ModFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId])
+}
+
+model ModWorkshop {
+  id              String   @id @default(uuid())
+  organizationId  String
+  name            String
+  intro           String?
+  /// setup | submission | assessment | grading | closed.
+  phase           String   @default("setup")
+  instructAuthors String?
+  instructReviewers String?
+  submissionStart DateTime?
+  submissionEnd   DateTime?
+  assessmentStart DateTime?
+  assessmentEnd   DateTime?
+  gradeSubmission Decimal  @default(80) @db.Decimal(8, 2)
+  gradeAssessment Decimal  @default(20) @db.Decimal(8, 2)
+  numReviewers    Int      @default(3)
+  rubric          Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  submissions ModWorkshopSubmission[]
+  allocations ModWorkshopAllocation[]
+}
+
+model ModWorkshopSubmission {
+  id               String   @id @default(uuid())
+  organizationId   String
+  workshopId       String
+  studentProfileId String
+  title            String
+  content          String?
+  attachments      Json     @default("[]")
+  submittedAt      DateTime @default(now())
+
+  workshop    ModWorkshop             @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  allocations ModWorkshopAllocation[]
+
+  @@index([workshopId])
+}
+
+model ModWorkshopAllocation {
+  id             String   @id @default(uuid())
+  organizationId String
+  workshopId     String
+  submissionId   String
+  reviewerProfileId String
+  grade          Decimal? @db.Decimal(8, 2)
+  feedback       String?
+  filledRubric   Json     @default("{}")
+  submittedAt    DateTime?
+  createdAt      DateTime @default(now())
+
+  workshop   ModWorkshop           @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  submission ModWorkshopSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, reviewerProfileId])
+  @@index([workshopId])
+}
+
+/// SCORM package instance + per-user tracking (CMI subset).
+model ModScorm {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// FK-less fileId of the uploaded .zip package; manifest parsed into `manifest`.
+  packageFileId  String?
+  scormVersion   String   @default("1.2")
+  manifest       Json     @default("{}")
+  maxAttempts    Int      @default(0)
+  gradingMethod  String   @default("highest")
+  maxScore       Decimal  @default(100) @db.Decimal(8, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tracks ScormTrack[]
+}
+
+model ScormTrack {
+  id               String   @id @default(uuid())
+  organizationId   String
+  scormId          String
+  studentProfileId String
+  scoIdentifier    String
+  attempt          Int      @default(1)
+  /// CMI element → value map (cmi.core.lesson_status, cmi.core.score.raw, …).
+  cmi              Json     @default("{}")
+  lessonStatus     String   @default("not attempted")
+  scoreRaw         Decimal? @db.Decimal(8, 2)
+  totalTimeSec     Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  scorm ModScorm @relation(fields: [scormId], references: [id], onDelete: Cascade)
+
+  @@unique([scormId, studentProfileId, scoIdentifier, attempt])
+  @@index([scormId])
+}
+
+/// LTI 1.3 external tool link (tool consumer side).
+model ModLti {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  toolUrl        String
+  clientId       String?
+  deploymentId   String?
+  publicKeyset   String?
+  loginUrl       String?
+  redirectUrls   String[] @default([])
+  customParams   Json     @default("{}")
+  launchContainer String  @default("new_window")
+  gradable       Boolean  @default(false)
+  maxScore       Decimal  @default(100) @db.Decimal(8, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// H5P interactive content instance + xAPI capture.
+model ModH5p {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  intro          String?
+  /// FK-less fileId of the uploaded .h5p; extracted metadata in `contentJson`.
+  packageFileId  String?
+  contentJson    Json     @default("{}")
+  library        String?
+  gradable       Boolean  @default(false)
+  maxScore       Decimal  @default(100) @db.Decimal(8, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  statements XapiStatement[]
+}
+
+/// xAPI statements captured from H5P / external tools.
+model XapiStatement {
+  id               String   @id @default(uuid())
+  organizationId   String
+  h5pId            String?
+  courseModuleId   String?
+  studentProfileId String?
+  userId           String?
+  verb             String
+  object           String
+  /// { score?, success?, completion?, duration?, response? }
+  result           Json     @default("{}")
+  raw              Json     @default("{}")
+  createdAt        DateTime @default(now())
+
+  h5p ModH5p? @relation(fields: [h5pId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, courseModuleId])
+  @@index([organizationId, studentProfileId])
+}
+
+// ─────────────────────── files ───────────────────────
+
+/// Context-addressed file record layered over kernel/files (Moodle file API).
+model LmsFile {
+  id             String   @id @default(uuid())
+  organizationId String
+  fileId         String
+  contextId      String
+  component      String
+  fileArea       String
+  itemId         String
+  filePath       String   @default("/")
+  fileName       String
+  mimeType       String?
+  sizeBytes      Int?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, component, fileArea, itemId])
+  @@index([contextId])
+}
+
+/// Submissions for the LMS-native mod_assign. Grades live in the spine
+/// (StudentAssessment via the grade bridge); this holds only the artefact.
+model ModAssignSubmission {
+  id               String    @id @default(uuid())
+  organizationId   String
+  assignId         String
+  courseModuleId   String
+  studentProfileId String
+  attemptNo        Int       @default(1)
+  content          String?
+  attachments      Json      @default("[]")
+  status           String    @default("submitted") // draft | submitted | graded
+  submittedAt      DateTime  @default(now())
+  gradedAt         DateTime?
+  feedback         String?
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([assignId, studentProfileId, attemptNo])
+  @@index([organizationId, courseModuleId])
+  @@index([studentProfileId])
 }

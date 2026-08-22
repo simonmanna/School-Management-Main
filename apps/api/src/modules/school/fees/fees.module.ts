@@ -11,6 +11,7 @@ import {
   PenaltyRunService,
   ScholarshipService,
   StudentFeeAssignmentService,
+  StudentOptionalFeeService,
 } from './catalog.service';
 import {
   DiscountController,
@@ -22,6 +23,7 @@ import {
   PenaltyRunController,
   ScholarshipController,
   StudentFeeAssignmentController,
+  StudentOptionalFeeController,
 } from './catalog.controller';
 import { BillingService, SchoolPaymentService } from './billing.service';
 import { AdvancedFinanceService } from './advanced.service';
@@ -59,6 +61,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     FeeCategoryController,
     FeeScheduleController,
     StudentFeeAssignmentController,
+    StudentOptionalFeeController,
     DiscountController,
     ScholarshipController,
     InstallmentPlanController,
@@ -78,6 +81,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     FeeCategoryService,
     FeeScheduleService,
     StudentFeeAssignmentService,
+    StudentOptionalFeeService,
     DiscountService,
     ScholarshipService,
     InstallmentPlanService,
@@ -98,6 +102,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     FeeCategoryService,
     FeeScheduleService,
     StudentFeeAssignmentService,
+    StudentOptionalFeeService,
     DiscountService,
     ScholarshipService,
     InstallmentPlanService,

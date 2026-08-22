@@ -1,41 +1,25 @@
 /**
- * Unit tests for AdmissionsService state machine (P0-7, C7 + C8).
+ * Unit tests for AdmissionsService — the admission state machine and the
+ * guards that hang off it.
  *
- * Bug:
- *  - The old `review()` method blindly wrote whatever status the
- *    caller asked for, regardless of the application's current
- *    status. This let a rejected or withdrawn application be
- *    re-accepted, an `accepted` application be `rejected` after
- *    enrollment, and `schedule_exam` be repeated indefinitely.
- *  - `create()` had no duplicate-application guard. A parent could
- *    submit the same child N times in a year and get N sequential
- *    application numbers, each with its own waiting-list slot.
- *
- * Fix:
- *  - Hand-rolled state machine. `review()` looks up the current
- *    status, checks the action is in the allowed set, and throws
- *    BadRequestException otherwise.
- *  - `create()` queries for an existing application with the same
- *    (academicYearId, normalizedFirstName, normalizedLastName,
- *    applicantDob) and rejects duplicates.
+ * History:
+ *  - `review()` once wrote whatever status the caller asked for, so a rejected or
+ *    withdrawn application could be re-accepted and an enrolled one rejected.
+ *    Fixed by ADMISSION_TRANSITIONS + assertTransition.
+ *  - `create()` had no duplicate guard, so a parent could submit the same child N
+ *    times in a year.
+ *  - This file then stopped compiling: `EnrollmentService` was added as the sixth
+ *    constructor parameter and the spec still passed five, so every assertion
+ *    below silently stopped running (TS2554). That is why the newer bypasses —
+ *    `recordDecision` and `scoreApplicationWeighted` writing `status` directly,
+ *    `acceptOffer` ignoring `expiresAt`, `enroll` never consulting the eligibility
+ *    gate — were not caught. The regression tests for those are at the bottom.
  */
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 
-interface Mocks {
-  applicationCreate: jest.Mock;
-  applicationFindFirst: jest.Mock;
-  applicationUpdateMany: jest.Mock;
-  applicationFindMany: jest.Mock;
-  studentProfileFindFirst: jest.Mock;
-  auditRecordInTx: jest.Mock;
-  events: { publish: jest.Mock };
-  sequence: { next: jest.Mock };
-  $transaction: jest.Mock;
-}
-
 function makeService() {
-  const tenant = { organizationId: 'org_test' };
+  const tenant = { organizationId: 'org_test', userId: 'user_1' };
   const events = { publish: jest.fn() };
   const sequence = { next: jest.fn().mockResolvedValue('APP-2026-000001') };
   const auditRecordInTx = jest.fn().mockResolvedValue(undefined);
@@ -53,6 +37,14 @@ function makeService() {
   const upsertable = () =>
     jest.fn().mockImplementation((args: any) => ({ id: 'row_1', ...args.create, ...(args.update ?? {}) }));
 
+  const offerLetterFindFirst = jest.fn().mockResolvedValue({
+    id: 'offer_1',
+    applicationId: 'app_1',
+    status: 'issued',
+    expiresAt: null,
+  });
+  const enrollmentFindFirst = jest.fn().mockResolvedValue(null);
+
   const tx = {
     admissionApplication: {
       create: applicationCreate,
@@ -61,15 +53,33 @@ function makeService() {
       findMany: applicationFindMany,
     },
     interview: { upsert: upsertable(), findFirst: jest.fn().mockResolvedValue(null) },
-    applicantScore: { upsert: upsertable() },
-    offerLetter: { upsert: upsertable(), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
-    entranceExam: { findMany: jest.fn().mockResolvedValue([]) },
-    applicationDocument: { findMany: jest.fn().mockResolvedValue([]) },
-    admissionFee: { upsert: upsertable() },
-    studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'sp_1', status: 'active', organizationId: 'org_test' }), create: jest.fn().mockImplementation((a: any) => ({ id: 'sp_1', ...a.data })), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
-    enrollment: { create: jest.fn().mockImplementation((a: any) => ({ id: 'enr_1', ...a.data })), findFirst: jest.fn().mockResolvedValue(null), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
-    studentStatusHistory: { create: jest.fn().mockResolvedValue(undefined) },
-    partner: { create: jest.fn().mockImplementation((a: any) => ({ id: 'partner_1', ...a.data })) },
+    applicantScore: { upsert: upsertable(), findFirst: jest.fn().mockResolvedValue(null) },
+    offerLetter: {
+      upsert: upsertable(),
+      updateMany: jest.fn().mockReturnValue({ count: 1 }),
+      findFirst: offerLetterFindFirst,
+    },
+    entranceExam: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), upsert: upsertable() },
+    applicationDocument: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation((a: any) => ({ id: 'apdoc_1', ...a.data })),
+      updateMany: jest.fn().mockReturnValue({ count: 1 }),
+    },
+    admissionFee: { upsert: upsertable(), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
+    admissionDecision: { upsert: upsertable() },
+    admissionCapacity: { findFirst: jest.fn().mockResolvedValue(null) },
+    admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1' }) },
+    waitingList: { findFirst: jest.fn().mockResolvedValue(null), count: jest.fn().mockResolvedValue(0), create: jest.fn().mockImplementation((a: any) => ({ id: 'wl_1', ...a.data })) },
+    applicantIdentityMatch: { create: jest.fn().mockResolvedValue(undefined) },
+    contact: { findFirst: jest.fn().mockResolvedValue({ partnerId: 'partner_9' }), create: jest.fn().mockImplementation((a: any) => ({ id: 'contact_new', ...a.data })) },
+    file: { findFirst: jest.fn().mockResolvedValue({ id: 'file_1' }) },
+    enrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
+    studentProfile: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
+    studentGuardian: { create: jest.fn().mockImplementation((a: any) => ({ id: 'sg_1', ...a.data })) },
+    admissionGuardian: { create: jest.fn().mockImplementation((a: any) => ({ id: 'ag_1', ...a.data })), findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
+    admissionStatusHistory: { create: jest.fn().mockResolvedValue(undefined) },
+    admissionRequirement: { findMany: jest.fn().mockResolvedValue([]) },
     document: { create: jest.fn().mockImplementation((a: any) => ({ id: 'doc_1', ...a.data })) },
     documentTypeDef: { findFirst: jest.fn().mockResolvedValue({ id: 'dt_1' }) },
   };
@@ -77,11 +87,35 @@ function makeService() {
   const prisma = {
     client: {
       $transaction: jest.fn(async (cb: any) => cb(tx)),
-      admissionApplication: {
-        findFirst: applicationFindFirst,
-        findMany: applicationFindMany,
-      },
+      admissionApplication: { findFirst: applicationFindFirst, findMany: applicationFindMany, updateMany: applicationUpdateMany },
+      applicantScore: { findFirst: jest.fn().mockResolvedValue(null), upsert: upsertable() },
+      applicantIdentityMatch: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
+      admissionCriteriaSet: { findFirst: jest.fn().mockResolvedValue(null) },
+      admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1' }) },
+      admissionCapacity: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
+      offerLetter: { updateMany: jest.fn().mockReturnValue({ count: 2 }) },
+      enrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
+      waitingList: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
     },
+  };
+
+  // The sixth constructor argument. Omitting it is what stopped this file from
+  // compiling, which in turn stopped every test below from ever running.
+  const enrollmentSvc = {
+    enrollNewStudent: jest.fn().mockImplementation(async (input: any) => ({
+      partner: { id: 'partner_1', name: input.name },
+      profile: { id: 'sp_1', currentClassId: input.classId, admissionNo: 'STU-000001' },
+      enrollment: { id: 'enr_1', classId: input.classId, termId: input.termId },
+    })),
+    withdraw: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'withdrawn' }),
+    reEnroll: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'enrolled' }),
+  };
+
+  // EncryptionService — the seventh constructor argument. Round-trips through a
+  // pass-through fake so create()/reveal paths exercise the real call shape.
+  const encryption = {
+    encrypt: jest.fn((s: string | null | undefined) => (s ? { ciphertext: `ct(${s})`, iv: 'iv', tag: 'tag' } : null)),
+    decrypt: jest.fn((p: any) => (p ? String(p.ciphertext).replace(/^ct\((.*)\)$/, '$1') : null)),
   };
 
   const service = new AdmissionsService(
@@ -90,6 +124,8 @@ function makeService() {
     { recordInTx: auditRecordInTx } as any,
     events as any,
     sequence as any,
+    enrollmentSvc as any,
+    encryption as any,
   );
 
   return {
@@ -99,30 +135,49 @@ function makeService() {
       applicationFindFirst,
       applicationUpdateMany,
       applicationFindMany,
-      studentProfileFindFirst: tx.studentProfile.findFirst as jest.Mock,
+      offerLetterFindFirst,
+      offerLetterUpdateMany: tx.offerLetter.updateMany,
+      enrollmentFindFirst,
+      enrollmentSvc,
       auditRecordInTx,
       events,
       sequence,
+      tx,
       $transaction: prisma.client.$transaction,
-    } as Mocks,
+    },
   };
 }
 
-describe('AdmissionsService.review — state machine (P0-7, C8)', () => {
+/** An application shaped the way checkEligibility's include expects it. */
+function eligibleApp(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'app_1',
+    organizationId: 'org_test',
+    academicYearId: 'ay_1',
+    admissionCycleId: null,
+    applyingForClassId: 'c_1',
+    status: 'offer_accepted',
+    documents: [],
+    offerLetter: { id: 'offer_1', status: 'accepted', expiresAt: null },
+    fee: null,
+    feeStatus: 'unpaid',
+    ...overrides,
+  };
+}
+
+describe('AdmissionsService.review — state machine', () => {
   it('rejects unknown actions', async () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted' });
-    await expect(
-      service.review('app_1', 'foobar' as any),
-    ).rejects.toThrow(BadRequestException);
+    await expect(service.review('app_1', 'foobar' as any)).rejects.toThrow(BadRequestException);
   });
 
   it('submitted → review → under_review (valid)', async () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'submitted' })  // initial read
-      .mockResolvedValueOnce({ id: 'app_1', status: 'under_review' });  // post-update read
-    const result = await service.review('app_1', 'review');
+      .mockResolvedValueOnce({ id: 'app_1', status: 'submitted' })
+      .mockResolvedValueOnce({ id: 'app_1', status: 'under_review' });
+    const result: any = await service.review('app_1', 'review');
     expect(result.status).toBe('under_review');
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -137,134 +192,49 @@ describe('AdmissionsService.review — state machine (P0-7, C8)', () => {
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: 'submitted' })
       .mockResolvedValueOnce({ id: 'app_1', status: 'withdrawn' });
-    const result = await service.review('app_1', 'withdraw');
+    const result: any = await service.review('app_1', 'withdraw');
     expect(result.status).toBe('withdrawn');
   });
 
-  it('submitted → accept → accepted (INVALID — must review first)', async () => {
+  it.each([
+    ['accept', 'submitted'],
+    ['reject', 'submitted'],
+    ['schedule_exam', 'submitted'],
+    ['accept', 'screening'],
+  ])('%s from %s is refused', async (action, from) => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted' });
-    await expect(
-      service.review('app_1', 'accept'),
-    ).rejects.toThrow(BadRequestException);
-    // No update should have been issued.
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: from });
+    await expect(service.review('app_1', action as any)).rejects.toThrow(BadRequestException);
     expect(mocks.applicationUpdateMany).not.toHaveBeenCalled();
   });
 
-  it('submitted → reject → rejected (INVALID — must review first)', async () => {
+  it.each(['rejected', 'withdrawn', 'enrolled'])('%s is terminal', async (status) => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted' });
-    await expect(
-      service.review('app_1', 'reject'),
-    ).rejects.toThrow(BadRequestException);
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status });
+    await expect(service.review('app_1', 'review')).rejects.toThrow(BadRequestException);
+    await expect(service.review('app_1', 'accept')).rejects.toThrow(BadRequestException);
+    await expect(service.review('app_1', 'withdraw')).rejects.toThrow(BadRequestException);
   });
 
-  it('submitted → schedule_exam → exam_scheduled (INVALID — must review first)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted' });
-    await expect(
-      service.review('app_1', 'schedule_exam'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('under_review → schedule_exam → exam_scheduled (valid)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'under_review' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'exam_scheduled' });
-    const result = await service.review('app_1', 'schedule_exam');
-    expect(result.status).toBe('exam_scheduled');
-  });
-
-  it('under_review → accept → accepted (valid)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'under_review' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'accepted' });
-    const result = await service.review('app_1', 'accept');
-    expect(result.status).toBe('accepted');
-  });
-
-  it('exam_scheduled → accept → accepted (valid)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'exam_scheduled' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'accepted' });
-    const result = await service.review('app_1', 'accept');
-    expect(result.status).toBe('accepted');
-  });
-
-  it('exam_scheduled → schedule_exam → exam_scheduled (INVALID — already scheduled)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'exam_scheduled' });
-    await expect(
-      service.review('app_1', 'schedule_exam'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('rejected → review (INVALID — rejected is terminal)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'rejected' });
-    await expect(
-      service.review('app_1', 'review'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('rejected → accept (INVALID — rejected is terminal)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'rejected' });
-    await expect(
-      service.review('app_1', 'accept'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('withdrawn → review (INVALID — withdrawn is terminal)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'withdrawn' });
-    await expect(
-      service.review('app_1', 'review'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('enrolled → review (INVALID — enrolled is terminal)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'enrolled' });
-    await expect(
-      service.review('app_1', 'review'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('accepted → withdraw (valid — accepted applications may still be withdrawn before enrollment)', async () => {
+  it('accepted → withdraw (valid — may still be withdrawn before enrollment)', async () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: 'accepted' })
       .mockResolvedValueOnce({ id: 'app_1', status: 'withdrawn' });
-    const result = await service.review('app_1', 'withdraw');
+    const result: any = await service.review('app_1', 'withdraw');
     expect(result.status).toBe('withdrawn');
   });
 
-  it('rejected → withdraw (INVALID — already terminal)', async () => {
+  it('exam_scheduled → schedule_exam is refused (already scheduled)', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'rejected' });
-    await expect(
-      service.review('app_1', 'withdraw'),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('enrolled → withdraw (INVALID — terminal)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'enrolled' });
-    await expect(
-      service.review('app_1', 'withdraw'),
-    ).rejects.toThrow(BadRequestException);
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'exam_scheduled' });
+    await expect(service.review('app_1', 'schedule_exam')).rejects.toThrow(BadRequestException);
   });
 
   it('rejects when the application does not exist', async () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst.mockResolvedValue(null);
-    await expect(
-      service.review('app_missing', 'review'),
-    ).rejects.toThrow(NotFoundException);
+    await expect(service.review('app_missing', 'review')).rejects.toThrow(NotFoundException);
   });
 
   it('persists the decision notes when provided', async () => {
@@ -284,12 +254,11 @@ describe('AdmissionsService.review — state machine (P0-7, C8)', () => {
   });
 });
 
-describe('AdmissionsService.create — duplicate guard (P0-7, C7)', () => {
+describe('AdmissionsService.create — duplicate guard', () => {
   it('creates a fresh application when no prior record exists', async () => {
     const { service, mocks } = makeService();
-    // First findFirst (for dedupe) returns null.
     mocks.applicationFindFirst.mockResolvedValueOnce(null);
-    const result = await service.create({
+    const result: any = await service.create({
       academicYearId: 'ay_1',
       applicantFirstName: 'Alice',
       applicantLastName: 'Nakimuli',
@@ -299,9 +268,11 @@ describe('AdmissionsService.create — duplicate guard (P0-7, C7)', () => {
     expect(mocks.applicationCreate).toHaveBeenCalled();
   });
 
-  it('rejects a duplicate application for the same (year, name, dob)', async () => {
+  it.each([
+    ['exact', 'Alice', 'Nakimuli'],
+    ['case-insensitively', 'ALICE', 'nakimuli'],
+  ])('rejects a duplicate %s', async (_label, first, last) => {
     const { service, mocks } = makeService();
-    // findFirst returns an existing record.
     mocks.applicationFindFirst.mockResolvedValueOnce({
       id: 'app_existing',
       applicationNumber: 'APP-2026-000001',
@@ -313,166 +284,91 @@ describe('AdmissionsService.create — duplicate guard (P0-7, C7)', () => {
     await expect(
       service.create({
         academicYearId: 'ay_1',
-        applicantFirstName: 'Alice',
-        applicantLastName: 'Nakimuli',
+        applicantFirstName: first,
+        applicantLastName: last,
         applicantDob: '2018-04-15',
       }),
     ).rejects.toThrow(BadRequestException);
-    // No new application should have been created.
     expect(mocks.applicationCreate).not.toHaveBeenCalled();
   });
 
-  it('matches case-insensitively (Alice vs ALICE)', async () => {
+  it('allows a re-application in a different academic year', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValueOnce({
-      id: 'app_existing',
-      applicationNumber: 'APP-2026-000001',
-      academicYearId: 'ay_1',
-      applicantFirstName: 'Alice',
-      applicantLastName: 'Nakimuli',
-      applicantDob: new Date('2018-04-15'),
-    });
-    await expect(
-      service.create({
-        academicYearId: 'ay_1',
-        applicantFirstName: 'ALICE',
-        applicantLastName: 'nakimuli',
-        applicantDob: '2018-04-15',
-      }),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('allows a new application for a different academic year', async () => {
-    const { service, mocks } = makeService();
-    // findFirst for ay_1 finds nothing.
     mocks.applicationFindFirst.mockResolvedValueOnce(null);
-    const result = await service.create({
-      academicYearId: 'ay_2',  // different year
+    const result: any = await service.create({
+      academicYearId: 'ay_2',
       applicantFirstName: 'Alice',
       applicantLastName: 'Nakimuli',
       applicantDob: '2018-04-15',
     });
     expect(result.status).toBe('submitted');
   });
-
-  it('allows a new application for a different DOB', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValueOnce(null);
-    const result = await service.create({
-      academicYearId: 'ay_1',
-      applicantFirstName: 'Alice',
-      applicantLastName: 'Nakimuli',
-      applicantDob: '2019-01-01',  // different DOB
-    });
-    expect(result.status).toBe('submitted');
-  });
 });
 
-describe('AdmissionsService extended lifecycle — FSM + new methods (P0/P2/P3)', () => {
-  /** Drive a review() action and assert the resulting status. */
+describe('AdmissionsService — extended lifecycle', () => {
+  const targetOf: Record<string, string> = {
+    review: 'under_review', screen: 'screening', schedule_interview: 'interview_scheduled',
+    complete_interview: 'interviewed', reschedule: 'interview_scheduled', schedule_exam: 'exam_scheduled',
+    exam_done: 'interviewed', score: 'scored', accept: 'accepted', reject: 'rejected',
+    waitlist: 'waitlisted', issue_offer: 'offer_issued', accept_offer: 'offer_accepted',
+    decline_offer: 'offer_declined', withdraw: 'withdrawn',
+  };
+
   async function driveReview(service: any, mocks: any, from: string, action: string) {
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: from, organizationId: 'org_test' })
       .mockResolvedValueOnce({ id: 'app_1', status: targetOf[action] });
     return service.review('app_1', action);
   }
-  const targetOf: Record<string, string> = {
-    review: 'under_review', screen: 'screening', schedule_interview: 'interview_scheduled',
-    complete_interview: 'interviewed', reschedule: 'interview_scheduled', schedule_exam: 'exam_scheduled',
-    exam_done: 'interviewed', score: 'scored', accept: 'accepted', reject: 'rejected',
-    waitlist: 'waitlisted', issue_offer: 'offer_issued', accept_offer: 'offer_accepted',
-    decline_offer: 'waitlisted', withdraw: 'withdrawn',
-  };
 
-  it('submitted → review → under_review → screen → screening (valid)', async () => {
+  it.each([
+    ['submitted', 'review', 'under_review'],
+    ['under_review', 'screen', 'screening'],
+    ['screening', 'schedule_interview', 'interview_scheduled'],
+    ['interview_scheduled', 'complete_interview', 'interviewed'],
+    ['interviewed', 'score', 'scored'],
+    ['scored', 'accept', 'accepted'],
+    ['accepted', 'issue_offer', 'offer_issued'],
+    ['offer_issued', 'accept_offer', 'offer_accepted'],
+    ['offer_issued', 'decline_offer', 'offer_declined'],
+    ['waitlisted', 'issue_offer', 'offer_issued'],
+  ])('%s --%s--> %s', async (from, action, expected) => {
     const { service, mocks } = makeService();
-    await driveReview(service, mocks, 'submitted', 'review');
-    const r = await driveReview(service, mocks, 'under_review', 'screen');
-    expect(r.status).toBe('screening');
+    const r: any = await driveReview(service, mocks, from, action);
+    expect(r.status).toBe(expected);
   });
 
-  it('screening → schedule_interview → interview_scheduled (valid)', async () => {
+  it('exam_scheduled → reschedule is refused (reschedule belongs to interviews)', async () => {
     const { service, mocks } = makeService();
-    const r = await driveReview(service, mocks, 'screening', 'schedule_interview');
-    expect(r.status).toBe('interview_scheduled');
-  });
-
-  it('interview_scheduled → complete_interview → interviewed (valid)', async () => {
-    const { service, mocks } = makeService();
-    const r = await driveReview(service, mocks, 'interview_scheduled', 'complete_interview');
-    expect(r.status).toBe('interviewed');
-  });
-
-  it('submitted → accept (INVALID — must review/screen first)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted' });
-    await expect(service.review('app_1', 'accept')).rejects.toThrow(BadRequestException);
-  });
-
-  it('screening → accept (INVALID — must interview/score first)', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'screening' });
-    await expect(service.review('app_1', 'accept')).rejects.toThrow(BadRequestException);
-  });
-
-  it('interviewed → score → scored → accept → accepted (valid)', async () => {
-    const { service, mocks } = makeService();
-    await driveReview(service, mocks, 'interviewed', 'score');
-    const r = await driveReview(service, mocks, 'scored', 'accept');
-    expect(r.status).toBe('accepted');
-  });
-
-  it('accepted → issue_offer → offer_issued → accept_offer → offer_accepted (valid)', async () => {
-    const { service, mocks } = makeService();
-    await driveReview(service, mocks, 'accepted', 'issue_offer');
-    const r = await driveReview(service, mocks, 'offer_issued', 'accept_offer');
-    expect(r.status).toBe('offer_accepted');
-  });
-
-  it('offer_issued → decline_offer → waitlisted (valid)', async () => {
-    const { service, mocks } = makeService();
-    const r = await driveReview(service, mocks, 'offer_issued', 'decline_offer');
-    expect(r.status).toBe('waitlisted');
-  });
-
-  it('exam_scheduled → reschedule → interview_scheduled (INVALID as repeated; must reject)', async () => {
-    const { service, mocks } = makeService();
-    // reschedule is allowed from interview_scheduled, NOT exam_scheduled.
     mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'exam_scheduled' });
     await expect(service.review('app_1', 'reschedule')).rejects.toThrow(BadRequestException);
   });
 
   it('scheduleInterview persists an Interview row and advances status (no rating)', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'screening', organizationId: 'org_test' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'screening', organizationId: 'org_test' });
-    const interview = await service.scheduleInterview('app_1', { interviewerId: 'staff_1' });
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'screening', organizationId: 'org_test' });
+    const interview: any = await service.scheduleInterview('app_1', { interviewerId: 'staff_1' });
     expect(interview.applicationId).toBe('app_1');
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'interview_scheduled' }) }),
     );
   });
 
-  it('scheduleInterview with rating marks interview completed → interviewed', async () => {
+  it('scheduleInterview with a rating records completion → interviewed', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'interview_scheduled', organizationId: 'org_test' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'interview_scheduled', organizationId: 'org_test' });
-    const interview = await service.scheduleInterview('app_1', { rating: 5, recommendation: 'strong' });
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'interview_scheduled', organizationId: 'org_test' });
+    const interview: any = await service.scheduleInterview('app_1', { rating: 5, recommendation: 'strong' });
     expect(interview.completedAt).not.toBeNull();
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'interviewed' }) }),
     );
   });
 
-  it('scoreApplication computes aggregate and moves to scored', async () => {
+  it('scoreApplication computes an aggregate and moves to scored', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'interviewed', organizationId: 'org_test' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'interviewed', organizationId: 'org_test' });
-    const score = await service.scoreApplication('app_1', { examScore: 80, interviewScore: 90, documentScore: 100 });
-    expect(score.totalScore).toBeGreaterThan(0);
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'interviewed', organizationId: 'org_test' });
+    const score: any = await service.scoreApplication('app_1', { examScore: 80, interviewScore: 90, documentScore: 100 });
+    expect(Number(score.totalScore)).toBeGreaterThan(0);
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'scored' }) }),
     );
@@ -480,51 +376,280 @@ describe('AdmissionsService extended lifecycle — FSM + new methods (P0/P2/P3)'
 
   it('issueOffer creates an OfferLetter and moves to offer_issued', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst
-      .mockResolvedValueOnce({ id: 'app_1', status: 'accepted', organizationId: 'org_test' })
-      .mockResolvedValueOnce({ id: 'app_1', status: 'accepted', organizationId: 'org_test' });
-    const offer = await service.issueOffer('app_1', { body: 'Welcome!' });
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'accepted', organizationId: 'org_test' });
+    const offer: any = await service.issueOffer('app_1', { body: 'Welcome!' });
     expect(offer.status).toBe('issued');
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'offer_issued' }) }),
     );
   });
+});
 
-  it('chargeApplicationFee issues a sales_invoice Document and sets feeStatus=pending', async () => {
+describe('AdmissionsService — application fee', () => {
+  const feeApp = {
+    id: 'app_1', status: 'under_review', organizationId: 'org_test', applicationNumber: 'APP-1',
+    applicantFirstName: 'A', applicantLastName: 'B', parentContactId: 'contact_1', feeStatus: 'unpaid',
+    feeInvoiceId: null,
+  };
+
+  it('bills the guardian Contact’s owning Partner, not the Contact itself', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'submitted', organizationId: 'org_test', applicationNumber: 'APP-1', applicantFirstName: 'A', applicantLastName: 'B', parentContactId: 'p_1', feeStatus: 'unpaid' });
-    const res = await service.chargeApplicationFee('app_1', { amount: 50000 });
+    mocks.applicationFindFirst.mockResolvedValue(feeApp);
+    const res: any = await service.chargeApplicationFee('app_1', { amount: 50000 });
     expect(res.invoiceId).toBeDefined();
+    // Document.partnerId is a FK to Partner. Passing the Contact id (as the old
+    // code did) is both a NOT NULL violation when null and the wrong entity when
+    // set.
+    expect(mocks.tx.document.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ partnerId: 'partner_9' }) }),
+    );
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ feeStatus: 'pending' }) }),
     );
   });
 
-  it('transferIn creates a student profile with active status', async () => {
+  it('refuses to bill an application with no guardian contact linked', async () => {
     const { service, mocks } = makeService();
-    const res = await service.transferIn({
-      name: 'Incoming Student', classId: 'c_1', termId: 't_1', rollNumber: 'R1',
-      transferredFrom: 'Other School',
-    });
-    expect(res.studentProfile.id).toBeDefined();
-    expect(res.studentProfile.currentClassId).toBe('c_1');
-    expect(res.enrollment.id).toBeDefined();
+    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, parentContactId: null });
+    await expect(service.chargeApplicationFee('app_1', { amount: 50000 })).rejects.toThrow(BadRequestException);
   });
 
-  it('withdrawStudent rejects a non-withdrawable (already withdrawn) student', async () => {
+  it.each(['rejected', 'withdrawn', 'enrolled'])('refuses to bill a %s application', async (status) => {
     const { service, mocks } = makeService();
-    mocks.studentProfileFindFirst.mockResolvedValue({ id: 'sp_1', status: 'withdrawn', organizationId: 'org_test' });
-    await expect(
-      service.withdrawStudent('sp_1', { reason: 'moved away' }),
-    ).rejects.toThrow(BadRequestException);
+    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, status });
+    await expect(service.chargeApplicationFee('app_1', { amount: 50000 })).rejects.toThrow(BadRequestException);
   });
 
-  it('reEnroll rejects an active student (must be withdrawn/alumni first)', async () => {
-    const { service } = makeService();
-    // default studentProfile.findFirst returns an active profile → should be rejected.
-    await expect(
-      service.reEnroll('sp_1', { classId: 'c_1', termId: 't_1', rollNumber: 'R1' }),
-    ).rejects.toThrow(BadRequestException);
+  it('markFeePaid settles the fee and is idempotent', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, feeStatus: 'pending' });
+    const res: any = await service.markFeePaid('app_1');
+    expect(res.feeStatus).toBe('paid');
+
+    mocks.applicationUpdateMany.mockClear();
+    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, feeStatus: 'paid' });
+    const again: any = await service.markFeePaid('app_1');
+    expect(again.feeStatus).toBe('paid');
+    expect(mocks.applicationUpdateMany).not.toHaveBeenCalled();
   });
 });
 
+describe('AdmissionsService — regressions for the FSM bypasses', () => {
+  it('recordDecision refuses a decision on a terminal application', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'enrolled', organizationId: 'org_test' });
+    // Used to write `status: 'rejected'` straight through updateMany, orphaning a
+    // live Enrollment behind a rejected application.
+    await expect(service.recordDecision('app_1', 'rejected', 'changed our mind')).rejects.toThrow(BadRequestException);
+    expect(mocks.applicationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('recordDecision accepts from scored and audits the transition', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'scored', organizationId: 'org_test', applyingForClassId: 'c_1' });
+    const res: any = await service.recordDecision('app_1', 'accepted', 'top of the cohort');
+    expect(res.decision).toBe('accepted');
+    expect(mocks.auditRecordInTx).toHaveBeenCalled();
+    expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'accepted' }) }),
+    );
+  });
+
+  it('recordDecision places a waitlisted applicant on the waiting list', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'scored', organizationId: 'org_test', applyingForClassId: 'c_1' });
+    await service.recordDecision('app_1', 'waitlisted', 'strong but oversubscribed');
+    expect(mocks.tx.waitingList.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ classId: 'c_1', position: 1 }) }),
+    );
+  });
+
+  it('acceptOffer refuses an expired offer and marks it expired', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'offer_issued', organizationId: 'org_test' });
+    mocks.offerLetterFindFirst.mockResolvedValue({
+      id: 'offer_1', applicationId: 'app_1', status: 'issued',
+      expiresAt: new Date(Date.now() - 86_400_000),
+    });
+    await expect(service.acceptOffer('app_1')).rejects.toThrow(BadRequestException);
+    expect(mocks.offerLetterUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'expired' }) }),
+    );
+  });
+
+  it('acceptOffer marks the OfferLetter accepted, not just the application', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'offer_issued', organizationId: 'org_test' });
+    mocks.offerLetterFindFirst.mockResolvedValue({
+      id: 'offer_1', applicationId: 'app_1', status: 'issued',
+      expiresAt: new Date(Date.now() + 86_400_000),
+    });
+    const res: any = await service.acceptOffer('app_1');
+    expect(res.status).toBe('offer_accepted');
+    expect(mocks.offerLetterUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'accepted' }) }),
+    );
+  });
+
+  it('acceptOffer refuses when there is no offer on file', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'offer_issued', organizationId: 'org_test' });
+    mocks.offerLetterFindFirst.mockResolvedValue(null);
+    await expect(service.acceptOffer('app_1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('addExamScore refuses once the decision has been taken', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'accepted', organizationId: 'org_test' });
+    await expect(
+      service.addExamScore({ applicationId: 'app_1', subjectId: 'sub_1', score: 99 }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('addExamScore refuses a score above maxScore', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_1', status: 'exam_scheduled', organizationId: 'org_test' });
+    await expect(
+      service.addExamScore({ applicationId: 'app_1', subjectId: 'sub_1', score: 120, maxScore: 100 }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('verifyDocument requires a reason when rejecting', async () => {
+    const { service, mocks } = makeService();
+    mocks.tx.applicationDocument.findFirst.mockResolvedValue({ id: 'apdoc_1', verified: false, rejectionReason: null });
+    await expect(service.verifyDocument('apdoc_1', false)).rejects.toThrow(BadRequestException);
+    await expect(service.verifyDocument('apdoc_1', false, 'illegible scan')).resolves.toBeDefined();
+  });
+});
+
+describe('AdmissionsService.enroll — the eligibility gate', () => {
+  const enrollDto = {
+    applicationId: 'app_1',
+    classId: 'c_1',
+    termId: 't_1',
+    rollNumber: '1',
+    student: { name: 'Grace Nakato' },
+  };
+
+  it('enrolls a ready application atomically and marks it enrolled', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp());
+    const res: any = await service.enroll(enrollDto as any);
+    expect(res.studentProfile.id).toBe('sp_1');
+    // enrollNewStudent must receive the caller's tx so the student creation and
+    // the status change commit together.
+    expect(mocks.enrollmentSvc.enrollNewStudent).toHaveBeenCalledWith(expect.any(Object), mocks.tx);
+    expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'enrolled' }) }),
+    );
+  });
+
+  it('refuses to enroll an application whose offer is not accepted', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'accepted' }));
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow(BadRequestException);
+    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+  });
+
+  it('refuses to enroll while a required document is unverified', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(
+      eligibleApp({ documents: [{ type: 'birth_cert', required: true, verified: false }] }),
+    );
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow(/required documents not verified/);
+    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+  });
+
+  it('ignores optional documents that are unverified', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(
+      eligibleApp({ documents: [{ type: 'photo', required: false, verified: false }] }),
+    );
+    await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
+  });
+
+  it('refuses to enroll while the application fee is outstanding', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ fee: { paid: false }, feeStatus: 'pending' }));
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow(/fee outstanding/);
+  });
+
+  it('does not require a fee when none was ever charged', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ fee: null, feeStatus: 'unpaid' }));
+    await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
+  });
+
+  it('refuses to enroll when the class is full', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
+    mocks.tx.admissionCapacity.findFirst.mockResolvedValue({
+      id: 'cap_1', classId: 'c_1', sectionId: null, streamId: null, capacity: 30, reservedCapacity: 0,
+    });
+    mocks.tx.enrollment.count.mockResolvedValue(30);
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow(/no seats available/);
+  });
+
+  it('allows enrollment when capacity remains', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
+    mocks.tx.admissionCapacity.findFirst.mockResolvedValue({
+      id: 'cap_1', classId: 'c_1', sectionId: null, streamId: null, capacity: 30, reservedCapacity: 2,
+    });
+    mocks.tx.enrollment.count.mockResolvedValue(27);
+    await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
+  });
+
+  it('treats an unconfigured capacity row as unconstrained', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
+    mocks.tx.admissionCapacity.findFirst.mockResolvedValue(null);
+    await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
+  });
+
+  it('reports the same gate through enrollmentEligibility without writing', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(
+      eligibleApp({ documents: [{ type: 'birth_cert', required: true, verified: false }] }),
+    );
+    const report: any = await service.enrollmentEligibility('app_1');
+    expect(report.status).toBe('BLOCKED');
+    expect(report.missing.join(' ')).toMatch(/required documents/);
+    expect(mocks.applicationUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdmissionsService — student lifecycle delegation', () => {
+  it('transferIn creates a student through the canonical enrollment service', async () => {
+    const { service, mocks } = makeService();
+    const res: any = await service.transferIn({
+      name: 'Incoming Student', classId: 'c_1', termId: 't_1', rollNumber: 'R1',
+      transferredFrom: 'Other School',
+    });
+    expect(res.studentProfile.id).toBe('sp_1');
+    expect(mocks.enrollmentSvc.enrollNewStudent).toHaveBeenCalledWith(
+      expect.objectContaining({ customFields: { transferredFrom: 'Other School' } }),
+    );
+  });
+
+  it('withdrawStudent refuses when there is no active enrollment', async () => {
+    const { service, mocks } = makeService();
+    mocks.enrollmentFindFirst.mockResolvedValue(null);
+    await expect(service.withdrawStudent('sp_1', { reason: 'moved away' })).rejects.toThrow(NotFoundException);
+  });
+
+  it('withdrawStudent delegates to the enrollment service', async () => {
+    const { service, mocks } = makeService();
+    mocks.enrollmentFindFirst.mockResolvedValue({ id: 'enr_1', studentProfileId: 'sp_1', status: 'enrolled' });
+    await service.withdrawStudent('sp_1', { reason: 'moved away' });
+    expect(mocks.enrollmentSvc.withdraw).toHaveBeenCalledWith('enr_1', { reason: 'moved away' });
+  });
+
+  it('reEnroll refuses when the student has no enrollment history', async () => {
+    const { service, mocks } = makeService();
+    mocks.enrollmentFindFirst.mockResolvedValue(null);
+    await expect(
+      service.reEnroll('sp_1', { classId: 'c_1', termId: 't_1', rollNumber: 'R1' }),
+    ).rejects.toThrow(NotFoundException);
+  });
+});

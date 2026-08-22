@@ -238,6 +238,7 @@ function FormField({
     if (!loaded && field.optionsLoader) {
       onLoadOptions().then(() => setLoaded(true));
     }
+    const opts = field.options ?? options;
     return (
       <div className="space-y-1">
         <Label>{field.label}</Label>
@@ -247,7 +248,7 @@ function FormField({
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">Select…</option>
-          {options.map((o) => (
+          {opts.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>

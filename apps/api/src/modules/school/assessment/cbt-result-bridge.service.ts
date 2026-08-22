@@ -39,6 +39,22 @@ export class CbtResultBridgeService {
   ): Promise<void> {
     const { organizationId, quizAttemptId, paperId, studentProfileId, autoScore, maxScore } = args;
 
+    // If this paper is sat as an LMS quiz activity, that activity's Assessment
+    // is the grade item the course already displays — post into it rather than
+    // minting a parallel quiz-sourced one. `CbtAttemptService.start` links new
+    // attempts up front; this covers attempts started before that landed.
+    const lmsStudentAssessmentId = await this.resolveLmsStudentAssessment(tx, paperId, studentProfileId);
+    if (lmsStudentAssessmentId) {
+      await this.marking.postMark(tx, {
+        studentAssessmentId: lmsStudentAssessmentId,
+        score: autoScore,
+        source: 'quiz',
+        comment: `cbt:${quizAttemptId}`,
+        onOutOfRange: 'clamp',
+      });
+      return;
+    }
+
     // Resolve subject/class/term when not supplied.
     let subjectId = args.subjectId ?? null;
     let classId = args.classId ?? null;
@@ -62,7 +78,10 @@ export class CbtResultBridgeService {
     }
     if (!subjectId || !classId || !termId) return; // cannot place into spine
 
-    const sourceRef = `quiz:${paperId}:${studentProfileId}`;
+    // Per-PAPER, not per-student. Every other producer keys its assessment to
+    // the activity, and one assessment per student meant a quiz could never
+    // carry a weight, a lock, or a gradebook column of its own.
+    const sourceRef = `quiz:${paperId}`;
     const assessment = await tx.assessment.upsert({
       where: { organizationId_sourceType_sourceRef: { organizationId, sourceType: 'quiz', sourceRef } },
       create: {
@@ -95,11 +114,29 @@ export class CbtResultBridgeService {
       update: { maxScore, approvalStatus: 'approved', status: 'graded' },
     });
 
-    await tx.markEntry.upsert({
-      where: { studentAssessmentId_round: { studentAssessmentId: sa.id, round: 'first' } },
-      create: { organizationId, studentAssessmentId: sa.id, round: 'first', score: autoScore },
-      update: { score: autoScore },
+    await this.marking.postMark(tx, {
+      studentAssessmentId: sa.id,
+      score: autoScore,
+      source: 'quiz',
+      comment: `cbt:${quizAttemptId}`,
+      onOutOfRange: 'clamp',
+      allowWhenApproved: true,
     });
-    await this.marking.recompute(tx, sa.id);
+  }
+
+  /** The `lms_activity` StudentAssessment for this paper's student, if the paper backs a mod_quiz. */
+  private async resolveLmsStudentAssessment(tx: any, paperId: string, studentProfileId: string): Promise<string | null> {
+    const modQuiz = await tx.modQuiz.findFirst({ where: { questionPaperId: paperId }, select: { id: true } });
+    if (!modQuiz) return null;
+    const cm = await tx.courseModule.findFirst({
+      where: { activityType: 'quiz', instanceId: modQuiz.id, assessmentId: { not: null }, deletedAt: null },
+      select: { assessmentId: true },
+    });
+    if (!cm?.assessmentId) return null;
+    const sa = await tx.studentAssessment.findFirst({
+      where: { assessmentId: cm.assessmentId, studentProfileId },
+      select: { id: true },
+    });
+    return sa?.id ?? null;
   }
 }

@@ -16,6 +16,7 @@ import { InvigilatorService } from './invigilator.service';
 import { LearningOutcomeService } from './outcomes.service';
 import { QuestionPaperService } from './question-paper.service';
 import { ReportCardSettingsService } from './report-card-settings.service';
+import { MarksWorkspaceService } from './marks-workspace.service';
 import {
   ExamController,
   ExamScheduleController,
@@ -29,6 +30,7 @@ import {
   QuestionPaperController,
 } from './examinations.controller';
 import { ExamRegistrationController, ExamVenueController } from './exam-ops.controller';
+import { MarksWorkspaceController } from './marks-workspace.controller';
 
 @Module({
   imports: [AssessmentModule],
@@ -45,6 +47,7 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     LearningOutcomeController,
     QuestionPaperController,
     ReportCardSettingsController,
+    MarksWorkspaceController,
   ],
   providers: [
     ExamTypeService,
@@ -62,6 +65,7 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     LearningOutcomeService,
     QuestionPaperService,
     ReportCardSettingsService,
+    MarksWorkspaceService,
   ],
   exports: [
     ExamTypeService,
@@ -78,6 +82,7 @@ import { ExamRegistrationController, ExamVenueController } from './exam-ops.cont
     InvigilatorService,
     LearningOutcomeService,
     QuestionPaperService,
+    MarksWorkspaceService,
   ],
 })
 export class ExaminationsModule {}

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
-import { computeEffective } from './assessment-math';
+import { MarkingService } from './marking.service';
 
 /**
  * GradeEntry → assessment-spine adapter.
@@ -21,6 +21,7 @@ export class AssessmentProjectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly marking: MarkingService,
   ) {}
 
   /**
@@ -67,34 +68,20 @@ export class AssessmentProjectionService {
         },
       });
 
+      // GradeEntry is the source here, so the projection re-posts marks that are
+      // already approved — the one caller allowed to. This block used to carry
+      // its own copy of the recompute arithmetic; `postMark` owns it now, so
+      // there is a single place where a mark becomes a score.
       if (ge.marksObtained !== null && ge.marksObtained !== undefined) {
-        await tx.markEntry.upsert({
-          where: { studentAssessmentId_round: { studentAssessmentId: sa.id, round: 'first' } },
-          create: {
-            organizationId,
-            studentAssessmentId: sa.id,
-            markerId: ge.enteredById ?? null,
-            round: 'first',
-            score: ge.marksObtained,
-          },
-          update: { score: ge.marksObtained, markerId: ge.enteredById ?? null },
+        await this.marking.postMark(tx, {
+          studentAssessmentId: sa.id,
+          score: ge.marksObtained,
+          source: 'exam',
+          markerId: ge.enteredById ?? null,
+          allowWhenApproved: true,
+          writeHistory: false, // GradeEntry already carries its own audit trail
         });
       }
-
-      // Recompute derived scores from the projected marks.
-      const [entries, adjustments] = await Promise.all([
-        tx.markEntry.findMany({ where: { studentAssessmentId: sa.id } }),
-        tx.markAdjustment.findMany({ where: { studentAssessmentId: sa.id } }),
-      ]);
-      const { originalScore, effectiveScore, percentage } = computeEffective(
-        entries.map((e: any) => ({ round: e.round, score: e.score })),
-        adjustments.map((a: any) => ({ sequence: a.sequence, delta: a.delta, replacementScore: a.replacementScore })),
-        ge.maxMarks,
-      );
-      await tx.studentAssessment.updateMany({
-        where: { id: sa.id },
-        data: { originalScore, effectiveScore, percentage },
-      });
     }
 
     return assessment.id;

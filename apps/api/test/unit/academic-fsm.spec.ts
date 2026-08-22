@@ -45,7 +45,11 @@ function makeEnrollmentService(enrRow: any | null) {
   const tenant = { organizationId: 'org_test', userId: 'user_1' } as any;
   const audit = { recordInTx: jest.fn(async () => undefined) } as any;
   const events = { publish: jest.fn() } as any;
-  const service = new EnrollmentService({ client } as any, tenant, audit, events);
+  // SequenceService is the fifth constructor argument. It was added and this call
+  // was not updated, so the whole file stopped compiling (TS2554) and every test
+  // in it silently stopped running — the same rot that had killed admission-fsm.spec.
+  const sequence = { next: jest.fn(async () => 'STU-000001') } as any;
+  const service = new EnrollmentService({ client } as any, tenant, audit, events, sequence);
   return { service, audit, events };
 }
 

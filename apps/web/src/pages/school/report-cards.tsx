@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { Download, Send, RefreshCw } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Download, Printer, Send, RefreshCw, Settings2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   useStudents,
   useTerms,
   useReportCards,
   useReportCardSettings,
+  useDefaultGradingScale,
+  useSchoolProfile,
   useGenerateReportCard,
   usePublishReportCard,
   type ReportCard,
-  type ReportCardSettings,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +18,12 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
+import {
+  ReportCardPreview,
+  SAMPLE_PREVIEW_DATA,
+  pageDimensions,
+  type ReportCardPreviewData,
+} from './_components/report-card-preview';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 
@@ -118,125 +126,127 @@ export function SchoolReportCardsPage() {
   );
 }
 
-function ReportCardView({ card, payload, student, settings }: { card: ReportCard; payload: NonNullable<ReportCard['payload']>; student?: any; settings?: ReportCardSettings }) {
-  const cfg = settings ?? ({} as Partial<ReportCardSettings>);
-  const show = (k: keyof ReportCardSettings) => cfg[k] === undefined ? true : Boolean(cfg[k]);
-  const color = (k: keyof ReportCardSettings, fallback: string) => (cfg[k] ? String(cfg[k]) : fallback);
-  const sections = payload.sections ?? [];
-  const allSubjects = sections.flatMap((s) => s.subjects);
+/**
+ * The on-screen report card. Rendered by the same component the Report Card
+ * Studio previews and the PDF renderer mirrors, so what an administrator
+ * designs is what a parent sees here and what comes out of the printer.
+ */
+function ReportCardView({
+  card,
+  payload,
+  student,
+  settings,
+}: {
+  card: ReportCard;
+  payload: NonNullable<ReportCard['payload']>;
+  student?: any;
+  settings?: Record<string, any>;
+}) {
+  const { data: school } = useSchoolProfile();
+  const { data: scale } = useDefaultGradingScale();
 
-  // Flatten the distinct exam/assessment column labels from data.
-  const examCols = Array.from(new Set(allSubjects.flatMap((s) => (s.examScores ?? []).map((x) => x.examType))));
+  const data = useMemo<ReportCardPreviewData>(() => ({
+    school: school
+      ? {
+          name: school.name ?? SAMPLE_PREVIEW_DATA.school.name,
+          motto: (school as any).motto ?? undefined,
+          address: (school as any).address ?? undefined,
+          phone: (school as any).phone ?? undefined,
+          email: (school as any).email ?? undefined,
+          website: (school as any).website ?? undefined,
+          logoUrl: (school as any).logoUrl ?? undefined,
+        }
+      : SAMPLE_PREVIEW_DATA.school,
+    student: {
+      name: student?.partner?.name ?? '—',
+      admissionNo: student?.admissionNo ?? '—',
+      gender: student?.gender ?? '—',
+      className: student?.currentClass?.name ?? student?.className ?? '—',
+      stream: student?.currentStream?.name ?? '—',
+      dateOfBirth: student?.dateOfBirth ?? undefined,
+      house: student?.house ?? undefined,
+    },
+    term: {
+      name: payload.term?.name ?? payload.termName ?? '—',
+      startDate: payload.term?.startDate,
+      endDate: payload.term?.endDate,
+    },
+    sections: (payload.sections ?? []).map((sec) => ({
+      title: sec.title,
+      subjects: (sec.subjects ?? []).map((s) => ({
+        subject: s.subject,
+        subjectCode: s.subjectCode,
+        examScores: (s.examScores ?? []).map((x) => ({ examType: x.examType, marks: x.marks, maxMarks: x.maxMarks })),
+        totalPercent: s.totalPercent ?? 0,
+        finalGrade: s.finalGrade ?? undefined,
+        finalPoints: s.finalPoints ?? undefined,
+        remark: s.remark ?? undefined,
+      })),
+    })),
+    summary: payload.summary ?? [],
+    stats: {
+      gpa: payload.gpa ?? undefined,
+      rank: payload.rank ?? undefined,
+      meanPercent: payload.meanPercent ?? undefined,
+      division: payload.division ?? undefined,
+      aggregate: (payload.summary ?? []).find((x) => /aggregate/i.test(x.label))?.value,
+    },
+    comments: {
+      classTeacher: payload.classTeacherComment ?? undefined,
+      headTeacher: payload.principalComment ?? undefined,
+    },
+    // Attendance is not part of the report card payload; the block hides
+    // itself when there is nothing to show.
+    attendance: { present: 0, absent: 0, late: 0, total: 0 },
+    gradeBands: (scale?.bands ?? []).map((b) => ({ min: b.min, max: b.max, grade: b.grade, remark: b.remark })),
+    eligible: payload.eligible ?? undefined,
+  }), [payload, student, school, scale]);
+
+  const print = () => {
+    const node = document.querySelector('[data-report-card-page]');
+    if (!node) return;
+    const w = window.open('', '_blank', 'width=900,height=1200');
+    if (!w) {
+      notify.error('Allow pop-ups to print this report card');
+      return;
+    }
+    const page = pageDimensions(settings ?? {});
+    w.document.write(
+      `<!doctype html><html><head><title>${data.student.name} — ${data.term.name}</title>` +
+      `<style>@page{size:${page.w}mm ${page.h}mm;margin:0}body{margin:0}</style>` +
+      `</head><body>${node.outerHTML}</body></html>`,
+    );
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 250);
+  };
 
   return (
     <Card>
-      <CardContent className="space-y-4 p-6">
-        {/* Header */}
-        <div className="border-b pb-3">
-          <h2 className="text-lg font-bold" style={{ color: color('reportTitleColor', 'inherit') }}>School Report Card</h2>
-          <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-1 text-sm md:grid-cols-3">
-            <Info label="NAME" value={student?.partner?.name ?? ''} />
-            <Info label="REG NO" value={student?.admissionNo ?? ''} />
-            <Info label="GENDER" value={student?.gender ?? ''} />
-            <Info label="CLASS" value={student?.classId ? className(student) : ''} />
-            <Info label="TERM" value={payload.term?.name ?? payload.termName ?? ''} />
-            {show('showTermStartDate') && payload.term?.startDate && <Info label="TERM START" value={String(payload.term.startDate)} />}
-            {show('showTermEndDate') && payload.term?.endDate && <Info label="TERM END" value={String(payload.term.endDate)} />}
-            {show('showFeesBalance') && <Info label="FEES BALANCE" value={student?.feesBalance ? String(student.feesBalance) : 'UGX 0'} />}
-            {payload.rank != null && <Info label="CLASS RANK" value={`${payload.rank}`} />}
-            {payload.meanPercent != null && <Info label="MEAN %" value={`${payload.meanPercent}`} />}
-            {payload.gpa != null && <Info label="GPA" value={`${payload.gpa}`} />}
+      <CardContent className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {card.publishedAt ? <Badge>Published</Badge> : <Badge variant="secondary">Draft</Badge>}
+            <span>Generated {card.generatedAt ? new Date(card.generatedAt).toLocaleString() : '—'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={print}>
+              <Printer className="h-4 w-4" /> Print
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/school/report-card-settings">
+                <Settings2 className="h-4 w-4" /> Design
+              </Link>
+            </Button>
           </div>
         </div>
 
-        {/* Subject tables (exams & assessments) */}
-        {sections.map((sec, i) => (
-          <div key={i}>
-            <h3 className="mb-1 text-sm font-semibold">{sec.title}</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border text-sm">
-                <thead className="bg-muted/50 text-left text-xs">
-                  <tr>
-                    <th className="border px-2 py-1 font-medium">SUBJECT</th>
-                    {examCols.map((ec) => (
-                      <th key={ec} className="border px-2 py-1 text-center font-medium">{ec}</th>
-                    ))}
-                    <th className="border px-2 py-1 text-center font-medium">%</th>
-                    <th className="border px-2 py-1 text-center font-medium">GRADE</th>
-                    <th className="border px-2 py-1 text-center font-medium">PTS</th>
-                    <th className="border px-2 py-1 font-medium">COMMENT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sec.subjects.length === 0 && (
-                    <tr><td colSpan={examCols.length + 5} className="border px-2 py-2 text-muted-foreground">No subjects recorded.</td></tr>
-                  )}
-                  {sec.subjects.map((s, j) => (
-                    <tr key={j} className="border-b">
-                      <td className="border px-2 py-1 font-medium">{s.subject}{s.subjectCode ? ` (${s.subjectCode})` : ''}</td>
-                      {examCols.map((ec) => {
-                        const sc = (s.examScores ?? []).find((x) => x.examType === ec);
-                        return (
-                          <td key={ec} className="border px-2 py-1 text-center">
-                            {sc ? `${sc.marks}/${sc.maxMarks}` : '—'}
-                          </td>
-                        );
-                      })}
-                      <td className="border px-2 py-1 text-center">{s.totalPercent ?? '—'}</td>
-                      <td className="border px-2 py-1 text-center font-semibold">{s.finalGrade ?? '—'}</td>
-                      <td className="border px-2 py-1 text-center">{s.finalPoints ?? '—'}</td>
-                      <td className="border px-2 py-1 text-xs text-muted-foreground">{s.remark ?? ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <div className="overflow-auto rounded-md bg-muted/40 p-3">
+          <div className="mx-auto w-fit shadow-md">
+            <ReportCardPreview settings={settings ?? {}} data={data} />
           </div>
-        ))}
-
-        {/* Summary */}
-        {payload.summary && payload.summary.length > 0 && (
-          <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm md:grid-cols-4">
-            {payload.summary.map((s, i) => (
-              <div key={i}><span className="text-muted-foreground">{s.label}: </span><span className="font-medium">{s.value}</span></div>
-            ))}
-          </div>
-        )}
-
-        {/* Comments */}
-        {(show('showClassTeacherComment') && payload.classTeacherComment) || (show('showHeadTeacherComment') && payload.principalComment) ? (
-          <div className="grid gap-2 border-t pt-3 text-sm md:grid-cols-2">
-            {show('showClassTeacherComment') && payload.classTeacherComment && (
-              <div><div className="text-xs font-semibold text-muted-foreground">CLASS TEACHER COMMENT</div><p>{payload.classTeacherComment}</p></div>
-            )}
-            {show('showHeadTeacherComment') && payload.principalComment && (
-              <div><div className="text-xs font-semibold text-muted-foreground">HEAD TEACHER COMMENT</div><p>{payload.principalComment}</p></div>
-            )}
-          </div>
-        ) : null}
-
-        {show('showWatermark') && (
-          <div className="pointer-events-none mt-3 text-center text-xs text-muted-foreground opacity-40">CONFIDENTIAL — SCHOOL REPORT</div>
-        )}
-
-        <div className="flex items-center justify-between border-t pt-2 text-xs text-muted-foreground">
-          <span>{card.publishedAt ? <Badge>Published</Badge> : <Badge variant="secondary">Draft</Badge>}</span>
-          <span>Generated {card.generatedAt ? new Date(card.generatedAt).toLocaleString() : ''}</span>
         </div>
       </CardContent>
     </Card>
   );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="text-xs font-semibold text-muted-foreground">{label}: </span>
-      <span>{value || '—'}</span>
-    </div>
-  );
-}
-
-function className(s: any): string {
-  return s.currentClass?.name ?? s.className ?? s.classId ?? '';
 }

@@ -278,20 +278,13 @@ export class AssignmentService {
         });
       }
 
-      // Record the mark as a first-round MarkEntry, then recompute derived score.
-      await tx.markEntry.upsert({
-        where: { studentAssessmentId_round: { studentAssessmentId: sa.id, round: 'first' } },
-        create: {
-          organizationId,
-          studentAssessmentId: sa.id,
-          markerId: this.tenant.userId ?? null,
-          round: 'first',
-          score: finalScore,
-        },
-        update: { score: finalScore, markerId: this.tenant.userId ?? null },
+      // Record the mark through the one write path, which owns the ledger, the
+      // lock check and the recompute.
+      await this.marking.postMark(tx, {
+        studentAssessmentId: sa.id,
+        score: finalScore,
+        source: 'assignment',
       });
-      await tx.studentAssessment.updateMany({ where: { id: sa.id }, data: { status: 'graded' } });
-      await this.marking.recompute(tx, sa.id);
 
       await this.audit.recordInTx(tx, {
         entity: 'AssignmentSubmission',

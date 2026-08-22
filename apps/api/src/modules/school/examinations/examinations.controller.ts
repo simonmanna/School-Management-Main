@@ -291,6 +291,19 @@ export class ReportCardController {
 export class ReportCardSettingsController {
   constructor(private readonly service: ReportCardSettingsService) {}
 
+  /**
+   * GET the field registry, groups and presets that describe every available
+   * customisation option. The settings UI renders itself from this, so adding
+   * an option server-side surfaces it in the browser with no client change.
+   *
+   * Declared before `@Get()` so 'schema' is not swallowed by the bare route.
+   */
+  @Get('schema')
+  @RequirePermissions(PERMISSIONS.school.read)
+  schema() {
+    return this.service.schema();
+  }
+
   /** GET the org's report card printable configuration (creates defaults if absent). */
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -303,6 +316,22 @@ export class ReportCardSettingsController {
   @RequirePermissions(PERMISSIONS.school.manageExams)
   update(@Body() dto: ReportCardSettingsDto) {
     return this.service.update(dto);
+  }
+
+  /** Replace the whole configuration with a named preset ('classic', 'modern', …). */
+  @Post('preset')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  applyPreset(@Body() body: { key?: string }) {
+    return this.service.applyPreset(String(body?.key ?? ''));
+  }
+
+  /** Reset to defaults — the whole card, or one group when `group` is given. */
+  @Post('reset')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  reset(@Body() body: { group?: string }) {
+    return this.service.reset(body?.group || undefined);
   }
 }
 

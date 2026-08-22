@@ -6,6 +6,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
+import { LmsExecutionService } from './lms-execution.service';
 import type {
   CreateAnnouncementDto,
   CreateHomeworkDto,
@@ -28,6 +29,7 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
     private readonly audit: AuditService,
+    private readonly execution: LmsExecutionService,
   ) {
     super(prisma.client.homeworkAssignment as unknown as CrudDelegate);
   }
@@ -111,45 +113,40 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     });
   }
 
+  /**
+   * Grade a homework submission.
+   *
+   * This used to write the score onto `HomeworkSubmission` and stop there — no
+   * spine row, so nothing downstream could see it. A teacher marking homework
+   * here produced a number that appeared on no gradebook and no report card.
+   * It now delegates to the execution service's bridge, which posts the mark
+   * into the assessment spine through the marking ledger and writes the same
+   * submission fields. The event and audit trail are preserved.
+   */
   async grade(dto: GradeSubmissionDto) {
-    return this.prisma.client.$transaction(async (tx: any) => {
-      const sub = await tx.homeworkSubmission.findFirst({ where: { id: dto.submissionId } });
-      if (!sub) throw new NotFoundException(`Submission ${dto.submissionId} not found`);
+    const sub = await this.prisma.client.homeworkSubmission.findFirst({ where: { id: dto.submissionId } });
+    if (!sub) throw new NotFoundException(`Submission ${dto.submissionId} not found`);
 
-      // A0: a homework score cannot exceed the assignment's maxScore.
-      const assignment = await tx.homeworkAssignment.findFirst({ where: { id: sub.assignmentId } });
-      const max = assignment?.maxScore != null ? Number(assignment.maxScore) : null;
-      if (dto.score < 0 || (max != null && dto.score > max)) {
-        throw new BadRequestException(
-          `Score ${dto.score} out of range [0, ${max ?? '∞'}] for this assignment`,
-        );
-      }
-
-      const updated = await tx.homeworkSubmission.updateMany({
-        where: { id: dto.submissionId },
-        data: {
-          score: dto.score,
-          feedback: dto.feedback ?? null,
-          gradedById: this.tenant.userId ?? null,
-          gradedAt: new Date(),
-          status: 'graded',
-        },
-      });
-      if (updated.count === 0) throw new NotFoundException(`Submission ${dto.submissionId} not found`);
-      await this.audit.recordInTx(tx, {
-        entity: 'HomeworkSubmission',
-        entityId: dto.submissionId,
-        action: 'update',
-        newValues: { score: dto.score, status: 'graded', action: 'grade' },
-      });
-      this.events.publish(EVENTS.SchoolHomeworkGraded, {
-        organizationId: this.tenant.organizationId,
-        submissionId: dto.submissionId,
-        assignmentId: sub.assignmentId,
-        studentProfileId: sub.studentProfileId,
-      });
-      return tx.homeworkSubmission.findFirst({ where: { id: dto.submissionId } });
+    const graded = await this.execution.gradeHomework({
+      submissionId: dto.submissionId,
+      score: dto.score,
+      feedback: dto.feedback,
+      gradedById: this.tenant.userId ?? undefined,
     });
+
+    await this.audit.record({
+      entity: 'HomeworkSubmission',
+      entityId: dto.submissionId,
+      action: 'update',
+      newValues: { score: dto.score, status: 'graded', action: 'grade' },
+    });
+    this.events.publish(EVENTS.SchoolHomeworkGraded, {
+      organizationId: this.tenant.organizationId,
+      submissionId: dto.submissionId,
+      assignmentId: sub.assignmentId,
+      studentProfileId: sub.studentProfileId,
+    });
+    return graded;
   }
 
   async byClass(classId: string) {
@@ -158,6 +155,61 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
       include: { subject: true, submissions: true },
       orderBy: { dueDate: 'desc' },
     });
+  }
+
+  /**
+   * One homework with a roster-derived submission list: EVERY active student in
+   * the class, each with their submission if one exists. Mirrors the marksheet
+   * rule — a student who has not submitted must still be visible, or the teacher
+   * cannot mark or chase them.
+   */
+  async detail(id: string) {
+    const hw = await this.prisma.client.homeworkAssignment.findFirst({
+      where: { id },
+      include: { subject: true, schoolClass: true },
+    });
+    if (!hw) throw new NotFoundException(`Homework ${id} not found`);
+
+    const [students, submissions] = await Promise.all([
+      this.prisma.client.studentProfile.findMany({
+        where: { currentClassId: hw.classId, status: 'active', ...(hw.sectionId ? { currentSectionId: hw.sectionId } : {}) },
+        include: { partner: true },
+      }),
+      this.prisma.client.homeworkSubmission.findMany({ where: { assignmentId: id } }),
+    ]);
+    const byStudent = new Map(submissions.map((s) => [s.studentProfileId, s]));
+
+    const rows = students
+      .map((st) => {
+        const sub = byStudent.get(st.id);
+        return {
+          studentProfileId: st.id,
+          name: st.partner?.name ?? st.admissionNo,
+          admissionNo: st.admissionNo,
+          submissionId: sub?.id ?? null,
+          submittedAt: sub?.submittedAt ?? null,
+          content: sub?.content ?? null,
+          score: sub?.score != null ? Number(sub.score) : null,
+          feedback: sub?.feedback ?? null,
+          status: sub?.status ?? 'not_submitted',
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const submitted = rows.filter((r) => r.status !== 'not_submitted').length;
+    const graded = rows.filter((r) => r.status === 'graded').length;
+    return {
+      homework: {
+        id: hw.id, title: hw.title, description: hw.description,
+        dueDate: hw.dueDate, maxScore: hw.maxScore != null ? Number(hw.maxScore) : null,
+        subject: hw.subject?.name ?? '', className: hw.schoolClass?.name ?? '',
+        classId: hw.classId, subjectId: hw.subjectId, termId: hw.termId,
+      },
+      students: rows,
+      total: rows.length,
+      submitted,
+      graded,
+    };
   }
 }
 

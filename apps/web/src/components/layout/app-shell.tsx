@@ -202,6 +202,15 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: 'Messaging',
+    icon: MessagesSquare,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/messaging', label: 'Send Message', icon: MessagesSquare, permission: PERMISSIONS.school.read },
+      { to: '/school/messaging?tab=history', label: 'Message History', icon: History, permission: PERMISSIONS.school.read },
+    ],
+  },
+  {
     title: 'Admissions & Enrollment',
     icon: FilePlus2,
     flag: 'VITE_ENABLE_SCHOOL',
@@ -232,23 +241,34 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Assessment & Examination',
+    // Two sections replace four (Exams & Marks + the assessment half of LMS).
+    // The numbered workflow leads; the gradebook and homework are the day-to-day
+    // continuous-assessment tools; reports and setup sit behind them.
+    title: 'Teaching & Assessment',
     icon: BookText,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/my-marking', label: 'My Marking', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/assessment', label: 'Assessment & Marks', icon: ClipboardCheck, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/exams', label: 'Exams & Grades', icon: BookText, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/report-card-settings', label: 'Report Card Settings', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams },
-      { to: '/school/assessment-ops', label: 'Rosters & Assignments', icon: ClipboardList, permission: PERMISSIONS.school.read },
-      { to: '/school/results', label: 'Result Spine', icon: ScrollText, permission: PERMISSIONS.school.read },
-      { to: '/school/grading-scales', label: 'Grading Scales', icon: SlidersHorizontal, permission: PERMISSIONS.school.read },
-      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.read },
-      { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
-      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read },
-      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.read },
-      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read },
+      { to: '/school/teaching', label: 'My Teaching', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+
+      { to: '/school/exam-workspace', label: '1. Exams', icon: CalendarDays, permission: PERMISSIONS.school.read, group: 'Do these in order' },
+      { to: '/school/exam-workspace/classes', label: '2. Choose classes', icon: Layers, permission: PERMISSIONS.school.manageExams, group: 'Do these in order' },
+      { to: '/school/enter-marks', label: '3. Enter marks', icon: ClipboardList, permission: PERMISSIONS.school.enterGrades, group: 'Do these in order' },
+      { to: '/school/exam-results', label: '4. Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Do these in order' },
+
+      { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades, group: 'Continuous assessment' },
+      { to: '/school/homework', label: 'Homework & Tasks', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Continuous assessment' },
+      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Continuous assessment' },
+
+      { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
+      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
+      { to: '/school/results', label: 'Result Runs', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Reports' },
+      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Reports' },
+      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Reports' },
+
+      { to: '/school/assessment', label: 'Weighting Policies', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
+      { to: '/school/grading-scales', label: 'Grading Scales', icon: Calculator, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
+      { to: '/school/assessment-ops', label: 'Cohorts & Rubrics', icon: ClipboardList, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
+      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Setup' },
     ],
   },
   {
@@ -273,19 +293,22 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'LMS & Lesson Planning',
+    // Curriculum & Lessons — the teaching half of the old LMS section, now that
+    // homework and the teacher dashboard have moved into Teaching & Assessment.
+    // Every item carries a permission guard (they previously had none).
+    title: 'Curriculum & Lessons',
     icon: Presentation,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy },
-      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation },
-      { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack },
-      { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck },
-      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare },
-      { to: '/school/lms/homework', label: 'Homework & Tasks', icon: ClipboardList },
-      { to: '/school/lms/teacher-dashboard', label: 'My Teaching', icon: UserCog },
-      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target },
-      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch },
+      { to: '/school/lms/courses', label: 'Courses', icon: GraduationCap, permission: PERMISSIONS.school.lmsRead, group: 'Courses' },
+      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy, permission: PERMISSIONS.school.manageCourses, group: 'Courses' },
+      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
+      { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
+      { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead, group: 'Planning' },
+      { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: Award, permission: PERMISSIONS.school.read, group: 'Outcomes' },
+      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead, group: 'Outcomes' },
+      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead, group: 'Outcomes' },
+      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead, group: 'Community' },
     ],
   },
   {
@@ -348,6 +371,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/categories', label: 'Fee Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/structures', label: 'Fee Structures', icon: Layers, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/optional', label: 'Optional Fees', icon: Ticket, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/schedules', label: 'Fee Schedules', icon: CalendarClock, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/dashboard', label: 'Finance Dashboard', icon: Receipt, permission: PERMISSIONS.school.read },
       { to: '/school/fees/invoices', label: 'Fee Invoices', icon: Receipt, permission: PERMISSIONS.school.read },

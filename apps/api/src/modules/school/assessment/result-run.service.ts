@@ -296,7 +296,9 @@ export class ResultRunService {
     // 3. Every contributing mark is approved (or a terminal non-participation).
     const studentIds = roster.members.map((m: any) => m.studentProfileId);
     const contributing = await this.prisma.client.studentAssessment.findMany({
-      where: { studentProfileId: { in: studentIds }, termId: rs.termId },
+      // Same relation filter as buildInput — a soft-deleted assessment must not
+      // be able to block a publish with a MARKS_NOT_APPROVED conflict.
+      where: { studentProfileId: { in: studentIds }, termId: rs.termId, assessment: { deletedAt: null } },
     });
     for (const sa of contributing) {
       const terminal = ['exempt', 'excused', 'absent', 'malpractice'].includes(sa.participation);
@@ -393,7 +395,11 @@ export class ResultRunService {
   private async buildInput(roster: any, termId: string): Promise<{ students: StudentInput[]; contributing: any[] }> {
     const studentIds = roster.members.map((m: any) => m.studentProfileId);
     const rows = await this.prisma.client.studentAssessment.findMany({
-      where: { studentProfileId: { in: studentIds }, termId },
+      // The tenancy extension supplies `deletedAt: null` for the StudentAssessment
+      // itself, but soft-deleting an Assessment does NOT cascade to its children —
+      // so without this relation filter a deleted assessment keeps contributing to
+      // every term result. Soft delete has to actually exclude something.
+      where: { studentProfileId: { in: studentIds }, termId, assessment: { deletedAt: null } },
       include: { assessment: { include: { component: true } } },
     });
 

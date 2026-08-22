@@ -32,12 +32,16 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
 
   async create(dto: CreateAcademicYearDto): Promise<AcademicYear> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      // JSON bodies arrive as date-only strings; Prisma's DateTime filter rejects
+      // them, so coerce to Date before any query or write.
+      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
+      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
       // Guard: no two academic years may overlap in time (same org).
       const clash = await tx.academicYear.findFirst({
         where: {
           organizationId: this.tenant.organizationId,
-          startDate: { lte: dto.endDate },
-          endDate: { gte: dto.startDate },
+          startDate: { lte: endDate },
+          endDate: { gte: startDate },
         },
       });
       if (clash) {
@@ -49,7 +53,7 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
       if (dto.isCurrent) {
         await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
-      const row = await tx.academicYear.create({ data: dto as any });
+      const row = await tx.academicYear.create({ data: { ...dto, startDate, endDate } as any });
       await this.audit.recordInTx(tx, { entity: 'AcademicYear', entityId: row.id, action: 'create', newValues: row });
       return row;
     });
@@ -88,13 +92,17 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
 
   async create(dto: CreateTermDto): Promise<Term> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      // JSON bodies arrive as date-only strings; Prisma's DateTime filter rejects
+      // them, so coerce to Date before any query or write.
+      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
+      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
       // Guard: terms within the same academic year must not overlap in time.
       const clash = await tx.term.findFirst({
         where: {
           organizationId: this.tenant.organizationId,
           academicYearId: dto.academicYearId,
-          startDate: { lte: dto.endDate },
-          endDate: { gte: dto.startDate },
+          startDate: { lte: endDate },
+          endDate: { gte: startDate },
         },
       });
       if (clash) {
@@ -105,7 +113,7 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
       if (dto.isCurrent) {
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
-      return tx.term.create({ data: dto as any });
+      return tx.term.create({ data: { ...dto, startDate, endDate } as any });
     });
   }
 

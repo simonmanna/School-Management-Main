@@ -10,6 +10,7 @@ import { AcademicsModule } from './academics/academics.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { LmsModule } from './lms/lms.module';
 import { LessonPlanningModule } from './lms/lesson-planning.module';
+import { LmsMoodleModule } from './lms/moodle/lms-moodle.module';
 import { ExaminationsModule } from './examinations/examinations.module';
 import { AssessmentModule } from './assessment/assessment.module';
 import { CbtModule } from './cbt/cbt.module';
@@ -46,6 +47,7 @@ import { SchoolController } from './school.controller';
     AttendanceModule,
     LmsModule,
     LessonPlanningModule,
+    LmsMoodleModule,
     ExaminationsModule,
     AssessmentModule,
     CbtModule,

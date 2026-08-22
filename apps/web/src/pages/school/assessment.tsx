@@ -5,7 +5,7 @@ import {
   useAssessmentPolicies, useCreateAssessmentPolicy,
   useResolvePolicy, useAssessmentComponents, useValidateComponents, useCreateAssessmentComponent,
   useAssessments, useCreateAssessment, useAssessmentTransition,
-  useMarksByAssessment, useRecordMark, useSetParticipation, useSubmitMarks, useMarkingApproval, useAppendAdjustment,
+  useMarksByAssessment, useRecordMark, useSubmitMarks, useMarkingApproval, useAppendAdjustment,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -158,7 +158,6 @@ function MarkTab() {
   useClassRoster(assessments?.find((a) => a.id === assessmentId)?.classId);
   const { data: marks } = useMarksByAssessment(assessmentId || undefined);
   const recordMark = useRecordMark();
-  const setPart = useSetParticipation();
   const submit = useSubmitMarks();
   const approve = useMarkingApproval();
   const appendAdj = useAppendAdjustment();
@@ -171,13 +170,13 @@ function MarkTab() {
 
   useEffect(() => {
     const next: Record<string, string> = {};
-    for (const m of marks ?? []) if (m.score != null) next[m.studentAssessmentId] = String(m.score);
+    for (const m of marks ?? []) { const cur = m.effectiveScore ?? m.originalScore; if (cur != null) next[m.id] = String(cur); }
     setVals(next);
   }, [marks, assessmentId]);
 
   const save = async () => {
-    const entries = (marks ?? []).filter((m) => vals[m.studentAssessmentId] !== undefined && vals[m.studentAssessmentId] !== '')
-      .map((m) => recordMark.mutateAsync({ studentAssessmentId: m.studentAssessmentId, score: Number(vals[m.studentAssessmentId]) }));
+    const entries = (marks ?? []).filter((m) => vals[m.id] !== undefined && vals[m.id] !== '')
+      .map((m) => recordMark.mutateAsync({ studentAssessmentId: m.id, score: Number(vals[m.id]) }));
     try { await Promise.all(entries); notify.success('Marks saved'); } catch { notify.error('Save failed'); }
   };
 
@@ -201,18 +200,15 @@ function MarkTab() {
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Adm.</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">Part.</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Status</th></tr></thead>
+              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Student ID</th><th className="px-4 py-2">Participation</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Status</th></tr></thead>
               <tbody>
                 {(marks ?? []).map((m) => (
-                  <tr key={m.studentAssessmentId} className="border-b last:border-0">
-                    <td className="px-4 py-2 font-mono text-xs">{m.admissionNo ?? '—'}</td>
-                    <td className="px-4 py-2">{m.studentName}</td>
+                  <tr key={m.id} className="border-b last:border-0">
+                    <td className="px-4 py-2 font-mono text-xs">{m.id.slice(0, 8)}</td>
+                    <td className="px-4 py-2">{m.participation}</td>
                     <td className="px-4 py-2">
-                      <select className={sel + ' w-32'} value={m.participation} onChange={(e) => setPart.mutate({ assessmentId, studentProfileId: m.studentProfileId, participation: e.target.value })}>
-                        {['present','absent','exempt','excused','malpractice','special_consideration'].map((p) => <option key={p} value={p}>{p}</option>)}
-                      </select>
+                      <Input type="number" className="h-8 w-24" value={vals[m.id] ?? ''} onChange={(e) => setVals({ ...vals, [m.id]: e.target.value })} />
                     </td>
-                    <td className="px-4 py-2"><Input type="number" className="h-8 w-24" value={vals[m.studentAssessmentId] ?? ''} onChange={(e) => setVals({ ...vals, [m.studentAssessmentId]: e.target.value })} /></td>
                     <td className="px-4 py-2"><Badge variant="secondary">{m.status}</Badge></td>
                   </tr>
                 ))}
@@ -229,7 +225,7 @@ function MarkTab() {
             <CardContent className="flex flex-wrap items-end gap-2">
               <select className={sel + ' w-56'} value={modSa} onChange={(e) => setModSa(e.target.value)}>
                 <option value="">Student…</option>
-                {(marks ?? []).map((m) => <option key={m.studentAssessmentId} value={m.studentAssessmentId}>{m.studentName}</option>)}
+                {(marks ?? []).map((m) => <option key={m.id} value={m.id}>{m.id.slice(0, 8)} · {m.participation}</option>)}
               </select>
               <select className={sel} value={modKind} onChange={(e) => setModKind(e.target.value)}>
                 {['moderation', 'scaling', 'late_penalty', 'special_consideration', 'correction'].map((k) => <option key={k} value={k}>{k.replace('_', ' ')}</option>)}

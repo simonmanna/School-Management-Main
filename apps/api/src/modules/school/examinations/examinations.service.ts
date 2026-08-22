@@ -49,10 +49,15 @@ export class ExamService extends BaseCrudService<Exam, CreateExamDto, UpdateExam
   }
 
   async schedule(dto: CreateExamDto): Promise<Exam> {
-    const row = await super.create({
+    // JSON bodies arrive as date-only strings; Prisma's DateTime fields reject
+    // them, so coerce to Date before the write (same fix as Term/AcademicYear).
+    const payload = {
       ...dto,
       classes: dto.classes as any,
-    });
+      startDate: dto.startDate ? new Date(dto.startDate) : undefined,
+      endDate: dto.endDate ? new Date(dto.endDate) : undefined,
+    } as any;
+    const row = await super.create(payload);
     this.events.publish(EVENTS.SchoolExamScheduled, {
       organizationId: this.tenant.organizationId,
       examId: row.id,
@@ -118,7 +123,9 @@ export class ExamScheduleService extends BaseCrudService<ExamSchedule, CreateExa
       }
       if (conflicts.length > 0) throw new BadRequestException({ message: 'Exam scheduling clash', conflicts });
     }
-    return super.create(dto);
+    // JSON bodies send date-only strings; coerce to Date for Prisma's DateTime.
+    const schedulePayload = { ...dto, date: dto.date ? new Date(dto.date) : undefined } as any;
+    return super.create(schedulePayload);
   }
 }
 
@@ -447,17 +454,20 @@ export class ReportCardService {
       const spine = await this.results.latestPublished(dto.termId, dto.studentProfileId);
       const legacy = await this.grading.computeTermGpa(dto.studentProfileId, dto.termId);
 
-      // Build the templated layout (sections + summary + eligibility).
-      const layout = await this.templates.buildLayout(dto.studentProfileId, dto.termId);
+      // Build the templated layout (sections + summary + eligibility). Pass the
+      // spine so the subject table is sourced from it too (P3), not just the
+      // headline numbers — otherwise the body and header of one card disagree.
+      const { layout, layoutSource } = await this.templates.buildLayout(dto.studentProfileId, dto.termId, spine);
 
       const provenance = spine
         ? {
             source: 'result_spine' as const,
+            layoutSource,
             resultSetId: spine.resultSet.id,
             resultSetRevision: spine.resultSet.revision,
             calculationVersion: spine.resultSet.calculationVersion,
           }
-        : { source: 'legacy_compute' as const };
+        : { source: 'legacy_compute' as const, layoutSource };
 
       const gpa = spine?.term.gpa != null ? Number(spine.term.gpa) : legacy.gpa;
       const rank = spine?.term.classRank ?? legacy.rank;
@@ -469,6 +479,13 @@ export class ReportCardService {
       const prior = await tx.reportCard.findFirst({
         where: { studentProfileId: dto.studentProfileId, termId: dto.termId },
       });
+      // A published card is a frozen, distributed record. Regenerating it would
+      // silently rewrite what a parent has already seen — unpublish first.
+      if (prior?.publishedAt) {
+        throw new BadRequestException(
+          'This report card is published. Unpublish it before regenerating, so the change is deliberate.',
+        );
+      }
       const classTeacherComment = prior?.classTeacherComment ?? null;
       const principalComment = prior?.principalComment ?? null;
       const competencyLevels = prior?.competencyLevels ?? {};

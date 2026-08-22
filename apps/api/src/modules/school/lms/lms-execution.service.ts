@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { MarkingService } from '../assessment/marking.service';
 
 const notFound = (what: string) => new NotFoundException(`${what} not found`);
 
@@ -21,6 +22,7 @@ export class LmsExecutionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly marking: MarkingService,
   ) {}
 
   private get org() {
@@ -207,7 +209,14 @@ export class LmsExecutionService {
     });
   }
 
-  /** Grade a submission and bridge it to the gradebook via StudentAssessment. */
+  /**
+   * Grade a submission and bridge it to the gradebook via StudentAssessment.
+   *
+   * The score reaches the spine as a MarkEntry, then `recompute` derives
+   * `effectiveScore` from it — the same discipline every other producer follows.
+   * This used to write the derived columns directly across three unwrapped
+   * calls, which left rows a later recompute would blank out.
+   */
   async gradeHomework(dto: {
     submissionId: string;
     score: number;
@@ -222,53 +231,59 @@ export class LmsExecutionService {
     if (!sub) throw notFound('Homework submission');
     const hw = sub.assignment;
 
-    // Idempotent Assessment row for this homework (sourceType=assignment, sourceRef=homeworkId).
-    const assessment = await this.prisma.client.assessment.upsert({
-      where: { organizationId_sourceType_sourceRef: { organizationId: this.org, sourceType: 'assignment', sourceRef: hw.id } },
-      update: {},
-      create: {
-        organizationId: this.org,
-        subjectId: hw.subjectId,
-        classId: hw.classId,
-        termId: hw.termId ?? '',
-        title: hw.title,
-        maxScore: dto.maxScore != null ? new Prisma.Decimal(dto.maxScore) : hw.maxScore ?? new Prisma.Decimal(100),
-        sourceType: 'assignment',
-        sourceRef: hw.id,
-        status: 'published',
-      },
-    });
+    // Assessment.termId is NOT NULL. This used to coerce a missing term to '',
+    // minting an assessment pinned to a term that does not exist — invisible
+    // to every term-scoped reader. Refuse instead.
+    if (!hw.termId) {
+      throw new BadRequestException(
+        `Homework "${hw.title}" has no term, so its marks cannot be placed in the gradebook. Set a term on the homework first.`,
+      );
+    }
+    const maxScore = dto.maxScore != null
+      ? new Prisma.Decimal(dto.maxScore)
+      : (hw.maxScore ?? new Prisma.Decimal(100));
+    if (dto.score < 0 || new Prisma.Decimal(dto.score).greaterThan(maxScore)) {
+      throw new BadRequestException(`Score ${dto.score} is outside [0, ${maxScore.toString()}]`);
+    }
 
-    const pct = dto.maxScore ? (dto.score / dto.maxScore) * 100 : hw.maxScore ? (dto.score / Number(hw.maxScore)) * 100 : 0;
-    const studentAssessment = await this.prisma.client.studentAssessment.upsert({
-      where: { assessmentId_studentProfileId: { assessmentId: assessment.id, studentProfileId: sub.studentProfileId } },
-      update: { effectiveScore: new Prisma.Decimal(dto.score), originalScore: new Prisma.Decimal(dto.score), percentage: new Prisma.Decimal(pct), approvalStatus: 'approved' },
-      create: {
-        organizationId: this.org,
+    return this.prisma.client.$transaction(async (tx: any) => {
+      // Idempotent Assessment row for this homework (sourceType=assignment, sourceRef=homeworkId).
+      const assessment = await tx.assessment.upsert({
+        where: { organizationId_sourceType_sourceRef: { organizationId: this.org, sourceType: 'assignment', sourceRef: hw.id } },
+        update: {},
+        create: {
+          organizationId: this.org,
+          subjectId: hw.subjectId,
+          classId: hw.classId,
+          termId: hw.termId,
+          title: hw.title,
+          maxScore,
+          sourceType: 'assignment',
+          sourceRef: hw.id,
+          status: 'published',
+        },
+      });
+
+      const studentAssessment = await this.marking.postMark(tx, {
         assessmentId: assessment.id,
         studentProfileId: sub.studentProfileId,
-        classId: hw.classId,
-        sectionId: hw.sectionId,
-        termId: hw.termId,
-        maxScore: dto.maxScore != null ? new Prisma.Decimal(dto.maxScore) : hw.maxScore ?? new Prisma.Decimal(100),
-        effectiveScore: new Prisma.Decimal(dto.score),
-        originalScore: new Prisma.Decimal(dto.score),
-        percentage: new Prisma.Decimal(pct),
-        approvalStatus: 'approved',
-        status: 'graded',
-      },
-    });
+        score: dto.score,
+        source: 'homework',
+        markerId: dto.gradedById ?? null,
+        snapshot: { classId: hw.classId, sectionId: hw.sectionId ?? undefined, termId: hw.termId ?? undefined },
+      });
 
-    return this.prisma.client.homeworkSubmission.update({
-      where: { id: sub.id },
-      data: {
-        score: new Prisma.Decimal(dto.score),
-        feedback: dto.feedback ?? null,
-        gradedById: dto.gradedById ?? null,
-        gradedAt: new Date(),
-        status: 'graded',
-        studentAssessmentId: studentAssessment.id,
-      },
+      return tx.homeworkSubmission.update({
+        where: { id: sub.id },
+        data: {
+          score: new Prisma.Decimal(dto.score),
+          feedback: dto.feedback ?? null,
+          gradedById: dto.gradedById ?? null,
+          gradedAt: new Date(),
+          status: 'graded',
+          studentAssessmentId: studentAssessment.id,
+        },
+      });
     });
   }
 

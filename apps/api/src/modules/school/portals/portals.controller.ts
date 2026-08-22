@@ -25,4 +25,11 @@ export class PortalsController {
   teacherDashboard(@Param('teacherPartnerId') id: string) {
     return this.portals.teacherDashboard(id);
   }
+
+  /** The teacher workspace (P5) — aggregated "what needs doing" for one teacher. */
+  @Get('teaching/:teacherPartnerId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  teachingOverview(@Param('teacherPartnerId') id: string) {
+    return this.portals.teacherOverview(id);
+  }
 }

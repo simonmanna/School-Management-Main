@@ -35,6 +35,7 @@ import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
 import { SchoolFeeCategoriesPage } from '@/pages/school/fee-categories';
 import { SchoolFeeStructuresPage } from '@/pages/school/fee-structures';
+import { SchoolOptionalFeesPage } from '@/pages/school/optional-fees';
 import { SchoolFeeSchedulesPage } from '@/pages/school/fee-schedules';
 import { SchoolFeesCollectPage } from '@/pages/school/fees-subpages';
 import { SchoolWaiverCategoriesPage } from '@/pages/school/fees-subpages';
@@ -58,10 +59,10 @@ import { SchoolTripsPage } from '@/pages/school/trips';
 import { SchoolTransportPage } from '@/pages/school/transport';
 import { SchoolLibraryPage } from '@/pages/school/library';
 import { FrontDeskPage } from '@/pages/school/front-desk';
-import { SchoolExamsPage } from '@/pages/school/exams';
 import { SchoolReportCardsPage } from '@/pages/school/report-cards';
 import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-settings';
 import { SchoolPromotionPage } from '@/pages/school/promotion';
+import { SchoolMessagingPage } from '@/pages/school/messaging';
 import { SchoolMealsPage } from '@/pages/school/meals';
 import { SchoolAdmissionsPage } from '@/pages/school/admissions';
 import { SchoolEnrollmentSummaryPage } from '@/pages/school/enrollment-summary';
@@ -74,7 +75,13 @@ import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
-import { SchoolMyMarkingPage } from '@/pages/school/my-marking';
+import { SchoolExamWorkspacePage } from '@/pages/school/exam-workspace';
+import { SchoolExamClassesPage } from '@/pages/school/exam-classes';
+import { SchoolEnterMarksPage } from '@/pages/school/enter-marks';
+import { SchoolExamResultsPage } from '@/pages/school/exam-results';
+import { SchoolGradebookPage } from '@/pages/school/gradebook';
+import { SchoolTeachingPage } from '@/pages/school/teaching';
+import { SchoolHomeworkPage } from '@/pages/school/homework';
 import { SchoolMarksheetPage } from '@/pages/school/marksheet';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
@@ -106,10 +113,12 @@ import { SchoolLmsLessonPlansPage } from '@/pages/school/lms/lesson-plans';
 import { SchoolLmsTemplatesPage } from '@/pages/school/lms/templates';
 import { SchoolLmsScheduledLessonsPage } from '@/pages/school/lms/scheduled-lessons';
 import { SchoolLmsDiscussionsPage } from '@/pages/school/lms/discussions';
-import { SchoolLmsHomeworkPage } from '@/pages/school/lms/homework';
-import { SchoolLmsTeacherDashboardPage } from '@/pages/school/lms/teacher-dashboard';
 import { SchoolLmsMasteryPage } from '@/pages/school/lms/mastery';
 import { SchoolLmsCoveragePage } from '@/pages/school/lms/coverage';
+import { SchoolLmsCoursesPage } from '@/pages/school/lms/courses';
+import { SchoolLmsCoursePage } from '@/pages/school/lms/course-page';
+import { SchoolLmsModuleViewPage } from '@/pages/school/lms/module-view';
+import { SchoolLmsParticipantsPage } from '@/pages/school/lms/participants';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -465,6 +474,7 @@ export function App() {
           <Route path="/school/fees" element={<SchoolFeesPage />} />
           <Route path="/school/fees/categories" element={<SchoolFeeCategoriesPage />} />
           <Route path="/school/fees/structures" element={<SchoolFeeStructuresPage />} />
+          <Route path="/school/fees/optional" element={<SchoolOptionalFeesPage />} />
           <Route path="/school/fees/schedules" element={<SchoolFeeSchedulesPage />} />
           <Route path="/school/fees/collect" element={<SchoolFeesCollectPage />} />
           <Route path="/school/fees/waiver-categories" element={<SchoolWaiverCategoriesPage />} />
@@ -483,10 +493,12 @@ export function App() {
           <Route path="/school/attendance/statuses" element={<SchoolAttendanceStatusesPage />} />
           <Route path="/school/attendance/report" element={<SchoolAttendanceReportPage />} />
           <Route path="/school/timetable" element={<SchoolTimetablePage />} />
-          <Route path="/school/exams" element={<SchoolExamsPage />} />
+          {/* P6: the classic exam page is superseded by the numbered workspace. */}
+          <Route path="/school/exams" element={<Navigate to="/school/exam-workspace" replace />} />
           <Route path="/school/report-cards" element={<SchoolReportCardsPage />} />
           <Route path="/school/report-card-settings" element={<SchoolReportCardSettingsPage />} />
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
+          <Route path="/school/messaging" element={<SchoolMessagingPage />} />
           <Route path="/school/meals" element={<SchoolMealsPage />} />
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
           <Route path="/school/admissions/analytics" element={<SchoolAdmissionsAnalyticsPage />} />
@@ -517,8 +529,16 @@ export function App() {
           <Route path="/school/management/policies" element={<SchoolPoliciesPage />} />
           <Route path="/school/management/custom-fields" element={<SchoolCustomFieldsPage />} />
           <Route path="/school/management/roles" element={<SchoolRolesPage />} />
+          <Route path="/school/exam-workspace" element={<SchoolExamWorkspacePage />} />
+          <Route path="/school/exam-workspace/classes" element={<SchoolExamClassesPage />} />
+          <Route path="/school/enter-marks" element={<SchoolEnterMarksPage />} />
+          <Route path="/school/exam-results" element={<SchoolExamResultsPage />} />
+          <Route path="/school/gradebook" element={<SchoolGradebookPage />} />
+          <Route path="/school/teaching" element={<SchoolTeachingPage />} />
+          <Route path="/school/homework" element={<SchoolHomeworkPage />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
-          <Route path="/school/my-marking" element={<SchoolMyMarkingPage />} />
+          {/* P6: My Marking → the teacher workspace, which finds the work for you. */}
+          <Route path="/school/my-marking" element={<Navigate to="/school/teaching" replace />} />
           <Route path="/school/marksheet/:assessmentId" element={<SchoolMarksheetPage />} />
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
@@ -526,13 +546,18 @@ export function App() {
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
+          <Route path="/school/lms/courses" element={<SchoolLmsCoursesPage />} />
+          <Route path="/school/lms/courses/:id" element={<SchoolLmsCoursePage />} />
+          <Route path="/school/lms/courses/:id/participants" element={<SchoolLmsParticipantsPage />} />
+          <Route path="/school/lms/modules/:id" element={<SchoolLmsModuleViewPage />} />
           <Route path="/school/lms/course-offerings" element={<SchoolLmsCourseOfferingsPage />} />
           <Route path="/school/lms/lesson-plans" element={<SchoolLmsLessonPlansPage />} />
           <Route path="/school/lms/templates" element={<SchoolLmsTemplatesPage />} />
           <Route path="/school/lms/scheduled-lessons" element={<SchoolLmsScheduledLessonsPage />} />
           <Route path="/school/lms/discussions" element={<SchoolLmsDiscussionsPage />} />
-          <Route path="/school/lms/homework" element={<SchoolLmsHomeworkPage />} />
-          <Route path="/school/lms/teacher-dashboard" element={<SchoolLmsTeacherDashboardPage />} />
+          {/* P6: the LMS debug homework form and teacher dashboard are consolidated. */}
+          <Route path="/school/lms/homework" element={<Navigate to="/school/homework" replace />} />
+          <Route path="/school/lms/teacher-dashboard" element={<Navigate to="/school/teaching" replace />} />
           <Route path="/school/lms/mastery" element={<SchoolLmsMasteryPage />} />
           <Route path="/school/lms/coverage" element={<SchoolLmsCoveragePage />} />
           <Route path="/school/cbt" element={<SchoolCbtPage />} />

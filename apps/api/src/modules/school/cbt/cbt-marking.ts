@@ -117,3 +117,38 @@ export function totalAuto(
   }
   return { autoScore, manualPending };
 }
+
+/** How a quiz with several attempts resolves to one grade (Moodle's grademethod). */
+export type QuizGradingMethod = 'highest' | 'average' | 'first' | 'last';
+
+/** One attempt, as far as grade selection is concerned. */
+export interface AttemptScore {
+  attemptNumber: number;
+  score: number;
+}
+
+/**
+ * Pick the grade from a student's attempts under the quiz's grading method.
+ *
+ * Ordering is derived from `attemptNumber` here rather than assumed from query
+ * order. The previous inline version read `first` as the LAST element and
+ * `last` as the FIRST, over a query with no `orderBy` at all — so both were
+ * wrong, and which way they were wrong depended on how Postgres happened to
+ * return the rows.
+ */
+export function pickAttemptScore(attempts: AttemptScore[], method: QuizGradingMethod): number | null {
+  if (attempts.length === 0) return null;
+  const ordered = [...attempts].sort((a, b) => a.attemptNumber - b.attemptNumber);
+  const scores = ordered.map((a) => a.score);
+  switch (method) {
+    case 'average':
+      return scores.reduce((sum, n) => sum + n, 0) / scores.length;
+    case 'first':
+      return scores[0];
+    case 'last':
+      return scores[scores.length - 1];
+    case 'highest':
+    default:
+      return Math.max(...scores);
+  }
+}

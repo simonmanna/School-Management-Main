@@ -32,6 +32,8 @@ function makeService(): { service: BillingService; mocks: MockContext } {
       studentFeeAssignment: { findMany: jest.fn().mockResolvedValue([]) },
       scholarship: { findMany: jest.fn().mockResolvedValue([]) },
       discount: { findMany: jest.fn().mockResolvedValue([]) },
+      // P3: the optional-fee opt-in lookup runs in the same batched Promise.all.
+      studentOptionalFee: { findMany: jest.fn().mockResolvedValue([]) },
       schoolFeeInvoice: { create: jest.fn() },
       // P0-5 pre-flight: generateForTerm now refuses to run when any fee
       // product carries a non-zero sales tax, because the totals overwrite in

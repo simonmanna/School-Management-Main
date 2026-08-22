@@ -39,6 +39,12 @@ export class HomeworkController {
     return this.assignments.findOne(id);
   }
 
+  @Get(':id/detail')
+  @RequirePermissions(PERMISSIONS.school.read)
+  detail(@Param('id') id: string) {
+    return this.assignments.detail(id);
+  }
+
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
   create(@Body() dto: CreateHomeworkDto) {

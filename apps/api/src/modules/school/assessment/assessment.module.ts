@@ -8,6 +8,8 @@ import { RubricService } from './rubric.service';
 import { AssignmentService } from './assignment.service';
 import { ResultRunService } from './result-run.service';
 import { CbtResultBridgeService } from './cbt-result-bridge.service';
+import { GradebookService } from './gradebook.service';
+import { GradebookController } from './gradebook.controller';
 import {
   AcademicRosterController,
   AssessmentComponentController,
@@ -35,6 +37,7 @@ import {
     RubricController,
     AssignmentController,
     ResultController,
+    GradebookController,
   ],
   providers: [
     AssessmentPolicyService,
@@ -47,6 +50,7 @@ import {
     AssignmentService,
     ResultRunService,
     CbtResultBridgeService,
+    GradebookService,
   ],
   exports: [
     AssessmentPolicyService,
@@ -59,6 +63,7 @@ import {
     AssignmentService,
     ResultRunService,
     CbtResultBridgeService,
+    GradebookService,
   ],
 })
 export class AssessmentModule {}

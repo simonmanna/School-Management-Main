@@ -1078,9 +1078,15 @@ export function useStudentActivities(studentProfileId: string | undefined) {
 /* ───────────────────────── Fees — structures & schedules ───────────────────────── */
 
 export interface FeeComponent {
+  /** FeeCategory.code — the join between a structure and the categories catalog. */
   code: string;
-  productId: string;
+  /** Display label on the invoice line (defaults to the category name). */
+  name?: string;
+  feeCategoryId?: string;
+  /** Optional: with no product the line falls back to the default revenue account. */
+  productId?: string;
   amount: number;
+  /** Optional components bill ONLY students opted in via Optional Fees. */
   isOptional?: boolean;
 }
 
@@ -1090,6 +1096,10 @@ export interface FeeStructure {
   academicYearId: string;
   components: FeeComponent[];
   applicableTo?: { classIds?: string[]; gradeLevelIds?: string[] } | null;
+  isActive?: boolean;
+  status?: string;
+  academicYear?: { id: string; name: string } | null;
+  schedules?: Array<{ id: string; termId: string; dueDate: string }>;
 }
 
 export interface FeeSchedule {
@@ -1108,6 +1118,7 @@ export interface FeeCategory {
   description: string | null;
   paymentOrder: number;
   isActive: boolean;
+  createdAt?: string;
 }
 
 export function useFeeCategories() {
@@ -1167,6 +1178,28 @@ export function useCreateFeeStructure() {
   });
 }
 
+export function useUpdateFeeStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string } & Partial<{
+      name: string;
+      academicYearId: string;
+      components: FeeComponent[];
+      applicableTo: { classIds?: string[] };
+      isActive: boolean;
+    }>) => (await api.patch<FeeStructure>(`${S}/fee-structures/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] }),
+  });
+}
+
+export function useDeleteFeeStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/fee-structures/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] }),
+  });
+}
+
 export function useFeeSchedules() {
   return useQuery({
     queryKey: ['school', 'fee-schedules'],
@@ -1180,6 +1213,83 @@ export function useCreateFeeSchedule() {
     mutationFn: async (dto: { feeStructureId: string; termId: string; dueDate: string }) =>
       (await api.post<FeeSchedule>(`${S}/fee-schedules`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-schedules'] }),
+  });
+}
+
+export function useDeleteFeeSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/fee-schedules/${id}`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'fee-schedules'] });
+      qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] });
+    },
+  });
+}
+
+/* ─────────────── Optional fees (per-student opt-in) ─────────────── */
+
+export interface OptionalFeeRow {
+  studentProfileId: string;
+  admissionNo: string;
+  name: string;
+  className: string;
+  classId: string | null;
+  optedIn: boolean;
+  amount: number | null;
+  notes: string | null;
+}
+
+export interface OptionalFeeRoster {
+  category: FeeCategory;
+  rows: OptionalFeeRow[];
+}
+
+/**
+ * The editable roster behind the Optional Fees screen. Disabled until a term
+ * AND a category are chosen — the endpoint requires both, and firing it early
+ * would just render a 400.
+ */
+export function useOptionalFeeRoster(params: {
+  termId: string;
+  feeCategoryId: string;
+  classId?: string;
+}) {
+  const { termId, feeCategoryId, classId } = params;
+  return useQuery({
+    queryKey: ['school', 'optional-fees', termId, feeCategoryId, classId ?? ''],
+    enabled: !!termId && !!feeCategoryId,
+    queryFn: async () =>
+      (
+        await api.get<OptionalFeeRoster>(`${S}/student-optional-fees/roster`, {
+          params: { termId, feeCategoryId, classId: classId || undefined },
+        })
+      ).data,
+  });
+}
+
+export function useSaveOptionalFees() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      termId: string;
+      feeCategoryId: string;
+      rows: Array<{ studentProfileId: string; amount?: number | null; isActive?: boolean }>;
+    }) =>
+      (await api.post<{ created: number; updated: number; removed: number }>(
+        `${S}/student-optional-fees/bulk`,
+        dto,
+      )).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'optional-fees'] }),
+  });
+}
+
+export function useStudentOptionalFees(studentProfileId: string) {
+  return useQuery({
+    queryKey: ['school', 'optional-fees', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<any[]>(`${S}/student-optional-fees/by-student/${studentProfileId}`)).data,
   });
 }
 
@@ -4248,5 +4358,543 @@ export function useSchoolInvoice(id?: string) {
     queryKey: ['school', 'invoices', id],
     enabled: !!id,
     queryFn: async () => (await api.get<{ invoice: any; document: any }>(`${S}/finance/invoices/${id}`)).data,
+  });
+}
+
+/* ───────────────────── Exam workspace (the 4-step marks flow) ─────────────────────
+ * These wrap /school/marks/*, the flat task-shaped surface over the exam →
+ * schedule → grade-entry chain. One hook per screen; nothing here needs the
+ * caller to know what an ExamSchedule is.
+ * ------------------------------------------------------------------------- */
+
+export interface WorkspaceExam {
+  id: string;
+  name: string;
+  status: string;
+  startDate: string;
+  endDate: string;
+  termId: string;
+  termName: string | null;
+  examTypeId: string;
+  examTypeName: string | null;
+  weight: number | null;
+  isFinal: boolean;
+  classCount: number;
+  paperCount: number;
+  lockedPaperCount: number;
+  marksExpected: number;
+  marksEntered: number;
+}
+
+export interface CoveragePaper {
+  examScheduleId: string;
+  subjectId: string;
+  subjectName: string;
+  subjectCode: string;
+  maxMarks: number;
+  locked: boolean;
+  marksEntered: number;
+  marksExpected: number;
+}
+
+export interface CoverageClass {
+  classId: string;
+  className: string;
+  gradeLevelName: string | null;
+  studentCount: number;
+  applied: boolean;
+  paperCount: number;
+  lockedPaperCount: number;
+  marksExpected: number;
+  marksEntered: number;
+  subjects: CoveragePaper[];
+}
+
+export interface MarkSheetStudent {
+  index: number;
+  studentProfileId: string;
+  name: string;
+  admissionNo: string;
+  streamId: string | null;
+  streamName: string | null;
+  sectionId: string | null;
+  gradeEntryId: string | null;
+  marks: number | null;
+  grade: string | null;
+  remarks: string | null;
+  participation: string;
+  status: string;
+  version: number;
+}
+
+export interface MarkSheet {
+  exam: { id: string; name: string; termId: string; termName: string | null; examTypeName: string | null };
+  class: { id: string; name: string };
+  subject: { id: string; name: string; code: string };
+  examScheduleId: string | null;
+  applied: boolean;
+  maxMarks: number;
+  locked: boolean;
+  lockedAt: string | null;
+  approvalStatus: string;
+  total: number;
+  entered: number;
+  students: MarkSheetStudent[];
+}
+
+export interface ResultGridStudent {
+  studentProfileId: string;
+  name: string;
+  admissionNo: string;
+  streamId: string | null;
+  streamName: string | null;
+  sectionId: string | null;
+  cells: Record<string, { marks: number | null; grade: string | null; participation: string }>;
+  subjectsMarked: number;
+  total: number | null;
+  average: number | null;
+  percentage: number | null;
+  grade: string | null;
+  position: number;
+}
+
+export interface ResultGrid {
+  exam: { id: string; name: string; termId: string; termName: string | null; examTypeName: string | null };
+  subjects: Array<{ examScheduleId: string; subjectId: string; name: string; code: string; maxMarks: number; locked: boolean }>;
+  students: ResultGridStudent[];
+  classSize: number;
+  marksExpected: number;
+  marksEntered: number;
+  complete: boolean;
+  lockedPaperCount: number;
+  paperCount: number;
+}
+
+export function useWorkspaceExams(params: { termId?: string; academicYearId?: string } = {}) {
+  return useQuery({
+    queryKey: ['school', 'marks', 'exams', params],
+    queryFn: async () => (await api.get<WorkspaceExam[]>(`${S}/marks/exams`, { params })).data,
+  });
+}
+
+export function useExamCoverage(examId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'marks', 'coverage', examId],
+    enabled: !!examId,
+    queryFn: async () =>
+      (await api.get<{ exam: any; classes: CoverageClass[] }>(`${S}/marks/coverage`, { params: { examId } })).data,
+  });
+}
+
+export function useClassSubjects(classId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'marks', 'subjects', classId],
+    enabled: !!classId,
+    queryFn: async () =>
+      (await api.get<Array<{ id: string; name: string; code: string; isCore: boolean }>>(`${S}/marks/subjects`, { params: { classId } })).data,
+  });
+}
+
+export function useApplyExamClasses() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classIds: string[]; subjectIds?: string[]; maxMarks?: number }) =>
+      (await api.post<{ created: number; skipped: number }>(`${S}/marks/apply-classes`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'marks'] }),
+  });
+}
+
+export function useRemoveExamClass() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string }) =>
+      (await api.post<{ removed: number }>(`${S}/marks/remove-class`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'marks'] }),
+  });
+}
+
+export function useMarkSheet(params: { examId?: string; classId?: string; subjectId?: string; streamId?: string }) {
+  const ready = !!params.examId && !!params.classId && !!params.subjectId;
+  return useQuery({
+    queryKey: ['school', 'marks', 'sheet', params],
+    enabled: ready,
+    queryFn: async () => (await api.get<MarkSheet>(`${S}/marks/sheet`, { params })).data,
+  });
+}
+
+/**
+ * Saves one cell. Deliberately does NOT invalidate the sheet: the row is
+ * patched in place by the caller so the input the user is typing in never
+ * re-mounts under them.
+ */
+export function useSaveMark() {
+  return useMutation({
+    mutationFn: async (dto: {
+      examId: string; classId: string; subjectId: string; studentProfileId: string;
+      marks?: number | null; participation?: string; maxMarks?: number;
+    }) => (await api.post(`${S}/marks/entry`, dto)).data,
+  });
+}
+
+export function useResultGrid(params: { examId?: string; classId?: string; streamId?: string }) {
+  const ready = !!params.examId && !!params.classId;
+  return useQuery({
+    queryKey: ['school', 'marks', 'grid', params],
+    enabled: ready,
+    queryFn: async () => (await api.get<ResultGrid>(`${S}/marks/grid`, { params })).data,
+  });
+}
+
+export function useLockMarks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string; subjectId?: string; locked: boolean }) =>
+      (await api.post<{ updated: number; locked: boolean }>(`${S}/marks/lock`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'marks'] }),
+  });
+}
+
+export interface Stream { id: string; classId: string; name: string; capacity: number }
+export function useStreams(classId?: string) {
+  return useQuery({
+    queryKey: ['school', 'streams', classId ?? 'all'],
+    queryFn: async () =>
+      (await api.get<Paginated<Stream>>(`${S}/streams`, { params: { pageSize: 300, ...(classId ? { classId } : {}) } })).data,
+  });
+}
+
+/* ═══════════════════════ Moodle-shaped LMS (ADR-014) ═══════════════════════ */
+const LMS = `${S}/lms`;
+
+export interface LmsCourse {
+  id: string; subjectId: string; classId: string; termId: string;
+  format: string; numSections: number; visible: boolean; summary?: string | null;
+  completionEnabled: boolean; groupMode: string;
+  teachers?: any[]; _count?: { modules: number; enrolments: number };
+}
+export interface LmsSection {
+  id: string; sectionNo: number; name?: string | null; summary?: string | null;
+  visible: boolean; weekOf?: string | null; sequence: string[];
+  modules: LmsModule[]; availabilityInfo?: { available: boolean; reasons: string[] };
+}
+export interface LmsModule {
+  id: string; activityType: string; instanceId: string; sectionId: string;
+  visible: boolean; sequence: number; completionMode: string; assessmentId?: string | null;
+  dueAt?: string | null; completion?: string; availabilityInfo?: { available: boolean; reasons: string[] };
+}
+export interface LmsActivityType { name: string; label: string; icon: string; gradable: boolean; hasSubmissions: boolean }
+
+export function useLmsCourses(params: { termId?: string; classId?: string; subjectId?: string } = {}) {
+  return useQuery({ queryKey: ['lms', 'courses', params], queryFn: async () => (await api.get<LmsCourse[]>(`${LMS}/courses`, { params })).data });
+}
+export function useLmsCoursePage(id: string, studentProfileId?: string) {
+  return useQuery({ queryKey: ['lms', 'course', id, studentProfileId ?? 'staff'], enabled: !!id,
+    queryFn: async () => (await api.get<{ offering: LmsCourse; sections: LmsSection[] }>(`${LMS}/courses/${id}`, { params: studentProfileId ? { studentProfileId } : {} })).data });
+}
+export function useLmsPermissions(id: string) {
+  return useQuery({ queryKey: ['lms', 'permissions', id], enabled: !!id, queryFn: async () => (await api.get<Record<string, boolean>>(`${LMS}/courses/${id}/permissions`)).data });
+}
+export function useLmsEnsureSections() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.post(`${LMS}/courses/${id}/sections/ensure`)).data, onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: ['lms', 'course', id] }) });
+}
+export function useLmsUpdateCourseSettings() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.patch(`${LMS}/courses/${id}/settings`, dto)).data, onSuccess: (_d, v: any) => qc.invalidateQueries({ queryKey: ['lms', 'course', v.id] }) });
+}
+export function useLmsAddSection() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post(`${LMS}/courses/${id}/sections`, dto)).data, onSuccess: (_d, v: any) => qc.invalidateQueries({ queryKey: ['lms', 'course', v.id] }) });
+}
+export function useLmsAddModule() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ courseId, ...dto }: any) => (await api.post(`${LMS}/courses/${courseId}/modules`, dto)).data, onSuccess: (_d, v: any) => qc.invalidateQueries({ queryKey: ['lms', 'course', v.courseId] }) });
+}
+export function useLmsMoveModule() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post(`${LMS}/modules/${id}/move`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'course'] }) });
+}
+export function useLmsDeleteModule() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`${LMS}/modules/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'course'] }) });
+}
+export function useLmsModuleView(id: string, studentProfileId?: string) {
+  return useQuery({ queryKey: ['lms', 'module', id, studentProfileId ?? 'staff'], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/modules/${id}/view`, { params: studentProfileId ? { studentProfileId } : {} })).data });
+}
+export function useLmsModuleAction() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, action, ...dto }: any) => (await api.post(`${LMS}/modules/${id}/action/${action}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }) });
+}
+export function useLmsSyncRoster() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.post(`${LMS}/courses/${id}/enrol/sync`)).data, onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: ['lms', 'course', id] }) });
+}
+export function useLmsGradebook(id: string) {
+  return useQuery({ queryKey: ['lms', 'gradebook', id], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/courses/${id}/gradebook`)).data });
+}
+export function useLmsCompletionReport(id: string) {
+  return useQuery({ queryKey: ['lms', 'completion', id], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/courses/${id}/completion-report`)).data });
+}
+export function useLmsParticipants(courseOfferingId: string) {
+  return useQuery({ queryKey: ['lms', 'participants', courseOfferingId], enabled: !!courseOfferingId, queryFn: async () => (await api.get<any[]>(`${LMS}/roles/participants`, { params: { courseOfferingId } })).data });
+}
+export function useLmsSeedRoles() {
+  return useMutation({ mutationFn: async () => (await api.post(`${LMS}/roles/seed`)).data });
+}
+export function useLmsSetCompletion() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post(`${LMS}/modules/${id}/completion`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }) });
+}
+export function useLmsActivityReport(id: string) {
+  return useQuery({ queryKey: ['lms', 'activity-report', id], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/courses/${id}/activity-report`)).data });
+}
+
+/* ───────────────────── Gradebook (class × term × subject spreadsheet) ─────────────────────
+ * One weighted total per student, computed by the same kernel the ResultSet
+ * and report card use. Columns are Assessment rows; only manual columns are
+ * editable here (exam/assignment/quiz marks live on their own screens).
+ * ------------------------------------------------------------------------- */
+
+export interface GradebookColumn {
+  assessmentId: string;
+  title: string;
+  kind: string;
+  maxScore: number;
+  sourceType: string;
+  componentId: string | null;
+  groupId: string;
+  locked: boolean;
+  hiddenFromStudents: boolean;
+  dueAt: string | null;
+  editable: boolean;
+}
+
+export interface GradebookGroup {
+  id: string;
+  name: string;
+  kind: string;
+  weight: number | null;
+  columnIds: string[];
+}
+
+export interface GradebookStudent {
+  studentProfileId: string;
+  name: string;
+  admissionNo: string;
+  streamName: string | null;
+  cells: Record<string, { studentAssessmentId: string | null; marks: number | null; grade: string | null; participation: string; status: string }>;
+  finalPercent: number | null;
+  grade: string | null;
+  componentPercents: Array<{ componentId: string; percent: number | null; weight: number }>;
+}
+
+export interface GradebookSheet {
+  class: { id: string; name: string; gradeLevelId: string } | null;
+  term: { id: string; name: string } | null;
+  subjects: Array<{ id: string; name: string; code: string }>;
+  subject: { id: string; name: string; code: string } | null;
+  columns: GradebookColumn[];
+  groups: GradebookGroup[];
+  students: GradebookStudent[];
+  policy: { id: string; name: string; weightsTotal: number; weightsValid: boolean } | null;
+}
+
+export function useGradebookSheet(params: { classId?: string; termId?: string; subjectId?: string; streamId?: string }) {
+  const ready = !!params.classId && !!params.termId;
+  return useQuery({
+    queryKey: ['school', 'gradebook', 'sheet', params],
+    enabled: ready,
+    queryFn: async () => (await api.get<GradebookSheet>(`${S}/gradebook/sheet`, { params })).data,
+  });
+}
+
+export function useGradebookCell() {
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; assessmentId: string; marks?: number | null; participation?: string }) =>
+      (await api.post(`${S}/gradebook/cell`, dto)).data,
+  });
+}
+
+export function useCreateGradebookColumn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { classId: string; termId: string; subjectId: string; title: string; maxScore?: number; componentId?: string; dueAt?: string }) =>
+      (await api.post(`${S}/gradebook/column`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
+  });
+}
+
+export function useUpdateGradebookColumn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; title?: string; maxScore?: number; componentId?: string | null; hiddenFromStudents?: boolean; dueAt?: string | null }) =>
+      (await api.patch(`${S}/gradebook/column/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
+  });
+}
+
+export function useDeleteGradebookColumn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, force }: { id: string; force?: boolean }) =>
+      (await api.delete(`${S}/gradebook/column/${id}`, { params: force ? { force: 'true' } : {} })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
+  });
+}
+
+export function useLockGradebookColumn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, locked }: { id: string; locked: boolean }) =>
+      (await api.post(`${S}/gradebook/column/${id}/lock`, { locked })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
+  });
+}
+
+/* Weighting-policy components — for the "add column → attach to component" picker. */
+export function usePolicyComponents(policyId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment-components', policyId],
+    enabled: !!policyId,
+    queryFn: async () => (await api.get<Array<{ id: string; name: string; kind: string; weight: string }>>(`${S}/assessment-components/by-policy/${policyId}`)).data,
+  });
+}
+
+/* ───────────────────── Teacher workspace (P5) ───────────────────── */
+
+export interface TeacherOverview {
+  teacher: { id: string; name: string } | null;
+  classes: Array<{ classId: string; className: string; subjectId: string; subjectName: string }>;
+  needsMarking: Array<{ assessmentId: string; title: string; subject: string; classId: string; count: number }>;
+  dueSoon: Array<{ assessmentId: string; title: string; subject: string; classId: string; dueAt: string | null; overdue: boolean }>;
+  awaitingApproval: number;
+  returnedToMe: Array<{ studentAssessmentId: string; assessmentId: string; title: string; subject: string }>;
+  examPapers: Array<{ examScheduleId: string; examName: string; subject: string; classId: string; entered: number; total: number }>;
+  lessonPlans: { draft: number; submitted: number; approved: number };
+}
+
+export function useTeacherOverview(teacherPartnerId?: string) {
+  return useQuery({
+    queryKey: ['school', 'teaching', teacherPartnerId],
+    enabled: !!teacherPartnerId,
+    queryFn: async () => (await api.get<TeacherOverview>(`${S}/portals/teaching/${teacherPartnerId}`)).data,
+  });
+}
+
+/* ───────────────────── Homework CRUD (P4) — the /school/homework surface ─────────────────────
+ * Grading routes through the fixed bridge (grade → StudentAssessment via the
+ * marking ledger). These wrap the CRUD controller the old debug page never used.
+ * ------------------------------------------------------------------------- */
+
+export interface HomeworkItem {
+  id: string;
+  teacherPartnerId: string;
+  classId: string;
+  sectionId?: string | null;
+  subjectId: string;
+  termId?: string | null;
+  title: string;
+  description?: string | null;
+  dueDate: string;
+  maxScore?: number | null;
+  subject?: { name: string } | null;
+  schoolClass?: { name: string } | null;
+  submissions?: HomeworkSubmissionRow[];
+}
+
+export interface HomeworkSubmissionRow {
+  id: string;
+  studentProfileId: string;
+  submittedAt?: string | null;
+  content?: string | null;
+  score?: number | null;
+  feedback?: string | null;
+  status: string;
+  studentProfile?: { admissionNo?: string; partner?: { name?: string } | null } | null;
+}
+
+export function useHomeworkList(params: { page?: number; pageSize?: number } = {}) {
+  return useQuery({
+    queryKey: ['school', 'homework', params],
+    queryFn: async () => (await api.get<Paginated<HomeworkItem>>(`${S}/homework`, { params: { pageSize: 100, ...params } })).data,
+  });
+}
+
+export function useHomeworkByClass(classId?: string) {
+  return useQuery({
+    queryKey: ['school', 'homework', 'by-class', classId],
+    enabled: !!classId,
+    queryFn: async () => (await api.get<HomeworkItem[]>(`${S}/homework/by-class/${classId}`)).data,
+  });
+}
+
+export function useHomework(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'homework', 'one', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<HomeworkItem>(`${S}/homework/${id}`)).data,
+  });
+}
+
+export function useCreateHomework() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      teacherPartnerId: string; classId: string; subjectId: string; title: string;
+      dueDate: string; termId?: string; sectionId?: string; description?: string; maxScore?: number;
+    }) => (await api.post(`${S}/homework`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
+  });
+}
+
+export function useUpdateHomework() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string } & Record<string, unknown>) =>
+      (await api.patch(`${S}/homework/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
+  });
+}
+
+export function useDeleteHomework() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/homework/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
+  });
+}
+
+export function useGradeHomeworkSubmission() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { submissionId: string; score: number; feedback?: string }) =>
+      (await api.post(`${S}/homework/grade`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
+  });
+}
+
+export interface HomeworkDetail {
+  homework: { id: string; title: string; description: string | null; dueDate: string; maxScore: number | null; subject: string; className: string; classId: string; subjectId: string; termId: string | null };
+  students: Array<{ studentProfileId: string; name: string; admissionNo: string; submissionId: string | null; submittedAt: string | null; content: string | null; score: number | null; feedback: string | null; status: string }>;
+  total: number;
+  submitted: number;
+  graded: number;
+}
+
+export function useHomeworkDetail(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'homework', 'detail', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<HomeworkDetail>(`${S}/homework/${id}/detail`)).data,
+  });
+}
+
+/** Create a submission for a student (used to record homework handed in on paper). */
+export function useSubmitHomeworkOnBehalf() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; content?: string }) =>
+      (await api.post(`${S}/homework/submit`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
   });
 }

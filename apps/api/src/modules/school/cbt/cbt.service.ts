@@ -192,12 +192,20 @@ export class CbtAttemptService {
       const priorAttempts = await tx.quizAttempt.count({ where: { paperId: dto.paperId, studentProfileId: dto.studentProfileId } });
       const expiresAt = new Date(Date.now() + paper.durationMinutes * 60_000);
 
+      // If this paper is sat as an LMS quiz activity, bind the attempt to that
+      // activity's StudentAssessment now. Without the link, `finalize` mints a
+      // SECOND, quiz-sourced assessment for the same sitting, and the LMS
+      // plugin's own grade sync mints a third — so one attempt contributed
+      // twice to the term aggregate.
+      const studentAssessmentId =
+        dto.studentAssessmentId ?? (await this.resolveLmsStudentAssessment(tx, dto.paperId, dto.studentProfileId));
+
       const attempt = await tx.quizAttempt.create({
         data: {
           organizationId,
           paperId: dto.paperId,
           studentProfileId: dto.studentProfileId,
-          studentAssessmentId: dto.studentAssessmentId ?? null,
+          studentAssessmentId,
           attemptNumber: priorAttempts + 1,
           status: 'in_progress',
           startedAt: new Date(),
@@ -209,6 +217,44 @@ export class CbtAttemptService {
       await tx.attemptEvent.create({ data: { organizationId, attemptId: attempt.id, type: 'start', payload: { paperId: dto.paperId } } });
       return this.strip(attempt);
     });
+  }
+
+  /**
+   * When a paper is the question bank behind a `mod_quiz` activity, that
+   * activity already owns an Assessment (sourceType `lms_activity`). Return the
+   * student's row on it — creating it if the roster fan-out missed them — so
+   * the attempt posts into the grade item the course already shows, instead of
+   * minting a parallel one.
+   *
+   * Returns null for a paper sat outside the LMS; those still go through the
+   * CBT result bridge in `finalize`.
+   */
+  private async resolveLmsStudentAssessment(tx: any, paperId: string, studentProfileId: string): Promise<string | null> {
+    const modQuiz = await tx.modQuiz.findFirst({ where: { questionPaperId: paperId }, select: { id: true } });
+    if (!modQuiz) return null;
+
+    const cm = await tx.courseModule.findFirst({
+      where: { activityType: 'quiz', instanceId: modQuiz.id, assessmentId: { not: null }, deletedAt: null },
+      select: { assessmentId: true },
+    });
+    if (!cm?.assessmentId) return null;
+
+    const assessment = await tx.assessment.findFirst({ where: { id: cm.assessmentId, deletedAt: null } });
+    if (!assessment) return null;
+
+    const sa = await tx.studentAssessment.upsert({
+      where: { assessmentId_studentProfileId: { assessmentId: assessment.id, studentProfileId } },
+      create: {
+        organizationId: this.tenant.organizationId,
+        assessmentId: assessment.id,
+        studentProfileId,
+        classId: assessment.classId,
+        termId: assessment.termId,
+        maxScore: assessment.maxScore,
+      },
+      update: {},
+    });
+    return sa.id;
   }
 
   async saveResponse(dto: SaveResponseDto) {
@@ -293,13 +339,13 @@ export class CbtAttemptService {
     // Post the auto-marked total to the assessment spine.
     if (manualPending === 0) {
       if (attempt.studentAssessmentId) {
-        await tx.markEntry.upsert({
-          where: { studentAssessmentId_round: { studentAssessmentId: attempt.studentAssessmentId, round: 'first' } },
-          create: { organizationId, studentAssessmentId: attempt.studentAssessmentId, round: 'first', score: autoScore },
-          update: { score: autoScore },
+        await this.marking.postMark(tx, {
+          studentAssessmentId: attempt.studentAssessmentId,
+          score: autoScore,
+          source: 'quiz',
+          comment: `cbt:${attempt.id}`,
+          onOutOfRange: 'clamp',
         });
-        await tx.studentAssessment.updateMany({ where: { id: attempt.studentAssessmentId }, data: { status: 'graded' } });
-        await this.marking.recompute(tx, attempt.studentAssessmentId);
       } else {
         // P1-A: ensure the quiz lands in the spine even when not pre-linked, so
         // it counts toward the term result aggregation.

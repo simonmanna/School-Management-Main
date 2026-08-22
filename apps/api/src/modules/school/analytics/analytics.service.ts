@@ -118,7 +118,7 @@ export class AnalyticsService {
   /** Assignment completion / late / missing rates for a class-term. */
   async assignmentMetrics(classId: string, termId: string) {
     const rows = await this.prisma.client.studentAssessment.findMany({
-      where: { classId, termId, assessment: { sourceType: 'assignment' } },
+      where: { classId, termId, assessment: { sourceType: 'assignment', deletedAt: null } },
       select: { status: true },
     });
     const total = rows.length;

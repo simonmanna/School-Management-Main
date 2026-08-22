@@ -469,6 +469,7 @@ export const ORG_SCOPED = new Set<string>([
   'FeeStructure',
   'FeeSchedule',
   'FeeCategory',
+  'StudentOptionalFee',
   'StudentFeeAssignment',
   'Discount',
   'Scholarship',

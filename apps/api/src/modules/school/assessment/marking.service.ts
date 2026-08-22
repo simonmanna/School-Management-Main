@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { StudentAssessment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -9,6 +9,9 @@ import { EVENTS } from '@erp/shared';
 import { computeEffective } from './assessment-math';
 import type { AppendAdjustmentDto, MarkingApprovalDto, RecordMarkDto, SetParticipationDto } from './dto.types';
 
+/** Tags a MarkEntry synthesised by `healLedgerlessScore`, so healed rows stay findable. */
+export const HEAL_COMMENT = 'auto-healed:legacy-direct-write';
+
 /**
  * StudentAssessment + the two mark-producing ledgers (MarkEntry rounds and the
  * append-only MarkAdjustment ledger). The canonical `originalScore` /
@@ -18,6 +21,8 @@ import type { AppendAdjustmentDto, MarkingApprovalDto, RecordMarkDto, SetPartici
  */
 @Injectable()
 export class MarkingService {
+  private readonly logger = new Logger(MarkingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
@@ -33,10 +38,13 @@ export class MarkingService {
   async recompute(tx: any, studentAssessmentId: string): Promise<void> {
     const sa = await tx.studentAssessment.findFirst({ where: { id: studentAssessmentId } });
     if (!sa) throw new NotFoundException(`StudentAssessment ${studentAssessmentId} not found`);
-    const [entries, adjustments] = await Promise.all([
+    let [entries, adjustments] = await Promise.all([
       tx.markEntry.findMany({ where: { studentAssessmentId } }),
       tx.markAdjustment.findMany({ where: { studentAssessmentId } }),
     ]);
+
+    entries = await this.healLedgerlessScore(tx, sa, entries, adjustments);
+
     const { originalScore, effectiveScore, percentage } = computeEffective(
       entries.map((e: any) => ({ round: e.round, score: e.score })),
       adjustments.map((a: any) => ({ sequence: a.sequence, delta: a.delta, replacementScore: a.replacementScore })),
@@ -46,6 +54,42 @@ export class MarkingService {
       where: { id: studentAssessmentId },
       data: { originalScore, effectiveScore, percentage, version: { increment: 1 } },
     });
+  }
+
+  /**
+   * TEMPORARY (remove two releases after 2026-08-21, then throw instead).
+   *
+   * Some historic rows carry an `effectiveScore` that was written STRAIGHT onto
+   * the StudentAssessment, with no MarkEntry behind it — the LMS grade bridge
+   * and the homework bridge both did this. `computeEffective` returns all-null
+   * when there is no ledger, so recomputing such a row would DELETE the mark.
+   *
+   * Rather than let that happen, adopt the orphaned score into the ledger it
+   * should always have had. The row is left arithmetically identical; it simply
+   * gains the `first` round that explains its score. The comment tag makes every
+   * healed row findable, and the warn tells us whether a writer is still
+   * bypassing `postMark`.
+   */
+  private async healLedgerlessScore(tx: any, sa: any, entries: any[], adjustments: any[]): Promise<any[]> {
+    if (entries.length > 0 || sa.effectiveScore == null) return entries;
+    const hasReplacement = adjustments.some((a: any) => a.replacementScore !== null && a.replacementScore !== undefined);
+    if (hasReplacement) return entries;
+
+    const healed = await tx.markEntry.create({
+      data: {
+        organizationId: sa.organizationId,
+        studentAssessmentId: sa.id,
+        markerId: sa.enteredById ?? null,
+        round: 'first',
+        score: sa.effectiveScore,
+        comment: HEAL_COMMENT,
+      },
+    });
+    this.logger.warn(
+      `Healed ledger-less score on StudentAssessment ${sa.id} (assessment ${sa.assessmentId}, ` +
+        `score ${String(sa.effectiveScore)}) — a writer set effectiveScore without a MarkEntry.`,
+    );
+    return [healed];
   }
 
   /** Ensure a StudentAssessment row exists for (assessment, student); returns it. */
@@ -66,6 +110,118 @@ export class MarkingService {
         gradeLevelId: snapshot.gradeLevelId ?? null,
       },
     });
+  }
+
+  /**
+   * THE write path. Every producer of a mark — exam projection, assignment,
+   * homework, quiz, LMS activity, gradebook cell, CSV import — goes through
+   * here, inside the caller's transaction.
+   *
+   * Before this existed each producer reimplemented the sequence, and they
+   * disagreed on all three of the things that matter: `recordMark` threw on an
+   * out-of-range score while the LMS bridge silently clamped it; only the LMS
+   * bridge checked `lockedAt`, so exam and assignment marks could be written to
+   * a locked grade item; and two producers skipped the MarkEntry ledger
+   * altogether, leaving scores a later recompute would erase.
+   *
+   * Address the row either by `studentAssessmentId`, or by
+   * `assessmentId` + `studentProfileId` (which creates it if absent).
+   */
+  async postMark(
+    tx: any,
+    input: {
+      studentAssessmentId?: string;
+      assessmentId?: string;
+      studentProfileId?: string;
+      /** null clears this round — the student reverts to having no mark. */
+      score: Prisma.Decimal.Value | null;
+      round?: string;
+      source: 'exam' | 'assignment' | 'homework' | 'quiz' | 'lms' | 'manual' | 'import' | 'override';
+      markerId?: string | null;
+      comment?: string | null;
+      snapshot?: { classId?: string; sectionId?: string; gradeLevelId?: string; termId?: string };
+      /** Import paths clamp; interactive paths throw. Default: throw. */
+      onOutOfRange?: 'throw' | 'clamp';
+      /** Only the exam projection and backfills may re-post an approved mark. */
+      allowWhenApproved?: boolean;
+      writeHistory?: boolean;
+    },
+  ): Promise<StudentAssessment> {
+    const round = input.round ?? 'first';
+
+    let sa: any;
+    if (input.studentAssessmentId) {
+      sa = await tx.studentAssessment.findFirst({ where: { id: input.studentAssessmentId } });
+      if (!sa) throw new NotFoundException(`StudentAssessment ${input.studentAssessmentId} not found`);
+    } else {
+      if (!input.assessmentId || !input.studentProfileId) {
+        throw new BadRequestException('postMark needs a studentAssessmentId, or an assessmentId + studentProfileId');
+      }
+      sa = await this.ensureRow(tx, input.assessmentId, input.studentProfileId, input.snapshot ?? {});
+    }
+
+    const assessment = await tx.assessment.findFirst({ where: { id: sa.assessmentId } });
+    if (assessment?.lockedAt) {
+      throw new BadRequestException('This grade item is locked. Unlock it before changing marks.');
+    }
+    if (sa.approvalStatus === 'approved' && !input.allowWhenApproved) {
+      throw new BadRequestException('Marks are approved; reject them before recording new marks');
+    }
+
+    if (input.score === null) {
+      await tx.markEntry.deleteMany({ where: { studentAssessmentId: sa.id, round } });
+    } else {
+      const max = new Prisma.Decimal(sa.maxScore);
+      let score = new Prisma.Decimal(input.score);
+      if (score.lessThan(0) || score.greaterThan(max)) {
+        if (input.onOutOfRange !== 'clamp') {
+          throw new BadRequestException(`Score ${score.toString()} out of range [0, ${max.toString()}]`);
+        }
+        score = score.lessThan(0) ? new Prisma.Decimal(0) : max;
+      }
+      await tx.markEntry.upsert({
+        where: { studentAssessmentId_round: { studentAssessmentId: sa.id, round } },
+        create: {
+          organizationId: sa.organizationId,
+          studentAssessmentId: sa.id,
+          markerId: input.markerId ?? this.tenant.userId ?? null,
+          round,
+          score,
+          comment: input.comment ?? null,
+        },
+        update: { score, comment: input.comment ?? null, markerId: input.markerId ?? this.tenant.userId ?? null },
+      });
+    }
+
+    if (input.writeHistory !== false) {
+      await tx.studentAssessmentHistory.create({
+        data: {
+          organizationId: sa.organizationId,
+          studentAssessmentId: sa.id,
+          oldScore: sa.effectiveScore,
+          newScore: input.score === null ? null : new Prisma.Decimal(input.score),
+          source: input.source,
+          changedById: input.markerId ?? this.tenant.userId ?? null,
+        },
+      });
+    }
+
+    await this.recompute(tx, sa.id);
+    await tx.studentAssessment.updateMany({
+      where: { id: sa.id },
+      data: {
+        status: input.score === null ? 'assigned' : 'graded',
+        enteredById: input.markerId ?? this.tenant.userId ?? null,
+      },
+    });
+    await this.audit.recordInTx(tx, {
+      entity: 'StudentAssessment',
+      entityId: sa.id,
+      action: 'update',
+      newValues: { action: 'post_mark', source: input.source, round, score: input.score },
+    });
+
+    return tx.studentAssessment.findFirst({ where: { id: sa.id } });
   }
 
   /** Set a student's participation (present/absent/exempt/…) on an assessment. */

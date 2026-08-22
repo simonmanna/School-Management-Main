@@ -95,7 +95,7 @@ export class BillingService {
     // query for the whole run instead of O(students × 3) round-trips (P1-9).
     const studentIds = students.map((s) => s.id);
     const now = new Date();
-    const [assignments, scholarships, discounts] = await Promise.all([
+    const [assignments, scholarships, discounts, optionalFees] = await Promise.all([
       this.prisma.client.studentFeeAssignment.findMany({
         where: { organizationId, termId: dto.termId, studentProfileId: { in: studentIds } },
       }),
@@ -109,8 +109,14 @@ export class BillingService {
         },
       }),
       this.prisma.client.discount.findMany({ where: { organizationId, isActive: true } }),
+      // P3: the per-student opt-ins that make an OPTIONAL component billable.
+      this.prisma.client.studentOptionalFee.findMany({
+        where: { organizationId, termId: dto.termId, isActive: true, studentProfileId: { in: studentIds } },
+        include: { feeCategory: true },
+      }),
     ]);
     const assignByStudent = new Map<string, any>(assignments.map((a) => [a.studentProfileId, a]));
+    const optInsByStudent = this.groupOptIns(optionalFees);
     const scholarshipsByStudent = new Map<string, any[]>();
     for (const sc of scholarships) {
       const arr = scholarshipsByStudent.get(sc.studentProfileId) ?? [];
@@ -133,7 +139,14 @@ export class BillingService {
       const customDiscount = (assignByStudent.get(s.id)?.customDiscount ?? {}) as Record<string, number>;
       const studentScholarships = scholarshipsByStudent.get(s.id) ?? [];
 
-      const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s);
+      const lines = this.computeLines(
+        components,
+        customDiscount,
+        discounts,
+        studentScholarships,
+        s,
+        optInsByStudent.get(s.id) ?? new Map(),
+      );
       if (lines.length === 0) continue;
 
       const issueDate = new Date();
@@ -194,11 +207,25 @@ export class BillingService {
     discounts: any[],
     scholarships: any[],
     student: any,
+    optIns: Map<string, number | null> = new Map(),
   ): Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> {
     const classId = student.currentClassId ?? '';
     const gradeLevelId = student.currentClass?.gradeLevelId ?? '';
 
-    const bases = components.map((c) => {
+    // P3 — the optional-fee gate. A MANDATORY component bills every student in
+    // the structure's scope; an OPTIONAL one only bills a student who has a
+    // StudentOptionalFee opt-in for this term. Before this, `isOptional` was
+    // stored on the component and then ignored, so a Swimming fee configured as
+    // optional was invoiced to the entire school.
+    const billable = components.filter((c) => !c.isOptional || this.hasOptIn(optIns, c));
+    if (billable.length === 0) return [];
+
+    const bases = billable.map((c) => {
+      // Precedence for the unit price: per-student opt-in amount (only an
+      // optional fee has one) → per-student assignment override → the
+      // structure's component amount.
+      const optIn = c.isOptional ? this.optInAmount(optIns, c) : null;
+      if (optIn != null) return Number(optIn);
       const override = customDiscount[c.code];
       return override != null ? Number(override) : Number(c.amount);
     });
@@ -212,10 +239,12 @@ export class BillingService {
       .filter((sc) => sc.type === 'percent')
       .reduce((s, sc) => s + Number(sc.value), 0);
 
-    return components.map((c, i) => {
+    return billable.map((c, i) => {
       const base = bases[i];
+      // The invoice line reads as the fee's name ("Swimming"), not its code.
+      const description = c.name?.trim() || c.code;
       if (base <= 0) {
-        return { productId: c.productId, description: c.code, quantity: 1, unitPrice: base, discountPercent: 0 };
+        return { productId: c.productId, description, quantity: 1, unitPrice: base, discountPercent: 0 };
       }
 
       // Matching discounts for this component.
@@ -233,8 +262,42 @@ export class BillingService {
       const cappedDiscount = Math.min(lineDiscountAmount, base);
       const discountPercent = (cappedDiscount / base) * 100;
 
-      return { productId: c.productId, description: c.code, quantity: 1, unitPrice: base, discountPercent };
+      return { productId: c.productId, description, quantity: 1, unitPrice: base, discountPercent };
     });
+  }
+
+  /**
+   * Index opt-in rows by BOTH the category id and the (upper-cased) category
+   * code. Structures written before P3 carry only a `code`, and structures
+   * written after carry a `feeCategoryId`; matching on either means an existing
+   * structure keeps working without a data migration.
+   */
+  private groupOptIns(rows: any[]): Map<string, Map<string, number | null>> {
+    const byStudent = new Map<string, Map<string, number | null>>();
+    for (const r of rows) {
+      let m = byStudent.get(r.studentProfileId);
+      if (!m) {
+        m = new Map<string, number | null>();
+        byStudent.set(r.studentProfileId, m);
+      }
+      const amount = r.amount == null ? null : Number(r.amount);
+      m.set(r.feeCategoryId, amount);
+      if (r.feeCategory?.code) m.set(r.feeCategory.code.toUpperCase(), amount);
+    }
+    return byStudent;
+  }
+
+  private hasOptIn(optIns: Map<string, number | null>, c: FeeComponent): boolean {
+    if (c.feeCategoryId && optIns.has(c.feeCategoryId)) return true;
+    return !!c.code && optIns.has(c.code.toUpperCase());
+  }
+
+  /** The student's overriding amount for an optional component, or null. */
+  private optInAmount(optIns: Map<string, number | null>, c: FeeComponent): number | null {
+    const byId = c.feeCategoryId ? optIns.get(c.feeCategoryId) : undefined;
+    if (byId != null) return byId;
+    const byCode = c.code ? optIns.get(c.code.toUpperCase()) : undefined;
+    return byCode ?? null;
   }
 
 
@@ -266,7 +329,7 @@ export class BillingService {
 
     const feeStructure = schedule.feeStructure;
     const components = (feeStructure.components as unknown as FeeComponent[]) ?? [];
-    const [assignment, studentScholarships, discounts] = await Promise.all([
+    const [assignment, studentScholarships, discounts, optionalFees] = await Promise.all([
       this.prisma.client.studentFeeAssignment.findFirst({ where: { organizationId, termId, studentProfileId } }),
       this.prisma.client.scholarship.findMany({
         where: {
@@ -276,9 +339,14 @@ export class BillingService {
         },
       }),
       this.prisma.client.discount.findMany({ where: { organizationId, isActive: true } }),
+      this.prisma.client.studentOptionalFee.findMany({
+        where: { organizationId, termId, studentProfileId, isActive: true },
+        include: { feeCategory: true },
+      }),
     ]);
     const customDiscount = (assignment?.customDiscount ?? {}) as Record<string, number>;
-    const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s);
+    const optIns = this.groupOptIns(optionalFees).get(studentProfileId) ?? new Map<string, number | null>();
+    const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s, optIns);
     if (lines.length === 0) return { status: 'skipped' };
 
     const issueDate = new Date();

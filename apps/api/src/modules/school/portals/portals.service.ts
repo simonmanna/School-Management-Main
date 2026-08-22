@@ -105,6 +105,158 @@ export class PortalsService {
     return { classes, todaySchedule, pendingGrades, marking: { pendingApprovals, draftMarks } };
   }
 
+  /**
+   * The teacher workspace (P5) — one screen that finds the teacher's work
+   * instead of making them pick a class/term/subject to discover it. Every
+   * panel is a live query the deep-links point back at.
+   *
+   * Assessments are scoped to the (class, subject) pairs the teacher is
+   * assigned. That proxy becomes an exact `Assessment.teacherPartnerId` filter
+   * once P4 lands the column; nothing here changes shape when it does.
+   */
+  async teacherOverview(teacherPartnerId: string) {
+    const assignments = await this.prisma.client.teacherAssignment.findMany({
+      where: { teacherPartnerId },
+      include: { subject: true, schoolClass: { include: { gradeLevel: true } } },
+    });
+    const staff = await this.prisma.client.staffProfile.findFirst({
+      where: { id: teacherPartnerId },
+      include: { partner: true },
+    });
+
+    const classIds = [...new Set(assignments.map((a) => a.classId))];
+    const subjectIds = [...new Set(assignments.map((a) => a.subjectId))];
+    const scope = classIds.length
+      ? { classId: { in: classIds }, subjectId: { in: subjectIds }, deletedAt: null }
+      : { id: 'none' }; // no assignments → empty everywhere
+
+    const now = new Date();
+    const weekAhead = new Date(now.getTime() + 7 * 86_400_000);
+
+    const [needsMarking, dueSoon, awaitingApproval, returnedToMe, examCoverage, lessonPlanCounts] = await Promise.all([
+      // Submitted work with no mark yet, grouped by assessment.
+      this.prisma.client.studentAssessment.groupBy({
+        by: ['assessmentId'],
+        where: {
+          status: { in: ['submitted', 'resubmitted'] },
+          markEntries: { none: {} },
+          assessment: scope,
+        },
+        _count: { _all: true },
+      }),
+      // Assessments due within a week, still open.
+      this.prisma.client.assessment.findMany({
+        where: { ...scope, status: { in: ['published', 'open'] }, dueAt: { gte: new Date(now.getTime() - 7 * 86_400_000), lte: weekAhead } },
+        orderBy: { dueAt: 'asc' },
+        take: 20,
+      }),
+      // Marks I entered that are awaiting someone else's approval — SoD means I
+      // can't approve my own, so this is a "waiting on approver" list.
+      this.prisma.client.studentAssessment.count({
+        where: { enteredById: teacherPartnerId, approvalStatus: 'submitted' },
+      }),
+      // Marks sent back to me to redo.
+      this.prisma.client.studentAssessment.findMany({
+        where: { enteredById: teacherPartnerId, approvalStatus: 'rejected' },
+        include: { assessment: true },
+        take: 20,
+      }),
+      // Exam papers for my classes with marks still to enter.
+      this.examPapersToEnter(classIds, subjectIds),
+      this.lessonPlanCounts(teacherPartnerId),
+    ]);
+
+    // Assessment.subjectId is FK-less in the spine, so subject names are resolved
+    // in one batch rather than a per-row join.
+    const allSubjectIds = [
+      ...new Set([
+        ...subjectIds,
+        ...dueSoon.map((a) => a.subjectId),
+        ...returnedToMe.map((sa) => sa.assessment?.subjectId).filter(Boolean) as string[],
+      ]),
+    ];
+    const subjectRows = allSubjectIds.length
+      ? await this.prisma.client.subject.findMany({ where: { id: { in: allSubjectIds } }, select: { id: true, name: true } })
+      : [];
+    const subjectName = new Map(subjectRows.map((s) => [s.id, s.name]));
+
+    // Enrich needs-marking with the assessment title + class/subject.
+    const markAssessmentIds = needsMarking.map((g) => g.assessmentId);
+    const markAssessments = markAssessmentIds.length
+      ? await this.prisma.client.assessment.findMany({ where: { id: { in: markAssessmentIds } } })
+      : [];
+    const needsMarkingRows = needsMarking
+      .map((g) => {
+        const a = markAssessments.find((x) => x.id === g.assessmentId);
+        return a ? { assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId) ?? '', classId: a.classId, count: g._count._all } : null;
+      })
+      .filter(Boolean);
+
+    return {
+      teacher: staff ? { id: staff.id, name: staff.partner?.name ?? staff.employeeNo } : null,
+      classes: assignments.map((a) => ({
+        classId: a.classId,
+        className: a.schoolClass?.name ?? '',
+        subjectId: a.subjectId,
+        subjectName: a.subject?.name ?? '',
+      })),
+      needsMarking: needsMarkingRows,
+      dueSoon: dueSoon.map((a) => ({
+        assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId) ?? '', classId: a.classId,
+        dueAt: a.dueAt, overdue: a.dueAt != null && a.dueAt < now,
+      })),
+      awaitingApproval,
+      returnedToMe: returnedToMe.map((sa) => ({
+        studentAssessmentId: sa.id, assessmentId: sa.assessmentId,
+        title: sa.assessment?.title ?? '', subject: sa.assessment ? subjectName.get(sa.assessment.subjectId) ?? '' : '',
+      })),
+      examPapers: examCoverage,
+      lessonPlans: lessonPlanCounts,
+    };
+  }
+
+  /** Exam papers (schedules) for these classes with fewer marks than students. */
+  private async examPapersToEnter(classIds: string[], subjectIds: string[]) {
+    if (classIds.length === 0) return [];
+    const schedules = await this.prisma.client.examSchedule.findMany({
+      where: { classId: { in: classIds }, subjectId: { in: subjectIds }, marksLockedAt: null },
+      include: { subject: true, exam: true },
+      take: 40,
+    });
+    if (schedules.length === 0) return [];
+
+    const sizes = await this.prisma.client.studentProfile.groupBy({
+      by: ['currentClassId'],
+      where: { currentClassId: { in: classIds }, status: 'active' },
+      _count: { _all: true },
+    });
+    const sizeByClass = new Map(sizes.map((s) => [s.currentClassId as string, s._count._all]));
+
+    const entered = await this.prisma.client.gradeEntry.groupBy({
+      by: ['examScheduleId'],
+      where: { examScheduleId: { in: schedules.map((s) => s.id) }, marksObtained: { not: null } },
+      _count: { _all: true },
+    });
+    const enteredBy = new Map(entered.map((e) => [e.examScheduleId, e._count._all]));
+
+    return schedules
+      .map((s) => {
+        const size = sizeByClass.get(s.classId) ?? 0;
+        const done = enteredBy.get(s.id) ?? 0;
+        return { examScheduleId: s.id, examName: s.exam?.name ?? '', subject: s.subject?.name ?? '', classId: s.classId, entered: done, total: size };
+      })
+      .filter((p) => p.total > 0 && p.entered < p.total);
+  }
+
+  private async lessonPlanCounts(teacherPartnerId: string) {
+    const [draft, submitted, approved] = await Promise.all([
+      this.prisma.client.lessonPlan.count({ where: { teacherPartnerId, workflowStatus: 'draft' } }).catch(() => 0),
+      this.prisma.client.lessonPlan.count({ where: { teacherPartnerId, workflowStatus: 'submitted' } }).catch(() => 0),
+      this.prisma.client.lessonPlan.count({ where: { teacherPartnerId, workflowStatus: 'approved' } }).catch(() => 0),
+    ]);
+    return { draft, submitted, approved };
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private async recentAttendance(studentProfileId: string) {

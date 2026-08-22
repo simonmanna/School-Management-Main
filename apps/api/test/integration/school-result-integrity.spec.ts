@@ -123,10 +123,53 @@ describeDb('integration: A3 result spine', () => {
     expect(Number(term?.meanPercent)).toBeGreaterThan(0);
     expect(term?.classRank).toBe(1); // 82% beats 55%
 
-    // Report card now reads the published spine.
+    // Report card now reads the published spine — headline AND body (P3). The
+    // subject table used to come from raw GradeEntry while the header came from
+    // the spine; both are now spine-sourced, so they cannot disagree.
     const card: any = await asUser('exams', () => reportCards.generate({ studentProfileId: s1.id, termId } as any));
     expect(card.payload.provenance.source).toBe('result_spine');
     expect(card.payload.provenance.resultSetId).toBe(rs.id);
+    expect(card.payload.provenance.layoutSource).toBe('result_spine');
+    const subjectRows = (card.payload.sections ?? []).flatMap((sec: any) => sec.subjects ?? []);
+    expect(subjectRows.length).toBeGreaterThan(0);
+    // The card's per-subject total matches the published StudentSubjectResult.
+    const ssr = await raw.studentSubjectResult.findFirst({ where: { resultSetId: rs.id, studentProfileId: s1.id } });
+    const match = subjectRows.find((r: any) => Math.abs(r.totalPercent - Math.round(Number(ssr!.finalPercent))) <= 1);
+    expect(match).toBeTruthy();
+
+    // Regenerating a PUBLISHED card is refused — it is a distributed record.
+    await asUser('head', () => reportCards.publish(card.id));
+    await expect(asUser('exams', () => reportCards.generate({ studentProfileId: s1.id, termId } as any)))
+      .rejects.toThrow(/published/i);
+  });
+
+  it('A3-softdelete: a soft-deleted assessment stops contributing to the result', async () => {
+    const { s1, rosterId } = await seedClass('DEL', { approve: true });
+
+    const before: any = await asUser('exams', () => results.compute({ termId, rosterId } as any));
+    const beforeTerm = await raw.studentTermResult.findFirst({
+      where: { resultSetId: before.id, studentProfileId: s1.id },
+    });
+    expect(Number(beforeTerm?.meanPercent)).toBeGreaterThan(0);
+
+    // Soft-delete the assessment. Its StudentAssessment children stay live —
+    // deleting a parent does not cascade — so without a relation filter on the
+    // spine readers the marks kept counting and soft delete excluded nothing.
+    const sa = await raw.studentAssessment.findFirst({
+      where: { studentProfileId: s1.id, termId },
+      include: { assessment: true },
+    });
+    expect(sa).not.toBeNull();
+    await raw.assessment.update({ where: { id: sa!.assessmentId }, data: { deletedAt: new Date() } });
+
+    const after: any = await asUser('exams', () => results.compute({ termId, rosterId } as any));
+    const afterSubject = await raw.studentSubjectResult.findMany({
+      where: { resultSetId: after.id, studentProfileId: s1.id },
+    });
+    expect(afterSubject).toHaveLength(0);
+
+    // Restore, so the later tests in this suite see the class they seeded.
+    await raw.assessment.update({ where: { id: sa!.assessmentId }, data: { deletedAt: null } });
   });
 
   it('A3-gate: publish rejects unapproved marks with a structured conflict', async () => {

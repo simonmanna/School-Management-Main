@@ -12,10 +12,12 @@ import {
   PenaltyRunService,
   ScholarshipService,
   StudentFeeAssignmentService,
+  StudentOptionalFeeService,
 } from './catalog.service';
 // Value imports (not `import type`): the global ValidationPipe reads
 // class-validator metadata off the runtime class, which `import type` erases.
 import {
+  BulkStudentOptionalFeeDto,
   CreateDiscountDto,
   CreateFeeCategoryDto,
   CreateFeeScheduleDto,
@@ -156,6 +158,47 @@ export class StudentFeeAssignmentController {
   @RequirePermissions(PERMISSIONS.school.manageFees)
   update(@Param('id') id: string, @Body() dto: UpdateStudentFeeAssignmentDto) {
     return this.service.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
+  }
+}
+
+/**
+ * P3 — Optional Fees. The roster endpoint is a GET so the screen is
+ * bookmarkable/refreshable per (term, category, class); the save is one bulk
+ * POST so a bursar editing 400 amounts commits them in a single request rather
+ * than 400 PATCHes racing each other.
+ */
+@Controller('school/student-optional-fees')
+export class StudentOptionalFeeController {
+  constructor(private readonly service: StudentOptionalFeeService) {}
+
+  @Get('roster')
+  @RequirePermissions(PERMISSIONS.school.read)
+  roster(
+    @Query('termId') termId: string,
+    @Query('feeCategoryId') feeCategoryId: string,
+    @Query('classId') classId?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.service.roster({ termId, feeCategoryId, classId, search });
+  }
+
+  @Get('by-student/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  byStudent(@Param('studentProfileId') id: string) {
+    return this.service.byStudent(id);
+  }
+
+  @Post('bulk')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  bulk(@Body() dto: BulkStudentOptionalFeeDto) {
+    return this.service.bulkUpsert(dto);
   }
 
   @Delete(':id')

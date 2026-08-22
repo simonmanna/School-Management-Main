@@ -1,23 +1,25 @@
 import { useState } from 'react';
-import { Plus, CalendarClock } from 'lucide-react';
+import { Plus, CalendarClock, Trash2 } from 'lucide-react';
 import {
   useFeeStructures,
   useFeeSchedules,
   useTerms,
   useCreateFeeSchedule,
+  useDeleteFeeSchedule,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
-import { sel } from './fees-shared';
+import { sel, apiError } from './fees-shared';
 
 export function SchoolFeeSchedulesPage() {
   const { data: structures } = useFeeStructures();
   const { data: schedules } = useFeeSchedules();
   const { data: terms } = useTerms();
   const createSchedule = useCreateFeeSchedule();
+  const deleteSchedule = useDeleteFeeSchedule();
 
   const [structId, setStructId] = useState('');
   const [termId, setTermId] = useState('');
@@ -30,8 +32,18 @@ export function SchoolFeeSchedulesPage() {
       setStructId('');
       setTermId('');
       setDue('');
-    } catch {
-      notify.error('Could not create schedule');
+    } catch (e) {
+      notify.error(apiError(e, 'Could not create schedule'));
+    }
+  };
+
+  const remove = async (id: string, label: string) => {
+    if (!confirm(`Remove the schedule for "${label}"? Invoices already generated are not affected.`)) return;
+    try {
+      await deleteSchedule.mutateAsync(id);
+      notify.success('Schedule removed');
+    } catch (e) {
+      notify.error(apiError(e, 'Could not remove schedule'));
     }
   };
 
@@ -91,6 +103,7 @@ export function SchoolFeeSchedulesPage() {
                   <TableHead>Structure</TableHead>
                   <TableHead>Term</TableHead>
                   <TableHead>Due</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -102,6 +115,16 @@ export function SchoolFeeSchedulesPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{sc.dueDate.slice(0, 10)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void remove(sc.id, sc.feeStructure?.name ?? sc.feeStructureId)}
+                        title="Remove schedule"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

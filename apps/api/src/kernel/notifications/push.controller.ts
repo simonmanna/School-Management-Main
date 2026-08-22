@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
+import { IsString, IsObject, IsOptional } from 'class-validator';
 import type { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/jwt-token.service';
@@ -7,10 +8,15 @@ import { RequirePermissions } from '../auth/decorators/require-permissions.decor
 import { PushService } from './push.service';
 import { Public } from '../auth/decorators/public.decorator';
 
+class PushKeys {
+  @ApiProperty() @IsString() p256dh!: string;
+  @ApiProperty() @IsString() auth!: string;
+}
+
 class SubscribeBody {
-  endpoint!: string;
-  keys!: { p256dh: string; auth: string };
-  userAgent?: string;
+  @ApiProperty() @IsString() endpoint!: string;
+  @ApiProperty() @IsObject() keys!: PushKeys;
+  @ApiProperty({ required: false }) @IsOptional() @IsString() userAgent?: string;
 }
 
 @ApiTags('push')
