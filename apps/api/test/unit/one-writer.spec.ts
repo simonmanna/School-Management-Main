@@ -117,6 +117,33 @@ describe('one-writer rule', () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * Every Assessment says what it IS at create time.
+   *
+   * `kind` decides which weighting component a mark lands in. A row that leaves
+   * it null falls through to the legacy read-time guess, which calls anything
+   * that is not a projected exam a CAT — so a project, a piece of homework or an
+   * LMS activity would be weighted against the CAT component and quietly move
+   * every affected student's term mark. Four producers were doing this.
+   *
+   * A source scan is blunt, but it is the only kind of test that catches the
+   * FIFTH producer somebody adds in six months.
+   */
+  it('every Assessment producer sets kind', () => {
+    const create = /assessment\s*\.\s*(?:create|upsert)\s*\(([\s\S]{0,1200}?)\)\s*;/g;
+    const offenders: string[] = [];
+    for (const f of files) {
+      for (const m of code(f.text).matchAll(create)) {
+        // `upsert` bodies keep kind in their `create:` half; `update:` need not.
+        const body = m[1];
+        if (!/\bkind\s*:/.test(body)) {
+          offenders.push(`${f.path}: ${m[0].slice(0, 100).replace(/\s+/g, ' ')}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('keeps recompute callable only from the service that owns it', () => {
     // Producers call postMark; recompute is an internal step of postMark. A
     // direct call means a producer is assembling the sequence by hand again.

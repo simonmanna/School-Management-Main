@@ -119,7 +119,7 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
   async function makeLmsGradeItem(title: string, maxScore = 100) {
     const assessment = await raw.assessment.create({
       data: {
-        organizationId, subjectId, classId, termId, title, maxScore,
+        organizationId, subjectId, classId, termId, title, maxScore, kind: 'classwork',
         sourceType: 'lms_activity', sourceRef: `cm-${Date.now()}-${Math.random()}`, status: 'draft',
       },
     });
@@ -207,7 +207,7 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
     });
     const assessment = await raw.assessment.create({
       data: {
-        organizationId, subjectId, classId, termId, title: 'Science quiz', maxScore: 5,
+        organizationId, subjectId, classId, termId, title: 'Science quiz', maxScore: 5, kind: 'cat',
         sourceType: 'lms_activity', sourceRef: `cm-quiz-${Date.now()}`, status: 'draft',
       },
     });

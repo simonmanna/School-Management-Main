@@ -218,13 +218,13 @@ async function main() {
   const compEX = await prisma.assessmentComponent.create({ data: { organizationId: O, policyId: policy.id, name: 'Final Exam', kind: 'exam', weight: D(60), aggregation: 'mean' } });
 
   const assessDefs = [
-    { title: 'Mathematics CAT 2', subj: 'MAT', comp: compCA.id, teacher: 'MAT', max: 30 },
-    { title: 'Physics Test 1', subj: 'PHY', comp: compCA.id, teacher: 'PHY', max: 30 },
-    { title: 'English Composition', subj: 'ENG', comp: compCA.id, teacher: 'ENG', max: 30 },
+    { title: 'Mathematics CAT 2', subj: 'MAT', comp: compCA.id, teacher: 'MAT', max: 30, kind: 'cat' as const },
+    { title: 'Physics Test 1', subj: 'PHY', comp: compCA.id, teacher: 'PHY', max: 30, kind: 'cat' as const },
+    { title: 'English Composition', subj: 'ENG', comp: compCA.id, teacher: 'ENG', max: 30, kind: 'cat' as const },
   ];
   for (const a of assessDefs) {
     const assessment = await prisma.assessment.create({
-      data: { organizationId: O, componentId: a.comp, subjectId: subj(a.subj).id, classId: classEast.id, termId: term.id, title: a.title, maxScore: D(a.max), status: 'graded' },
+      data: { organizationId: O, componentId: a.comp, subjectId: subj(a.subj).id, classId: classEast.id, termId: term.id, title: a.title, maxScore: D(a.max), kind: a.kind, status: 'graded' },
     });
     const klass = eastStudents;
     for (const st of klass) {
@@ -249,7 +249,7 @@ async function main() {
   await prisma.rubricLevel.create({ data: { organizationId: O, criterionId: crit.id, label: 'Weak', score: D(8), descriptor: 'Partial' } });
 
   const assignmentAssessment = await prisma.assessment.create({
-    data: { organizationId: O, componentId: compCA.id, subjectId: subj('ENG').id, classId: classEast.id, termId: term.id, title: 'English Homework — Essay', maxScore: D(20), sourceType: 'assignment', status: 'graded' },
+    data: { organizationId: O, componentId: compCA.id, subjectId: subj('ENG').id, classId: classEast.id, termId: term.id, title: 'English Homework — Essay', maxScore: D(20), kind: 'project', sourceType: 'assignment', status: 'graded' },
   });
   const assignment = await prisma.assignment.create({
     data: { organizationId: O, assessmentId: assignmentAssessment.id, rosterId: roster.id, instructions: 'Write a 300-word essay on "My Community".', allowLate: true, latePenaltyPercent: D(10), maxAttempts: 1, gradingMode: 'rubric', rubricId: rubric.id, rubricVersion: 1 },

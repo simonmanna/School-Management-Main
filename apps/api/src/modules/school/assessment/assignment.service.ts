@@ -47,6 +47,11 @@ export class AssignmentService {
         rubricVersion = rubric.version;
       }
 
+      // `kind` is set at CREATE. Leaving it null used to fall back to the
+      // read-time guess, which classifies anything that is not a projected exam
+      // as a CAT — so an assignment was weighted against the CAT component
+      // rather than its own. An A2 Assignment is coursework handed in, which is
+      // `project`; a policy component can still claim it by kind.
       const assessment = await tx.assessment.create({
         data: {
           organizationId,
@@ -55,6 +60,7 @@ export class AssignmentService {
           termId: dto.termId,
           title: dto.title,
           maxScore: dto.maxScore ?? 100,
+          kind: 'project',
           sourceType: 'assignment',
           status: 'draft',
           dueAt: dto.dueAt ? new Date(dto.dueAt) : null,

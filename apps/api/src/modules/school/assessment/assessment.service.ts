@@ -40,13 +40,19 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
 
   async create(dto: CreateAssessmentDto): Promise<Assessment> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      let component: any = null;
       if (dto.componentId) {
-        const component = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId } });
+        component = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId } });
         if (!component) throw new NotFoundException(`AssessmentComponent ${dto.componentId} not found`);
       }
       const row = await tx.assessment.create({
         data: {
           ...dto,
+          // An assessment says what it IS at create. Leaving `kind` null defers
+          // to the legacy guess on read, which calls anything that is not a
+          // projected exam a CAT — so a project created here would be weighted
+          // against the CAT component.
+          kind: (dto.kind ?? component?.kind ?? 'cat') as any,
           dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
           createdBy: this.tenant.userId ?? null,
         },

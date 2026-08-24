@@ -84,6 +84,8 @@ export class CreateAssessmentDto {
   @IsOptional() @IsIn([...SOURCE_TYPE]) sourceType?: (typeof SOURCE_TYPE)[number];
   @IsOptional() @IsString() sourceRef?: string;
   @IsOptional() @IsString() dueAt?: string;
+  /** What it IS. Defaults to the component's kind, else `cat`. */
+  @IsOptional() @IsIn([...ASSESSMENT_KIND]) kind?: (typeof ASSESSMENT_KIND)[number];
 }
 
 export class UpdateAssessmentDto {
@@ -91,6 +93,7 @@ export class UpdateAssessmentDto {
   @IsOptional() @IsString() @IsNotEmpty() title?: string;
   @IsOptional() @IsNumber() @Min(0) maxScore?: number;
   @IsOptional() @IsNumber() @Min(0) weightInComponent?: number;
+  @IsOptional() @IsIn([...ASSESSMENT_KIND]) kind?: (typeof ASSESSMENT_KIND)[number];
   @IsOptional() @IsString() dueAt?: string;
   @IsOptional() @IsInt() @Min(0) version?: number;
 }

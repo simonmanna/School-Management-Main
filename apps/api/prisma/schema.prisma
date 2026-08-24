@@ -12958,10 +12958,10 @@ model Assessment {
   /// is precisely what made one "Assessments" list, filterable by CAT /
   /// homework / exam, impossible to build.
   ///
-  /// Nullable on purpose until the backfill has run: a default of `cat` would
-  /// be indistinguishable from a row the backfill genuinely classified as a
-  /// CAT, and the shadow-compare in P4 depends on telling those apart.
-  kind              AssessmentKind?
+  /// Mandatory. It was nullable only while the backfill needed to tell "not
+  /// yet classified" apart from "classified as cat"; both producers and data
+  /// are now complete, so the legacy read-time guess is retired.
+  kind              AssessmentKind
   sourceType        AssessmentSourceType @default(manual)
   /// FK-less link to the origin row (examScheduleId, assignmentId, quizId).
   sourceRef         String?

@@ -91,6 +91,10 @@ export class CbtResultBridgeService {
         termId,
         title: `CBT ${paperId.slice(0, 8)}`,
         maxScore,
+        // A quiz is continuous assessment. Saying so beats leaving `kind` null
+        // and relying on the legacy read-time guess, which happens to land on
+        // `cat` for a quiz today but does so by accident, not by intent.
+        kind: 'cat',
         sourceType: 'quiz',
         sourceRef,
         status: 'graded',

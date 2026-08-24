@@ -68,6 +68,11 @@ export class LmsGradeBridgeService {
         termId: offering.termId,
         title: `[LMS] ${cm.id.slice(0, 8)}`,
         maxScore: grade.maxScore,
+        // Work done inside a course is classwork. Leaving `kind` null sent it
+        // to the read-time guess, which called it a CAT and weighted it against
+        // the CAT component — the single biggest way LMS activity distorted a
+        // subject's term mark.
+        kind: 'classwork',
         sourceType: 'lms_activity',
         sourceRef: cm.id,
         status: 'draft',
