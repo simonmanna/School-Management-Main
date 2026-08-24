@@ -4,6 +4,19 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { MarkingService } from './marking.service';
 
 /**
+ * `GradeEntry` has no participation column — the legacy row records a
+ * non-scoring outcome in free-text `remarks`. These are the values that mean
+ * "resolved, but no numeric mark", and they must survive into the spine or
+ * `countsAbsentAsZero` can never fire for an exam mark.
+ */
+const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice', 'special_consideration']);
+
+function participationOf(remarks?: string | null): string {
+  const r = remarks?.trim().toLowerCase();
+  return r && NON_SCORING.has(r) ? r : 'present';
+}
+
+/**
  * GradeEntry → assessment-spine adapter.
  *
  * Exam marks keep flowing through the existing GradeEntry endpoints, but each
@@ -43,6 +56,9 @@ export class AssessmentProjectionService {
     const assessment = await this.ensureAssessment(tx, organizationId, schedule);
 
     for (const ge of gradeEntries) {
+      const participation = participationOf(ge.remarks);
+      const scored = ge.marksObtained !== null && ge.marksObtained !== undefined;
+
       const sa = await tx.studentAssessment.upsert({
         where: {
           assessmentId_studentProfileId: { assessmentId: assessment.id, studentProfileId: ge.studentProfileId },
@@ -54,14 +70,19 @@ export class AssessmentProjectionService {
           classId: schedule.classId,
           termId: schedule.exam.termId,
           maxScore: ge.maxMarks,
-          status: 'graded',
-          participation: 'present',
+          status: scored ? 'graded' : 'assigned',
+          participation,
           approvalStatus: ge.status,
           enteredById: ge.enteredById ?? null,
           approvedById: ge.approvedById ?? null,
         },
         update: {
           maxScore: ge.maxMarks,
+          // Participation used to be written once, as a hardcoded 'present',
+          // and never updated — so an absence recorded on the legacy row never
+          // reached the spine and `countsAbsentAsZero` never fired for an exam
+          // mark. It is re-derived on every projection now.
+          participation,
           approvalStatus: ge.status,
           enteredById: ge.enteredById ?? null,
           approvedById: ge.approvedById ?? null,
@@ -72,16 +93,20 @@ export class AssessmentProjectionService {
       // already approved — the one caller allowed to. This block used to carry
       // its own copy of the recompute arithmetic; `postMark` owns it now, so
       // there is a single place where a mark becomes a score.
-      if (ge.marksObtained !== null && ge.marksObtained !== undefined) {
-        await this.marking.postMark(tx, {
-          studentAssessmentId: sa.id,
-          score: ge.marksObtained,
-          source: 'exam',
-          markerId: ge.enteredById ?? null,
-          allowWhenApproved: true,
-          writeHistory: false, // GradeEntry already carries its own audit trail
-        });
-      }
+      //
+      // A CLEARED legacy row must clear the spine too. Skipping the null case
+      // left the previous score standing forever, so clearing a cell — or
+      // marking a student absent — looked applied on the marksheet while the
+      // gradebook, the result run and the report card all still counted the old
+      // mark.
+      await this.marking.postMark(tx, {
+        studentAssessmentId: sa.id,
+        score: scored ? ge.marksObtained : null,
+        source: 'exam',
+        markerId: ge.enteredById ?? null,
+        allowWhenApproved: true,
+        writeHistory: false, // GradeEntry already carries its own audit trail
+      });
     }
 
     return assessment.id;

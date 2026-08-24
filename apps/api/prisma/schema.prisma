@@ -12931,11 +12931,29 @@ model Assessment {
   componentId       String?
   subjectId         String
   classId           String
+  /// Stream/section, when the assessment is narrower than the whole class.
+  sectionId         String?
   termId            String
   title             String
+  /// CAT 1 / CAT 2, exam paper number — orders same-kind assessments in a term.
+  sequence          Int?
+  /// Teacher who owns this assessment (StaffProfile.id). Lets the approvals
+  /// queue say "submitted by Mr John" without joining through the mark ledger.
+  /// NOTE: distinct from `StudentAssessment.enteredById`, which is a User id.
+  teacherPartnerId  String?
   maxScore          Decimal  @default(100) @db.Decimal(8, 2)
   /// Relative weight if a component aggregates several assessments (e.g. best-N).
   weightInComponent Decimal  @default(1) @db.Decimal(6, 3)
+  /// What this assessment IS, independent of whether a weighting component has
+  /// been attached yet. Kind used to be reachable only through
+  /// `component.kind`, so an adapter-projected exam mark was typeless — which
+  /// is precisely what made one "Assessments" list, filterable by CAT /
+  /// homework / exam, impossible to build.
+  ///
+  /// Nullable on purpose until the backfill has run: a default of `cat` would
+  /// be indistinguishable from a row the backfill genuinely classified as a
+  /// CAT, and the shadow-compare in P4 depends on telling those apart.
+  kind              AssessmentKind?
   sourceType        AssessmentSourceType @default(manual)
   /// FK-less link to the origin row (examScheduleId, assignmentId, quizId).
   sourceRef         String?
@@ -12944,6 +12962,9 @@ model Assessment {
   /// Moodle grade-item hide/lock (ADR-014 §3.5).
   hiddenFromStudents Boolean @default(false)
   lockedAt          DateTime?
+  lockedById        String?
+  /// Resit sitting of the same paper — carried over from ExamSchedule.
+  isResit           Boolean  @default(false)
   version           Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -12959,6 +12980,8 @@ model Assessment {
   @@unique([organizationId, sourceType, sourceRef])
   @@index([organizationId])
   @@index([organizationId, classId, termId, subjectId])
+  @@index([organizationId, termId, kind])
+  @@index([organizationId, teacherPartnerId])
   @@index([componentId])
 }
 

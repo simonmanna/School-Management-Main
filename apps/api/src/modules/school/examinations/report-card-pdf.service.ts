@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { ReportCardTemplateService } from './report-card-template.service';
 import { ReportCardSettingsService } from './report-card-settings.service';
 import { GradingService, type GradeBand } from './grading.service';
+import { ResultRunService } from '../assessment/result-run.service';
 import type { ColumnItem } from './report-card-settings.schema';
 
 /**
@@ -63,6 +64,7 @@ export class ReportCardPdfService {
     private readonly templates: ReportCardTemplateService,
     private readonly settingsService: ReportCardSettingsService,
     private readonly grading: GradingService,
+    private readonly results: ResultRunService,
   ) {}
 
   async generatePdf(reportCardId: string): Promise<Buffer> {
@@ -89,7 +91,17 @@ export class ReportCardPdfService {
 
     // Prefer the layout frozen into the payload; rebuild only for cards that
     // predate the template upgrade.
+    //
+    // A rebuild MUST be handed the published result spine, exactly as
+    // `ReportCardService.generate` does. Calling `buildLayout` without it left
+    // `spineSubjects` empty, which forced `canUseSpine` false and sent every
+    // rebuilt card down the legacy GradeEntry path — so `REPORT_CARD_SOURCE`
+    // was inert here whatever it was set to, and a re-rendered PDF could
+    // disagree with the card the parent was shown.
     const stored: any = card.payload ?? {};
+    const spine = stored?.sections
+      ? null
+      : await this.results.latestPublished(card.termId, card.studentProfileId).catch(() => null);
     const layout = stored?.sections
       ? {
           system: stored.system ?? undefined,
@@ -99,7 +111,7 @@ export class ReportCardPdfService {
           eligible: stored.eligible,
           footer: stored.footer,
         }
-      : (await this.templates.buildLayout(card.studentProfileId, card.termId)).layout;
+      : (await this.templates.buildLayout(card.studentProfileId, card.termId, spine)).layout;
 
     const [attendance, gradeBands] = await Promise.all([
       this.loadAttendance(card.studentProfileId, term?.startDate, term?.endDate),

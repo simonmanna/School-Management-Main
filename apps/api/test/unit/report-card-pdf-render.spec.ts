@@ -22,7 +22,7 @@ import {
 
 /** The renderer only touches its injected deps in `loadModel`, never in `render`. */
 function makeService(): ReportCardPdfService {
-  return new ReportCardPdfService(null as any, null as any, null as any, null as any, null as any);
+  return new ReportCardPdfService(null as any, null as any, null as any, null as any, null as any, null as any);
 }
 
 function subject(name: string, code: string, percent: number) {

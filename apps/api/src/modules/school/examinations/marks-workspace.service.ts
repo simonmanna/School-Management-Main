@@ -360,51 +360,17 @@ export class MarksWorkspaceService {
 
     if (clearing) {
       // Clearing a cell (or marking a non-scoring outcome) must not leave a
-      // stale numeric mark behind.
-      const existing = await this.prisma.client.gradeEntry.findFirst({
-        where: { examScheduleId: schedule.id, studentProfileId: dto.studentProfileId },
-      });
-      if (existing?.status === 'approved') {
-        throw new ConflictException('These marks are approved; reject them before editing.');
-      }
-      if (!existing && !dto.participation) return { cleared: true };
-
+      // stale numeric mark behind — in EITHER store. This used to write
+      // `gradeEntry` here directly and return, with no projection, so the spine
+      // kept the old score and the gradebook, the result run and the report card
+      // all went on counting a mark the teacher had erased.
       const remarks = dto.participation && dto.participation !== 'present' ? dto.participation : null;
-      if (existing) {
-        await this.prisma.client.gradeEntry.updateMany({
-          where: { id: existing.id },
-          data: {
-            marksObtained: null,
-            grade: null,
-            gradePoint: null,
-            remarks,
-            status: 'draft',
-            enteredById: this.tenant.userId ?? null,
-            enteredAt: new Date(),
-            version: { increment: 1 },
-          },
-        });
-      } else {
-        await this.prisma.client.gradeEntry.create({
-          data: {
-            organizationId: this.tenant.organizationId,
-            examScheduleId: schedule.id,
-            studentProfileId: dto.studentProfileId,
-            marksObtained: null,
-            maxMarks,
-            remarks,
-            status: 'draft',
-            enteredById: this.tenant.userId ?? null,
-            enteredAt: new Date(),
-          },
-        });
-      }
-      await this.audit.record({
-        entity: 'GradeEntry',
-        entityId: schedule.id,
-        action: 'update',
-        newValues: { action: 'clear_mark', studentProfileId: dto.studentProfileId, participation: dto.participation },
+      const res = await this.grades.clearEntry({
+        examScheduleId: schedule.id,
+        studentProfileId: dto.studentProfileId,
+        remarks,
       });
+      if (!res.row) return { cleared: true };
       return { cleared: true, examScheduleId: schedule.id, participation: dto.participation ?? null };
     }
 

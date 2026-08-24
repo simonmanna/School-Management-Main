@@ -259,6 +259,78 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     });
   }
 
+  /**
+   * Clear one student's mark, or record a non-scoring outcome (absent, exempt,
+   * excused, malpractice) against the legacy row.
+   *
+   * This exists because clearing used to be done by writing `gradeEntry`
+   * directly from the marks workspace, WITHOUT projecting — so the cleared
+   * legacy row and the spine immediately disagreed, and the stale score went on
+   * counting in the gradebook, the result run and the report card. Clearing is
+   * a mark write like any other and belongs on the same atomic path as
+   * `bulkUpsert`.
+   */
+  async clearEntry(dto: { examScheduleId: string; studentProfileId: string; remarks?: string | null }) {
+    const organizationId = this.tenant.organizationId;
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const existing = await tx.gradeEntry.findFirst({
+        where: { examScheduleId: dto.examScheduleId, studentProfileId: dto.studentProfileId },
+      });
+
+      // Same rule as bulkUpsert: an approved mark goes back through
+      // reject → resubmit, it is not silently erased.
+      if (existing && existing.status === 'approved') {
+        throw new ConflictException(
+          `Grade for student ${dto.studentProfileId} is approved; reject it before clearing marks`,
+        );
+      }
+
+      const common = {
+        marksObtained: null,
+        grade: null,
+        gradePoint: null,
+        remarks: dto.remarks ?? null,
+        enteredById: this.tenant.userId ?? null,
+        enteredAt: new Date(),
+      };
+
+      let row: any;
+      if (existing) {
+        await tx.gradeEntry.updateMany({
+          where: { id: existing.id },
+          data: { ...common, status: 'draft', version: { increment: 1 } },
+        });
+        row = await tx.gradeEntry.findFirst({ where: { id: existing.id } });
+      } else {
+        // Nothing to clear and no outcome to record.
+        if (!dto.remarks) return { cleared: true, examScheduleId: dto.examScheduleId, row: null };
+        const schedule = await tx.examSchedule.findFirst({ where: { id: dto.examScheduleId } });
+        row = await tx.gradeEntry.create({
+          data: {
+            organizationId,
+            examScheduleId: dto.examScheduleId,
+            studentProfileId: dto.studentProfileId,
+            maxMarks: schedule?.maxMarks ?? 100,
+            status: 'draft',
+            ...common,
+          },
+        });
+      }
+
+      await this.audit.recordInTx(tx, {
+        entity: 'GradeEntry',
+        entityId: row.id,
+        action: existing ? 'update' : 'create',
+        newValues: { action: 'clear_mark', studentProfileId: dto.studentProfileId, remarks: dto.remarks ?? null },
+      });
+
+      // The half that was missing: the spine must learn the mark is gone.
+      await this.projection.projectExamSchedule(tx, dto.examScheduleId);
+      return { cleared: true, examScheduleId: dto.examScheduleId, row };
+    });
+  }
+
   async submit(examScheduleId: string) {
     return this.prisma.client.$transaction(async (tx: any) => {
       const res = await tx.gradeEntry.updateMany({

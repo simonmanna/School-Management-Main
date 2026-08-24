@@ -58,10 +58,13 @@ function makeService(overrides: Record<string, any> = {}) {
     { client } as any,
     { organizationId: 'org_1', userId: 'user_1' } as any,
     { record: jest.fn(), recordInTx: jest.fn() } as any,
-    { bulkUpsert: jest.fn().mockResolvedValue({ count: 1, results: [{ id: 'ge_1', marksObtained: 70, grade: 'B', version: 1 }] }) } as any,
+    {
+      bulkUpsert: jest.fn().mockResolvedValue({ count: 1, results: [{ id: 'ge_1', marksObtained: 70, grade: 'B', version: 1 }] }),
+      clearEntry: jest.fn().mockResolvedValue({ cleared: true, examScheduleId: 'sched_1', row: { id: 'ge_1' } }),
+    } as any,
     { bandFor: jest.fn().mockResolvedValue({ grade: 'B', gpa: 3, min: 60, max: 79 }) } as any,
   );
-  return { service, client };
+  return { service, client, grades: (service as any).grades };
 }
 
 function student(id: string, name: string, extra: Record<string, any> = {}) {
@@ -149,6 +152,45 @@ describe('MarksWorkspaceService — marksheet', () => {
     await expect(
       service.saveMark({ examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math', studentProfileId: 's1', marks: 41 }),
     ).rejects.toThrow(/between 0 and 40/);
+  });
+
+  /**
+   * Clearing used to write `gradeEntry` from this service directly and return,
+   * with no projection — so the legacy row was cleared while the assessment
+   * spine kept the old score, and the gradebook, the result run and the report
+   * card all went on counting a mark the teacher had erased. Clearing has to
+   * travel the same atomic, projecting path as any other mark write.
+   */
+  it('routes a cleared mark through the projecting path, never straight at GradeEntry', async () => {
+    const { service, client, grades } = makeService();
+    client.examSchedule.findFirst.mockResolvedValue({ id: 'sched_1', maxMarks: 100, marksLockedAt: null });
+    client.studentProfile.findFirst.mockResolvedValue({ id: 's1' });
+
+    const res = await service.saveMark({
+      examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math', studentProfileId: 's1', marks: null,
+    });
+
+    expect(res.cleared).toBe(true);
+    expect(grades.clearEntry).toHaveBeenCalledWith({
+      examScheduleId: 'sched_1', studentProfileId: 's1', remarks: null,
+    });
+    expect(client.gradeEntry.updateMany).not.toHaveBeenCalled();
+    expect(client.gradeEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('records a non-scoring outcome as the legacy remark, so the projection can read it back', async () => {
+    const { service, client, grades } = makeService();
+    client.examSchedule.findFirst.mockResolvedValue({ id: 'sched_1', maxMarks: 100, marksLockedAt: null });
+    client.studentProfile.findFirst.mockResolvedValue({ id: 's1' });
+
+    await service.saveMark({
+      examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math', studentProfileId: 's1',
+      marks: null, participation: 'absent',
+    });
+
+    expect(grades.clearEntry).toHaveBeenCalledWith({
+      examScheduleId: 'sched_1', studentProfileId: 's1', remarks: 'absent',
+    });
   });
 
   it('creates the paper on demand when a mark is typed into one that was never applied', async () => {
