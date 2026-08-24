@@ -36,6 +36,12 @@ function makeService(overrides: Record<string, any> = {}) {
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       create: jest.fn(),
     },
+    // The paper's lock now lives on its Assessment; the schedule column is the
+    // legacy mirror, still read for papers locked before the cutover.
+    assessment: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     gradeEntry: {
       findMany: jest.fn().mockResolvedValue([]),
       groupBy: jest.fn().mockResolvedValue([]),
@@ -53,6 +59,9 @@ function makeService(overrides: Record<string, any> = {}) {
     term: { findMany: jest.fn().mockResolvedValue([]) },
     ...overrides,
   };
+  // Applying an exam now mints its gradebook columns in one transaction, so the
+  // stub has to be able to open one.
+  client.$transaction = jest.fn((fn: any) => (typeof fn === 'function' ? fn(client) : Promise.all(fn)));
 
   const service = new MarksWorkspaceService(
     { client } as any,
@@ -63,6 +72,7 @@ function makeService(overrides: Record<string, any> = {}) {
       clearEntry: jest.fn().mockResolvedValue({ cleared: true, examScheduleId: 'sched_1', row: { id: 'ge_1' } }),
     } as any,
     { bandFor: jest.fn().mockResolvedValue({ grade: 'B', gpa: 3, min: 60, max: 79 }) } as any,
+    { forExamSchedules: jest.fn().mockResolvedValue(0), forExamSchedule: jest.fn().mockResolvedValue(null) } as any,
   );
   return { service, client, grades: (service as any).grades };
 }

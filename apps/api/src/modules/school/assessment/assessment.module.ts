@@ -3,6 +3,9 @@ import { AssessmentComponentService, AssessmentPolicyService } from './assessmen
 import { AssessmentService } from './assessment.service';
 import { MarkingService } from './marking.service';
 import { AssessmentProjectionService } from './assessment-projection.service';
+import { AssessmentMintService } from './assessment-mint.service';
+import { AssessmentBoardService } from './assessment-board.service';
+import { AssessmentBoardController } from './assessment-board.controller';
 import { AcademicRosterService } from './roster.service';
 import { RubricService } from './rubric.service';
 import { AssignmentService } from './assignment.service';
@@ -38,6 +41,7 @@ import {
     AssignmentController,
     ResultController,
     GradebookController,
+    AssessmentBoardController,
   ],
   providers: [
     AssessmentPolicyService,
@@ -45,6 +49,8 @@ import {
     AssessmentService,
     MarkingService,
     AssessmentProjectionService,
+    AssessmentMintService,
+    AssessmentBoardService,
     AcademicRosterService,
     RubricService,
     AssignmentService,
@@ -58,6 +64,8 @@ import {
     AssessmentService,
     MarkingService,
     AssessmentProjectionService,
+    AssessmentMintService,
+    AssessmentBoardService,
     AcademicRosterService,
     RubricService,
     AssignmentService,

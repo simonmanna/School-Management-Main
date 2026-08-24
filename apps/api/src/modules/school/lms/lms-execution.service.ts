@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { MarkingService } from '../assessment/marking.service';
+import { AssessmentMintService } from '../assessment/assessment-mint.service';
 
 const notFound = (what: string) => new NotFoundException(`${what} not found`);
 
@@ -23,6 +24,7 @@ export class LmsExecutionService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly marking: MarkingService,
+    private readonly mint: AssessmentMintService,
   ) {}
 
   private get org() {
@@ -231,14 +233,6 @@ export class LmsExecutionService {
     if (!sub) throw notFound('Homework submission');
     const hw = sub.assignment;
 
-    // Assessment.termId is NOT NULL. This used to coerce a missing term to '',
-    // minting an assessment pinned to a term that does not exist — invisible
-    // to every term-scoped reader. Refuse instead.
-    if (!hw.termId) {
-      throw new BadRequestException(
-        `Homework "${hw.title}" has no term, so its marks cannot be placed in the gradebook. Set a term on the homework first.`,
-      );
-    }
     const maxScore = dto.maxScore != null
       ? new Prisma.Decimal(dto.maxScore)
       : (hw.maxScore ?? new Prisma.Decimal(100));
@@ -247,22 +241,11 @@ export class LmsExecutionService {
     }
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      // Idempotent Assessment row for this homework (sourceType=assignment, sourceRef=homeworkId).
-      const assessment = await tx.assessment.upsert({
-        where: { organizationId_sourceType_sourceRef: { organizationId: this.org, sourceType: 'assignment', sourceRef: hw.id } },
-        update: {},
-        create: {
-          organizationId: this.org,
-          subjectId: hw.subjectId,
-          classId: hw.classId,
-          termId: hw.termId,
-          title: hw.title,
-          maxScore,
-          sourceType: 'assignment',
-          sourceRef: hw.id,
-          status: 'published',
-        },
-      });
+      // The homework already carries its assessment (minted when it was set).
+      // This used to upsert by (sourceType, sourceRef) with no link on the
+      // homework, so a second Assessment could appear behind the first. Older
+      // homework, set before the link existed, is adopted rather than duplicated.
+      const assessment = await this.mint.forHomework(tx, hw);
 
       const studentAssessment = await this.marking.postMark(tx, {
         assessmentId: assessment.id,
@@ -270,7 +253,11 @@ export class LmsExecutionService {
         score: dto.score,
         source: 'homework',
         markerId: dto.gradedById ?? null,
-        snapshot: { classId: hw.classId, sectionId: hw.sectionId ?? undefined, termId: hw.termId ?? undefined },
+        snapshot: {
+          classId: hw.classId,
+          sectionId: hw.sectionId ?? undefined,
+          termId: assessment.termId ?? undefined,
+        },
       });
 
       return tx.homeworkSubmission.update({

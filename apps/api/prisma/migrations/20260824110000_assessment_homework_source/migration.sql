@@ -1,0 +1,12 @@
+-- Split `homework` out of the `assignment` source type.
+--
+-- HomeworkAssignment and the A2 Assignment shared `sourceType='assignment'`,
+-- told apart only by whether `sourceRef` was null. Postgres treats nulls as
+-- distinct in a unique index, so @@unique([organizationId, sourceType,
+-- sourceRef]) permitted unlimited `('assignment', NULL)` rows and the model's
+-- "one assessment per origin row" promise was already false.
+--
+-- Alone in its own migration on purpose: Postgres forbids using an enum value
+-- in DML inside the transaction that adds it, and Prisma wraps each migration
+-- in one transaction.
+ALTER TYPE "AssessmentSourceType" ADD VALUE IF NOT EXISTS 'homework';

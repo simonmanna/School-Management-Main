@@ -6,6 +6,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { MarkingService } from './marking.service';
 import { AssessmentPolicyService } from './assessment-config.service';
 import { resolveBands } from './grade-bands';
+import { kindOf } from './assessment-math';
 import {
   computeSubject,
   type AssessmentDatum,
@@ -105,7 +106,7 @@ export class GradebookService {
     // Assign each column to the component it contributes to (mirrors
     // computeSubject's member-matching exactly), else to the unweighted group.
     const columns = assessments.map((a) => {
-      const kind = a.component?.kind ?? (a.sourceType === 'exam_session' ? 'exam' : 'cat');
+      const kind = kindOf(a);
       const owner =
         components.find((c) => a.componentId === c.id) ??
         components.find((c) => a.componentId == null && c.kind === kind) ??
@@ -276,6 +277,13 @@ export class GradebookService {
       if (!component) throw new NotFoundException(`Component ${dto.componentId} not found`);
     }
 
+    // The column records what it IS. Kind used to be guessed on read, from the
+    // component or the source type, which classified every component-less
+    // column as a CAT and weighted it as one.
+    const component = dto.componentId
+      ? await this.prisma.client.assessmentComponent.findFirst({ where: { id: dto.componentId } })
+      : null;
+
     const created = await this.prisma.client.assessment.create({
       data: {
         organizationId: this.org,
@@ -285,6 +293,7 @@ export class GradebookService {
         componentId: dto.componentId ?? null,
         title: dto.title,
         maxScore: dto.maxScore ?? 100,
+        kind: (dto.kind ?? component?.kind ?? 'cat') as any,
         sourceType: 'manual',
         status: 'open',
         dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
@@ -318,6 +327,7 @@ export class GradebookService {
       where: { id: assessmentId },
       data: {
         ...(dto.title !== undefined ? { title: dto.title } : {}),
+        ...(dto.kind !== undefined ? { kind: dto.kind as any } : {}),
         ...(dto.maxScore !== undefined ? { maxScore: dto.maxScore } : {}),
         ...(dto.componentId !== undefined ? { componentId: dto.componentId } : {}),
         ...(dto.hiddenFromStudents !== undefined ? { hiddenFromStudents: dto.hiddenFromStudents } : {}),

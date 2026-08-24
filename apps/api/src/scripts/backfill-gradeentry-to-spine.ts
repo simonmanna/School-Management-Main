@@ -94,6 +94,8 @@ async function preflight(prisma: PrismaService) {
   await count(prisma, 'papers locked but Assessment unlocked', SQL_LOCK_DRIFT);
   await count(prisma, 'Assessment rows with no kind yet', `
     SELECT count(*)::int c FROM "Assessment" a WHERE a.kind IS NULL ${orgFilter('a')}`);
+  await count(prisma, 'homework not yet linked to its column', `
+    SELECT count(*)::int c FROM "HomeworkAssignment" h WHERE h."assessmentId" IS NULL ${orgFilter('h')}`);
 
   const dist = await q(prisma, `
     SELECT COALESCE(a.kind::text, '(null)') AS kind, count(*)::int c
@@ -268,6 +270,34 @@ async function backfillExamColumns(prisma: PrismaService): Promise<number> {
   return prisma.raw.$executeRawUnsafe(sql);
 }
 
+/**
+ * Step 3b — homework becomes its own source type, and links to its column.
+ *
+ * HomeworkAssignment and the A2 Assignment shared `sourceType='assignment'`,
+ * told apart only by whether `sourceRef` was null — so the row is RE-POINTED,
+ * never duplicated. Then the homework gets the `assessmentId` link that stops a
+ * second Assessment appearing behind the first at grading time.
+ */
+async function relinkHomework(prisma: PrismaService): Promise<{ repointed: number; linked: number }> {
+  const repointed = await prisma.raw.$executeRawUnsafe(`
+    UPDATE "Assessment" a
+       SET "sourceType" = 'homework', kind = 'homework'
+     WHERE a."sourceType" = 'assignment'
+       AND a."sourceRef" IS NOT NULL
+       AND EXISTS (SELECT 1 FROM "HomeworkAssignment" h WHERE h.id = a."sourceRef")
+       ${orgFilter('a')}`);
+
+  const linked = await prisma.raw.$executeRawUnsafe(`
+    UPDATE "HomeworkAssignment" h
+       SET "assessmentId" = a.id
+      FROM "Assessment" a
+     WHERE a."sourceType" = 'homework' AND a."sourceRef" = h.id
+       AND h."assessmentId" IS NULL
+       ${orgFilter('h')}`);
+
+  return { repointed, linked };
+}
+
 /** Step 4 — one StudentAssessment per GradeEntry, participation included. */
 async function mintStudentAssessments(prisma: PrismaService): Promise<number> {
   const sql = `
@@ -411,6 +441,8 @@ async function main() {
     console.log(`  assessments minted      ${await mintExamAssessments(prisma)}`);
     console.log(`  kind classified         ${await backfillKind(prisma)}`);
     console.log(`  exam columns filled     ${await backfillExamColumns(prisma)}`);
+    const hw = await relinkHomework(prisma);
+    console.log(`  homework re-pointed     ${hw.repointed} (linked ${hw.linked})`);
     console.log(`  student rows minted     ${await mintStudentAssessments(prisma)}`);
     console.log(`  student rows synced     ${await syncStudentAssessments(prisma)}`);
     console.log(`  mark entries inserted   ${await insertMarkEntries(prisma)}`);

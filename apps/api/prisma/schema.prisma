@@ -12196,8 +12196,11 @@ model HomeworkAssignment {
   sectionId        String?
   subjectId        String
   termId           String?
-  /// NEW (Phase 1): link into the LMS spine. NO studentAssessmentId here — the
-  /// bridge is at submission level (HomeworkSubmission → StudentAssessment).
+  /// The gradebook column this homework IS. Minted when the homework is
+  /// created, not when it is first graded, so the column exists from the moment
+  /// the work is set. NO studentAssessmentId here — the per-student bridge is at
+  /// submission level (HomeworkSubmission → StudentAssessment).
+  assessmentId     String?   @unique
   courseOfferingId String?
   lessonPlanId     String?
   learningObjectiveId String?
@@ -12328,10 +12331,15 @@ enum AssessmentKind {
 
 enum AssessmentSourceType {
   manual
+  /// An A2 `Assignment` (sourceRef is null — see the note on Assessment).
   assignment
   exam_session
   quiz
   lms_activity
+  /// A `HomeworkAssignment`. Split out of `assignment`, which the two used to
+  /// share, distinguished only by whether `sourceRef` was null — and the unique
+  /// key tolerates unlimited nulls, so "one assessment per origin row" was false.
+  homework
 }
 
 enum AssessmentStatus {
@@ -13007,7 +13015,12 @@ model StudentAssessment {
   /// Marking-approval workflow, reusing the GradeEntry enum (draft→submitted→approved/rejected).
   approvalStatus   GradeEntryStatus @default(draft)
   enteredById      String?
+  enteredAt        DateTime?
   approvedById     String?
+  approvedAt       DateTime?
+  /// Why an approver sent the marks back. Carried over from GradeEntry so the
+  /// spine can own the whole approval workflow.
+  rejectionReason  String?
   version          Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

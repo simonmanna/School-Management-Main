@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { GradeEntryService } from './examinations.service';
+import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { GradingService } from './grading.service';
 import type { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './marks-workspace.dto';
 
@@ -41,6 +42,7 @@ export class MarksWorkspaceService {
     private readonly audit: AuditService,
     private readonly grades: GradeEntryService,
     private readonly grading: GradingService,
+    private readonly mint: AssessmentMintService,
   ) {}
 
   /* ─────────────────────────── Step 1: exams ─────────────────────────── */
@@ -227,16 +229,26 @@ export class MarksWorkspaceService {
         });
       }
     }
-    if (data.length === 0) return { created: 0, skipped: have.size };
+    if (data.length === 0) {
+      // Even with nothing new to create, older papers may predate the minting
+      // rule below — give them their column now rather than on first mark.
+      const minted = await this.mintForExam(dto.examId, dto.classIds);
+      return { created: 0, skipped: have.size, columnsMinted: minted };
+    }
 
     const res = await this.prisma.client.examSchedule.createMany({ data, skipDuplicates: true });
+    // Every paper becomes a gradebook column the moment it is applied. Before
+    // this, the column appeared only once someone typed a mark, so a teacher
+    // opening the gradebook saw no sign of an exam the office had already
+    // scheduled.
+    const minted = await this.mintForExam(dto.examId, dto.classIds);
     await this.audit.record({
       entity: 'ExamSchedule',
       entityId: dto.examId,
       action: 'create',
       newValues: { action: 'apply_classes', examId: dto.examId, classIds: dto.classIds, created: res.count },
     });
-    return { created: res.count, skipped: have.size };
+    return { created: res.count, skipped: have.size, columnsMinted: minted };
   }
 
   /**
@@ -316,6 +328,16 @@ export class MarksWorkspaceService {
     });
 
     const entered = rows.filter((r) => r.marks != null || NON_SCORING.has(r.participation)).length;
+    // The assessment's lock is authoritative; the schedule column is the legacy
+    // mirror, still read so a paper locked before the cutover stays locked.
+    const spineLock = schedule
+      ? await this.prisma.client.assessment.findFirst({
+          where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
+          select: { lockedAt: true },
+        })
+      : null;
+    const locked = spineLock?.lockedAt ?? schedule?.marksLockedAt ?? null;
+
     return {
       exam: {
         id: exam.id,
@@ -329,8 +351,8 @@ export class MarksWorkspaceService {
       examScheduleId: schedule?.id ?? null,
       applied: schedule != null,
       maxMarks,
-      locked: schedule?.marksLockedAt != null,
-      lockedAt: schedule?.marksLockedAt ?? null,
+      locked: locked != null,
+      lockedAt: locked,
       approvalStatus: this.rollupStatus(entries.map((e) => e.status)),
       total: rows.length,
       entered,
@@ -345,7 +367,11 @@ export class MarksWorkspaceService {
    */
   async saveMark(dto: SaveMarkDto) {
     const schedule = await this.ensureSchedule(dto.examId, dto.classId, dto.subjectId, dto.maxMarks);
-    if (schedule.marksLockedAt) {
+    const spineLock = await this.prisma.client.assessment.findFirst({
+      where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
+      select: { lockedAt: true },
+    });
+    if (spineLock?.lockedAt ?? schedule.marksLockedAt) {
       throw new ConflictException('Mark entry is locked for this paper. Unlock it to make changes.');
     }
 
@@ -529,12 +555,26 @@ export class MarksWorkspaceService {
       throw new NotFoundException('No papers found for this exam and class.');
     }
 
-    const res = await this.prisma.client.examSchedule.updateMany({
-      where: { id: { in: schedules.map((s) => s.id) } },
-      data: {
-        marksLockedAt: dto.locked ? new Date() : null,
-        marksLockedById: dto.locked ? (this.tenant.userId ?? null) : null,
-      },
+    const at = dto.locked ? new Date() : null;
+    const by = dto.locked ? (this.tenant.userId ?? null) : null;
+    const ids = schedules.map((s) => s.id);
+
+    // `Assessment.lockedAt` is the lock that BITES — `postMark` enforces it, so
+    // it stops the gradebook cell, the LMS bridge and the CBT bridge too.
+    // `ExamSchedule.marksLockedAt` was only ever checked by this one service,
+    // which meant a "locked" paper stayed writable through every other door.
+    // Both are written until the legacy column is dropped.
+    const res = await this.prisma.client.$transaction(async (tx: any) => {
+      const updated = await tx.examSchedule.updateMany({
+        where: { id: { in: ids } },
+        data: { marksLockedAt: at, marksLockedById: by },
+      });
+      await this.mint.forExamSchedules(tx, ids);
+      await tx.assessment.updateMany({
+        where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: { in: ids } },
+        data: { lockedAt: at, lockedById: by },
+      });
+      return updated;
     });
     await this.audit.record({
       entity: 'ExamSchedule',
@@ -633,6 +673,18 @@ export class MarksWorkspaceService {
   private participationOf(g: { remarks?: string | null } | undefined): string {
     const r = g?.remarks?.trim().toLowerCase();
     return r && NON_SCORING.has(r) ? r : 'present';
+  }
+
+  /** Give every paper of this exam, in these classes, its gradebook column. */
+  private async mintForExam(examId: string, classIds: string[]): Promise<number> {
+    const schedules = await this.prisma.client.examSchedule.findMany({
+      where: { examId, classId: { in: classIds } },
+      select: { id: true },
+    });
+    if (schedules.length === 0) return 0;
+    return this.prisma.client.$transaction((tx: any) =>
+      this.mint.forExamSchedules(tx, schedules.map((s) => s.id)),
+    );
   }
 
   /** Weakest status wins, so "partly approved" never reads as approved. */

@@ -47,12 +47,14 @@ function makeService(gradeEntries: any[]) {
     },
   };
 
+  const mint = { forExamSchedule: jest.fn().mockResolvedValue(ASSESSMENT) };
   const service = new AssessmentProjectionService(
     { client: tx } as any,
     { organizationId: 'org_1', userId: 'user_1' } as any,
     { postMark } as any,
+    mint as any,
   );
-  return { service, tx, postMark };
+  return { service, tx, postMark, mint };
 }
 
 /** The `create`/`update` bodies handed to the StudentAssessment upsert. */

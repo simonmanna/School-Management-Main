@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { StudentAssessment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -35,7 +35,11 @@ export class MarkingService {
    * MUST be called inside the same transaction as any mark/adjustment write so
    * the derived fields never lag the ledgers. Bumps `version`.
    */
-  async recompute(tx: any, studentAssessmentId: string): Promise<void> {
+  async recompute(
+    tx: any,
+    studentAssessmentId: string,
+    opts: { heal?: boolean } = {},
+  ): Promise<void> {
     const sa = await tx.studentAssessment.findFirst({ where: { id: studentAssessmentId } });
     if (!sa) throw new NotFoundException(`StudentAssessment ${studentAssessmentId} not found`);
     let [entries, adjustments] = await Promise.all([
@@ -43,7 +47,14 @@ export class MarkingService {
       tx.markAdjustment.findMany({ where: { studentAssessmentId } }),
     ]);
 
-    entries = await this.healLedgerlessScore(tx, sa, entries, adjustments);
+    // `heal: false` says the empty ledger is INTENTIONAL — the caller just
+    // cleared the round. Without it, the self-heal below cannot tell a
+    // deliberate clear apart from a legacy orphan and puts the mark straight
+    // back, so erasing a mark (or marking a student absent after entering one)
+    // silently did nothing.
+    if (opts.heal !== false) {
+      entries = await this.healLedgerlessScore(tx, sa, entries, adjustments);
+    }
 
     const { originalScore, effectiveScore, percentage } = computeEffective(
       entries.map((e: any) => ({ round: e.round, score: e.score })),
@@ -162,7 +173,10 @@ export class MarkingService {
 
     const assessment = await tx.assessment.findFirst({ where: { id: sa.assessmentId } });
     if (assessment?.lockedAt) {
-      throw new BadRequestException('This grade item is locked. Unlock it before changing marks.');
+      // 409, not 400: a locked item is a STATE conflict, not a malformed
+      // request, and the marks workspace already contracts on 409 for its own
+      // lock check. Two codes for one condition made the web show two messages.
+      throw new ConflictException('This grade item is locked. Unlock it before changing marks.');
     }
     if (sa.approvalStatus === 'approved' && !input.allowWhenApproved) {
       throw new BadRequestException('Marks are approved; reject them before recording new marks');
@@ -206,7 +220,7 @@ export class MarkingService {
       });
     }
 
-    await this.recompute(tx, sa.id);
+    await this.recompute(tx, sa.id, { heal: input.score !== null });
     await tx.studentAssessment.updateMany({
       where: { id: sa.id },
       data: {
@@ -349,12 +363,21 @@ export class MarkingService {
       const rows = await tx.studentAssessment.findMany({ where: { assessmentId: dto.assessmentId } });
       if (rows.length === 0) throw new NotFoundException(`No student assessments for assessment ${dto.assessmentId}`);
 
-      if (dto.action === 'submit') {
+      if (dto.action === 'submit' || dto.action === 'resubmit') {
+        // Resubmit is the second half of the reject loop: marks sent back are
+        // `rejected`, and a marker fixing them must be able to send them on
+        // again without an admin resetting the row by hand.
+        const from = dto.action === 'resubmit' ? 'rejected' : 'draft';
         const res = await tx.studentAssessment.updateMany({
-          where: { assessmentId: dto.assessmentId, approvalStatus: 'draft' },
-          data: { approvalStatus: 'submitted', enteredById: actorId },
+          where: { assessmentId: dto.assessmentId, approvalStatus: from },
+          data: {
+            approvalStatus: 'submitted',
+            enteredById: actorId,
+            enteredAt: new Date(),
+            rejectionReason: null,
+          },
         });
-        await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'update', newValues: { action: 'submit', count: res.count } });
+        await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'update', newValues: { action: dto.action, count: res.count } });
         return { updated: res.count };
       }
 
@@ -365,17 +388,17 @@ export class MarkingService {
         }
         const res = await tx.studentAssessment.updateMany({
           where: { assessmentId: dto.assessmentId, approvalStatus: 'submitted' },
-          data: { approvalStatus: 'approved', approvedById: actorId },
+          data: { approvalStatus: 'approved', approvedById: actorId, approvedAt: new Date() },
         });
         await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'approve', newValues: { count: res.count } });
         this.events.publish(EVENTS.SchoolMarksApproved, { organizationId, assessmentId: dto.assessmentId, approvedById: actorId ?? '', count: res.count });
         return { updated: res.count };
       }
 
-      // reject
+      // reject — the reason is part of the record, not a toast the marker missed
       const res = await tx.studentAssessment.updateMany({
         where: { assessmentId: dto.assessmentId, approvalStatus: 'submitted' },
-        data: { approvalStatus: 'rejected' },
+        data: { approvalStatus: 'rejected', rejectionReason: dto.reason ?? null },
       });
       await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'reject', newValues: { reason: dto.reason ?? null, count: res.count } });
       return { updated: res.count };

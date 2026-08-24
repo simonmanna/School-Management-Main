@@ -129,7 +129,9 @@ export class AppendAdjustmentDto {
 }
 
 // ── Marking-approval workflow (mirrors GradeEntry FSM at the assessment level) ──
-const APPROVAL_ACTION = ['submit', 'approve', 'reject'] as const;
+// `resubmit` closes the reject loop: rejected → submitted, without an admin
+// resetting the row by hand. GradeEntry supported it; the spine did not.
+const APPROVAL_ACTION = ['submit', 'resubmit', 'approve', 'reject'] as const;
 export class MarkingApprovalDto {
   @IsString() @IsNotEmpty() assessmentId!: string;
   @IsIn([...APPROVAL_ACTION]) action!: (typeof APPROVAL_ACTION)[number];

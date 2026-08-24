@@ -16,6 +16,7 @@ import {
   type SubjectInput,
 } from './result-computation';
 import type { ComputeResultsDto, RequestAmendmentDto } from './dto.types';
+import { kindOf } from './assessment-math';
 
 interface PublishConflict {
   code: string;
@@ -423,7 +424,7 @@ export class ResultRunService {
         });
         const assessments: AssessmentDatum[] = saRows.map((r: any, i: number) => ({
           componentId: r.assessment.componentId,
-          kind: r.assessment.component?.kind ?? (r.assessment.sourceType === 'exam_session' ? 'exam' : 'cat'),
+          kind: kindOf(r.assessment),
           effectiveScore: r.effectiveScore,
           maxScore: r.maxScore,
           participation: r.participation,

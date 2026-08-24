@@ -141,3 +141,17 @@ export function computeEffective(
   const effectiveScore = applyAdjustments(originalScore, adjustments, maxScore);
   return { originalScore, effectiveScore, percentage: percentageOf(effectiveScore, maxScore) };
 }
+
+/**
+ * What an assessment IS, for weighting purposes.
+ *
+ * `Assessment.kind` is the answer. The fallback exists only for rows written
+ * before the column did, and it is the OLD GUESS, kept verbatim so those rows
+ * keep behaving exactly as they did — `component.kind`, else exam-if-projected,
+ * else CAT. That guess is wrong for every component-less homework, quiz and LMS
+ * assessment, all of which it weighted as CATs; the backfill is what removes
+ * the last of them. Once `kind` is NOT NULL this whole function goes away.
+ */
+export function kindOf(a: { kind?: string | null; sourceType?: string; component?: { kind?: string } | null }): string {
+  return a.kind ?? a.component?.kind ?? (a.sourceType === 'exam_session' ? 'exam' : 'cat');
+}

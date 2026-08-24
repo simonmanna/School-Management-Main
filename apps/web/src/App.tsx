@@ -75,6 +75,9 @@ import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
+import { SchoolAssessmentsPage } from '@/pages/school/assessments';
+import { SchoolAssessmentMarkPage } from '@/pages/school/assessment-mark';
+import { SchoolApprovalsPage } from '@/pages/school/approvals';
 import { SchoolExamWorkspacePage } from '@/pages/school/exam-workspace';
 import { SchoolExamClassesPage } from '@/pages/school/exam-classes';
 import { SchoolEnterMarksPage } from '@/pages/school/enter-marks';
@@ -82,7 +85,6 @@ import { SchoolExamResultsPage } from '@/pages/school/exam-results';
 import { SchoolGradebookPage } from '@/pages/school/gradebook';
 import { SchoolTeachingPage } from '@/pages/school/teaching';
 import { SchoolHomeworkPage } from '@/pages/school/homework';
-import { SchoolMarksheetPage } from '@/pages/school/marksheet';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
@@ -535,11 +537,20 @@ export function App() {
           <Route path="/school/exam-results" element={<SchoolExamResultsPage />} />
           <Route path="/school/gradebook" element={<SchoolGradebookPage />} />
           <Route path="/school/teaching" element={<SchoolTeachingPage />} />
-          <Route path="/school/homework" element={<SchoolHomeworkPage />} />
+          {/* The unified front door: every kind of assessment in one list, and
+              one marking screen behind it. Homework and the numbered exam steps
+              are filters/views of this, not separate systems. */}
+          <Route path="/school/assessments" element={<SchoolAssessmentsPage />} />
+          <Route path="/school/assessments/:assessmentId/mark" element={<SchoolAssessmentMarkPage />} />
+          <Route path="/school/approvals" element={<SchoolApprovalsPage />} />
+          <Route path="/school/homework" element={<Navigate to="/school/assessments?kind=homework" replace />} />
+          <Route path="/school/homework/manage" element={<SchoolHomeworkPage />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
           {/* P6: My Marking → the teacher workspace, which finds the work for you. */}
           <Route path="/school/my-marking" element={<Navigate to="/school/teaching" replace />} />
-          <Route path="/school/marksheet/:assessmentId" element={<SchoolMarksheetPage />} />
+          {/* One marking screen. The old per-assessment marksheet kept its own
+              copy of the grid; the route survives so bookmarks still land. */}
+          <Route path="/school/marksheet/:assessmentId" element={<SchoolAssessmentMarkPage />} />
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
           <Route path="/school/grading-scales" element={<SchoolGradingScalePage />} />

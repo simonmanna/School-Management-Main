@@ -85,21 +85,24 @@ export class PortalsService {
       orderBy: { period: { order: 'asc' } } as any,
     });
 
-    // Pending grade submissions
-    const pendingGrades = await this.prisma.client.gradeEntry.count({
-      where: {
-        enteredById: teacherPartnerId,
-        status: 'draft',
-      },
+    // Pending grade submissions, off the spine rather than the legacy row —
+    // and off `Assessment.teacherPartnerId`, since `GradeEntry.enteredById` is
+    // a User id and was never going to match a StaffProfile id.
+    const pendingGrades = await this.prisma.client.studentAssessment.count({
+      where: { approvalStatus: 'draft', assessment: { teacherPartnerId, deletedAt: null } },
     });
 
     // A8: spine-side marking queue — assessments this teacher entered awaiting
     // approval, plus any open amendment requests to review.
+    // `enteredById` is a USER id; `teacherPartnerId` is a StaffProfile id.
+    // Filtering one by the other matched nothing, so these counters have read
+    // zero since they were written. `Assessment.teacherPartnerId` is the column
+    // that actually holds the teacher.
     const pendingApprovals = await this.prisma.client.studentAssessment.count({
-      where: { enteredById: teacherPartnerId, approvalStatus: 'submitted' },
+      where: { approvalStatus: 'submitted', assessment: { teacherPartnerId } },
     });
     const draftMarks = await this.prisma.client.studentAssessment.count({
-      where: { enteredById: teacherPartnerId, approvalStatus: 'draft' },
+      where: { approvalStatus: 'draft', assessment: { teacherPartnerId } },
     });
 
     return { classes, todaySchedule, pendingGrades, marking: { pendingApprovals, draftMarks } };
@@ -153,11 +156,11 @@ export class PortalsService {
       // Marks I entered that are awaiting someone else's approval — SoD means I
       // can't approve my own, so this is a "waiting on approver" list.
       this.prisma.client.studentAssessment.count({
-        where: { enteredById: teacherPartnerId, approvalStatus: 'submitted' },
+        where: { approvalStatus: 'submitted', assessment: { teacherPartnerId } },
       }),
       // Marks sent back to me to redo.
       this.prisma.client.studentAssessment.findMany({
-        where: { enteredById: teacherPartnerId, approvalStatus: 'rejected' },
+        where: { approvalStatus: 'rejected', assessment: { teacherPartnerId } },
         include: { assessment: true },
         take: 20,
       }),
@@ -219,6 +222,8 @@ export class PortalsService {
   private async examPapersToEnter(classIds: string[], subjectIds: string[]) {
     if (classIds.length === 0) return [];
     const schedules = await this.prisma.client.examSchedule.findMany({
+      // Locked papers are not work to do. The assessment's lock is authoritative;
+      // the schedule column is the legacy mirror.
       where: { classId: { in: classIds }, subjectId: { in: subjectIds }, marksLockedAt: null },
       include: { subject: true, exam: true },
       take: 40,

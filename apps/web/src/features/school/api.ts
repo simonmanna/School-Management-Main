@@ -4898,3 +4898,197 @@ export function useSubmitHomeworkOnBehalf() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'homework'] }),
   });
 }
+
+/* ───────────────────── Assessment board — the unified front door ─────────────────────
+ * One list, one create form, one submit/approve path, whatever KIND of
+ * assessment it is. The kind-specific surfaces (/school/marks, /school/homework,
+ * /school/gradebook) still exist and still own the detail; this is the door.
+ * ------------------------------------------------------------------------- */
+
+export const ASSESSMENT_KINDS = [
+  'cat', 'homework', 'project', 'practical', 'exam', 'oral', 'classwork',
+] as const;
+export type AssessmentKind = (typeof ASSESSMENT_KINDS)[number];
+
+/** School language, not database language. */
+export const KIND_LABEL: Record<string, string> = {
+  cat: 'CAT', homework: 'Homework', project: 'Project', practical: 'Practical',
+  exam: 'Exam', oral: 'Oral', classwork: 'Classwork', attendance: 'Attendance',
+};
+
+export const BOARD_STAGES = ['draft', 'open', 'marking', 'submitted', 'approved', 'returned'] as const;
+export type BoardStage = (typeof BOARD_STAGES)[number];
+
+export const STAGE_LABEL: Record<string, string> = {
+  draft: 'Draft', open: 'Not started', marking: 'Marking',
+  submitted: 'Awaiting approval', approved: 'Approved', returned: 'Returned',
+};
+
+export interface BoardRow {
+  assessmentId: string;
+  title: string;
+  kind: string;
+  sequence: number;
+  subject: { id: string; name: string };
+  class: { id: string; name: string };
+  component: { id: string; name: string; weight: number } | null;
+  maxScore: number;
+  dueAt: string | null;
+  status: string;
+  approvalStatus: string;
+  locked: boolean;
+  sourceType: string;
+  marked: number;
+  total: number;
+}
+
+export interface BoardPolicy {
+  id: string;
+  components: Array<{ id: string; name: string; kind: string; weight: number }>;
+  totalWeight: number;
+  valid: boolean;
+}
+
+export interface AssessmentBoard {
+  rows: BoardRow[];
+  policy: BoardPolicy | null;
+  subjects: Array<{ id: string; name: string }>;
+  counts: Record<string, number>;
+}
+
+export function useAssessmentBoard(q: {
+  termId?: string; classId?: string; subjectId?: string; kind?: string; status?: string;
+}) {
+  return useQuery({
+    queryKey: ['school', 'assessment-board', q],
+    enabled: !!q.termId,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(q)) if (v) params.set(k, String(v));
+      return (await api.get<AssessmentBoard>(`${S}/assessment-board?${params}`)).data;
+    },
+  });
+}
+
+export interface ApprovalRow {
+  assessmentId: string;
+  title: string;
+  kind: string;
+  subject: string;
+  class: string;
+  submittedBy: string | null;
+  students: number;
+  average: number | null;
+  missing: number;
+  maxScore: number;
+}
+
+export function useApprovalQueue(termId?: string, classId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment-board', 'approvals', termId, classId],
+    enabled: !!termId,
+    queryFn: async () => {
+      const params = new URLSearchParams({ termId: termId! });
+      if (classId) params.set('classId', classId);
+      return (await api.get<{ rows: ApprovalRow[] }>(`${S}/assessment-board/approvals?${params}`)).data;
+    },
+  });
+}
+
+export interface CreateAssessmentInput {
+  kind: string;
+  classId: string;
+  subjectId: string;
+  termId: string;
+  title: string;
+  maxScore?: number;
+  sequence?: number;
+  componentId?: string;
+  teacherPartnerId?: string;
+  description?: string;
+  dueAt?: string;
+  examId?: string;
+  classIds?: string[];
+}
+
+export function useCreateAssessmentUnified() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: CreateAssessmentInput) =>
+      (await api.post(`${S}/assessment-board`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'assessment-board'] });
+      qc.invalidateQueries({ queryKey: ['school', 'gradebook'] });
+      qc.invalidateQueries({ queryKey: ['school', 'homework'] });
+    },
+  });
+}
+
+export function useSubmitAssessmentMarks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (assessmentId: string) =>
+      (await api.post(`${S}/assessment-board/${assessmentId}/submit`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assessment-board'] }),
+  });
+}
+
+export function useApproveAssessmentMarks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assessmentId: string; action: 'approve' | 'reject'; reason?: string }) =>
+      (await api.post(`${S}/assessment-board/${dto.assessmentId}/approval`, {
+        action: dto.action, reason: dto.reason,
+      })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assessment-board'] }),
+  });
+}
+
+export interface BoardSheetStudent {
+  studentProfileId: string;
+  name: string;
+  admissionNo: string;
+  studentAssessmentId: string | null;
+  marks: number | null;
+  percentage: number | null;
+  participation: string;
+  approvalStatus: string;
+}
+
+export interface BoardSheet {
+  assessment: {
+    id: string;
+    title: string;
+    kind: string;
+    maxScore: number;
+    dueAt: string | null;
+    locked: boolean;
+    status: string;
+    subject: { id: string; name: string };
+    class: { id: string; name: string };
+    component: { id: string; name: string; weight: number } | null;
+  };
+  approvalStatus: string;
+  students: BoardSheetStudent[];
+  marked: number;
+  total: number;
+}
+
+export function useBoardSheet(assessmentId?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment-board', 'sheet', assessmentId],
+    enabled: !!assessmentId,
+    queryFn: async () => (await api.get<BoardSheet>(`${S}/assessment-board/${assessmentId}/sheet`)).data,
+  });
+}
+
+/**
+ * Deliberately does NOT invalidate: refetching the sheet would remount the input
+ * the teacher is still typing in. The grid patches its own row from the result.
+ */
+export function useSaveBoardMark(assessmentId?: string) {
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; marks: number | null; participation?: string }) =>
+      (await api.post(`${S}/assessment-board/${assessmentId}/mark`, dto)).data,
+  });
+}

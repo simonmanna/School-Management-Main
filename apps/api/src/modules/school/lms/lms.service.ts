@@ -7,6 +7,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import { LmsExecutionService } from './lms-execution.service';
+import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import type {
   CreateAnnouncementDto,
   CreateHomeworkDto,
@@ -30,6 +31,7 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     private readonly events: EventBus,
     private readonly audit: AuditService,
     private readonly execution: LmsExecutionService,
+    private readonly mint: AssessmentMintService,
   ) {
     super(prisma.client.homeworkAssignment as unknown as CrudDelegate);
   }
@@ -51,6 +53,13 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
           attachments: (dto.attachments as any) ?? [],
         } as any,
       });
+
+      // Homework IS an assessment. Minting the gradebook column here, rather
+      // than at first grade, means the column exists from the moment the work
+      // is set — and the term is resolved now, when a teacher can still fix it,
+      // instead of blocking them at grading time with marks in hand.
+      const assessment = await this.mint.forHomework(tx, row);
+      row.assessmentId = assessment.id;
       await this.audit.recordInTx(tx, {
         entity: 'HomeworkAssignment',
         entityId: row.id,

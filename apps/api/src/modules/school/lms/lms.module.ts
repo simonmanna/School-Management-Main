@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { LessonPlanningModule } from './lesson-planning.module';
+import { AssessmentModule } from '../assessment/assessment.module';
 import { AnnouncementService, HomeworkService, LearningResourceService, SubmissionService } from './lms.service';
 import {
   AnnouncementController,
@@ -11,7 +12,9 @@ import {
 @Module({
   // LessonPlanningModule supplies LmsExecutionService — homework grading has a
   // single implementation, the one that reaches the assessment spine.
-  imports: [LessonPlanningModule],
+  // AssessmentModule supplies AssessmentMintService: homework IS an assessment,
+  // and its gradebook column is minted when the work is set.
+  imports: [LessonPlanningModule, AssessmentModule],
   controllers: [
     HomeworkController,
     SubmissionController,

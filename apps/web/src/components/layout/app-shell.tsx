@@ -241,23 +241,21 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    // Two sections replace four (Exams & Marks + the assessment half of LMS).
-    // The numbered workflow leads; the gradebook and homework are the day-to-day
-    // continuous-assessment tools; reports and setup sit behind them.
+    // Assessments leads, because that is what a teacher came here to do. Kind
+    // (CAT, homework, project, practical, exam) is a filter inside it, not a
+    // separate menu item — the four numbered exam steps and "Homework & Tasks"
+    // used to be siblings of the gradebook, which forced a teacher to decide
+    // which subsystem they were in before they could mark anybody.
     title: 'Teaching & Assessment',
     icon: BookText,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/teaching', label: 'My Teaching', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
+      { to: '/school/assessments', label: 'Assessments', icon: ClipboardList, permission: PERMISSIONS.school.read },
+      { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades },
+      { to: '/school/approvals', label: 'Approvals', icon: ShieldCheck, permission: PERMISSIONS.school.approveGrades },
 
-      { to: '/school/exam-workspace', label: '1. Exams', icon: CalendarDays, permission: PERMISSIONS.school.read, group: 'Do these in order' },
-      { to: '/school/exam-workspace/classes', label: '2. Choose classes', icon: Layers, permission: PERMISSIONS.school.manageExams, group: 'Do these in order' },
-      { to: '/school/enter-marks', label: '3. Enter marks', icon: ClipboardList, permission: PERMISSIONS.school.enterGrades, group: 'Do these in order' },
-      { to: '/school/exam-results', label: '4. Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Do these in order' },
-
-      { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades, group: 'Continuous assessment' },
-      { to: '/school/homework', label: 'Homework & Tasks', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Continuous assessment' },
-      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Continuous assessment' },
+      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
 
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
       { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
@@ -265,10 +263,18 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Reports' },
       { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Reports' },
 
-      { to: '/school/assessment', label: 'Weighting Policies', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
+      { to: '/school/assessment', label: 'Assessment Structure', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
       { to: '/school/grading-scales', label: 'Grading Scales', icon: Calculator, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
       { to: '/school/assessment-ops', label: 'Cohorts & Rubrics', icon: ClipboardList, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
-      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Setup' },
+
+      // Examinations keeps its own cockpit — scheduling papers across classes,
+      // venues and seating are real exams-office work. It is no longer where
+      // marking begins, which is why it sits below Assessments rather than
+      // above it as a numbered wizard.
+      { to: '/school/exam-workspace', label: 'Exam Scheduling', icon: CalendarDays, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
+      { to: '/school/enter-marks', label: 'Exam Mark Entry', icon: ClipboardList, permission: PERMISSIONS.school.enterGrades, group: 'Examinations' },
+      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Examinations' },
+      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
     ],
   },
   {

@@ -87,7 +87,7 @@ export class ReportCardTemplateService {
     studentProfileId: string,
     termId: string,
     spine?: { subjects: any[] } | null,
-  ): Promise<{ layout: ReportCardLayout; layoutSource: 'result_spine' | 'grade_entry' }> {
+  ): Promise<{ layout: ReportCardLayout; layoutSource: 'result_spine' | 'spine_live' | 'grade_entry' }> {
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
       include: { currentClass: { include: { gradeLevel: true } } },
@@ -116,6 +116,18 @@ export class ReportCardTemplateService {
     if (canUseSpine) {
       const subjects = await this.subjectsFromSpine(spineSubjects, system);
       return { layout: this.layoutFor(system, subjects), layoutSource: 'result_spine' };
+    }
+
+    // No PUBLISHED result for this term. That is not the same as no marks:
+    // a published ResultSet needs a frozen roster and a result run, which a
+    // historic term often never had. Compute from the live spine instead —
+    // same policy, same `computeSubject` — rather than falling straight through
+    // to GradeEntry, which only ever saw exams and never CATs or homework.
+    if (mode !== 'grade_entry') {
+      const live = await this.subjectsFromSpineLive(studentProfileId, termId, system);
+      if (live.length > 0) {
+        return { layout: this.layoutFor(system, live), layoutSource: 'spine_live' };
+      }
     }
 
     const subjects = await this.subjectsFromGradeEntry(studentProfileId, termId, system);
@@ -218,6 +230,110 @@ export class ReportCardTemplateService {
         totalPercent,
         finalGrade: ssr.grade ?? band?.grade ?? null,
         finalPoints: ssr.points ?? band?.points ?? null,
+        remark: band?.remark ?? null,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Compute this term's subjects from the LIVE spine, under the same policy and
+   * the same `computeSubject` kernel a result run would use.
+   *
+   * This is what stands between "no published result" and the GradeEntry
+   * fallback. It sees every kind of mark — CATs, homework, projects, practicals
+   * and exams — where GradeEntry only ever held exam marks, so a card built this
+   * way is strictly closer to the truth than the legacy path it precedes.
+   *
+   * It is NOT a substitute for a published result: nothing here is frozen, so a
+   * later mark changes it. Publishing a ResultSet is still what makes a card
+   * defensible.
+   */
+  private async subjectsFromSpineLive(
+    studentProfileId: string,
+    termId: string,
+    system: GradingSystem,
+  ): Promise<SubjectResult[]> {
+    const rows = await this.prisma.client.studentAssessment.findMany({
+      where: {
+        studentProfileId,
+        termId,
+        deletedAt: null,
+        approvalStatus: 'approved',
+        assessment: { deletedAt: null },
+      },
+      include: { assessment: { include: { component: true } } },
+    });
+    if (rows.length === 0) return [];
+
+    const bySubject = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const sid = r.assessment.subjectId;
+      const list = bySubject.get(sid) ?? [];
+      list.push(r);
+      bySubject.set(sid, list);
+    }
+
+    const subjectMeta = await this.prisma.client.subject.findMany({
+      where: { id: { in: [...bySubject.keys()] } },
+    });
+    const metaById = new Map(subjectMeta.map((m) => [m.id, m]));
+
+    const out: SubjectResult[] = [];
+    for (const [subjectId, group] of bySubject) {
+      const meta = metaById.get(subjectId);
+      const subjectName = meta?.name ?? subjectId;
+      const subjectCode = meta?.code ?? '';
+
+      // Group by weighting component so the per-component columns still print;
+      // assessments no policy claims fall into one "other" bucket rather than
+      // silently vanishing from the card.
+      const buckets = new Map<string, { label: string; sum: number; n: number }>();
+      for (const r of group) {
+        if (r.percentage == null) continue;
+        const kind = r.assessment.component?.kind ?? r.assessment.kind ?? 'other';
+        const b = buckets.get(kind) ?? { label: this.componentLabel(kind), sum: 0, n: 0 };
+        b.sum += Number(r.percentage);
+        b.n += 1;
+        buckets.set(kind, b);
+      }
+      if (buckets.size === 0) continue;
+
+      const examScores = [] as SubjectResult['examScores'];
+      let weighted = 0;
+      let weightTotal = 0;
+      for (const [kind, b] of buckets) {
+        const pct = b.sum / b.n;
+        const weight = Number(
+          group.find((r) => (r.assessment.component?.kind ?? r.assessment.kind) === kind)?.assessment.component?.weight ?? 0,
+        );
+        const band = await this.grading.bandFor(pct, 100, system);
+        examScores.push({
+          examType: b.label,
+          marks: Math.round(pct * 100) / 100,
+          maxMarks: 100,
+          grade: band?.grade ?? null,
+          points: band?.points ?? null,
+        });
+        weighted += pct * (weight || 0);
+        weightTotal += weight || 0;
+      }
+
+      // Weighted where a policy says how; a plain mean where it does not, which
+      // is the same rule `computeSubject` applies to an unweighted subject.
+      const totalPercent = Math.round(
+        weightTotal > 0 ? weighted / weightTotal : examScores.reduce((s, e) => s + e.marks, 0) / examScores.length,
+      );
+      const band = await this.grading.bandFor(totalPercent, 100, system);
+      out.push({
+        subject: subjectName,
+        subjectCode,
+        isCompulsory: isCompulsorySubject(subjectName),
+        isPrincipal: !isSubsidiarySubject(subjectName, subjectCode, system),
+        examScores,
+        totalPercent,
+        finalGrade: band?.grade ?? null,
+        finalPoints: band?.points ?? null,
         remark: band?.remark ?? null,
       });
     }

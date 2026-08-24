@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { MarkingService } from './marking.service';
+import { AssessmentMintService } from './assessment-mint.service';
 
 /**
  * `GradeEntry` has no participation column — the legacy row records a
@@ -35,6 +36,7 @@ export class AssessmentProjectionService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly marking: MarkingService,
+    private readonly mint: AssessmentMintService,
   ) {}
 
   /**
@@ -128,28 +130,13 @@ export class AssessmentProjectionService {
     });
   }
 
-  private async ensureAssessment(tx: any, organizationId: string, schedule: any) {
-    const existing = await tx.assessment.findFirst({
-      where: { organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
-    });
-    if (existing) return existing;
-    // Attach to a component bridged to this exam's ExamType, if one exists.
-    const component = schedule.exam.examTypeId
-      ? await tx.assessmentComponent.findFirst({ where: { examTypeId: schedule.exam.examTypeId } })
-      : null;
-    return tx.assessment.create({
-      data: {
-        organizationId,
-        componentId: component?.id ?? null,
-        subjectId: schedule.subjectId,
-        classId: schedule.classId,
-        termId: schedule.exam.termId,
-        title: `${schedule.subject?.name ?? 'Exam'} — ${schedule.exam.name}`,
-        maxScore: schedule.maxMarks,
-        sourceType: 'exam_session',
-        sourceRef: schedule.id,
-        status: 'grading',
-      },
-    });
+  /**
+   * Minting moved to `AssessmentMintService` so a paper gets its gradebook
+   * column when the office APPLIES it, not when someone first types a mark into
+   * it. This wrapper stays because the projection still needs the row to exist
+   * for legacy papers that were never applied through the new path.
+   */
+  private async ensureAssessment(tx: any, _organizationId: string, schedule: any) {
+    return this.mint.forExamSchedule(tx, schedule.id);
   }
 }
