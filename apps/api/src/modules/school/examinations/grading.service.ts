@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { defaultBands } from '../assessment/grade-bands';
 
 const D = Prisma.Decimal;
 type Decimal = Prisma.Decimal;
@@ -83,65 +84,10 @@ export class GradingService {
     });
     if (fallback) return fallback.bands as unknown as GradeBand[];
 
-    // No registered scale — use the built-in default for the system.
-    switch ((system ?? '').toUpperCase()) {
-      case 'UACE': return this.defaultUACE();
-      case 'CBC': return this.defaultCBC();
-      case 'UCE':
-      default: return this.defaultUCE();
-    }
-  }
-
-  /** Uganda UCE scale (post-2020). D1 (best, 1 pt) → F9 (fail, 9 pts). */
-  defaultUCE(): GradeBand[] {
-    return [
-      { min: 90, max: 100, grade: 'D1', gpa: 4.0, points: 1, remark: 'Distinction' },
-      { min: 80, max: 89,  grade: 'D2', gpa: 3.6, points: 2, remark: 'Distinction' },
-      { min: 70, max: 79,  grade: 'C3', gpa: 3.2, points: 3, remark: 'Credit' },
-      { min: 65, max: 69,  grade: 'C4', gpa: 2.8, points: 4, remark: 'Credit' },
-      { min: 60, max: 64,  grade: 'C5', gpa: 2.4, points: 5, remark: 'Credit' },
-      { min: 50, max: 59,  grade: 'C6', gpa: 2.0, points: 6, remark: 'Credit' },
-      { min: 40, max: 49,  grade: 'P7', gpa: 1.5, points: 7, remark: 'Pass' },
-      { min: 35, max: 39,  grade: 'P8', gpa: 1.0, points: 8, remark: 'Pass' },
-      { min: 0,  max: 34,  grade: 'F9', gpa: 0.0, points: 9, remark: 'Fail' },
-    ];
-  }
-
-  /** Uganda UACE scale. A (best, 5 pts) → O (10 pts), F (fail). */
-  defaultUACE(): GradeBand[] {
-    return [
-      { min: 80, max: 100, grade: 'A',  gpa: 4.0, points: 5, remark: 'Distinction' },
-      { min: 70, max: 79,  grade: 'B',  gpa: 3.6, points: 6, remark: 'Distinction' },
-      { min: 60, max: 69,  grade: 'C',  gpa: 3.2, points: 7, remark: 'Credit' },
-      { min: 50, max: 59,  grade: 'D',  gpa: 2.8, points: 8, remark: 'Credit' },
-      { min: 40, max: 49,  grade: 'E',  gpa: 2.4, points: 9, remark: 'Pass' },
-      { min: 30, max: 39,  grade: 'O',  gpa: 2.0, points: 10, remark: 'Pass' },
-      { min: 0,  max: 29,  grade: 'F',  gpa: 0.0, points: 11, remark: 'Fail' },
-    ];
-  }
-
-  /** CBC competency levels (Uganda lower-secondary). */
-  defaultCBC(): GradeBand[] {
-    return [
-      { min: 80, max: 100, grade: 'A', gpa: 4.0, remark: 'Exceeding Expectations' },
-      { min: 65, max: 79,  grade: 'B', gpa: 3.0, remark: 'Meeting Expectations' },
-      { min: 50, max: 64,  grade: 'C', gpa: 2.0, remark: 'Approaching Expectations' },
-      { min: 0,  max: 49,  grade: 'D', gpa: 1.0, remark: 'Below Expectations' },
-    ];
-  }
-
-  /** Legacy 9-point scale used by schools that haven't adopted UCE bands. */
-  legacyGeneric(): GradeBand[] {
-    return [
-      { min: 90, max: 100, grade: 'A',  gpa: 4.0, remark: 'Distinction' },
-      { min: 80, max: 89,  grade: 'B',  gpa: 3.6, remark: 'Distinction' },
-      { min: 70, max: 79,  grade: 'C',  gpa: 3.2, remark: 'Credit' },
-      { min: 60, max: 69,  grade: 'D',  gpa: 2.8, remark: 'Credit' },
-      { min: 50, max: 59,  grade: 'E',  gpa: 2.4, remark: 'Pass' },
-      { min: 40, max: 49,  grade: 'O',  gpa: 2.0, remark: 'Pass' },
-      { min: 30, max: 39,  grade: 'F',  gpa: 1.5, remark: 'Fail' },
-      { min: 0,  max: 29,  grade: 'F9', gpa: 0.0, remark: 'Fail' },
-    ];
+    // No registered scale — use the built-in default for the system. The band
+    // tables live in assessment/grade-bands.ts so the result kernel and the
+    // examinations vertical resolve the SAME grades (B6 fold — one resolver).
+    return defaultBands(system ?? 'UCE');
   }
 
   // ── UCE aggregate ──────────────────────────────────────────────────────

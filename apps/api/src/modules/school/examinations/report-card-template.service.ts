@@ -75,10 +75,11 @@ export class ReportCardTemplateService {
    *   2. the raw GradeEntry marks, the legacy path, for a historic term that was
    *      never run through the spine.
    *
-   * `REPORT_CARD_SOURCE` gates the cutover: `spine` (default) prefers the spine,
-   * `grade_entry` forces the legacy path, `shadow` computes both and logs any
-   * divergence while still returning the legacy layout — so a full reporting
-   * cycle can be compared before the flip. Flip between terms, never mid-term.
+   * B6 — the cutover is complete. `GradeEntry` is now read-only historic evidence
+   * and the result spine (published `ResultSet`, or the live `StudentAssessment`
+   * view) is the ONLY source a report card reads. There is no `grade_entry` or
+   * `shadow` branch to flip back to: parity was proven by `school-gradeentry-
+   * parity.spec.ts` against production-shaped data before this was removed.
    *
    * The `spine` argument is the already-fetched published result (from
    * `generate`), passed in to avoid a second query.
@@ -87,7 +88,7 @@ export class ReportCardTemplateService {
     studentProfileId: string,
     termId: string,
     spine?: { subjects: any[] } | null,
-  ): Promise<{ layout: ReportCardLayout; layoutSource: 'result_spine' | 'spine_live' | 'grade_entry' }> {
+  ): Promise<{ layout: ReportCardLayout; layoutSource: 'result_spine' | 'spine_live' }> {
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
       include: { currentClass: { include: { gradeLevel: true } } },
@@ -98,40 +99,27 @@ export class ReportCardTemplateService {
       where: { organizationId: this.tenant.organizationId },
     });
     const system = (school?.gradingSystem ?? 'UCE') as GradingSystem;
-    const mode = (process.env.REPORT_CARD_SOURCE ?? 'spine') as 'spine' | 'grade_entry' | 'shadow';
 
     const spineSubjects = spine?.subjects ?? [];
-    const canUseSpine = mode !== 'grade_entry' && spineSubjects.length > 0;
 
-    if (mode === 'shadow' && spineSubjects.length > 0) {
-      // Compute both, return legacy, but flag where they disagree.
-      const [legacy, fromSpine] = await Promise.all([
-        this.subjectsFromGradeEntry(studentProfileId, termId, system),
-        this.subjectsFromSpine(spineSubjects, system),
-      ]);
-      this.warnOnDivergence(studentProfileId, termId, legacy, fromSpine);
-      return { layout: this.layoutFor(system, legacy), layoutSource: 'grade_entry' };
-    }
-
-    if (canUseSpine) {
+    // 1) A published ResultSet is the authoritative, frozen term result.
+    if (spineSubjects.length > 0) {
       const subjects = await this.subjectsFromSpine(spineSubjects, system);
       return { layout: this.layoutFor(system, subjects), layoutSource: 'result_spine' };
     }
 
-    // No PUBLISHED result for this term. That is not the same as no marks:
-    // a published ResultSet needs a frozen roster and a result run, which a
-    // historic term often never had. Compute from the live spine instead —
-    // same policy, same `computeSubject` — rather than falling straight through
-    // to GradeEntry, which only ever saw exams and never CATs or homework.
-    if (mode !== 'grade_entry') {
-      const live = await this.subjectsFromSpineLive(studentProfileId, termId, system);
-      if (live.length > 0) {
-        return { layout: this.layoutFor(system, live), layoutSource: 'spine_live' };
-      }
+    // 2) No published result for this term — but marks may still exist. Compute
+    // from the live spine under the same policy and `computeSubject` kernel a
+    // result run uses, so a card built this way agrees with one published later.
+    const live = await this.subjectsFromSpineLive(studentProfileId, termId, system);
+    if (live.length > 0) {
+      return { layout: this.layoutFor(system, live), layoutSource: 'spine_live' };
     }
 
-    const subjects = await this.subjectsFromGradeEntry(studentProfileId, termId, system);
-    return { layout: this.layoutFor(system, subjects), layoutSource: 'grade_entry' };
+    // 3) Genuinely nothing: an empty card is the honest answer. (The legacy
+    // GradeEntry fallback is gone — it only ever held exam marks and would
+    // under-report a term that includes CATs, homework and projects.)
+    return { layout: this.layoutFor(system, []), layoutSource: 'spine_live' };
   }
 
   private layoutFor(system: GradingSystem, subjects: SubjectResult[]): ReportCardLayout {
@@ -141,51 +129,6 @@ export class ReportCardTemplateService {
       case 'CBC': return this.buildCBCLayout(subjects);
       default: return this.buildGenericLayout(subjects);
     }
-  }
-
-  /** Legacy path: raw GradeEntry marks bucketed per subject. */
-  private async subjectsFromGradeEntry(studentProfileId: string, termId: string, system: GradingSystem): Promise<SubjectResult[]> {
-    const entries = await this.prisma.client.gradeEntry.findMany({
-      where: { studentProfileId, examSchedule: { exam: { termId } }, status: 'approved' },
-      include: { examSchedule: { include: { subject: true, exam: { include: { examType: true } } } } },
-    });
-
-    const bySubject: Record<string, SubjectResult> = {};
-    for (const e of entries) {
-      const sid = e.examSchedule.subjectId;
-      const subjectName = e.examSchedule.subject.name;
-      const subjectCode = e.examSchedule.subject.code;
-      if (!bySubject[sid]) {
-        bySubject[sid] = {
-          subject: subjectName,
-          subjectCode,
-          isCompulsory: isCompulsorySubject(subjectName),
-          isPrincipal: !isSubsidiarySubject(subjectName, subjectCode, system),
-          examScores: [],
-          totalPercent: 0,
-          finalGrade: null,
-          finalPoints: null,
-        };
-      }
-      const band = await this.grading.bandFor(Number(e.marksObtained ?? 0), Number(e.maxMarks), system);
-      bySubject[sid].examScores.push({
-        examType: e.examSchedule.exam.examType.name,
-        marks: Number(e.marksObtained ?? 0),
-        maxMarks: Number(e.maxMarks),
-        grade: band?.grade ?? null,
-        points: band?.points ?? null,
-      });
-    }
-    for (const sid of Object.keys(bySubject)) {
-      const s = bySubject[sid];
-      const total = s.examScores.reduce((sum, x) => sum + (x.marks / x.maxMarks) * 100, 0);
-      s.totalPercent = s.examScores.length > 0 ? Math.round(total / s.examScores.length) : 0;
-      const band = await this.grading.bandFor(s.totalPercent, 100, system);
-      s.finalGrade = band?.grade ?? null;
-      s.finalPoints = band?.points ?? null;
-      s.remark = band?.remark ?? null;
-    }
-    return Object.values(bySubject);
   }
 
   /**
@@ -346,23 +289,6 @@ export class ReportCardTemplateService {
       practical: 'Practical', project: 'Project', oral: 'Oral', attendance: 'Attendance',
     };
     return map[kind] ?? kind;
-  }
-
-  private warnOnDivergence(studentProfileId: string, termId: string, legacy: SubjectResult[], spine: SubjectResult[]) {
-    const spineByName = new Map(spine.map((s) => [s.subject, s]));
-    for (const l of legacy) {
-      const s = spineByName.get(l.subject);
-      if (!s) {
-        this.logger.warn(`[report-card shadow] ${studentProfileId}/${termId}: "${l.subject}" present in GradeEntry but not the spine`);
-        continue;
-      }
-      if (l.finalGrade !== s.finalGrade || Math.abs(l.totalPercent - s.totalPercent) > 1) {
-        this.logger.warn(
-          `[report-card shadow] ${studentProfileId}/${termId}: "${l.subject}" diverges — ` +
-            `GradeEntry ${l.totalPercent}% ${l.finalGrade} vs spine ${s.totalPercent}% ${s.finalGrade}`,
-        );
-      }
-    }
   }
 
   // ── Templates ──────────────────────────────────────────────────────────

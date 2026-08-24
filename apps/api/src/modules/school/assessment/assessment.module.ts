@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { AssessmentComponentService, AssessmentPolicyService } from './assessment-config.service';
 import { AssessmentService } from './assessment.service';
 import { MarkingService } from './marking.service';
-import { AssessmentProjectionService } from './assessment-projection.service';
 import { AssessmentMintService } from './assessment-mint.service';
 import { AssessmentBoardService } from './assessment-board.service';
 import { AssessmentBoardController } from './assessment-board.controller';
@@ -26,8 +25,8 @@ import {
 
 /**
  * Assessment core (A1) + rosters/assignments/rubrics (A2). Exports the services
- * other modules build on — AssessmentProjectionService for the examinations
- * GradeEntry adapter, and the marking/roster services for A3's result spine.
+ * other modules build on — the marking/roster/mint services for A3's result
+ * spine. The GradeEntry adapter was retired in B6 (GradeEntry is now read-only).
  * CbtResultBridgeService lets the CBT module post quiz marks into this spine.
  */
 @Module({
@@ -48,7 +47,6 @@ import {
     AssessmentComponentService,
     AssessmentService,
     MarkingService,
-    AssessmentProjectionService,
     AssessmentMintService,
     AssessmentBoardService,
     AcademicRosterService,
@@ -63,7 +61,6 @@ import {
     AssessmentComponentService,
     AssessmentService,
     MarkingService,
-    AssessmentProjectionService,
     AssessmentMintService,
     AssessmentBoardService,
     AcademicRosterService,

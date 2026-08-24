@@ -96,23 +96,19 @@ describe('one-writer rule', () => {
   });
 
   /**
-   * GradeEntry is the MIRROR now, not the source.
+   * B6 — `GradeEntry` is now structurally unwritable: a DB trigger blocks every
+   * INSERT/UPDATE/DELETE, and no application code may write it either. It is
+   * frozen historic evidence; the Assessment → StudentAssessment → MarkEntry spine
+   * is the only mark store (written solely by `MarkingService.postMark`).
    *
-   * The spine is written first, by `postMark`, and `examinations.service.ts`
-   * brings the legacy row along behind it. Anything else writing GradeEntry is
-   * a second writer to a store that is on its way to read-only — exactly the
-   * shape of the original bug, where the truth lived in whichever store was
-   * written last. `marks-workspace.service.ts` used to be such a writer: its
-   * clearing branch wrote GradeEntry directly and never projected.
-   *
-   * When the mirror is finally dropped, this allowlist goes empty and a DB
-   * trigger takes over.
+   * This rule fails the build on ANY `gradeEntry.create/update/upsert/delete` in
+   * the school source tree — there is no longer a permitted writer. If a new
+   * writer appears, this test catches it before it can diverge the two stores.
    */
-  it('only the mirror owner writes GradeEntry', () => {
-    const MIRROR_OWNER = join('examinations', 'examinations.service.ts');
+  it('no code writes GradeEntry (structurally unwritable since B6)', () => {
     const gradeEntryWrite = /gradeEntry\s*\.\s*(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\s*\(/;
     const offenders = files
-      .filter((f) => f.path !== MIRROR_OWNER && gradeEntryWrite.test(code(f.text)))
+      .filter((f) => gradeEntryWrite.test(code(f.text)))
       .map((f) => f.path);
     expect(offenders).toEqual([]);
   });

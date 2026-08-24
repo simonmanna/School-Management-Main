@@ -8,7 +8,6 @@ import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-
 import { EVENTS } from '@erp/shared';
 import { GradingService } from './grading.service';
 import { ReportCardTemplateService } from './report-card-template.service';
-import { AssessmentProjectionService } from '../assessment/assessment-projection.service';
 import { MarkingService } from '../assessment/marking.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { ResultRunService } from '../assessment/result-run.service';
@@ -153,21 +152,10 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     private readonly grading: GradingService,
     private readonly events: EventBus,
     private readonly audit: AuditService,
-    private readonly projection: AssessmentProjectionService,
     private readonly marking: MarkingService,
     private readonly mint: AssessmentMintService,
   ) {
     super(prisma.client.gradeEntry as unknown as CrudDelegate);
-  }
-
-  /**
-   * `spine` (default) writes the assessment spine FIRST and mirrors down to
-   * GradeEntry; `grade_entry` keeps the old order, writing GradeEntry and
-   * projecting up. The switch exists so the cutover is an env change rather
-   * than a redeploy, and it stays until GradeEntry is sealed read-only.
-   */
-  private get spinePrimary(): boolean {
-    return (process.env.MARKS_SOURCE ?? 'spine') !== 'grade_entry';
   }
 
   /**
@@ -183,10 +171,24 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
    *   - an optimistic-concurrency `version` guard stops two markers silently
    *     overwriting each other.
    */
+  /**
+   * Bulk-upsert grades for a class × exam.
+   *
+   * B6 — the spine (Assessment → StudentAssessment → MarkEntry) is the ONLY mark
+   * store. `GradeEntry` is now structurally unwritable (a DB trigger blocks every
+   * INSERT/UPDATE/DELETE, and this method no longer touches it). Marks are written
+   * by the one writer, `MarkingService.postMark`. The legacy `GradeEntry` rows
+   * that already exist are frozen historic evidence; we re-read them only to keep
+   * the response shape stable for any caller that still inspects it.
+   *
+   * A0 hardening carried over from the original:
+   *   - marks are validated `0 ≤ marksObtained ≤ maxMarks`;
+   *   - the grade is resolved under the school's own grading system;
+   *   - `SchoolGradePosted` is emitted per entered mark;
+   *   - approval / optimistic-concurrency guards live inside `postMark`.
+   */
   async bulkUpsert(dto: BulkGradeEntryDto) {
     const organizationId = this.tenant.organizationId;
-    // Resolve the school's grading system once so every band lookup in this
-    // batch uses the same scale.
     const profile = await this.prisma.client.schoolProfile.findFirst({
       where: { organizationId },
       select: { gradingSystem: true },
@@ -194,243 +196,156 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     const system = profile?.gradingSystem ?? undefined;
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      const results: any[] = [];
+      // Validate every entry up front so a bad row can't half-apply.
       for (const e of dto.entries) {
         const maxMarks = e.maxMarks ?? 100;
-        // A0: reject impossible marks rather than store them and compute a
-        // nonsense percentage/grade downstream.
         if (e.marksObtained < 0 || maxMarks <= 0 || e.marksObtained > maxMarks) {
           throw new BadRequestException(
             `Student ${e.studentProfileId}: marks ${e.marksObtained} out of range [0, ${maxMarks}]`,
           );
         }
-        const band = await this.grading.bandFor(e.marksObtained, maxMarks, system);
+        await this.grading.bandFor(e.marksObtained, maxMarks, system);
+      }
 
-        const existing = await tx.gradeEntry.findFirst({
-          where: { examScheduleId: dto.examScheduleId, studentProfileId: e.studentProfileId },
+      // THE FLIP (B6: permanent). Write the spine directly, by the one writer.
+      // Deriving the spine by reading GradeEntry back (the retired projection)
+      // is what made two stores possible: it put the truth in whichever store
+      // was written last.
+      const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
+      if (assessment) {
+        const schedule = await tx.examSchedule.findFirst({
+          where: { id: dto.examScheduleId },
+          include: { exam: true },
         });
-
-        // A0: approved marks are not silently re-writable by a re-upsert; they
-        // must go back through reject → resubmit.
-        if (existing && existing.status === 'approved') {
-          throw new ConflictException(
-            `Grade for student ${e.studentProfileId} is approved; reject it before re-entering marks`,
-          );
-        }
-        // A0: optimistic concurrency — if the caller carries a stale version,
-        // refuse rather than clobber a concurrent edit.
-        if (existing && e.version !== undefined && existing.version !== e.version) {
-          throw new ConflictException(
-            `Grade for student ${e.studentProfileId} was modified concurrently ` +
-              `(expected version ${e.version}, current ${existing.version}). Re-read and retry.`,
-          );
-        }
-
-        const common = {
-          marksObtained: e.marksObtained,
-          maxMarks,
-          grade: band?.grade ?? null,
-          gradePoint: band?.gpa ?? null,
-          remarks: e.remarks ?? null,
-          enteredById: this.tenant.userId ?? null,
-          enteredAt: new Date(),
-        };
-
-        let row: any;
-        if (existing) {
-          await tx.gradeEntry.updateMany({
-            where: { id: existing.id },
-            // Re-entering a mark returns it to draft and bumps the version.
-            data: { ...common, status: 'draft', version: { increment: 1 } },
+        for (const e of dto.entries) {
+          await this.marking.postMark(tx, {
+            assessmentId: assessment.id,
+            studentProfileId: e.studentProfileId,
+            score: e.marksObtained,
+            source: 'exam',
+            markerId: this.tenant.userId ?? null,
+            snapshot: { classId: schedule?.classId, termId: schedule?.exam?.termId },
+            writeHistory: false,
           });
-          row = await tx.gradeEntry.findFirst({ where: { id: existing.id } });
-        } else {
-          row = await tx.gradeEntry.create({
-            data: {
-              organizationId,
-              examScheduleId: dto.examScheduleId,
-              studentProfileId: e.studentProfileId,
-              status: 'draft',
-              ...common,
-            },
+          this.events.publish(EVENTS.SchoolGradePosted, {
+            organizationId,
+            examScheduleId: dto.examScheduleId,
+            studentProfileId: e.studentProfileId,
           });
         }
+      }
 
-        await this.audit.recordInTx(tx, {
-          entity: 'GradeEntry',
-          entityId: row.id,
-          action: existing ? 'update' : 'create',
-          newValues: { marksObtained: e.marksObtained, maxMarks, grade: row.grade, status: 'draft' },
-        });
-        // Fire the previously-dead "grade posted" event for each entered mark.
-        this.events.publish(EVENTS.SchoolGradePosted, {
-          organizationId,
+      // Re-read the frozen GradeEntry rows for callers that still expect the
+      // legacy shape. They are NEVER written here.
+      const results = await tx.gradeEntry.findMany({
+        where: {
           examScheduleId: dto.examScheduleId,
-          studentProfileId: e.studentProfileId,
-        });
-        results.push(row);
-      }
-      if (this.spinePrimary) {
-        // THE FLIP. The spine is written directly, by the one writer, and the
-        // GradeEntry rows above are now the MIRROR — historic evidence kept in
-        // step, not the source. Deriving the spine by reading GradeEntry back
-        // (what `projectExamSchedule` does) is what made two stores possible in
-        // the first place: it put the truth in whichever one was written last.
-        const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
-        if (assessment) {
-          const schedule = await tx.examSchedule.findFirst({
-            where: { id: dto.examScheduleId },
-            include: { exam: true },
-          });
-          for (const e of dto.entries) {
-            await this.marking.postMark(tx, {
-              assessmentId: assessment.id,
-              studentProfileId: e.studentProfileId,
-              score: e.marksObtained,
-              source: 'exam',
-              markerId: this.tenant.userId ?? null,
-              snapshot: { classId: schedule?.classId, termId: schedule?.exam?.termId },
-              // No allowWhenApproved bypass. The projection needed one because
-              // it re-read already-approved GradeEntry rows; writing the spine
-              // directly does not, and postMark's approval guard now agrees
-              // with the GradeEntry guard above (the backfill verified zero
-              // drift between them). A bypass that is not needed is a bypass
-              // that will eventually be used by accident.
-              writeHistory: false, // GradeEntry carries its own audit trail
-            });
-          }
-        }
-      } else {
-        // Legacy order, kept behind MARKS_SOURCE=grade_entry as the revert.
-        await this.projection.projectExamSchedule(tx, dto.examScheduleId);
-      }
+          studentProfileId: { in: dto.entries.map((e: any) => e.studentProfileId) },
+        },
+      });
       return { count: results.length, results };
     });
   }
 
   /**
    * Clear one student's mark, or record a non-scoring outcome (absent, exempt,
-   * excused, malpractice) against the legacy row.
+   * excused, malpractice).
    *
-   * This exists because clearing used to be done by writing `gradeEntry`
-   * directly from the marks workspace, WITHOUT projecting — so the cleared
-   * legacy row and the spine immediately disagreed, and the stale score went on
-   * counting in the gradebook, the result run and the report card. Clearing is
-   * a mark write like any other and belongs on the same atomic path as
-   * `bulkUpsert`.
+   * B6 — `GradeEntry` is structurally unwritable, so clearing acts ONLY on the
+   * spine: `postMark(score: null)` removes the mark, and the non-scoring outcome
+   * is recorded as `participation` (so `countsAbsentAsZero` still fires). The
+   * legacy `GradeEntry` row is frozen historic evidence and is never touched.
    */
   async clearEntry(dto: { examScheduleId: string; studentProfileId: string; remarks?: string | null }) {
     const organizationId = this.tenant.organizationId;
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      const existing = await tx.gradeEntry.findFirst({
-        where: { examScheduleId: dto.examScheduleId, studentProfileId: dto.studentProfileId },
-      });
+      const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
+      if (!assessment) return { cleared: true, examScheduleId: dto.examScheduleId, row: null };
 
-      // Same rule as bulkUpsert: an approved mark goes back through
-      // reject → resubmit, it is not silently erased.
-      if (existing && existing.status === 'approved') {
+      // An approved mark goes back through reject -> resubmit, it is not silently
+      // erased. Enforced on the spine now.
+      const saChk = await tx.studentAssessment.findFirst({
+        where: { assessmentId: assessment.id, studentProfileId: dto.studentProfileId },
+      });
+      if (saChk && saChk.approvalStatus === 'approved') {
         throw new ConflictException(
           `Grade for student ${dto.studentProfileId} is approved; reject it before clearing marks`,
         );
       }
 
-      const common = {
-        marksObtained: null,
-        grade: null,
-        gradePoint: null,
-        remarks: dto.remarks ?? null,
-        enteredById: this.tenant.userId ?? null,
-        enteredAt: new Date(),
-      };
-
-      let row: any;
-      if (existing) {
-        await tx.gradeEntry.updateMany({
-          where: { id: existing.id },
-          data: { ...common, status: 'draft', version: { increment: 1 } },
-        });
-        row = await tx.gradeEntry.findFirst({ where: { id: existing.id } });
-      } else {
-        // Nothing to clear and no outcome to record.
-        if (!dto.remarks) return { cleared: true, examScheduleId: dto.examScheduleId, row: null };
-        const schedule = await tx.examSchedule.findFirst({ where: { id: dto.examScheduleId } });
-        row = await tx.gradeEntry.create({
-          data: {
-            organizationId,
-            examScheduleId: dto.examScheduleId,
-            studentProfileId: dto.studentProfileId,
-            maxMarks: schedule?.maxMarks ?? 100,
-            status: 'draft',
-            ...common,
-          },
-        });
-      }
-
-      await this.audit.recordInTx(tx, {
-        entity: 'GradeEntry',
-        entityId: row.id,
-        action: existing ? 'update' : 'create',
-        newValues: { action: 'clear_mark', studentProfileId: dto.studentProfileId, remarks: dto.remarks ?? null },
+      const remark = String(dto.remarks ?? '').trim().toLowerCase();
+      const participation = NON_SCORING_REMARKS.has(remark) ? remark : 'present';
+      const written = await this.marking.postMark(tx, {
+        assessmentId: assessment.id,
+        studentProfileId: dto.studentProfileId,
+        score: null,
+        source: 'exam',
+        markerId: this.tenant.userId ?? null,
+        writeHistory: false,
+      });
+      await tx.studentAssessment.updateMany({
+        where: { id: written.id },
+        data: { participation: participation as any },
       });
 
-      // The half that was missing: the spine must learn the mark is gone.
-      if (this.spinePrimary) {
-        const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
-        if (assessment) {
-          const remark = String(dto.remarks ?? '').trim().toLowerCase();
-          const participation = NON_SCORING_REMARKS.has(remark) ? remark : 'present';
-          const sa = await this.marking.postMark(tx, {
-            assessmentId: assessment.id,
-            studentProfileId: dto.studentProfileId,
-            score: null,
-            source: 'exam',
-            markerId: this.tenant.userId ?? null,
-            writeHistory: false,
-          });
-          await tx.studentAssessment.updateMany({
-            where: { id: sa.id },
-            data: { participation: participation as any },
-          });
-        }
-      } else {
-        await this.projection.projectExamSchedule(tx, dto.examScheduleId);
-      }
+      // Re-read the frozen GradeEntry only to return the legacy shape. Never written.
+      const row = await tx.gradeEntry.findFirst({
+        where: { examScheduleId: dto.examScheduleId, studentProfileId: dto.studentProfileId },
+      });
       return { cleared: true, examScheduleId: dto.examScheduleId, row };
     });
   }
 
+  /**
+   * Submit all draft marks for a paper. B6 — operates on the spine (the only mark
+   * store). `GradeEntry` is structurally unwritable, so this drives the canonical
+   * StudentAssessment.approvalStatus via `syncApproval` and never touches the
+   * legacy mirror.
+   */
   async submit(examScheduleId: string) {
     return this.prisma.client.$transaction(async (tx: any) => {
-      const res = await tx.gradeEntry.updateMany({
-        where: { examScheduleId, status: 'draft' },
-        data: { status: 'submitted' },
+      const assessment = await tx.assessment.findFirst({
+        where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: examScheduleId },
+        select: { id: true },
+      });
+      if (!assessment) return { updated: 0 };
+      const res = await tx.studentAssessment.updateMany({
+        where: { assessmentId: assessment.id, approvalStatus: 'draft' },
+        data: { approvalStatus: 'submitted', enteredAt: new Date(), rejectionReason: null },
       });
       if (res.count > 0) {
         await this.audit.recordInTx(tx, {
-          entity: 'GradeEntry',
-          entityId: examScheduleId,
+          entity: 'Assessment',
+          entityId: assessment.id,
           action: 'update',
           newValues: { action: 'submit', examScheduleId, count: res.count },
         });
-        await this.syncApproval(tx, examScheduleId, 'submitted');
       }
       return { updated: res.count };
     });
   }
 
+  /**
+   * Approve a submitted paper. Segregation of duty: whoever entered a mark cannot
+   * approve it — checked against the spine's `enteredById`, since GradeEntry is
+   * now read-only historic evidence.
+   */
   async approve(examScheduleId: string) {
     const organizationId = this.tenant.organizationId;
     const approverId = this.tenant.userId ?? null;
     return this.prisma.client.$transaction(async (tx: any) => {
-      const pending = await tx.gradeEntry.findMany({
-        where: { examScheduleId, status: 'submitted' },
+      const assessment = await tx.assessment.findFirst({
+        where: { organizationId, sourceType: 'exam_session', sourceRef: examScheduleId },
+        select: { id: true },
+      });
+      if (!assessment) return { updated: 0 };
+      const pending = await tx.studentAssessment.findMany({
+        where: { assessmentId: assessment.id, approvalStatus: 'submitted' },
         select: { id: true, enteredById: true },
       });
       if (pending.length === 0) return { updated: 0 };
 
-      // A0 segregation of duty: whoever entered a mark must not approve it.
-      // Approving a batch that contains any self-entered mark is refused.
       const selfEntered = pending.some((g: any) => g.enteredById && g.enteredById === approverId);
       if (selfEntered) {
         throw new BadRequestException(
@@ -438,17 +353,16 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         );
       }
 
-      const res = await tx.gradeEntry.updateMany({
-        where: { examScheduleId, status: 'submitted' },
-        data: { status: 'approved', approvedById: approverId, approvedAt: new Date() },
+      const res = await tx.studentAssessment.updateMany({
+        where: { assessmentId: assessment.id, approvalStatus: 'submitted' },
+        data: { approvalStatus: 'approved', approvedById: approverId, approvedAt: new Date() },
       });
       await this.audit.recordInTx(tx, {
-        entity: 'GradeEntry',
-        entityId: examScheduleId,
+        entity: 'Assessment',
+        entityId: assessment.id,
         action: 'approve',
         newValues: { examScheduleId, approvedById: approverId, count: res.count },
       });
-      await this.syncApproval(tx, examScheduleId, 'approved', approverId);
       this.events.publish(EVENTS.SchoolGradeApproved, {
         organizationId,
         examScheduleId,
@@ -461,26 +375,30 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
   /**
    * A0: reject submitted marks back to `rejected` with a reason, making the
    * previously-unreachable `rejected` state reachable via the API. From
-   * `rejected` the enterer can `resubmit` (see the grade_entry workflow).
+   * `rejected` the enterer can `resubmit`.
    */
   async reject(examScheduleId: string, reason: string) {
     const organizationId = this.tenant.organizationId;
     const rejectedById = this.tenant.userId ?? null;
     return this.prisma.client.$transaction(async (tx: any) => {
-      const res = await tx.gradeEntry.updateMany({
-        where: { examScheduleId, status: 'submitted' },
-        data: { status: 'rejected', rejectionReason: reason },
+      const assessment = await tx.assessment.findFirst({
+        where: { organizationId, sourceType: 'exam_session', sourceRef: examScheduleId },
+        select: { id: true },
+      });
+      if (!assessment) throw new NotFoundException(`No assessment for schedule ${examScheduleId}`);
+      const res = await tx.studentAssessment.updateMany({
+        where: { assessmentId: assessment.id, approvalStatus: 'submitted' },
+        data: { approvalStatus: 'rejected', rejectionReason: reason },
       });
       if (res.count === 0) {
         throw new NotFoundException(`No submitted grades to reject for schedule ${examScheduleId}`);
       }
       await this.audit.recordInTx(tx, {
-        entity: 'GradeEntry',
-        entityId: examScheduleId,
+        entity: 'Assessment',
+        entityId: assessment.id,
         action: 'reject',
         newValues: { examScheduleId, rejectedById, reason, count: res.count },
       });
-      await this.syncApproval(tx, examScheduleId, 'rejected', null, reason);
       this.events.publish(EVENTS.SchoolGradeRejected, {
         organizationId,
         examScheduleId,
@@ -492,7 +410,12 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
   }
 
   /**
-   * Carry an approval decision onto the spine.
+   * Carry an approval decision onto the spine. Retained for any caller that still
+   * decides at the GradeEntry level (legacy bridge); the exam endpoints above now
+   * write the spine directly.
+   */
+
+
    *
    * The two workflows used to be mirrored the other way round — GradeEntry
    * decided, and the spine was updated to match. The spine is the record now,

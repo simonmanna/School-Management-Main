@@ -174,9 +174,9 @@ describe('GradingService — UACE aggregate (best 3 principals)', () => {
 });
 
 describe('GradingService — scale fixtures', () => {
+  const defaultBands = require('../../src/modules/school/assessment/grade-bands').defaultBands;
   it('UCE has 9 bands sorted from highest to lowest', () => {
-    const svc = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
-    const bands = svc.defaultUCE();
+    const bands = defaultBands('UCE');
     expect(bands).toHaveLength(9);
     expect(bands[0].grade).toBe('D1');
     expect(bands[bands.length - 1].grade).toBe('F9');
@@ -187,16 +187,14 @@ describe('GradingService — scale fixtures', () => {
   });
 
   it('UACE has 7 bands from A to F', () => {
-    const svc = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
-    const bands = svc.defaultUACE();
+    const bands = defaultBands('UACE');
     expect(bands).toHaveLength(7);
     expect(bands[0].grade).toBe('A');
     expect(bands[bands.length - 1].grade).toBe('F');
   });
 
   it('CBC has 4 competency levels', () => {
-    const svc = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
-    const bands = svc.defaultCBC();
-    expect(bands.map((b) => b.grade)).toEqual(['A', 'B', 'C', 'D']);
+    const bands = defaultBands('CBC');
+    expect(bands.map((b: any) => b.grade)).toEqual(['A', 'B', 'C', 'D']);
   });
 });
