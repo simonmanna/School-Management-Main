@@ -271,7 +271,14 @@ describeDb('integration: exam workspace — create → apply → mark → result
     expect(row.classCount).toBe(1);
     expect(row.paperCount).toBe(2);
     expect(row.marksExpected).toBe(6);
-    expect(row.marksEntered).toBe(5); // 5 numeric marks; the absence carries none
+    // 5 numeric marks + 1 absence = 6 students RESOLVED.
+    //
+    // This used to read 5: the exam list counted GradeEntry rows carrying a
+    // number, while the marksheet on the very next screen counted an absence as
+    // entered. So a fully-marked paper showed 5/6 here and 6/6 there, and a
+    // teacher chasing the sixth mark was chasing one that was never coming.
+    // Both counters now use the marksheet's rule.
+    expect(row.marksEntered).toBe(6);
     expect(row.examTypeName).toContain('Mid-Term');
   });
 });

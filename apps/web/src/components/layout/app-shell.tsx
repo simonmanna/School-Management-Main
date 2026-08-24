@@ -255,6 +255,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/approvals', label: 'Approvals', icon: ShieldCheck, permission: PERMISSIONS.school.approveGrades },
 
+      { to: '/school/homework', label: 'Homework Submissions', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Tools' },
       { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
 
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },

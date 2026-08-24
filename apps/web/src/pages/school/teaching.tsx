@@ -74,7 +74,7 @@ export function SchoolTeachingPage() {
                     title={m.title}
                     sub={m.subject}
                     right={<Badge>{m.count} to mark</Badge>}
-                    onClick={() => navigate(`/school/marksheet/${m.assessmentId}`)}
+                    onClick={() => navigate(`/school/assessments/${m.assessmentId}/mark`)}
                   />
                 ))
               )}
@@ -125,7 +125,7 @@ export function SchoolTeachingPage() {
                     title={r.title}
                     sub={r.subject}
                     right={<Badge variant="destructive">Rejected</Badge>}
-                    onClick={() => navigate(`/school/marksheet/${r.assessmentId}`)}
+                    onClick={() => navigate(`/school/assessments/${r.assessmentId}/mark`)}
                   />
                 ))
               )}

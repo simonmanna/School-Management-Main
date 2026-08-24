@@ -202,8 +202,17 @@ export function SchoolAssessmentsPage() {
                     <StageBadge row={r} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <RowAction row={r} onMark={() => navigate(`/school/assessments/${r.assessmentId}/mark`)}
-                      onSubmit={() => onSubmit(r)} submitting={submit.isPending} />
+                    <div className="flex items-center justify-end gap-1.5">
+                      {/* Homework also collects submissions, which the board does
+                          not model — so the row offers the screen that does. */}
+                      {r.kind === 'homework' && (
+                        <Link to="/school/homework" className="text-xs text-muted-foreground hover:underline">
+                          Submissions
+                        </Link>
+                      )}
+                      <RowAction row={r} onMark={() => navigate(`/school/assessments/${r.assessmentId}/mark`)}
+                        onSubmit={() => onSubmit(r)} submitting={submit.isPending} />
+                    </div>
                   </td>
                 </tr>
               ))}

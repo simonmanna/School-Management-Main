@@ -40,6 +40,7 @@ function makeService(overrides: Record<string, any> = {}) {
     // legacy mirror, still read for papers locked before the cutover.
     assessment: {
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     gradeEntry: {
@@ -62,6 +63,7 @@ function makeService(overrides: Record<string, any> = {}) {
   // Applying an exam now mints its gradebook columns in one transaction, so the
   // stub has to be able to open one.
   client.$transaction = jest.fn((fn: any) => (typeof fn === 'function' ? fn(client) : Promise.all(fn)));
+  client.studentAssessment = { count: jest.fn().mockResolvedValue(0), ...(overrides.studentAssessment ?? {}) };
 
   const service = new MarksWorkspaceService(
     { client } as any,
@@ -75,6 +77,50 @@ function makeService(overrides: Record<string, any> = {}) {
     { forExamSchedules: jest.fn().mockResolvedValue(0), forExamSchedule: jest.fn().mockResolvedValue(null) } as any,
   );
   return { service, client, grades: (service as any).grades };
+}
+
+/**
+ * Seed the SPINE for one or more papers.
+ *
+ * Marks used to be seeded as GradeEntry rows because that is where the marks
+ * workspace read them. It reads the assessment spine now, so the fixtures move
+ * with it — every assertion below is unchanged, which is the point: the flip
+ * was meant to change where a mark lives, not what the screen does.
+ *
+ * `marks` is keyed by studentProfileId; a value of `null` with a participation
+ * means a resolved non-scoring outcome (absent, exempt…).
+ */
+function seedSpine(
+  client: any,
+  papers: Array<{
+    scheduleId: string;
+    marks: Record<string, number | null>;
+    participation?: Record<string, string>;
+  }>,
+) {
+  const rows = papers.map((p) => ({
+    id: `assess_${p.scheduleId}`,
+    sourceRef: p.scheduleId,
+    sourceType: 'exam_session',
+    lockedAt: null,
+    studentAssessments: Object.entries(p.marks).map(([studentProfileId, score]) => ({
+      id: `sa_${p.scheduleId}_${studentProfileId}`,
+      studentProfileId,
+      effectiveScore: score,
+      participation: p.participation?.[studentProfileId] ?? 'present',
+      approvalStatus: 'draft',
+    })),
+  }));
+  client.assessment.findMany.mockResolvedValue(rows);
+  client.assessment.findFirst.mockImplementation(({ where }: any) => {
+    const ref = where?.sourceRef;
+    const id = typeof ref === 'string' ? ref : undefined;
+    return Promise.resolve(rows.find((r) => r.sourceRef === id) ?? null);
+  });
+  client.studentAssessment.count.mockResolvedValue(
+    rows.reduce((n, r) => n + r.studentAssessments.length, 0),
+  );
+  return rows;
 }
 
 function student(id: string, name: string, extra: Record<string, any> = {}) {
@@ -102,6 +148,7 @@ describe('MarksWorkspaceService — marksheet', () => {
       id: 'sched_1', maxMarks: 100, marksLockedAt: null,
     });
     // Only one of the three has been marked.
+    seedSpine(client, [{ scheduleId: 'sched_1', marks: { s2: 64 } }]);
     client.gradeEntry.findMany.mockResolvedValue([
       { id: 'ge_1', studentProfileId: 's2', marksObtained: 64, grade: 'B', remarks: null, status: 'draft', version: 1 },
     ]);
@@ -133,8 +180,8 @@ describe('MarksWorkspaceService — marksheet', () => {
     const { service, client } = makeService();
     client.studentProfile.findMany.mockResolvedValue([student('s1', 'Achieng Mary'), student('s2', 'Bwire Paul')]);
     client.examSchedule.findFirst.mockResolvedValue({ id: 'sched_1', maxMarks: 100, marksLockedAt: null });
-    client.gradeEntry.findMany.mockResolvedValue([
-      { id: 'ge_1', studentProfileId: 's1', marksObtained: null, remarks: 'absent', status: 'draft', version: 1 },
+    seedSpine(client, [
+      { scheduleId: 'sched_1', marks: { s1: null }, participation: { s1: 'absent' } },
     ]);
 
     const sheet = await service.sheet({ examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math' });
@@ -278,10 +325,27 @@ describe('MarksWorkspaceService — applying an exam to classes', () => {
     expect(client.examSchedule.deleteMany).not.toHaveBeenCalled();
   });
 
+  /**
+   * The guard has to see marks that arrived through the spine, not only ones
+   * with a legacy row behind them — otherwise unticking a box cascade-deletes
+   * real marks the user could see on screen a moment earlier.
+   */
+  it('will not remove a class whose marks exist only on the spine', async () => {
+    const { service, client } = makeService();
+    client.examSchedule.findMany.mockResolvedValue([{ id: 'sched_1' }]);
+    client.gradeEntry.count.mockResolvedValue(0);
+    client.studentAssessment.count.mockResolvedValue(7);
+
+    await expect(service.removeClass({ examId: 'exam_1', classId: 'class_1' }))
+      .rejects.toBeInstanceOf(ConflictException);
+    expect(client.examSchedule.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('removes a class that has no marks', async () => {
     const { service, client } = makeService();
     client.examSchedule.findMany.mockResolvedValue([{ id: 'sched_1' }, { id: 'sched_2' }]);
     client.gradeEntry.count.mockResolvedValue(0);
+    client.studentAssessment.count.mockResolvedValue(0);
     client.examSchedule.deleteMany.mockResolvedValue({ count: 2 });
 
     const res = await service.removeClass({ examId: 'exam_1', classId: 'class_1' });
@@ -306,11 +370,10 @@ describe('MarksWorkspaceService — results grid', () => {
 
   it('totals only the subjects that are marked, and ranks by total', async () => {
     const { service, client } = gridService();
-    client.gradeEntry.findMany.mockResolvedValue([
-      { examScheduleId: 'sched_m', studentProfileId: 's1', marksObtained: 80, grade: 'A', remarks: null },
-      { examScheduleId: 'sched_e', studentProfileId: 's1', marksObtained: 70, grade: 'B', remarks: null },
-      { examScheduleId: 'sched_m', studentProfileId: 's2', marksObtained: 90, grade: 'A', remarks: null },
-      // s2 has no English mark; s3 has nothing at all.
+    // s2 has no English mark; s3 has nothing at all.
+    seedSpine(client, [
+      { scheduleId: 'sched_m', marks: { s1: 80, s2: 90 } },
+      { scheduleId: 'sched_e', marks: { s1: 70 } },
     ]);
 
     const grid = await service.grid({ examId: 'exam_1', classId: 'class_1' });
@@ -331,11 +394,7 @@ describe('MarksWorkspaceService — results grid', () => {
 
   it('gives tied students the same position', async () => {
     const { service, client } = gridService();
-    client.gradeEntry.findMany.mockResolvedValue([
-      { examScheduleId: 'sched_m', studentProfileId: 's1', marksObtained: 75, grade: 'B', remarks: null },
-      { examScheduleId: 'sched_m', studentProfileId: 's2', marksObtained: 75, grade: 'B', remarks: null },
-      { examScheduleId: 'sched_m', studentProfileId: 's3', marksObtained: 50, grade: 'C', remarks: null },
-    ]);
+    seedSpine(client, [{ scheduleId: 'sched_m', marks: { s1: 75, s2: 75, s3: 50 } }]);
 
     const grid = await service.grid({ examId: 'exam_1', classId: 'class_1' });
     const byName = Object.fromEntries(grid.students.map((s) => [s.name, s]));
@@ -347,9 +406,7 @@ describe('MarksWorkspaceService — results grid', () => {
 
   it('reports completion against class size × papers', async () => {
     const { service, client } = gridService();
-    client.gradeEntry.findMany.mockResolvedValue([
-      { examScheduleId: 'sched_m', studentProfileId: 's1', marksObtained: 80, grade: 'A', remarks: null },
-    ]);
+    seedSpine(client, [{ scheduleId: 'sched_m', marks: { s1: 80 } }]);
 
     const grid = await service.grid({ examId: 'exam_1', classId: 'class_1' });
 
@@ -362,8 +419,8 @@ describe('MarksWorkspaceService — results grid', () => {
 
   it('surfaces a non-scoring outcome in the cell instead of a blank', async () => {
     const { service, client } = gridService();
-    client.gradeEntry.findMany.mockResolvedValue([
-      { examScheduleId: 'sched_m', studentProfileId: 's1', marksObtained: null, grade: null, remarks: 'absent' },
+    seedSpine(client, [
+      { scheduleId: 'sched_m', marks: { s1: null }, participation: { s1: 'absent' } },
     ]);
 
     const grid = await service.grid({ examId: 'exam_1', classId: 'class_1' });

@@ -543,8 +543,9 @@ export function App() {
           <Route path="/school/assessments" element={<SchoolAssessmentsPage />} />
           <Route path="/school/assessments/:assessmentId/mark" element={<SchoolAssessmentMarkPage />} />
           <Route path="/school/approvals" element={<SchoolApprovalsPage />} />
-          <Route path="/school/homework" element={<Navigate to="/school/assessments?kind=homework" replace />} />
-          <Route path="/school/homework/manage" element={<SchoolHomeworkPage />} />
+          {/* Homework keeps its own screen: it collects and returns SUBMISSIONS,
+              which the assessment board does not model. The board links into it. */}
+          <Route path="/school/homework" element={<SchoolHomeworkPage />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
           {/* P6: My Marking → the teacher workspace, which finds the work for you. */}
           <Route path="/school/my-marking" element={<Navigate to="/school/teaching" replace />} />

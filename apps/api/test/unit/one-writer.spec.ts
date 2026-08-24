@@ -95,6 +95,28 @@ describe('one-writer rule', () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * GradeEntry is the MIRROR now, not the source.
+   *
+   * The spine is written first, by `postMark`, and `examinations.service.ts`
+   * brings the legacy row along behind it. Anything else writing GradeEntry is
+   * a second writer to a store that is on its way to read-only — exactly the
+   * shape of the original bug, where the truth lived in whichever store was
+   * written last. `marks-workspace.service.ts` used to be such a writer: its
+   * clearing branch wrote GradeEntry directly and never projected.
+   *
+   * When the mirror is finally dropped, this allowlist goes empty and a DB
+   * trigger takes over.
+   */
+  it('only the mirror owner writes GradeEntry', () => {
+    const MIRROR_OWNER = join('examinations', 'examinations.service.ts');
+    const gradeEntryWrite = /gradeEntry\s*\.\s*(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\s*\(/;
+    const offenders = files
+      .filter((f) => f.path !== MIRROR_OWNER && gradeEntryWrite.test(code(f.text)))
+      .map((f) => f.path);
+    expect(offenders).toEqual([]);
+  });
+
   it('keeps recompute callable only from the service that owns it', () => {
     // Producers call postMark; recompute is an internal step of postMark. A
     // direct call means a producer is assembling the sequence by hand again.

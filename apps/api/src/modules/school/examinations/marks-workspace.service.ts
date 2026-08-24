@@ -75,12 +75,7 @@ export class MarksWorkspaceService {
       where: { examId: { in: examIds } },
       select: { id: true, examId: true, classId: true, marksLockedAt: true },
     });
-    const entered = await this.prisma.client.gradeEntry.groupBy({
-      by: ['examScheduleId'],
-      where: { examScheduleId: { in: schedules.map((s) => s.id) }, marksObtained: { not: null } },
-      _count: { _all: true },
-    });
-    const enteredBySchedule = new Map(entered.map((e) => [e.examScheduleId, e._count._all]));
+    const enteredBySchedule = await this.markedPerPaper(schedules.map((s) => s.id));
 
     // Class sizes, so "expected marks" is a real number rather than a guess.
     const classIds = [...new Set(schedules.map((s) => s.classId))];
@@ -142,14 +137,7 @@ export class MarksWorkspaceService {
     ]);
 
     const sizes = await this.classSizes(classes.map((c) => c.id));
-    const entered = schedules.length
-      ? await this.prisma.client.gradeEntry.groupBy({
-          by: ['examScheduleId'],
-          where: { examScheduleId: { in: schedules.map((s) => s.id) }, marksObtained: { not: null } },
-          _count: { _all: true },
-        })
-      : [];
-    const enteredBySchedule = new Map(entered.map((e) => [e.examScheduleId, e._count._all]));
+    const enteredBySchedule = await this.markedPerPaper(schedules.map((s) => s.id));
 
     const rows = classes.map((c) => {
       const own = schedules.filter((s) => s.classId === c.id);
@@ -262,9 +250,24 @@ export class MarksWorkspaceService {
     });
     if (schedules.length === 0) return { removed: 0 };
 
-    const marks = await this.prisma.client.gradeEntry.count({
-      where: { examScheduleId: { in: schedules.map((s) => s.id) } },
-    });
+    // Guard on BOTH stores. Counting only GradeEntry would let a class be
+    // dropped when its marks arrived through the spine, cascading real marks
+    // away on what the user experienced as unticking a box.
+    const scheduleIds = schedules.map((s) => s.id);
+    const [legacyMarks, spineMarks] = await Promise.all([
+      this.prisma.client.gradeEntry.count({ where: { examScheduleId: { in: scheduleIds } } }),
+      this.prisma.client.studentAssessment.count({
+        where: {
+          deletedAt: null,
+          assessment: {
+            organizationId: this.tenant.organizationId,
+            sourceType: 'exam_session',
+            sourceRef: { in: scheduleIds },
+          },
+        },
+      }),
+    ]);
+    const marks = Math.max(legacyMarks, spineMarks);
     if (marks > 0) {
       throw new ConflictException(
         `This class already has ${marks} mark(s) for this exam. Delete the marks first, or leave the class on the exam.`,
@@ -306,37 +309,49 @@ export class MarksWorkspaceService {
     });
 
     const students = await this.studentsOfClass(params.classId, params.streamId);
+
+    // The assessment IS the paper now. Its `lockedAt` is the lock that bites
+    // (postMark enforces it everywhere); the schedule column is the legacy
+    // mirror, still read so a paper locked before the cutover stays locked.
+    const spine = schedule
+      ? await this.prisma.client.assessment.findFirst({
+          where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
+          include: { studentAssessments: { where: { deletedAt: null } } },
+        })
+      : null;
+    const locked = spine?.lockedAt ?? schedule?.marksLockedAt ?? null;
+
+    // Marks come off the spine, and the legacy row supplies only what the spine
+    // does not carry: the letter grade frozen under the scale in force when the
+    // mark was entered. Reading `marksObtained` here was the last place the two
+    // stores could disagree on screen.
     const entries = schedule
       ? await this.prisma.client.gradeEntry.findMany({ where: { examScheduleId: schedule.id } })
       : [];
-    const byStudent = new Map(entries.map((g) => [g.studentProfileId, g]));
+    const legacyByStudent = new Map(entries.map((g) => [g.studentProfileId, g]));
+    const spineByStudent = new Map((spine?.studentAssessments ?? []).map((r: any) => [r.studentProfileId, r]));
 
     const maxMarks = schedule ? Number(schedule.maxMarks) : 100;
     const rows = students.map((s, i) => {
-      const g = byStudent.get(s.studentProfileId);
+      const sa: any = spineByStudent.get(s.studentProfileId);
+      const g = legacyByStudent.get(s.studentProfileId);
       return {
         index: i + 1,
         ...s,
         gradeEntryId: g?.id ?? null,
-        marks: g?.marksObtained != null ? Number(g.marksObtained) : null,
+        studentAssessmentId: sa?.id ?? null,
+        // `effectiveScore` is post-moderation — the mark that actually counts,
+        // which is what a marksheet should show.
+        marks: sa?.effectiveScore != null ? Number(sa.effectiveScore) : null,
         grade: g?.grade ?? null,
         remarks: g?.remarks ?? null,
-        participation: this.participationOf(g),
-        status: g?.status ?? 'draft',
+        participation: String(sa?.participation ?? 'present'),
+        status: String(sa?.approvalStatus ?? g?.status ?? 'draft'),
         version: g?.version ?? 0,
       };
     });
 
     const entered = rows.filter((r) => r.marks != null || NON_SCORING.has(r.participation)).length;
-    // The assessment's lock is authoritative; the schedule column is the legacy
-    // mirror, still read so a paper locked before the cutover stays locked.
-    const spineLock = schedule
-      ? await this.prisma.client.assessment.findFirst({
-          where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
-          select: { lockedAt: true },
-        })
-      : null;
-    const locked = spineLock?.lockedAt ?? schedule?.marksLockedAt ?? null;
 
     return {
       exam: {
@@ -353,7 +368,7 @@ export class MarksWorkspaceService {
       maxMarks,
       locked: locked != null,
       lockedAt: locked,
-      approvalStatus: this.rollupStatus(entries.map((e) => e.status)),
+      approvalStatus: this.rollupStatus(rows.map((r) => r.status)),
       total: rows.length,
       entered,
       students: rows,
@@ -459,18 +474,50 @@ export class MarksWorkspaceService {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const students = await this.studentsOfClass(params.classId, params.streamId);
-    const entries = schedules.length
-      ? await this.prisma.client.gradeEntry.findMany({
-          where: { examScheduleId: { in: schedules.map((s) => s.id) } },
+
+    // Off the spine, keyed back to the paper it came from. The grid stays RAW —
+    // one column per paper, no weighting — because it answers "how did the
+    // class do in this exam", which is a different question from "what is the
+    // term mark". The weighted view already exists twice, as the gradebook and
+    // as a published ResultSet; running `computeSubject` over one exam's
+    // assessments would divide by weights that do not sum to 100 and quietly
+    // under-report every student.
+    const scheduleIds = schedules.map((s) => s.id);
+    const spineAssessments = scheduleIds.length
+      ? await this.prisma.client.assessment.findMany({
+          where: {
+            organizationId: this.tenant.organizationId,
+            sourceType: 'exam_session',
+            sourceRef: { in: scheduleIds },
+            deletedAt: null,
+          },
+          include: { studentAssessments: { where: { deletedAt: null } } },
         })
       : [];
+    const legacyGrades = scheduleIds.length
+      ? await this.prisma.client.gradeEntry.findMany({ where: { examScheduleId: { in: scheduleIds } } })
+      : [];
 
+    const scheduleSubject = new Map(schedules.map((s) => [s.id, s.subjectId]));
     const bySubject = new Map<string, Map<string, any>>();
     for (const s of subjects) bySubject.set(s.subjectId, new Map());
-    const scheduleSubject = new Map(schedules.map((s) => [s.id, s.subjectId]));
-    for (const g of entries) {
+    for (const a of spineAssessments) {
+      const subjectId = a.sourceRef ? scheduleSubject.get(a.sourceRef) : null;
+      if (!subjectId) continue;
+      for (const sa of a.studentAssessments as any[]) {
+        bySubject.get(subjectId)?.set(sa.studentProfileId, {
+          marksObtained: sa.effectiveScore,
+          participation: String(sa.participation ?? 'present'),
+          grade: null,
+        });
+      }
+    }
+    // The letter grade is the one fact the spine does not carry — it was frozen
+    // under the scale in force when the mark was entered. Fold it in.
+    for (const g of legacyGrades) {
       const subjectId = scheduleSubject.get(g.examScheduleId);
-      if (subjectId) bySubject.get(subjectId)?.set(g.studentProfileId, g);
+      const cell = subjectId ? bySubject.get(subjectId)?.get(g.studentProfileId) : null;
+      if (cell) cell.grade = g.grade ?? null;
     }
 
     const system = await this.gradingSystem();
@@ -487,7 +534,7 @@ export class MarksWorkspaceService {
           cells[sub.subjectId] = {
             marks,
             grade: g?.grade ?? null,
-            participation: this.participationOf(g),
+            participation: g?.participation ?? 'present',
           };
           if (marks != null) {
             total += marks;
@@ -524,7 +571,10 @@ export class MarksWorkspaceService {
     });
 
     const expected = students.length * subjects.length;
-    const done = entries.filter((g) => g.marksObtained != null).length;
+    const done = spineAssessments.reduce(
+      (n, a) => n + (a.studentAssessments as any[]).filter((sa) => sa.effectiveScore != null).length,
+      0,
+    );
     return {
       exam: {
         id: exam.id,
@@ -670,9 +720,44 @@ export class MarksWorkspaceService {
   }
 
   /** `remarks` doubles as the non-scoring outcome marker on the legacy row. */
-  private participationOf(g: { remarks?: string | null } | undefined): string {
-    const r = g?.remarks?.trim().toLowerCase();
-    return r && NON_SCORING.has(r) ? r : 'present';
+  /**
+   * How many students have a resolved outcome on each paper.
+   *
+   * Counted off the spine, and a non-scoring outcome COUNTS: a student marked
+   * absent is done, not outstanding, and showing them as unmarked sends a
+   * teacher looking for a mark that is never coming.
+   *
+   * (`participationOf` used to sit here, deriving participation by string-
+   * matching free-text `remarks`. It is gone: participation is a real enum on
+   * the spine now, so a teacher typing "absent" as a comment can no longer flip
+   * it by accident.)
+   */
+  private async markedPerPaper(scheduleIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (scheduleIds.length === 0) return out;
+
+    const assessments = await this.prisma.client.assessment.findMany({
+      where: {
+        organizationId: this.tenant.organizationId,
+        sourceType: 'exam_session',
+        sourceRef: { in: scheduleIds },
+        deletedAt: null,
+      },
+      include: {
+        studentAssessments: {
+          where: { deletedAt: null },
+          select: { effectiveScore: true, participation: true },
+        },
+      },
+    });
+    for (const a of assessments) {
+      if (!a.sourceRef) continue;
+      const n = (a.studentAssessments as any[]).filter(
+        (sa) => sa.effectiveScore != null || NON_SCORING.has(String(sa.participation)),
+      ).length;
+      out.set(a.sourceRef, n);
+    }
+    return out;
   }
 
   /** Give every paper of this exam, in these classes, its gradebook column. */

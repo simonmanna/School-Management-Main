@@ -9,6 +9,8 @@ import { EVENTS } from '@erp/shared';
 import { GradingService } from './grading.service';
 import { ReportCardTemplateService } from './report-card-template.service';
 import { AssessmentProjectionService } from '../assessment/assessment-projection.service';
+import { MarkingService } from '../assessment/marking.service';
+import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { ResultRunService } from '../assessment/result-run.service';
 import type {
   BulkGradeEntryDto,
@@ -137,6 +139,9 @@ interface GradeBand { min: number; max: number; grade: string; gpa: number; rema
  * GradingService applies the GradingScale to compute grade letter + grade point,
  * and RankingService computes class rank + overall rank.
  */
+/** `GradeEntry` records a non-scoring outcome in free-text `remarks`. */
+const NON_SCORING_REMARKS = new Set(['absent', 'exempt', 'excused', 'malpractice', 'special_consideration']);
+
 @Injectable()
 export class GradeEntryService extends BaseCrudService<GradeEntry, { examScheduleId: string; studentProfileId: string; marksObtained: number; maxMarks: number }, GradeEntryUpdateDto> {
   protected readonly entityName = 'GradeEntry';
@@ -149,8 +154,20 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     private readonly events: EventBus,
     private readonly audit: AuditService,
     private readonly projection: AssessmentProjectionService,
+    private readonly marking: MarkingService,
+    private readonly mint: AssessmentMintService,
   ) {
     super(prisma.client.gradeEntry as unknown as CrudDelegate);
+  }
+
+  /**
+   * `spine` (default) writes the assessment spine FIRST and mirrors down to
+   * GradeEntry; `grade_entry` keeps the old order, writing GradeEntry and
+   * projecting up. The switch exists so the cutover is an env change rather
+   * than a redeploy, and it stays until GradeEntry is sealed read-only.
+   */
+  private get spinePrimary(): boolean {
+    return (process.env.MARKS_SOURCE ?? 'spine') !== 'grade_entry';
   }
 
   /**
@@ -253,8 +270,40 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         });
         results.push(row);
       }
-      // A1: project the just-written marks into the assessment spine, atomically.
-      await this.projection.projectExamSchedule(tx, dto.examScheduleId);
+      if (this.spinePrimary) {
+        // THE FLIP. The spine is written directly, by the one writer, and the
+        // GradeEntry rows above are now the MIRROR — historic evidence kept in
+        // step, not the source. Deriving the spine by reading GradeEntry back
+        // (what `projectExamSchedule` does) is what made two stores possible in
+        // the first place: it put the truth in whichever one was written last.
+        const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
+        if (assessment) {
+          const schedule = await tx.examSchedule.findFirst({
+            where: { id: dto.examScheduleId },
+            include: { exam: true },
+          });
+          for (const e of dto.entries) {
+            await this.marking.postMark(tx, {
+              assessmentId: assessment.id,
+              studentProfileId: e.studentProfileId,
+              score: e.marksObtained,
+              source: 'exam',
+              markerId: this.tenant.userId ?? null,
+              snapshot: { classId: schedule?.classId, termId: schedule?.exam?.termId },
+              // No allowWhenApproved bypass. The projection needed one because
+              // it re-read already-approved GradeEntry rows; writing the spine
+              // directly does not, and postMark's approval guard now agrees
+              // with the GradeEntry guard above (the backfill verified zero
+              // drift between them). A bypass that is not needed is a bypass
+              // that will eventually be used by accident.
+              writeHistory: false, // GradeEntry carries its own audit trail
+            });
+          }
+        }
+      } else {
+        // Legacy order, kept behind MARKS_SOURCE=grade_entry as the revert.
+        await this.projection.projectExamSchedule(tx, dto.examScheduleId);
+      }
       return { count: results.length, results };
     });
   }
@@ -326,7 +375,27 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
       });
 
       // The half that was missing: the spine must learn the mark is gone.
-      await this.projection.projectExamSchedule(tx, dto.examScheduleId);
+      if (this.spinePrimary) {
+        const assessment = await this.mint.forExamSchedule(tx, dto.examScheduleId);
+        if (assessment) {
+          const remark = String(dto.remarks ?? '').trim().toLowerCase();
+          const participation = NON_SCORING_REMARKS.has(remark) ? remark : 'present';
+          const sa = await this.marking.postMark(tx, {
+            assessmentId: assessment.id,
+            studentProfileId: dto.studentProfileId,
+            score: null,
+            source: 'exam',
+            markerId: this.tenant.userId ?? null,
+            writeHistory: false,
+          });
+          await tx.studentAssessment.updateMany({
+            where: { id: sa.id },
+            data: { participation: participation as any },
+          });
+        }
+      } else {
+        await this.projection.projectExamSchedule(tx, dto.examScheduleId);
+      }
       return { cleared: true, examScheduleId: dto.examScheduleId, row };
     });
   }
@@ -344,7 +413,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
           action: 'update',
           newValues: { action: 'submit', examScheduleId, count: res.count },
         });
-        await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'submitted');
+        await this.syncApproval(tx, examScheduleId, 'submitted');
       }
       return { updated: res.count };
     });
@@ -379,7 +448,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         action: 'approve',
         newValues: { examScheduleId, approvedById: approverId, count: res.count },
       });
-      await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'approved', approverId);
+      await this.syncApproval(tx, examScheduleId, 'approved', approverId);
       this.events.publish(EVENTS.SchoolGradeApproved, {
         organizationId,
         examScheduleId,
@@ -411,7 +480,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         action: 'reject',
         newValues: { examScheduleId, rejectedById, reason, count: res.count },
       });
-      await this.projection.mirrorApprovalStatus(tx, examScheduleId, 'rejected');
+      await this.syncApproval(tx, examScheduleId, 'rejected', null, reason);
       this.events.publish(EVENTS.SchoolGradeRejected, {
         organizationId,
         examScheduleId,
@@ -419,6 +488,47 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         reason,
       });
       return { updated: res.count };
+    });
+  }
+
+  /**
+   * Carry an approval decision onto the spine.
+   *
+   * The two workflows used to be mirrored the other way round — GradeEntry
+   * decided, and the spine was updated to match. The spine is the record now,
+   * so the exam endpoints write their own row and then bring the canonical one
+   * with them. The direction is the whole difference between "two stores that
+   * agree" and "one store with a legacy view".
+   *
+   * `approvedAt` / `rejectionReason` are set here rather than left to a later
+   * recompute: an approval that does not say WHEN, or a rejection that does not
+   * say WHY, is not an audit trail.
+   */
+  private async syncApproval(
+    tx: any,
+    examScheduleId: string,
+    status: 'submitted' | 'approved' | 'rejected',
+    approvedById?: string | null,
+    reason?: string | null,
+  ): Promise<void> {
+    const assessment = await tx.assessment.findFirst({
+      where: {
+        organizationId: this.tenant.organizationId,
+        sourceType: 'exam_session',
+        sourceRef: examScheduleId,
+      },
+      select: { id: true },
+    });
+    if (!assessment) return;
+
+    await tx.studentAssessment.updateMany({
+      where: { assessmentId: assessment.id },
+      data: {
+        approvalStatus: status,
+        ...(status === 'submitted' ? { enteredAt: new Date(), rejectionReason: null } : {}),
+        ...(status === 'approved' ? { approvedById: approvedById ?? null, approvedAt: new Date() } : {}),
+        ...(status === 'rejected' ? { rejectionReason: reason ?? null } : {}),
+      },
     });
   }
 
