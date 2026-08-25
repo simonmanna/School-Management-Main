@@ -277,6 +277,12 @@ export const EVENTS = {
   SchoolPaymentImportPosted: 'school.fee.import.batch.posted',
   SchoolTermClosed: 'school.fee.term.closed',
   SchoolTermReopened: 'school.fee.term.reopened',
+  // Reversals (Phase 3). An allocation reversal moves NO cash — it un-settles
+  // an invoice and returns value to the payment's unallocated balance. A
+  // payment reversal unwinds a receipt that should never have existed. Neither
+  // is a refund, which returns money that genuinely arrived.
+  SchoolAllocationReversed: 'school.fee.allocation.reversed',
+  SchoolPaymentReversed: 'school.fee.payment.reversed',
   // Library + transport
   SchoolBookBorrowed: 'school.library.borrowed',
   SchoolBookReturned: 'school.library.returned',
@@ -901,6 +907,20 @@ export interface DomainEventMap {
     termId: string;
     reopenedById: string;
     reason?: string;
+  };
+  'school.fee.allocation.reversed': {
+    organizationId: string;
+    allocationId: string;
+    paymentId: string;
+    documentId: string;
+    amount: string;
+    reason: string;
+  };
+  'school.fee.payment.reversed': {
+    organizationId: string;
+    paymentId: string;
+    reason: string;
+    reversedAllocations: number;
   };
   'school.library.borrowed': {
     organizationId: string;

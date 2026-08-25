@@ -4,11 +4,15 @@ import { RequirePermissions } from '../../../kernel/auth/decorators/require-perm
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { FinanceControlsService } from './finance-controls.service';
+import { PaymentAllocationReversalService } from './allocation-reversal.service';
 
 @Controller('school/finance')
 @UseInterceptors(IdempotencyInterceptor)
 export class FinanceControlsController {
-  constructor(private readonly controls: FinanceControlsService) {}
+  constructor(
+    private readonly controls: FinanceControlsService,
+    private readonly reversals: PaymentAllocationReversalService,
+  ) {}
 
   /* ── Adjustments ── */
 
@@ -59,5 +63,37 @@ export class FinanceControlsController {
   @RequirePermissions(PERMISSIONS.school.closePeriod)
   reopenTerm(@Param('termId') termId: string, @Body() body: { reason?: string }) {
     return this.controls.reopenTerm(termId, body?.reason);
+  }
+
+  /* ── Reversals (Phase 3) ──
+   *
+   * Three separate operations, not one. Reversing an ALLOCATION moves no cash;
+   * reversing a PAYMENT unwinds a receipt that never should have existed; a
+   * REFUND (elsewhere) returns money that genuinely arrived. All three are
+   * gated on approveRefunds because each changes what a family owes.
+   */
+
+  @Post('allocations/:id/reverse')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.approveRefunds)
+  reverseAllocation(@Param('id') id: string, @Body() body: { reason: string }) {
+    return this.reversals.reverseAllocation(id, body?.reason);
+  }
+
+  @Post('payments/:id/reallocate')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.approveRefunds)
+  reallocate(
+    @Param('id') id: string,
+    @Body() body: { allocations: Array<{ documentId: string; amount: number }>; reason: string },
+  ) {
+    return this.reversals.reallocate(id, body?.allocations ?? [], body?.reason);
+  }
+
+  @Post('payments/:id/reverse')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.approveRefunds)
+  reversePayment(@Param('id') id: string, @Body() body: { reason: string }) {
+    return this.reversals.reversePayment(id, body?.reason);
   }
 }

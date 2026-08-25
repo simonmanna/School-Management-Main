@@ -114,6 +114,20 @@ Internal     full Decimal precision retained through tax and allocation math
 Display      rounded to currency precision at the presentation edge only (UGX → 0 dp)
 ```
 
+## Pricing provenance
+
+```
+No financial transaction may derive its price from MUTABLE configuration.
+
+    FeeStructure → published FeeStructureVersion → FeeItem → billing → DocumentLine
+
+Once invoiced, DocumentLine is the final immutable economic record. Editing a
+published pricing record is forbidden; a change is a new version.
+```
+
+Changing a fee structure must never alter what an already-issued invoice says, nor
+what a re-run of a completed billing period would produce.
+
 ## Terminology
 
 ```
@@ -133,6 +147,20 @@ A posted PaymentAllocation is never edited. Reallocation =
     reverse original allocation → create replacement allocation.
 ```
 
+## Atomicity
+
+```
+No partial financial transaction survives a failed transaction. A failure at any
+point leaves NO document, NO journal entry, NO cash movement, NO allocation,
+NO subledger row.
+
+Forbidden: returning early from inside a transaction callback after a write —
+a return COMMITS. Use an explicit throw to abort.
+```
+
+The forbidden pattern above is not hypothetical: it is the root cause of P0-2,
+where a partial waiver committed a subledger change with no GL entry.
+
 ## Concurrency
 
 ```
@@ -147,6 +175,10 @@ payment imports, credits, waivers, penalty runs.
 No financial transaction posts into a closed or locked accounting period.
 Reopening requires maker-checker authorization and is itself audited.
 School-term financial close is a SEPARATE school-domain control.
+
+A mutation validates the period of EVERY document it touches — never only the
+period named in the request. A payment taken in Term 2 may not be allocated to
+a Term 1 document once Term 1 is closed.
 ```
 
 ## Tenancy

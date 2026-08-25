@@ -56,6 +56,11 @@ export const AUDIT_ACTIONS = [
   'unassign',
   'restore',
   'measure',
+  // Compensating actions. FINANCIAL_INVARIANTS §Immutability corrects a posted
+  // record only by reversal, never by editing it — so "reversed" and
+  // "reallocated" are distinct audited events, not variants of 'update'.
+  'reverse',
+  'reallocate',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

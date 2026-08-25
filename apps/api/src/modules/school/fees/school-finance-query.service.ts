@@ -143,7 +143,16 @@ export class SchoolFinanceQueryService {
   async studentLedger(
     studentProfileId: string,
     range?: { from?: string; to?: string },
-  ): Promise<{ studentProfileId: string; rows: LedgerRow[]; closingBalance: number }> {
+  ): Promise<{
+    studentProfileId: string;
+    rows: LedgerRow[];
+    /** Balance carried into `from`; 0 when no range is given (P1-K). */
+    openingBalance: number;
+    /** Balance at the end of the visible window. */
+    closingBalance: number;
+    /** Balance across all time, independent of the window. */
+    currentBalance: number;
+  }> {
     const organizationId = this.tenant.organizationId;
     const student = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
@@ -254,14 +263,51 @@ export class SchoolFinanceQueryService {
     });
     const closingBalance = running;
 
-    const visible = withBalance.filter((r) => {
+    const inRange = (r: LedgerRow) => {
       const t = new Date(r.date);
       if (from && t < from) return false;
       if (to && t > to) return false;
       return true;
-    });
+    };
 
-    return { studentProfileId, rows: visible, closingBalance };
+    // P1-K · the opening balance.
+    //
+    // Without it a date-range statement is unreadable: a September statement
+    // shows September's movements and a running balance that starts wherever
+    // September happened to start, with nothing explaining the 500,000 the
+    // student carried in. The identity a statement must satisfy is
+    //
+    //   Opening + Charges + Penalties − Payments − Credits − Waivers
+    //           − Refunds ± Adjustments = Closing
+    //
+    // and it has no left-hand side without this row.
+    const visible: LedgerRow[] = [];
+    if (from) {
+      const priorRows = withBalance.filter((r) => new Date(r.date) < from);
+      const opening = priorRows.length ? priorRows[priorRows.length - 1].balance : 0;
+      visible.push({
+        date: from.toISOString(),
+        ledgerType: 'OPENING_BALANCE',
+        sourceType: 'opening_balance',
+        sourceId: studentProfileId,
+        reference: '—',
+        description: `Balance brought forward (${priorRows.length} earlier entr${priorRows.length === 1 ? 'y' : 'ies'})`,
+        debit: 0,
+        credit: 0,
+        balance: opening,
+      });
+    }
+    visible.push(...withBalance.filter(inRange));
+
+    return {
+      studentProfileId,
+      rows: visible,
+      openingBalance: visible.length && from ? visible[0].balance : 0,
+      closingBalance: visible.length ? visible[visible.length - 1].balance : 0,
+      // The student's true balance across all time, regardless of the window —
+      // distinct from the closing balance of a filtered range.
+      currentBalance: closingBalance,
+    };
   }
 
   /**
@@ -347,6 +393,186 @@ export class SchoolFinanceQueryService {
   }
 
   /**
+   * Cached-projection reconciliation — ADR-013's Gate 1/4.
+   *
+   * The ADR promises: "Cached columns (amountPaid, amountResidual, amountWaived,
+   * remaining) are performance projections. A CI reconciliation test asserts
+   * they equal their subledger." No such check existed, so a projection could
+   * drift from the events behind it and nothing would notice — which is the
+   * failure mode the whole economic-event model exists to prevent.
+   *
+   * Each row returned is a projection that disagrees with its subledger. An
+   * empty result is the gate passing.
+   */
+  async reconcileCachedProjections(): Promise<{
+    checked: number;
+    drifted: Array<{
+      kind: 'amountPaid' | 'amountWaived' | 'creditRemaining';
+      id: string;
+      reference: string;
+      cached: number;
+      subledger: number;
+      variance: number;
+    }>;
+  }> {
+    const organizationId = this.tenant.organizationId;
+    const drifted: Array<{
+      kind: 'amountPaid' | 'amountWaived' | 'creditRemaining';
+      id: string;
+      reference: string;
+      cached: number;
+      subledger: number;
+      variance: number;
+    }> = [];
+
+    const docs = await this.prisma.client.document.findMany({
+      where: { ...POSTED_FEE_WHERE, organizationId },
+      select: { id: true, documentNumber: true, partnerId: true, amountPaid: true, amountWaived: true },
+    });
+    const docIds = docs.map((d) => d.id);
+
+    // amountPaid must equal SUM(posted PaymentAllocation) — cash only. A
+    // reversed allocation no longer counts, which is precisely why `status`
+    // is filtered here rather than summing every row.
+    const allocs = docIds.length
+      ? await this.prisma.client.paymentAllocation.groupBy({
+          by: ['documentId'],
+          where: { organizationId, documentId: { in: docIds }, status: 'posted' },
+          _sum: { amount: true },
+        })
+      : [];
+    const paidByDoc = new Map(allocs.map((a) => [a.documentId!, Number(a._sum.amount ?? 0)]));
+
+    // amountWaived must equal SUM(applied Waiver) for the student behind the
+    // document. Waivers are student-scoped, so this compares per partner.
+    const waivers = await this.prisma.client.waiver.findMany({
+      where: { organizationId, applied: true },
+      select: { studentProfileId: true, amount: true, documentId: true },
+    });
+    const waivedByDoc = new Map<string, number>();
+    for (const w of waivers) {
+      if (!w.documentId) continue;
+      waivedByDoc.set(w.documentId, (waivedByDoc.get(w.documentId) ?? 0) + Number(w.amount));
+    }
+
+    for (const d of docs) {
+      const cachedPaid = Number(d.amountPaid);
+      const realPaid = paidByDoc.get(d.id) ?? 0;
+      if (Math.abs(cachedPaid - realPaid) > 0.01) {
+        drifted.push({
+          kind: 'amountPaid',
+          id: d.id,
+          reference: d.documentNumber,
+          cached: cachedPaid,
+          subledger: realPaid,
+          variance: Number((cachedPaid - realPaid).toFixed(6)),
+        });
+      }
+      // Only document-targeted waivers can be attributed to a document; a
+      // whole-student waiver spreads across invoices oldest-first and is
+      // reconciled at the student level by studentBalance, not here.
+      if (waivedByDoc.has(d.id)) {
+        const cachedWaived = Number(d.amountWaived ?? 0);
+        const realWaived = waivedByDoc.get(d.id)!;
+        if (Math.abs(cachedWaived - realWaived) > 0.01) {
+          drifted.push({
+            kind: 'amountWaived',
+            id: d.id,
+            reference: d.documentNumber,
+            cached: cachedWaived,
+            subledger: realWaived,
+            variance: Number((cachedWaived - realWaived).toFixed(6)),
+          });
+        }
+      }
+    }
+
+    // FeeCredit.remaining must equal amount − SUM(posted FeeCreditAllocation).
+    const credits = await this.prisma.client.feeCredit.findMany({
+      where: { organizationId },
+      select: { id: true, code: true, amount: true, remaining: true },
+    });
+    const creditAllocs = await this.prisma.client.feeCreditAllocation.groupBy({
+      by: ['feeCreditId'],
+      where: { organizationId, status: 'posted' },
+      _sum: { amount: true },
+    });
+    const drawnByCredit = new Map(creditAllocs.map((a) => [a.feeCreditId, Number(a._sum.amount ?? 0)]));
+    for (const c of credits) {
+      const expected = Number(c.amount) - (drawnByCredit.get(c.id) ?? 0);
+      const cached = Number(c.remaining);
+      // A refunded credit is drawn down without a FeeCreditAllocation (the
+      // payout is a Payment, not an application), so a lower cached value than
+      // the allocation subledger implies is expected, not drift. Only the
+      // other direction — remaining MORE than the events justify — is a defect.
+      if (cached - expected > 0.01) {
+        drifted.push({
+          kind: 'creditRemaining',
+          id: c.id,
+          reference: c.code,
+          cached,
+          subledger: expected,
+          variance: Number((cached - expected).toFixed(6)),
+        });
+      }
+    }
+
+    return { checked: docs.length + credits.length, drifted };
+  }
+
+  /**
+   * Operational cash custody (P2-A, first half).
+   *
+   * FINANCIAL_INVARIANTS §Cash custody requires Payment = CashMovement = GL
+   * cash. This half must hold at EVERY instant: it compares what the system
+   * recorded against itself. The second half — bank/mobile-money settlement —
+   * legitimately lags and is reported separately, so a timing difference is
+   * never mistaken for an accounting defect.
+   */
+  async reconcileOperationalCash(): Promise<{
+    byMethod: Array<{ paymentMethod: string; payments: number; cashMovements: number; variance: number }>;
+    variance: number;
+  }> {
+    const organizationId = this.tenant.organizationId;
+
+    const payments = await this.prisma.client.payment.groupBy({
+      by: ['paymentMethod'],
+      where: { organizationId, direction: 'inbound', status: 'posted' },
+      _sum: { amount: true },
+    });
+
+    // Only cash-drawer methods produce a CashMovement; a bank transfer has no
+    // till movement, so comparing it against one would manufacture a variance.
+    const movements = await this.prisma.raw.$queryRawUnsafe<Array<{ paymentMethod: string; total: unknown }>>(
+      `SELECT p."paymentMethod" AS "paymentMethod", COALESCE(SUM(cm."amount"), 0) AS "total"
+         FROM "CashMovement" cm
+         JOIN "Payment" p ON p."id" = cm."paymentId"
+        WHERE cm."organizationId" = $1 AND p."direction" = 'inbound'
+        GROUP BY p."paymentMethod"`,
+      organizationId,
+    );
+    const movementByMethod = new Map(movements.map((m) => [m.paymentMethod, Number(m.total ?? 0)]));
+
+    const byMethod = payments
+      .filter((p) => movementByMethod.has(p.paymentMethod))
+      .map((p) => {
+        const paid = Number(p._sum.amount ?? 0);
+        const moved = movementByMethod.get(p.paymentMethod) ?? 0;
+        return {
+          paymentMethod: p.paymentMethod,
+          payments: paid,
+          cashMovements: moved,
+          variance: Number((paid - moved).toFixed(2)),
+        };
+      });
+
+    return {
+      byMethod,
+      variance: Number(byMethod.reduce((t, m) => t + m.variance, 0).toFixed(2)),
+    };
+  }
+
+  /**
    * Credit-liability reconciliation (A6): outstanding FeeCredit vs the GL
    * Fee-Credit Liability account.
    */
@@ -427,17 +653,44 @@ export class SchoolFinanceQueryService {
     return { invoice: inv, document: doc };
   }
 
-  /** Canonical refundable entitlement for a partner (A2.1). Reused by refunds. */
-  async refundableAmount(partnerId: string, studentProfileId: string): Promise<number> {
+  /**
+   * Canonical refundable entitlement, BROKEN DOWN by funding source (A2.1).
+   *
+   * The split matters because the two halves settle differently. Unallocated
+   * inbound cash is refunded by simply paying it back — the original receipt
+   * posted Dr Cash / Cr AR, and the refund's Dr AR / Cr Cash reverses it. A
+   * FeeCredit is a LIABILITY (posted Dr AR / Cr Fee-Credit Liability), so
+   * paying it out must also draw the liability down and mark the credit spent;
+   * omitting that let the same credit be refunded repeatedly and still applied
+   * to invoices (P0-C).
+   *
+   * `credits` is ordered oldest-first — the order a drawdown consumes them in.
+   */
+  async refundableBreakdown(
+    partnerId: string,
+    studentProfileId: string,
+  ): Promise<{
+    fromPayments: number;
+    fromCredits: number;
+    total: number;
+    credits: Array<{ id: string; code: string; source: string; remaining: number }>;
+  }> {
     const organizationId = this.tenant.organizationId;
-    const [inboundAgg, refundedAgg, convertedAgg, creditAgg] = await Promise.all([
+    const [inboundAgg, refundedAgg, convertedAgg, credits] = await Promise.all([
       this.prisma.client.payment.aggregate({
         where: { organizationId, partnerId, direction: 'inbound' },
         _sum: { unallocatedAmount: true },
       }),
-      // outbound refunds already paid
+      // Outbound refunds already paid. Scoped to fee-sourced refunds (P2-F):
+      // an unrelated outbound payment on this partner is not a fee refund and
+      // must not shrink the student's fee entitlement.
       this.prisma.client.payment.aggregate({
-        where: { organizationId, partnerId, direction: 'outbound' },
+        where: {
+          organizationId,
+          partnerId,
+          direction: 'outbound',
+          allocations: { some: { document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } } } },
+        },
         _sum: { amount: true },
       }),
       // overpayment already converted into a credit (counted once — P1-3)
@@ -445,28 +698,48 @@ export class SchoolFinanceQueryService {
         where: { organizationId, studentProfileId, source: 'overpayment' },
         _sum: { amount: true },
       }),
-      // refundable outstanding credits
+      // Refundable outstanding credits, oldest-first.
+      //
+      // `opening_balance` is excluded unconditionally: it is a migration
+      // artifact representing a balance the school carried forward, not money
+      // a payer ever handed over, so it must never be paid out as cash however
+      // its isRefundable flag happens to be set.
       this.prisma.client.feeCredit.findMany({
         where: {
           organizationId,
           studentProfileId,
           isRefundable: true,
           status: { in: ['active', 'partially_applied'] },
+          source: { not: 'opening_balance' },
+          remaining: { gt: 0 },
         },
-        select: { remaining: true },
+        select: { id: true, code: true, source: true, remaining: true },
+        orderBy: { createdAt: 'asc' },
       }),
     ]);
 
     const unallocated = Number(inboundAgg._sum.unallocatedAmount ?? 0);
     const alreadyRefunded = Number(refundedAgg._sum.amount ?? 0);
     const converted = Number(convertedAgg._sum.amount ?? 0);
-    const refundableCredits = creditAgg.reduce((s, c) => s + Number(c.remaining), 0);
+    const fromCredits = credits.reduce((s, c) => s + Number(c.remaining), 0);
 
     // Unallocated payment value, minus what has already left as refunds, minus
     // the portion already re-represented as a FeeCredit (entitlement
     // uniqueness), PLUS refundable outstanding credits.
     const fromPayments = Math.max(0, unallocated - alreadyRefunded - converted);
-    return Number(dec(fromPayments).plus(refundableCredits).toFixed(6));
+
+    return {
+      fromPayments: Number(dec(fromPayments).toFixed(6)),
+      fromCredits: Number(dec(fromCredits).toFixed(6)),
+      total: Number(dec(fromPayments).plus(fromCredits).toFixed(6)),
+      credits: credits.map((c) => ({ ...c, remaining: Number(c.remaining) })),
+    };
+  }
+
+  /** Canonical refundable entitlement for a partner (A2.1). Reused by refunds. */
+  async refundableAmount(partnerId: string, studentProfileId: string): Promise<number> {
+    const { total } = await this.refundableBreakdown(partnerId, studentProfileId);
+    return total;
   }
 
   /** Constants re-exported for callers that filter documents themselves. */

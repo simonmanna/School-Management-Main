@@ -129,6 +129,12 @@ enum AuditAction {
   restore
   // Beverage Control — a bottle weighing/measurement event.
   measure
+  // Fees hardening (2026-08-24): reversal state machines. §Immutability
+  // corrects a posted record only by compensating reversal, never by editing
+  // it in place — so "reversed" and "reallocated" are distinct audited events,
+  // not variants of 'update'. See allocation-reversal.service.ts.
+  reverse
+  reallocate
 }
 
 enum TaskType {
@@ -2975,7 +2981,16 @@ model Payment {
   amount            Decimal          @default(0) @db.Decimal(20, 6)
   allocatedAmount   Decimal          @default(0) @db.Decimal(20, 6)
   unallocatedAmount Decimal          @default(0) @db.Decimal(20, 6)
+  /// Free-text narration. A bursar may legitimately type the same value on
+  /// every receipt ("CASH"), so this is NEVER constrained — see externalReference.
   reference         String?
+  /// Machine-issued idempotency key: MoMo/bank/card transaction id, or an
+  /// import row reference. Unique per (org, type, value, direction) — the
+  /// database guarantee FINANCIAL_INVARIANTS §Idempotency requires, which an
+  /// application existence check under READ COMMITTED cannot provide (P0-B).
+  externalReference     String?
+  /// mobile_money_txn | bank_txn | card_txn | import_row
+  externalReferenceType String?
   status            DocumentStatus   @default(posted)
   /// Phase F: branch this payment was made at.
   branchId          String?
@@ -2990,9 +3005,11 @@ model Payment {
   cashMovements CashMovement[]
 
   @@unique([organizationId, paymentNumber])
+  @@unique([organizationId, externalReferenceType, externalReference, direction])
   @@index([organizationId])
   @@index([organizationId, partnerId])
   @@index([organizationId, branchId])
+  @@index([organizationId, externalReference])
 }
 
 model PaymentAllocation {
@@ -3004,16 +3021,42 @@ model PaymentAllocation {
   documentId     String?
   invoiceId      String?
   amount         Decimal  @default(0) @db.Decimal(20, 6)
+  /// Cached projection of whether a PaymentAllocationReversal row exists:
+  /// posted | reversed. The reversal ROW is authoritative — exactly as
+  /// FeeCredit.remaining projects FeeCreditAllocation (ADR-013).
+  status         String   @default("posted")
   createdAt      DateTime @default(now())
 
   payment  Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   document Document? @relation(fields: [documentId], references: [id])
   invoice  Invoice?  @relation(fields: [invoiceId], references: [id])
+  reversal PaymentAllocationReversal?
 
   @@index([organizationId])
   @@index([paymentId])
   @@index([documentId])
   @@index([invoiceId])
+  @@index([organizationId, status])
+}
+
+/// A reversal is a NEW economic event, never an edit of the original allocation
+/// (FINANCIAL_INVARIANTS §Immutability). Reallocation = reverse then re-create.
+/// Unique on paymentAllocationId: reversing twice would restore AR twice.
+model PaymentAllocationReversal {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  paymentAllocationId String   @unique
+  amount              Decimal  @db.Decimal(20, 6)
+  reason              String
+  journalEntryId      String?
+  reversedById        String?
+  approvedById        String?
+  reversedAt          DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  allocation PaymentAllocation @relation(fields: [paymentAllocationId], references: [id])
+
+  @@index([organizationId])
 }
 
 // =============================================================================

@@ -10,7 +10,9 @@ import { AccountDeterminationService } from '../../accounting/posting/account-de
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { EVENTS } from '@erp/shared';
 import { dec, round, ZERO } from '../../../kernel/common/money';
-import { ACTIVE_FEE_STATUSES, OPEN_FEE_WHERE, POSTED_FEE_WHERE, SCHOOL_FEE_SOURCE_TYPES } from './fee-document.constants';
+import { ACTIVE_FEE_STATUSES, OPEN_FEE_WHERE, SCHOOL_FEE_SOURCE_TYPES } from './fee-document.constants';
+import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { FinanceControlsService } from './finance-controls.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -40,6 +42,9 @@ export class AdvancedFinanceService {
     private readonly posting: PostingService,
     private readonly accounts: AccountDeterminationService,
     private readonly resolver: AccountResolverService,
+    private readonly finance: SchoolFinanceQueryService,
+    // P1-B: period control on every document a waiver or credit touches.
+    private readonly controls: FinanceControlsService,
   ) {}
 
   /* ───────────────────────── Sponsorship ───────────────────────── */
@@ -60,6 +65,46 @@ export class AdvancedFinanceService {
     if (!sponsor) throw new NotFoundException(`Sponsor ${dto.sponsorId} not found`);
     const student = await this.prisma.client.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
     if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+
+    // P1-I · the cap. `capAmount` was written and read by nothing, so a sponsor
+    // capped at 500,000 could have 800,000 attributed to them.
+    //
+    // Being straight about what is and is not enforced here: a stored zero or
+    // negative cap is rejected, and overlapping live sponsorships for the same
+    // sponsor+student are rejected — both are integrity rules this layer CAN
+    // uphold. Enforcing the cap against actual consumption is not possible
+    // yet, because nothing collects money from a sponsor: payments land on the
+    // student's AR, so no query can say how much of a student's balance a
+    // sponsor settled. That is why sponsorship is gated off at the controller
+    // (Phase 5) rather than shipped with a cap that silently does nothing.
+    if (dto.capAmount != null && dec(dto.capAmount).lessThanOrEqualTo(ZERO)) {
+      throw new BadRequestException(
+        'A sponsorship cap must be positive. Omit capAmount for an uncapped sponsorship.',
+      );
+    }
+    const validFrom = new Date(dto.validFrom);
+    const validTo = dto.validTo ? new Date(dto.validTo) : null;
+    if (validTo && validTo <= validFrom) {
+      throw new BadRequestException('validTo must be after validFrom.');
+    }
+    const overlapping = await this.prisma.client.sponsorship.findFirst({
+      where: {
+        organizationId,
+        sponsorId: dto.sponsorId,
+        studentProfileId: dto.studentProfileId,
+        isActive: true,
+        AND: [
+          { OR: [{ validTo: null }, { validTo: { gte: validFrom } }] },
+          ...(validTo ? [{ validFrom: { lte: validTo } }] : []),
+        ],
+      },
+    });
+    if (overlapping) {
+      throw new BadRequestException(
+        `${sponsor.name} already sponsors this student over an overlapping period (${overlapping.code}). ` +
+          'Two live sponsorships would make each cap unenforceable against the other.',
+      );
+    }
 
     const row = await this.prisma.client.sponsorship.create({
       data: {
@@ -94,6 +139,28 @@ export class AdvancedFinanceService {
     });
   }
 
+  /**
+   * Sponsor statement — every figure reported as its own event class.
+   *
+   * P0-D: this used to derive `totalPaid = totalBilled - totalBalance`.
+   * `totalBalance` is the sum of `amountResidual`, which waivers, credit
+   * applications and credit adjustments all reduce — so every forgiven shilling
+   * was reported to a third party as money they had paid. That is the P0-3
+   * defect the rest of this module was remediated to remove, surviving in the
+   * one method the remediation did not reach (FINANCIAL_INVARIANTS §Terminology:
+   * amountPaid EXCLUDES waivers, credits, write-offs and adjustments).
+   *
+   * There is now no derived "paid" figure anywhere. Each student's numbers come
+   * from `SchoolFinanceQueryService.studentBalance`, the one canonical
+   * calculation, where `collected` is SUM(PaymentAllocation).
+   *
+   * `paidBySponsor` vs `paidByOthers`: a sponsorship does not currently create a
+   * distinct payer — collections land on the STUDENT's AR — so the split cannot
+   * be derived from the subledger and every collection is reported under
+   * `paidByOthers`. That is honest rather than convenient, and it is one of the
+   * reasons sponsorship is not production-ready (see the audit's Deferred
+   * section: a sponsor must become a real payer with its own receivable).
+   */
   async sponsorStatement(sponsorId: string) {
     const organizationId = this.tenant.organizationId;
     const sponsor = await this.prisma.client.partner.findFirst({ where: { id: sponsorId } });
@@ -103,42 +170,53 @@ export class AdvancedFinanceService {
       where: { organizationId, sponsorId, isActive: true },
       include: { studentProfile: true },
     });
-    const studentIds = sponsorships.map((s) => s.studentProfileId);
-    if (studentIds.length === 0) {
-      return { sponsorId, sponsorName: sponsor.name, students: [], totalBilled: 0, totalPaid: 0, totalBalance: 0, totalWaived: 0 };
-    }
-    const partnerIds = await this.prisma.client.studentProfile.findMany({
-      where: { id: { in: studentIds } },
-      select: { id: true, partnerId: true },
-    });
-    const partnerIdSet = [...new Set(partnerIds.map((p) => p.partnerId))];
 
-    // P0-7: financially-active documents only. Without the status filter a
-    // draft or cancelled invoice inflated the sponsor's billed total.
-    const invoices = await this.prisma.client.document.findMany({
-      where: { ...POSTED_FEE_WHERE, organizationId, partnerId: { in: partnerIdSet } },
-      select: { id: true, partnerId: true, totalAmount: true, amountResidual: true },
-    });
-    const waivers = await this.prisma.client.waiver.findMany({
-      where: { organizationId, studentProfileId: { in: studentIds }, applied: true },
-      select: { amount: true },
-    });
+    const empty = {
+      sponsorId,
+      sponsorName: sponsor.name,
+      students: [] as any[],
+      totalBilled: 0,
+      paidBySponsor: 0,
+      paidByOthers: 0,
+      totalWaived: 0,
+      totalCredited: 0,
+      totalAdjusted: 0,
+      totalOutstanding: 0,
+    };
+    if (sponsorships.length === 0) return empty;
 
-    const totalBilled = invoices.reduce((s, d) => s + Number(d.totalAmount), 0);
-    const totalBalance = invoices.reduce((s, d) => s + Number(d.amountResidual), 0);
-    const totalWaived = waivers.reduce((s, w) => s + Number(w.amount), 0);
+    const rows = await Promise.all(
+      sponsorships.map(async (sp) => {
+        const b = await this.finance.studentBalance(sp.studentProfileId);
+        return {
+          studentProfileId: sp.studentProfileId,
+          studentName: (sp.studentProfile as any)?.partner?.name ?? sp.studentProfileId,
+          sponsorshipCode: sp.code,
+          capAmount: sp.capAmount != null ? Number(sp.capAmount) : null,
+          billed: b.billed,
+          paidBySponsor: 0,
+          paidByOthers: b.collected,
+          waived: b.waived,
+          credited: b.credited,
+          adjusted: b.adjusted,
+          outstanding: b.balance,
+        };
+      }),
+    );
+
+    const sum = (k: keyof (typeof rows)[number]) => rows.reduce((t, r) => t + Number(r[k] ?? 0), 0);
 
     return {
       sponsorId,
       sponsorName: sponsor.name,
-      students: sponsorships.map((sp) => ({
-        studentProfileId: sp.studentProfileId,
-        studentName: (sp.studentProfile as any)?.partner?.name ?? sp.studentProfileId,
-      })),
-      totalBilled,
-      totalPaid: totalBilled - totalBalance,
-      totalBalance,
-      totalWaived,
+      students: rows,
+      totalBilled: sum('billed'),
+      paidBySponsor: sum('paidBySponsor'),
+      paidByOthers: sum('paidByOthers'),
+      totalWaived: sum('waived'),
+      totalCredited: sum('credited'),
+      totalAdjusted: sum('adjusted'),
+      totalOutstanding: sum('outstanding'),
     };
   }
 
@@ -294,6 +372,10 @@ export class AdvancedFinanceService {
         remaining = remaining.minus(take);
         settled.push(doc.id);
       }
+
+      // P1-B: a waiver forgives receivable on these documents, so their terms
+      // must be open (FINANCIAL_INVARIANTS §Period control).
+      await this.controls.assertDocumentsPeriodOpen(settled, tx);
 
       const appliedAmount = round(dec(waiver.amount), 6).minus(remaining);
 
@@ -466,8 +548,18 @@ export class AdvancedFinanceService {
     if (!student) throw new NotFoundException(`Student ${studentProfileId} not found`);
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      // P1-E: an EXPIRED credit is not spendable. `expiresAt` existed on the
+      // model and was read by nothing, so a lapsed credit kept settling
+      // invoices indefinitely.
+      const now = new Date();
       const credits = await tx.feeCredit.findMany({
-        where: { organizationId, studentProfileId, isActive: true, remaining: { gt: 0 } },
+        where: {
+          organizationId,
+          studentProfileId,
+          isActive: true,
+          remaining: { gt: 0 },
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
         orderBy: { createdAt: 'asc' },
       });
       const docs = await tx.document.findMany({
@@ -482,19 +574,29 @@ export class AdvancedFinanceService {
       );
       const arAccount = await this.accounts.receivableAccount(null, tx);
 
-      // Running balances as plain numbers (credit drawdown is not sub-cent
-      // sensitive). Each credit's new `remaining` is persisted at the end.
+      // P1-D: running balances in Decimal, not JS floats.
+      //
+      // This used to carry a comment claiming "credit drawdown is not sub-cent
+      // sensitive" and run on `Number` / `Math.min` — a self-granted exemption
+      // from FINANCIAL_INVARIANTS §Money precision, twenty lines from
+      // `applyWaiver`, which does the same arithmetic in Decimal correctly.
+      // Percentage-derived credits produce fractions that float math silently
+      // drifts on, and the drift lands in the AR subledger.
       let creditIdx = 0;
-      let creditRemaining = credits.length ? Number(credits[0].remaining) : 0;
-      let totalApplied = 0;
-      const usedByCredit = new Map<string, number>();
+      let creditRemaining = credits.length ? dec(credits[0].remaining) : ZERO;
+      let totalApplied = ZERO;
+      const usedByCredit = new Map<string, Prisma.Decimal>();
+      // P1-B: the documents this drawdown settles, checked for period control
+      // before anything is persisted.
+      const settledDocIds: string[] = [];
 
       for (const doc of docs) {
-        if (creditIdx >= credits.length || creditRemaining <= 0) break;
-        const residual = Number(doc.amountResidual);
-        if (residual <= 0) continue;
-        const take = Math.min(creditRemaining, residual);
-        const newResidual = residual - take;
+        if (creditIdx >= credits.length || creditRemaining.lessThanOrEqualTo(ZERO)) break;
+        const residual = dec(doc.amountResidual);
+        if (residual.lessThanOrEqualTo(ZERO)) continue;
+        const take = Prisma.Decimal.min(creditRemaining, residual);
+        const newResidual = residual.minus(take);
+        settledDocIds.push(doc.id);
         await tx.document.update({
           where: { id: doc.id },
           data: {
@@ -504,7 +606,7 @@ export class AdvancedFinanceService {
             // reported collections exactly as a waiver did. The credit
             // subledger (FeeCreditAllocation, A2) becomes the record of what
             // was applied; amountPaid stays reserved for realized payment.
-            paymentStatus: newResidual <= 0 ? 'paid' : 'partial',
+            paymentStatus: newResidual.lessThanOrEqualTo(ZERO) ? 'paid' : 'partial',
           },
         });
         // GL: Dr Fee-Credit Liability / Cr AR (drawdown).
@@ -535,28 +637,31 @@ export class AdvancedFinanceService {
             status: 'posted',
           },
         });
-        creditRemaining -= take;
-        totalApplied += take;
-        usedByCredit.set(cid, (usedByCredit.get(cid) ?? 0) + take);
-        if (creditRemaining <= 0) {
+        creditRemaining = creditRemaining.minus(take);
+        totalApplied = totalApplied.plus(take);
+        usedByCredit.set(cid, (usedByCredit.get(cid) ?? ZERO).plus(take));
+        if (creditRemaining.lessThanOrEqualTo(ZERO)) {
           creditIdx++;
-          if (creditIdx < credits.length) creditRemaining = Number(credits[creditIdx].remaining);
+          if (creditIdx < credits.length) creditRemaining = dec(credits[creditIdx].remaining);
         }
       }
+
+      // P1-B: a credit drawdown settles receivable on these documents.
+      await this.controls.assertDocumentsPeriodOpen(settledDocIds, tx);
 
       // Persist drawn-down balances + lifecycle status (A2). remaining stays a
       // derived cache; status reflects how much of the credit is spent.
       for (const [id, used] of usedByCredit) {
         const credit = credits.find((c: any) => c.id === id)!;
-        const newRemaining = Number(credit.remaining) - used;
-        const status = newRemaining <= 0 ? 'fully_applied' : 'partially_applied';
+        const newRemaining = dec(credit.remaining).minus(used);
+        const status = newRemaining.lessThanOrEqualTo(ZERO) ? 'fully_applied' : 'partially_applied';
         await tx.feeCredit.update({
           where: { id },
-          data: { remaining: newRemaining, isActive: newRemaining > 0, status },
+          data: { remaining: newRemaining, isActive: newRemaining.greaterThan(ZERO), status },
         });
       }
 
-      if (totalApplied > 0) {
+      if (totalApplied.greaterThan(ZERO)) {
         this.events.publish(EVENTS.SchoolFeeCreditApplied, {
           organizationId,
           studentProfileId,

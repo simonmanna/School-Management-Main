@@ -26,6 +26,8 @@ function makeService(overrides: Record<string, unknown> = {}) {
       discount: { findMany: jest.fn().mockResolvedValue([]) },
       studentOptionalFee: { findMany: jest.fn().mockResolvedValue([]) },
       schoolFeeInvoice: { create: jest.fn() },
+      // P1-A: the batched run prices from the published version's FeeItem rows.
+      feeItem: { findMany: jest.fn().mockResolvedValue([]) },
       product: { findMany: jest.fn().mockResolvedValue([]) },
       organization: { findFirst: jest.fn() },
       $transaction: jest.fn(),
@@ -117,9 +119,29 @@ describe('BillingService — optional fee gating', () => {
       {
         id: 'sch1',
         dueDate: new Date(),
-        feeStructure: { id: 'fs1', academicYearId: 'ay1', applicableTo: {}, components: [TUITION, SWIMMING] },
+        feeStructure: {
+          id: 'fs1',
+          name: 'Standard',
+          academicYearId: 'ay1',
+          applicableTo: {},
+          // P1-A: published with a frozen version — billing reads the version's
+          // FeeItem rows below, not these components.
+          status: 'published',
+          currentVersionId: 'fsv1',
+          components: [TUITION, SWIMMING],
+        },
       },
     ]);
+    prisma.client.feeItem.findMany.mockResolvedValue(
+      [TUITION, SWIMMING].map((c) => ({
+        feeStructureVersionId: 'fsv1',
+        code: c.code,
+        name: c.name,
+        productId: null,
+        amount: c.amount,
+        isOptional: c.isOptional,
+      })),
+    );
     prisma.client.studentOptionalFee.findMany.mockResolvedValue([
       { studentProfileId: 's1', feeCategoryId: 'cat_swim', amount: 90000, feeCategory: { code: 'SWIMMING' } },
     ]);

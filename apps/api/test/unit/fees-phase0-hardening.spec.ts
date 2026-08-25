@@ -63,8 +63,31 @@ function makeCollectService(openInvoices: any[] = []) {
   };
   const prisma = { client: { $transaction: jest.fn(async (cb: any) => cb(tx)) } };
   const payments = { createReceipt: jest.fn().mockResolvedValue({ id: 'pay_1' }) };
-  const finance = { refundableAmount: jest.fn().mockResolvedValue(0) };
-  const service = new SchoolPaymentService(prisma as any, tenant as any, events as any, payments as any, finance as any);
+  const finance = {
+    refundableAmount: jest.fn().mockResolvedValue(0),
+    refundableBreakdown: jest.fn().mockResolvedValue({ fromPayments: 0, fromCredits: 0, total: 0, credits: [] }),
+  };
+  // Posting collaborators are used only by the credit-funded half of a refund
+  // (P0-C); collect never reaches them.
+  const posting = { post: jest.fn() };
+  const accounts = { receivableAccount: jest.fn() };
+  const resolver = { ensureByCode: jest.fn() };
+  // P1-B: period control. Open by default; a closed-term test overrides it.
+  const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
+  // P1-C: only reached by the allocatedPaymentId refund mode.
+  const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
+  const service = new SchoolPaymentService(
+    prisma as any,
+    tenant as any,
+    events as any,
+    payments as any,
+    finance as any,
+    posting as any,
+    accounts as any,
+    resolver as any,
+    controls as any,
+    reversals as any,
+  );
   return { service, documentFindMany };
 }
 
@@ -102,6 +125,7 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
   const tenant = { organizationId: 'org_test' };
   const events = { publish: jest.fn() };
   const createCustomerRefund = jest.fn().mockResolvedValue({ id: 'refund_1' });
+  const feeCreditUpdate = jest.fn().mockResolvedValue({});
   const tx = {
     studentProfile: {
       findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }),
@@ -116,17 +140,48 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
       aggregate: jest.fn().mockResolvedValue({
         _sum: { remaining: new Prisma.Decimal(opts.creditRemaining) },
       }),
+      // P0-C: the drawdown the refund now performs on a credit it spends.
+      update: feeCreditUpdate,
     },
   };
   const prisma = { client: { $transaction: jest.fn(async (cb: any) => cb(tx)) } };
   const payments = { createCustomerRefund };
-  // A2.1: the canonical entitlement now lives in the query service. Mirror the
-  // MAX-of-the-two-pots floor the tests were written against.
+  // A2.1: the canonical entitlement now lives in the query service, which
+  // returns it BROKEN DOWN by funding source (P0-C) so the refund knows which
+  // credits it is actually spending. `total` mirrors the MAX-of-the-two-pots
+  // floor these tests were written against: the two pots can describe the same
+  // money, so summing them would authorise double the real entitlement (P1-3).
   const finance = {
     refundableAmount: jest.fn().mockResolvedValue(Math.max(opts.unallocated, opts.creditRemaining)),
+    refundableBreakdown: jest.fn().mockResolvedValue({
+      fromPayments: opts.unallocated,
+      fromCredits: opts.creditRemaining,
+      total: Math.max(opts.unallocated, opts.creditRemaining),
+      credits: opts.creditRemaining
+        ? [{ id: 'cr_1', code: 'CR-000001', source: 'approved_adjustment', remaining: opts.creditRemaining }]
+        : [],
+    }),
   };
-  const service = new SchoolPaymentService(prisma as any, tenant as any, events as any, payments as any, finance as any);
-  return { service, createCustomerRefund };
+  const posting = { post: jest.fn().mockResolvedValue({ id: 'je_1' }) };
+  const accounts = { receivableAccount: jest.fn().mockResolvedValue('acc_ar') };
+  const resolver = { ensureByCode: jest.fn().mockResolvedValue('acc_feecr') };
+  // P1-B: period control. Open by default; a closed-term test overrides it.
+  const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
+  // P1-C: only reached by the allocatedPaymentId refund mode.
+  const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
+  const service = new SchoolPaymentService(
+    prisma as any,
+    tenant as any,
+    events as any,
+    payments as any,
+    finance as any,
+    posting as any,
+    accounts as any,
+    resolver as any,
+    controls as any,
+    reversals as any,
+  );
+  return { service, createCustomerRefund, feeCreditUpdate, posting };
 }
 
 describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
@@ -160,6 +215,46 @@ describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
     const { service, createCustomerRefund } = makeRefundService({ unallocated: 0, creditRemaining: 500_000 });
     await expect(service.refundFee(dto)).resolves.toMatchObject({ replayed: false });
     expect(createCustomerRefund).toHaveBeenCalled();
+  });
+
+  it('draws down the fee credit it pays out, and retires the liability (P0-C)', async () => {
+    // The defect: refundFee paid out against a refundable credit and touched
+    // the credit in NO way — remaining unchanged, status still 'active', the
+    // Fee-Credit Liability never debited. The same 500k could then be refunded
+    // again, and applyCredits would still spend it on the next invoice.
+    const { service, feeCreditUpdate, posting } = makeRefundService({ unallocated: 0, creditRemaining: 500_000 });
+    await service.refundFee(dto);
+
+    // Fully consumed -> terminal 'refunded', and no longer drawable.
+    expect(feeCreditUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'cr_1' },
+        data: expect.objectContaining({ status: 'refunded', isActive: false }),
+      }),
+    );
+
+    // The credit's creation posted Dr AR / Cr Fee-Credit Liability, so paying
+    // it out must retire that liability rather than debit AR a second time.
+    expect(posting.post).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceType: 'school_fee_credit_refund',
+        lines: [
+          expect.objectContaining({ accountId: 'acc_feecr', debit: '500000' }),
+          expect.objectContaining({ accountId: 'acc_ar', credit: '500000' }),
+        ],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('leaves fee credits alone when the refund is funded by unallocated cash', async () => {
+    // A plain overpayment refund reverses its own receipt (Dr AR / Cr Cash).
+    // There is no liability to retire, so neither a drawdown nor a
+    // compensating entry belongs here.
+    const { service, feeCreditUpdate, posting } = makeRefundService({ unallocated: 500_000, creditRemaining: 0 });
+    await service.refundFee(dto);
+    expect(feeCreditUpdate).not.toHaveBeenCalled();
+    expect(posting.post).not.toHaveBeenCalled();
   });
 
   it('never treats an overpayment and the credit it funded as two pots (P1-3)', async () => {

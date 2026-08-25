@@ -9,6 +9,7 @@ import { OPEN_FEE_WHERE, POSTED_FEE_WHERE } from './fee-document.constants';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
+import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { PaymentService } from '../../invoicing/payment/payment.service';
 // DmsTypeResolver comes from the @Global DocumentsModule, which documents its
 // vertical injectors (invoicing, recurring, rental, school) explicitly — no
@@ -17,6 +18,7 @@ import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { FinanceControlsService } from './finance-controls.service';
+import { PaymentAllocationReversalService } from './allocation-reversal.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 
 /**
@@ -59,10 +61,20 @@ export class BillingService {
    *  1. Application-level check: look for an existing Document
    *     matching (org, sourceType='school_fee', sourceId=scheduleId,
    *     reference='TERM-<termId>') before creating.
-   *  2. Database-level unique constraint: @@unique on the same
-   *     tuple. If two concurrent bursars click "Generate" at the
-   *     same instant, the second one gets a P2002 unique-violation
-   *     that we catch and treat as "already exists".
+   *  2. Database-level unique constraint on
+   *     (organizationId, partnerId, sourceType, sourceId, reference)
+   *     — one charge per STUDENT per schedule per term. If two
+   *     concurrent bursars click "Generate" at the same instant, the
+   *     second gets a P2002 unique-violation that we catch and treat
+   *     as "already exists".
+   *
+   *     This comment previously described this constraint as existing.
+   *     It did not: no migration created it, so layer 2 was fiction and
+   *     layer 1 (a findFirst under READ COMMITTED) was the only guard —
+   *     which two concurrent transactions both pass. Created by
+   *     20260824120000_fees_integrity_constraints. `partnerId` is
+   *     load-bearing: without it the key would permit only ONE invoice
+   *     per schedule for the entire school.
    *  3. Atomic: the read + create run inside a single $transaction
    *     so a row inserted between the read and the create (from a
    *     different process) is visible to the create's write.
@@ -124,6 +136,22 @@ export class BillingService {
       scholarshipsByStudent.set(sc.studentProfileId, arr);
     }
 
+    // P1-A: load every published version's priced items ONCE, so pricing every
+    // student from the immutable version costs one query for the whole run
+    // rather than one per student.
+    const versionIds = [...new Set(schedules.map((sch) => sch.feeStructure.currentVersionId).filter((v): v is string => !!v))];
+    const itemsByVersion = new Map<string, FeeComponent[]>();
+    if (versionIds.length) {
+      const items = await this.prisma.client.feeItem.findMany({
+        where: { feeStructureVersionId: { in: versionIds } },
+      });
+      for (const i of items) {
+        const arr = itemsByVersion.get(i.feeStructureVersionId) ?? [];
+        arr.push(this.itemToComponent(i));
+        itemsByVersion.set(i.feeStructureVersionId, arr);
+      }
+    }
+
     const created: any[] = [];
     const skipped: any[] = [];
     const failed: any[] = [];
@@ -135,7 +163,14 @@ export class BillingService {
       if (!schedule) continue;
 
       const feeStructure = schedule.feeStructure;
-      const components = (feeStructure.components as unknown as FeeComponent[]) ?? [];
+      const priced = await this.pricedComponents(feeStructure as any, itemsByVersion);
+      if (priced.components === null) {
+        // P1-G: a structure that cannot be priced from an immutable version is
+        // reported, never billed from its mutable JSON instead.
+        skipped.push({ studentProfileId: s.id, reason: 'unpriceable_structure', detail: priced.reason });
+        continue;
+      }
+      const components = priced.components;
       const customDiscount = (assignByStudent.get(s.id)?.customDiscount ?? {}) as Record<string, number>;
       const studentScholarships = scholarshipsByStudent.get(s.id) ?? [];
 
@@ -188,6 +223,68 @@ export class BillingService {
     }
 
     return { count: created.length, documents: created, skipped, failed };
+  }
+
+  /**
+   * P1-A · pricing provenance. Load the priced components an invoice must be
+   * billed from: the immutable `FeeItem` rows of the structure's published
+   * `FeeStructureVersion` — never the mutable `FeeStructure.components` JSON.
+   *
+   * Billing used to read that JSON directly, which meant editing a published
+   * structure silently changed what the next run charged, with no version bump
+   * and no provenance. `FeeStructureVersion` and `FeeItem` were written by
+   * `catalog.publish()` and read by nothing at all.
+   *
+   * FINANCIAL_INVARIANTS §Pricing provenance:
+   *     FeeStructure → published FeeStructureVersion → FeeItem → billing → DocumentLine
+   *
+   * Returns null when the structure cannot be priced immutably — an unpublished
+   * structure, or a published one with no version. The caller records that as a
+   * typed `skipped` reason rather than quietly falling back to mutable pricing
+   * (P1-G): billing from a draft is exactly the failure this closes.
+   */
+  private async pricedComponents(
+    feeStructure: { id: string; name: string; status: string; currentVersionId: string | null },
+    itemsByVersion?: Map<string, FeeComponent[]>,
+  ): Promise<{ components: FeeComponent[]; versionId: string } | { components: null; reason: string }> {
+    if (feeStructure.status !== 'published') {
+      return { components: null, reason: `fee structure "${feeStructure.name}" is ${feeStructure.status}, not published` };
+    }
+    if (!feeStructure.currentVersionId) {
+      return {
+        components: null,
+        reason: `fee structure "${feeStructure.name}" has no published version — publish it before billing`,
+      };
+    }
+
+    const cached = itemsByVersion?.get(feeStructure.currentVersionId);
+    const items =
+      cached ??
+      (await this.prisma.client.feeItem.findMany({
+        where: { feeStructureVersionId: feeStructure.currentVersionId },
+      })).map((i) => this.itemToComponent(i));
+
+    if (items.length === 0) {
+      return { components: null, reason: `published version of "${feeStructure.name}" has no fee items` };
+    }
+    return { components: items, versionId: feeStructure.currentVersionId };
+  }
+
+  /** A priced FeeItem, in the shape the line calculator already understands. */
+  private itemToComponent(item: {
+    code: string;
+    name: string;
+    productId: string | null;
+    amount: unknown;
+    isOptional: boolean;
+  }): FeeComponent {
+    return {
+      code: item.code,
+      name: item.name,
+      productId: item.productId ?? undefined,
+      amount: Number(item.amount),
+      isOptional: item.isOptional,
+    };
   }
 
   /**
@@ -310,7 +407,14 @@ export class BillingService {
   async billSingleStudent(
     studentProfileId: string,
     termId: string,
-  ): Promise<{ status: 'posted' | 'skipped'; documentId?: string; schoolFeeInvoiceId?: string; amount?: string }> {
+  ): Promise<{
+    status: 'posted' | 'skipped';
+    documentId?: string;
+    schoolFeeInvoiceId?: string;
+    amount?: string;
+    /** Why the student was skipped — e.g. a structure with no published version (P1-G). */
+    reason?: string;
+  }> {
     const organizationId = this.tenant.organizationId;
     const s = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId, status: 'active' },
@@ -328,7 +432,10 @@ export class BillingService {
     if (!schedule) return { status: 'skipped' };
 
     const feeStructure = schedule.feeStructure;
-    const components = (feeStructure.components as unknown as FeeComponent[]) ?? [];
+    // P1-A: priced from the immutable published version, same as the bulk run.
+    const priced = await this.pricedComponents(feeStructure as any);
+    if (priced.components === null) return { status: 'skipped', reason: priced.reason };
+    const components = priced.components;
     const [assignment, studentScholarships, discounts, optionalFees] = await Promise.all([
       this.prisma.client.studentFeeAssignment.findFirst({ where: { organizationId, termId, studentProfileId } }),
       this.prisma.client.scholarship.findMany({
@@ -470,6 +577,11 @@ export class BillingService {
               termId: dto.termId,
               classId: s.currentClassId ?? null,
               sectionId: s.currentSectionId ?? null,
+              // P0-A: the pricing version this invoice was billed from. Without
+              // it the business-key unique index above is INERT — Postgres
+              // treats NULLs as distinct, so every row's key was unique by
+              // virtue of being unknown and concurrent runs could both insert.
+              feeStructureVersionId: feeStructure.currentVersionId ?? null,
               status: 'issued',
               issueDate,
               dueDate: schedule.dueDate ? new Date(schedule.dueDate) : null,
@@ -540,6 +652,13 @@ export class BillingService {
 
       const schedule = await tx.feeSchedule.findFirst({ where: { id: scheduleId } });
       if (!schedule) throw new NotFoundException(`FeeSchedule ${scheduleId} not found`);
+
+      // P1-B: a penalty is a NEW CHARGE against the schedule's term (ADR-013),
+      // so it must not post into a closed one. The gate lives here rather than
+      // in the cron worker so a manually triggered run is covered too — and the
+      // daily cron would otherwise keep assessing penalties against terms the
+      // bursar had already closed and reconciled.
+      await this.controls.assertTermOpen(schedule.termId);
 
       const due = new Date(schedule.dueDate);
       const cutoff = new Date(due);
@@ -746,6 +865,15 @@ export class SchoolPaymentService {
     private readonly events: EventBus,
     private readonly payments: PaymentService,
     private readonly finance: SchoolFinanceQueryService,
+    // Needed only by the credit-funded half of a refund (P0-C), which must
+    // retire the Fee-Credit Liability the credit's creation raised.
+    private readonly posting: PostingService,
+    private readonly accounts: AccountDeterminationService,
+    private readonly resolver: AccountResolverService,
+    // P1-B: period control on every document a tender or refund touches.
+    private readonly controls: FinanceControlsService,
+    // P1-C: refunding an allocated payment composes an allocation reversal.
+    private readonly reversals: PaymentAllocationReversalService,
   ) {}
 
   /**
@@ -766,12 +894,25 @@ export class SchoolPaymentService {
       const method = dto.paymentMethod ?? 'cash';
 
       // Idempotency: mobile-money providers retry with the same external
-      // transaction id. A replayed reference returns the original receipt
-      // rather than collecting twice. Scoped to inbound receipts for this
-      // partner so an unrelated payment can't shadow it.
-      if (dto.reference) {
+      // transaction id. A replayed key returns the original receipt rather than
+      // collecting twice.
+      //
+      // P0-B: this keys on `externalReference`, NOT `reference`. The two were
+      // one free-text column, which made the guard both too strict and too
+      // loose — a bursar typing "CASH" on a second receipt was treated as a
+      // replay, while the check itself was only an application `findFirst`
+      // under READ COMMITTED, so two concurrent provider callbacks both passed
+      // it. `externalReference` carries a database unique index
+      // (organizationId, type, value, direction), so the race now fails at the
+      // database and is caught below.
+      if (dto.externalReference) {
         const existing = await tx.payment.findFirst({
-          where: { organizationId, reference: dto.reference, direction: 'inbound', partnerId },
+          where: {
+            organizationId,
+            externalReference: dto.externalReference,
+            externalReferenceType: dto.externalReferenceType ?? undefined,
+            direction: 'inbound',
+          },
           include: { allocations: true },
         });
         if (existing) {
@@ -838,6 +979,12 @@ export class SchoolPaymentService {
         }
       }
 
+      // P1-B: every invoice this tender will settle must be in an OPEN term.
+      // Checking only a requested termId would let a Term-2 payment settle a
+      // Term-1 invoice after Term 1 closed (FINANCIAL_INVARIANTS §Period
+      // control). Runs inside this transaction so it cannot race a close.
+      await this.controls.assertDocumentsPeriodOpen(allocations.map((a) => a.documentId), tx);
+
       // Delegate to the single payment writer. It posts the GL leg, updates
       // each Document's residual/status, writes the CashMovement when this is a
       // cash payment on an open session (accountId omitted so that path runs),
@@ -854,6 +1001,8 @@ export class SchoolPaymentService {
           // the default account (and, for cash, keep the CashMovement path live).
           accountId: method === 'bank' ? dto.bankAccountId : undefined,
           reference: dto.reference,
+          externalReference: dto.externalReference,
+          externalReferenceType: dto.externalReferenceType,
           cashSessionId: dto.cashSessionId,
           allocations,
         },
@@ -933,10 +1082,17 @@ export class SchoolPaymentService {
       });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
 
-      // Replay guard: a prior refund with the same reference returns as-is.
-      if (dto.reference) {
+      // Replay guard: a prior refund carrying the same machine-issued key
+      // returns as-is. Keys on externalReference for the same reason collect
+      // does (P0-B) — narration is not an idempotency key.
+      if (dto.externalReference) {
         const existing = await tx.payment.findFirst({
-          where: { organizationId, reference: dto.reference, direction: 'outbound', partnerId: student.partnerId },
+          where: {
+            organizationId,
+            externalReference: dto.externalReference,
+            externalReferenceType: dto.externalReferenceType ?? undefined,
+            direction: 'outbound',
+          },
           include: { allocations: true },
         });
         if (existing) {
@@ -948,9 +1104,50 @@ export class SchoolPaymentService {
       // service so every caller shares the same definition. It subtracts the
       // portion of an overpayment already converted into a FeeCredit
       // (entitlement uniqueness, P1-3) and adds refundable outstanding credits.
-      const refundableNum = await this.finance.refundableAmount(student.partnerId, student.id);
-      const refundable = round(dec(refundableNum), 6);
-      const overpaymentCredit = refundableNum;
+      // P1-C · refunding an ALREADY-ALLOCATED payment.
+      //
+      // The entitlement covers unallocated cash and refundable credits only, so
+      // without this a parent who paid an invoice in full and was then owed
+      // money back had no path at all. Reversing the allocation first restores
+      // the invoice's receivable and returns the value to the payment's
+      // unallocated balance — which is what then funds the payout.
+      //
+      // This is a composition of two distinct events (REVERSAL then REFUND),
+      // not a third kind of refund: after this block the ordinary
+      // unallocated-cash path below runs unchanged.
+      //
+      // FINANCIAL_INVARIANTS §Outstanding AR: "A refund of an *allocated*
+      // payment increases outstanding AR."
+      const reversedAllocations: string[] = [];
+      if (dto.allocatedPaymentId) {
+        const priorAllocations = await tx.paymentAllocation.findMany({
+          where: { organizationId, paymentId: dto.allocatedPaymentId, status: 'posted' },
+          select: { id: true, documentId: true },
+        });
+        if (priorAllocations.length === 0) {
+          throw new BadRequestException(
+            `Payment ${dto.allocatedPaymentId} has no posted allocations to reverse. ` +
+              'Omit allocatedPaymentId to refund unallocated cash or a credit.',
+          );
+        }
+        // P1-B: restoring AR on these documents posts against their terms.
+        await this.controls.assertDocumentsPeriodOpen(
+          priorAllocations.map((a: any) => a.documentId).filter(Boolean),
+          tx,
+        );
+        for (const alloc of priorAllocations) {
+          await this.reversals.reverseAllocation(
+            alloc.id,
+            `Refund of allocated payment: ${dto.reference ?? 'no reference'}`,
+            tx,
+          );
+          reversedAllocations.push(alloc.id);
+        }
+      }
+
+      const breakdown = await this.finance.refundableBreakdown(student.partnerId, student.id);
+      const refundable = round(dec(breakdown.total), 6);
+      const overpaymentCredit = breakdown.total;
 
       const wanted = round(dec(dto.amount), 6);
       if (wanted.greaterThan(refundable)) {
@@ -958,6 +1155,55 @@ export class SchoolPaymentService {
           `Refund of ${wanted.toString()} exceeds this student's refundable entitlement of ` +
             `${refundable.toString()}. Record the overpayment or credit that funds this refund first.`,
         );
+      }
+
+      // P0-C: draw down the credits this refund actually spends.
+      //
+      // Unallocated cash is consumed first, because refunding it needs no
+      // credit at all. Only the remainder touches FeeCredits, oldest-first.
+      //
+      // Previously nothing here touched the credit: `remaining` stayed put,
+      // `status` stayed 'active', and the Fee-Credit Liability was never
+      // debited — so the same entitlement could be paid out again and again and
+      // ALSO applied to the next invoice. One credit, unlimited payouts
+      // (FINANCIAL_INVARIANTS §Economic-entitlement uniqueness).
+      const fromPayments = round(dec(breakdown.fromPayments), 6);
+      let creditPortion = wanted.greaterThan(fromPayments) ? wanted.minus(fromPayments) : ZERO;
+      const creditsSpent: Array<{ id: string; code: string; amount: string }> = [];
+
+      if (creditPortion.greaterThan(ZERO)) {
+        for (const credit of breakdown.credits) {
+          if (creditPortion.lessThanOrEqualTo(ZERO)) break;
+          const available = dec(credit.remaining);
+          if (available.lessThanOrEqualTo(ZERO)) continue;
+          const take = Prisma.Decimal.min(creditPortion, available);
+          const newRemaining = available.minus(take);
+
+          await tx.feeCredit.update({
+            where: { id: credit.id },
+            data: {
+              remaining: newRemaining,
+              // 'refunded' is terminal for a fully-paid-out credit; a partially
+              // refunded one stays drawable for what is left.
+              status: newRemaining.lessThanOrEqualTo(ZERO) ? 'refunded' : 'partially_applied',
+              isActive: newRemaining.greaterThan(ZERO),
+            },
+          });
+
+          creditPortion = creditPortion.minus(take);
+          creditsSpent.push({ id: credit.id, code: credit.code, amount: take.toString() });
+        }
+
+        if (creditPortion.greaterThan(ZERO)) {
+          // The entitlement said this was fundable and the credits say otherwise
+          // — a concurrent drawdown took them. Abort rather than pay out
+          // unfunded cash. An explicit throw is required: a return here would
+          // COMMIT (FINANCIAL_INVARIANTS §Atomicity).
+          throw new BadRequestException(
+            `Refund of ${wanted.toString()} is short by ${creditPortion.toString()}: the fee credits ` +
+              'funding it were drawn down concurrently. Retry.',
+          );
+        }
       }
 
       const refund: any = await this.payments.createCustomerRefund(
@@ -968,10 +1214,59 @@ export class SchoolPaymentService {
           paymentMethod: dto.paymentMethod,
           accountId: dto.paymentMethod === 'bank' ? dto.bankAccountId : undefined,
           reference: dto.reference,
+          externalReference: dto.externalReference,
+          externalReferenceType: dto.externalReferenceType,
           cashSessionId: dto.cashSessionId,
         },
         tx,
       );
+
+      // P0-C, GL half. `createCustomerRefund` posts Dr AR / Cr Cash — correct
+      // for unallocated cash, whose receipt credited AR in the first place. A
+      // credit-funded refund is different: the credit's creation posted
+      // Dr AR / Cr Fee-Credit Liability, so paying it out must retire that
+      // liability rather than debit AR a second time. This compensating leg
+      // (Dr Fee-Credit Liability / Cr AR) nets the refund's AR debit away,
+      // leaving Dr Fee-Credit Liability / Cr Cash overall.
+      //
+      // The treatment is the same for every refundable origin, because in each
+      // of them the liability represents value the payer is entitled to have
+      // back. The origin that genuinely differs is `opening_balance` — a
+      // carried-forward migration artifact, never money anyone handed over —
+      // and it is excluded from the entitlement upstream rather than posted
+      // differently here.
+      const creditFunded = creditsSpent.reduce((acc, c) => acc.plus(dec(c.amount)), dec(0));
+      if (creditFunded.greaterThan(ZERO)) {
+        const arAccount = await this.accounts.receivableAccount(null, tx);
+        const liabilityAccount = await this.resolver.ensureByCode(
+          'FEE-CR',
+          { name: 'Fee Credit Liability', categoryKey: 'current_liability', mappingKey: 'fee_credit' },
+          tx,
+        );
+        await this.posting.post(
+          {
+            journalCode: 'GEN',
+            date: new Date(),
+            description: `Fee credit refunded · ${creditsSpent.map((c) => c.code).join(', ')}`,
+            sourceType: 'school_fee_credit_refund',
+            sourceId: refund.id,
+            lines: [
+              {
+                accountId: liabilityAccount,
+                debit: creditFunded.toString(),
+                description: 'Fee credit liability retired',
+              },
+              {
+                accountId: arAccount,
+                credit: creditFunded.toString(),
+                partnerId: student.partnerId,
+                description: 'AR restored (credit refunded)',
+              },
+            ],
+          },
+          tx,
+        );
+      }
 
       this.events.publish(EVENTS.SchoolFeeRefundRecorded, {
         organizationId,
@@ -981,7 +1276,7 @@ export class SchoolPaymentService {
         overpaymentCredit: overpaymentCredit.toString(),
       });
 
-      return { payment: refund, replayed: false, overpaymentCredit };
+      return { payment: refund, replayed: false, overpaymentCredit, creditsSpent, reversedAllocations };
     });
   }
 }

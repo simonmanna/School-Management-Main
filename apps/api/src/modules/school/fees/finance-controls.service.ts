@@ -9,6 +9,7 @@ import { AccountDeterminationService } from '../../accounting/posting/account-de
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { dec, ZERO } from '../../../kernel/common/money';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { POSTED_FEE_WHERE } from './fee-document.constants';
 
 /**
  * Finance controls (A2 FeeAdjustment, A4.1 TermFinancialClose).
@@ -103,6 +104,12 @@ export class FinanceControlsService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const doc = await tx.document.findFirst({ where: { id: adj.documentId!, organizationId } });
       if (!doc) throw new NotFoundException(`Document ${adj.documentId} not found`);
+
+      // P1-B: an adjustment moves this document's residual and its GL AR leg,
+      // so the term the document belongs to must be open — regardless of when
+      // the adjustment itself was raised.
+      await this.assertDocumentsPeriodOpen([doc.id], tx);
+
       const amount = dec(adj.amount);
       const isDebit = adj.direction === 'debit';
 
@@ -201,37 +208,149 @@ export class FinanceControlsService {
     }
   }
 
+  /**
+   * P1-B · period control on every AFFECTED document, not the requested one.
+   *
+   * `assertTermOpen` checks the term a caller names. That is necessary but not
+   * sufficient: a payment taken in Term 2 can be allocated to a Term 1 invoice,
+   * a waiver can forgive a closed term's receivable, and a credit can be drawn
+   * against one — all while the request names an open term. Each of those posts
+   * into a closed period through the back door.
+   *
+   * FINANCIAL_INVARIANTS §Period control:
+   *   "A mutation validates the period of EVERY document it touches — never
+   *    only the period named in the request."
+   *
+   * Resolution runs through SchoolFeeInvoice, which carries the termId; a
+   * document with no school invoice (a penalty raised outside the invoice
+   * model, say) has no school term to close and is not blocked here — the
+   * accounting FiscalPeriod still governs its posting date.
+   *
+   * `tx` is accepted so the check runs inside the caller's transaction and
+   * cannot race a concurrent close.
+   */
+  async assertDocumentsPeriodOpen(documentIds: string[], tx?: any): Promise<void> {
+    const ids = [...new Set(documentIds.filter(Boolean))];
+    if (ids.length === 0) return;
+    const organizationId = this.tenant.organizationId;
+    const db = tx ?? this.prisma.client;
+
+    const invoices = await db.schoolFeeInvoice.findMany({
+      where: { organizationId, documentId: { in: ids } },
+      select: { termId: true, invoiceNumber: true },
+    });
+    const termIds = [...new Set(invoices.map((i: any) => i.termId).filter(Boolean))] as string[];
+    if (termIds.length === 0) return;
+
+    const closes = await db.termFinancialClose.findMany({
+      where: { organizationId, termId: { in: termIds }, status: 'closed' },
+      select: { termId: true },
+    });
+    if (closes.length === 0) return;
+
+    const closedTermIds = new Set(closes.map((c: any) => c.termId));
+    const blocked = invoices.filter((i: any) => i.termId && closedTermIds.has(i.termId));
+    throw new BadRequestException(
+      `This would post against ${blocked.length} invoice(s) in a financially closed term ` +
+        `(${blocked.map((b: any) => b.invoiceNumber).slice(0, 5).join(', ')}). ` +
+        'Reopen the term (maker-checker) before posting.',
+    );
+  }
+
   getTermCloseStatus(termId: string) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.termFinancialClose.findFirst({ where: { organizationId, termId } });
   }
 
-  /** Close a term: freeze a totals snapshot; block further fee postings. */
+  /**
+   * Org-wide fee totals, by grouped aggregate (P2-E). Mirrors the balance
+   * identity `SchoolFinanceQueryService.studentBalance` computes per student —
+   * `collected` is SUM(PaymentAllocation), never `Document.amountPaid`, which
+   * the P0-3 defect polluted with forgiven and credited value.
+   *
+   * Throws rather than returning partial totals: its only caller freezes the
+   * result as the permanent record of a closed term.
+   */
+  private async termTotalsSnapshot(organizationId: string) {
+    const studentPartners = await this.prisma.client.studentProfile.findMany({
+      where: { organizationId },
+      select: { partnerId: true },
+    });
+    const partnerIds = [...new Set(studentPartners.map((s) => s.partnerId))];
+
+    const docs = await this.prisma.client.document.findMany({
+      where: { ...POSTED_FEE_WHERE, organizationId, partnerId: { in: partnerIds } },
+      select: { id: true, totalAmount: true },
+    });
+    const docIds = docs.map((d) => d.id);
+
+    const [collectedAgg, creditedAgg, waivedAgg, adjustments] = await Promise.all([
+      docIds.length
+        ? this.prisma.client.paymentAllocation.aggregate({
+            where: { organizationId, documentId: { in: docIds } },
+            _sum: { amount: true },
+          })
+        : Promise.resolve({ _sum: { amount: null } }),
+      docIds.length
+        ? this.prisma.client.feeCreditAllocation.aggregate({
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
+            _sum: { amount: true },
+          })
+        : Promise.resolve({ _sum: { amount: null } }),
+      this.prisma.client.waiver.aggregate({
+        where: { organizationId, applied: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.client.feeAdjustment.findMany({
+        where: { organizationId, status: 'posted' },
+        select: { direction: true, amount: true },
+      }),
+    ]);
+
+    const billed = docs.reduce((t, d) => t + Number(d.totalAmount), 0);
+    const collected = Number(collectedAgg._sum.amount ?? 0);
+    const credited = Number(creditedAgg._sum.amount ?? 0);
+    const waived = Number(waivedAgg._sum.amount ?? 0);
+    const adjusted = adjustments.reduce(
+      (t, a) => t + (a.direction === 'debit' ? Number(a.amount) : -Number(a.amount)),
+      0,
+    );
+
+    return {
+      billed,
+      collected,
+      waived,
+      credited,
+      adjusted,
+      balance: billed - collected - waived - credited + adjusted,
+      studentCount: partnerIds.length,
+      invoiceCount: docs.length,
+      closedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Close a term: freeze a totals snapshot; block further fee postings.
+   *
+   * Fail-closed (P1-J): if the snapshot cannot be computed, the term stays open
+   * rather than closing with an unreconcilable placeholder.
+   */
   async closeTerm(termId: string) {
     const organizationId = this.tenant.organizationId;
     const closedById = this.tenant.userId ?? null;
 
-    // Snapshot the term's fee totals at close for the reporting record. Purely
-    // informational — best-effort so a slow or partial aggregate can never block
-    // the close itself, which is the actual control.
-    let snapshot: any = { closedAt: new Date().toISOString() };
-    try {
-      const students = await this.prisma.client.studentProfile.findMany({
-        where: { organizationId },
-        select: { id: true },
-        take: 5000,
-      });
-      let billed = 0, collected = 0, waived = 0, credited = 0, balance = 0;
-      for (const s of students) {
-        const b = await this.finance.studentBalance(s.id).catch(() => null);
-        if (!b) continue;
-        billed += b.billed; collected += b.collected; waived += b.waived;
-        credited += b.credited; balance += b.balance;
-      }
-      snapshot = { billed, collected, waived, credited, balance, closedAt: new Date().toISOString() };
-    } catch {
-      // snapshot stays the minimal marker
-    }
+    // P1-J: the snapshot is FAIL-CLOSED.
+    //
+    // This used to be wrapped in `catch {}` and described as "best-effort so a
+    // slow or partial aggregate can never block the close". That has it exactly
+    // backwards: the frozen totals ARE the record of what the books said at
+    // close, and a term closed with a placeholder marker is a term nobody can
+    // ever reconcile back to. If the totals cannot be computed, the correct
+    // outcome is that the term does not close.
+    //
+    // P2-E: computed by grouped aggregates rather than an N+1 loop over up to
+    // 5000 students, which is also why it could time out in the first place.
+    const snapshot = await this.termTotalsSnapshot(organizationId);
 
     const row = await this.prisma.client.termFinancialClose.upsert({
       where: { organizationId_termId: { organizationId, termId } },

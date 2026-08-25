@@ -414,19 +414,6 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
    * decides at the GradeEntry level (legacy bridge); the exam endpoints above now
    * write the spine directly.
    */
-
-
-   *
-   * The two workflows used to be mirrored the other way round — GradeEntry
-   * decided, and the spine was updated to match. The spine is the record now,
-   * so the exam endpoints write their own row and then bring the canonical one
-   * with them. The direction is the whole difference between "two stores that
-   * agree" and "one store with a legacy view".
-   *
-   * `approvedAt` / `rejectionReason` are set here rather than left to a later
-   * recompute: an approval that does not say WHEN, or a rejection that does not
-   * say WHY, is not an audit trail.
-   */
   private async syncApproval(
     tx: any,
     examScheduleId: string,

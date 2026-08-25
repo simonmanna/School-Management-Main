@@ -170,12 +170,17 @@ export class PaymentReconciliationService {
       throw new BadRequestException('This row has no matched student — assign one before confirming.');
     }
 
-    // Post through the engine with reference = externalRef, so a re-confirm or
-    // re-import replays the original receipt rather than paying twice.
+    // Post through the engine keyed on the row's external reference, so a
+    // re-confirm or re-import replays the original receipt rather than paying
+    // twice. This used to be passed as `reference` — the narration column —
+    // which is unconstrained; `externalReference` carries the unique index that
+    // makes the replay guarantee real (P0-B).
     const receipt = await this.payments.collect({
       studentProfileId: targetStudent,
       amount: Number(row.amount),
       paymentMethod: row.batchId ? 'mobile_money' : 'bank',
+      externalReference: row.externalRef,
+      externalReferenceType: 'import_row',
       reference: row.externalRef,
       paymentDate: row.transactionDate?.toISOString(),
     } as any);

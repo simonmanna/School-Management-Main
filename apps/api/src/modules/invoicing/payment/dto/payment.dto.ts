@@ -10,7 +10,12 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { PAYMENT_METHODS, type PaymentMethod } from '@erp/shared';
+import {
+  EXTERNAL_REFERENCE_TYPES,
+  PAYMENT_METHODS,
+  type ExternalReferenceType,
+  type PaymentMethod,
+} from '@erp/shared';
 
 export class PaymentAllocationDto {
   /** Generic AR/AP ledger document (manual invoice / vendor bill). */
@@ -47,9 +52,29 @@ export class CreatePaymentDto {
   @IsString()
   accountId?: string;
 
+  /**
+   * Free-text narration shown on the receipt. NEVER an idempotency key — a
+   * bursar may legitimately type "CASH" on every receipt. Use
+   * `externalReference` for anything that must not be processed twice.
+   */
   @IsOptional()
   @IsString()
   reference?: string;
+
+  /**
+   * Machine-issued idempotency key: a MoMo/bank/card transaction id, or an
+   * import row reference. Unique per (organization, type, value, direction) at
+   * the database level, so a replayed provider callback can never collect
+   * twice — the guarantee an application existence check cannot give under
+   * READ COMMITTED (P0-B).
+   */
+  @IsOptional()
+  @IsString()
+  externalReference?: string;
+
+  @IsOptional()
+  @IsIn([...EXTERNAL_REFERENCE_TYPES])
+  externalReferenceType?: ExternalReferenceType;
 
   @IsOptional()
   @IsString()

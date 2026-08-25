@@ -159,14 +159,45 @@ describeDb('integration: school happy path (fee → payment → cash → ledger)
     studentProfileId = student.id;
 
     // Fee structure + schedule for the term (one tuition component).
+    //
+    // The structure MUST be published with an immutable FeeStructureVersion:
+    // Phase 2 (P1-G / §Pricing provenance) makes billing refuse any structure
+    // that is not `published` with a `currentVersionId`. Billing prices from the
+    // immutable FeeItem rows, never the mutable `components` JSON. This mirrors
+    // what catalog.publish() does in production; we reproduce its effect here
+    // with raw inserts since the fixture builds everything via Prisma directly.
     const feeStructure = await raw.feeStructure.create({
       data: {
         organizationId,
         name: 'Standard Term Fees',
         academicYearId: year.id,
+        status: 'draft',
         components: [{ code: 'TUITION', productId: product.id, amount: TUITION }],
         applicableTo: { classIds: [schoolClass.id] },
       },
+    });
+    const feeVersion = await raw.feeStructureVersion.create({
+      data: {
+        organizationId,
+        feeStructureId: feeStructure.id,
+        versionNo: 1,
+        publishedAt: new Date('2026-01-01'),
+      },
+    });
+    await raw.feeItem.create({
+      data: {
+        organizationId,
+        feeStructureVersionId: feeVersion.id,
+        code: 'TUITION',
+        name: 'Tuition',
+        productId: product.id,
+        amount: TUITION,
+        isOptional: false,
+      },
+    });
+    await raw.feeStructure.update({
+      where: { id: feeStructure.id },
+      data: { status: 'published', currentVersionId: feeVersion.id },
     });
     await raw.feeSchedule.create({
       data: { organizationId, feeStructureId: feeStructure.id, termId, dueDate: new Date('2026-02-15') },
@@ -274,12 +305,17 @@ describeDb('integration: school happy path (fee → payment → cash → ledger)
   });
 
   it('is idempotent on a replayed mobile-money reference', async () => {
+    // P0-B: idempotency keys on `externalReference` (the machine-issued
+    // provider transaction id), NOT `reference` (which is free-text bursar
+    // narration and may legitimately repeat). A replayed external key returns
+    // the original payment rather than double-collecting.
     const first: any = await asTenant(() =>
       schoolPayments.collect({
         studentProfileId,
         amount: 100_000,
         paymentMethod: 'mobile_money',
-        reference: 'MM-DUP-1',
+        externalReference: 'MM-DUP-1',
+        externalReferenceType: 'mobile_money_txn',
       }),
     );
     const second: any = await asTenant(() =>
@@ -287,13 +323,14 @@ describeDb('integration: school happy path (fee → payment → cash → ledger)
         studentProfileId,
         amount: 100_000,
         paymentMethod: 'mobile_money',
-        reference: 'MM-DUP-1',
+        externalReference: 'MM-DUP-1',
+        externalReferenceType: 'mobile_money_txn',
       }),
     );
     expect(second.replayed).toBe(true);
     expect(second.payment.id).toBe(first.payment.id);
 
-    const dup = await raw.payment.count({ where: { organizationId, reference: 'MM-DUP-1' } });
+    const dup = await raw.payment.count({ where: { organizationId, externalReference: 'MM-DUP-1' } });
     expect(dup).toBe(1);
   });
 });

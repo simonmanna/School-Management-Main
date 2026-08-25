@@ -35,6 +35,21 @@ function makeService(): { service: BillingService; mocks: MockContext } {
       // P3: the optional-fee opt-in lookup runs in the same batched Promise.all.
       studentOptionalFee: { findMany: jest.fn().mockResolvedValue([]) },
       schoolFeeInvoice: { create: jest.fn() },
+      // P1-A: billing prices from the immutable FeeStructureVersion's FeeItem
+      // rows, never the mutable FeeStructure.components JSON. One TUITION item
+      // mirrors what publish() would have frozen from the components below.
+      feeItem: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            feeStructureVersionId: 'fsv1',
+            code: 'TUITION',
+            name: 'Tuition',
+            productId: 'prod1',
+            amount: 800000,
+            isOptional: false,
+          },
+        ]),
+      },
       // P0-5 pre-flight: generateForTerm now refuses to run when any fee
       // product carries a non-zero sales tax, because the totals overwrite in
       // the loop would unbalance the journal and abort the run part way
@@ -90,7 +105,8 @@ describe('BillingService — generateForTerm math', () => {
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
       id: 'sch1', dueDate: new Date(),
       feeStructure: {
-        id: 'fs1', applicableTo: {}, components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
+        id: 'fs1', name: 'Standard', status: 'published', currentVersionId: 'fsv1',
+        applicableTo: {}, components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
       },
     }]);
     // Existing invoice for the (student, schedule) tuple.
@@ -120,7 +136,8 @@ describe('BillingService — generateForTerm math', () => {
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
       id: 'sch1', dueDate: new Date(),
       feeStructure: {
-        id: 'fs1', applicableTo: {}, components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
+        id: 'fs1', name: 'Standard', status: 'published', currentVersionId: 'fsv1',
+        applicableTo: {}, components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
       },
     }]);
     // First call to the inner $transaction throws a Prisma P2002
@@ -153,7 +170,8 @@ describe('BillingService — generateForTerm math', () => {
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
       id: 'sch1', dueDate: new Date(),
       feeStructure: {
-        id: 'fs1', academicYearId: 'ay1', applicableTo: {},
+        id: 'fs1', name: 'Standard', status: 'published', currentVersionId: 'fsv1',
+        academicYearId: 'ay1', applicableTo: {},
         components: [{ code: 'TUITION', productId: 'prod1', amount: 800000 }],
       },
     }]);

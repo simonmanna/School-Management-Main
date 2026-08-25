@@ -105,6 +105,23 @@ export const PAYMENT_METHODS = ['cash', 'bank', 'mobile_money', 'card', 'cheque'
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /**
+ * Kinds of MACHINE-ISSUED payment idempotency key. `Payment.externalReference`
+ * is unique per (organization, type, value, direction) — the database guarantee
+ * FINANCIAL_INVARIANTS §Idempotency requires.
+ *
+ * Deliberately has no 'cash' member: a bursar may legitimately type the same
+ * narration on every cash receipt, which is why narration lives in the
+ * unconstrained `Payment.reference` and never here.
+ */
+export const EXTERNAL_REFERENCE_TYPES = [
+  'mobile_money_txn',
+  'bank_txn',
+  'card_txn',
+  'import_row',
+] as const;
+export type ExternalReferenceType = (typeof EXTERNAL_REFERENCE_TYPES)[number];
+
+/**
  * Account-determination mapping keys now live in `./accounting/account-mappings`
  * as `ACCOUNT_MAPPING_REGISTRY` (key + label + group + expectedCategories +
  * required). `ACCOUNT_MAPPING_KEYS` and `ACCOUNT_MAPPING_LABELS` are still

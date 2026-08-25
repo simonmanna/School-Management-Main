@@ -186,6 +186,11 @@ export class PaymentService {
           allocatedAmount: ZERO,
           unallocatedAmount: amount,
           reference: dto.reference ?? null,
+          // P0-B: the machine-issued idempotency key, distinct from narration.
+          // A unique index on (org, type, value, direction) makes a replayed
+          // provider callback fail at the database rather than double-collect.
+          externalReference: dto.externalReference ?? null,
+          externalReferenceType: dto.externalReference ? (dto.externalReferenceType ?? null) : null,
           status: 'posted',
           branchId: dto.branchId ?? null,
         },
@@ -366,6 +371,92 @@ export class PaymentService {
       amount: (payment.amount as Prisma.Decimal).toString(),
     });
     return this.prisma.client.payment.findFirst({ where: { id } });
+  }
+
+  /**
+   * Allocate an ALREADY-POSTED payment's unallocated balance to AR documents.
+   *
+   * `record` allocates at creation time; this is the missing other half — the
+   * writer for value that came back to a payment after an allocation was
+   * reversed. Without it, reallocation (FINANCIAL_INVARIANTS §Immutability:
+   * "Reallocation = reverse original allocation → create replacement
+   * allocation") had no second step, so a mis-allocated receipt could not be
+   * corrected at all.
+   *
+   * Deliberately does NOT post a journal entry: the cash and its GL leg were
+   * recorded when the payment was created and are unchanged by moving value
+   * between invoices. The caller's reversal already posted the compensating
+   * AR leg; this re-settles it against a different document. Callers that need
+   * the AR leg re-posted supply it themselves (see
+   * PaymentAllocationReversalService).
+   */
+  async allocateExisting(
+    dto: { paymentId: string; allocations: Array<{ documentId: string; amount: number }> },
+    tx?: any,
+  ) {
+    const run = async (db: any) => {
+      const organizationId = this.tenant.organizationId;
+      const payment = await db.payment.findFirst({ where: { id: dto.paymentId, organizationId } });
+      if (!payment) throw new BadRequestException(`Payment ${dto.paymentId} not found`);
+      if (payment.status === 'cancelled') {
+        throw new BadRequestException('A cancelled payment cannot be allocated.');
+      }
+
+      let allocated = ZERO;
+      const created: any[] = [];
+      for (const a of dto.allocations) {
+        const amount = round(dec(a.amount), 6);
+        if (amount.lessThanOrEqualTo(0)) continue;
+
+        const doc = await db.document.findFirst({ where: { id: a.documentId, organizationId } });
+        if (!doc) throw new BadRequestException(`Document ${a.documentId} not found`);
+
+        const newResidual = (doc.amountResidual as Prisma.Decimal).minus(amount);
+        if (newResidual.lessThan(0)) {
+          throw new BadRequestException(
+            `Allocation to document ${doc.documentNumber} exceeds its residual of ${doc.amountResidual}.`,
+          );
+        }
+        const newPaid = (doc.amountPaid as Prisma.Decimal).plus(amount);
+
+        const row = await db.paymentAllocation.create({
+          data: { organizationId, paymentId: payment.id, documentId: doc.id, amount, status: 'posted' },
+        });
+        await db.document.update({
+          where: { id: doc.id },
+          data: {
+            amountPaid: newPaid,
+            amountResidual: newResidual,
+            paymentStatus: this.residualStatus(doc.totalAmount, newResidual),
+            status: newResidual.lessThanOrEqualTo(0) ? 'paid' : doc.status,
+          },
+        });
+        allocated = allocated.plus(amount);
+        created.push(row);
+        this.events.publish('payment.allocated', {
+          organizationId,
+          paymentId: payment.id,
+          documentId: doc.id,
+          amount: amount.toString(),
+        });
+      }
+
+      const unallocated = (payment.unallocatedAmount as Prisma.Decimal).minus(allocated);
+      if (unallocated.lessThan(0)) {
+        throw new BadRequestException(
+          `Allocating ${allocated.toString()} exceeds this payment's unallocated balance of ${payment.unallocatedAmount}.`,
+        );
+      }
+      await db.payment.update({
+        where: { id: payment.id },
+        data: {
+          allocatedAmount: (payment.allocatedAmount as Prisma.Decimal).plus(allocated),
+          unallocatedAmount: unallocated,
+        },
+      });
+      return created;
+    };
+    return tx ? run(tx) : this.prisma.client.$transaction(run);
   }
 
   private residualStatus(total: Prisma.Decimal, residual: Prisma.Decimal): PaymentStatus {

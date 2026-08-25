@@ -14,6 +14,7 @@ import {
   StudentFeeAssignmentService,
   StudentOptionalFeeService,
 } from './catalog.service';
+import type { FeeComponent } from './dto.types';
 // Value imports (not `import type`): the global ValidationPipe reads
 // class-validator metadata off the runtime class, which `import type` erases.
 import {
@@ -72,8 +73,11 @@ export class FeeStructureController {
 
   @Post(':id/publish')
   @RequirePermissions(PERMISSIONS.school.manageFees)
-  publish(@Param('id') id: string) {
-    return this.service.publish(id);
+  publish(@Param('id') id: string, @Body() dto?: { components?: FeeComponent[] }) {
+    // Body is optional: publishing a draft as-is sends none, repricing a
+    // published structure sends the new components (P1-A — `update` refuses
+    // them once published, so this is the one repricing door).
+    return this.service.publish(id, dto);
   }
 
   @Delete(':id')

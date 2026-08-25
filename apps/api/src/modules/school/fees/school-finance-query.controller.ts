@@ -53,4 +53,26 @@ export class SchoolFinanceQueryController {
   reconcileCreditLiability() {
     return this.finance.reconcileCreditLiability();
   }
+
+  /**
+   * ADR-013's Gate 1/4: every cached projection equals the subledger behind it.
+   * An empty `drifted` array is the gate passing.
+   */
+  @Get('reconciliation/cached-projections')
+  @RequirePermissions(PERMISSIONS.school.read)
+  reconcileCachedProjections() {
+    return this.finance.reconcileCachedProjections();
+  }
+
+  /**
+   * Cash custody, operational half: Payment vs CashMovement. Must be
+   * zero-variance at every instant — unlike bank/mobile-money settlement, which
+   * legitimately lags and is reported separately so a timing difference is
+   * never mistaken for an accounting defect.
+   */
+  @Get('reconciliation/operational-cash')
+  @RequirePermissions(PERMISSIONS.school.read)
+  reconcileOperationalCash() {
+    return this.finance.reconcileOperationalCash();
+  }
 }

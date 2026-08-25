@@ -33,6 +33,7 @@ import { PenaltyCronWorker } from './penalty-cron.worker';
 import { BudgetService } from './budget.service';
 import { BudgetController } from './budget.controller';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { PaymentAllocationReversalService } from './allocation-reversal.service';
 import { SchoolFinanceQueryController } from './school-finance-query.controller';
 import { FinanceControlsService } from './finance-controls.service';
 import { FinanceControlsController } from './finance-controls.controller';
@@ -93,6 +94,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     PenaltyCronWorker,
     BudgetService,
     SchoolFinanceQueryService,
+    PaymentAllocationReversalService,
     FinanceControlsService,
     BillingRunService,
     PaymentReconciliationService,
@@ -113,6 +115,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     AdvancedFinanceService,
     PenaltyCronWorker,
     SchoolFinanceQueryService,
+    PaymentAllocationReversalService,
     FinanceControlsService,
     BillingRunService,
   ],

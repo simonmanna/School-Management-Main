@@ -41,6 +41,7 @@ export const ORG_SCOPED = new Set<string>([
   'DocumentLine',
   'Payment',
   'PaymentAllocation',
+  'PaymentAllocationReversal',
   // Phase 4 — inventory
   'InventoryLocation',
   'StockItem',

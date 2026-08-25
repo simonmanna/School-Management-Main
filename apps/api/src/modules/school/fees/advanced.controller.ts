@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -17,24 +17,65 @@ import { AdvancedFinanceService } from './advanced.service';
 export class AdvancedFinanceController {
   constructor(private readonly finance: AdvancedFinanceService) {}
 
-  /* Sponsorships */
+  /* ── Sponsorships (Phase 5: contained, not production-ready) ──
+   *
+   * Sponsorship records a sponsor, a student and a cap, and produces a
+   * statement — but nothing collects money FROM a sponsor. Collections land on
+   * the STUDENT's AR, so the subledger cannot say which portion a sponsor paid,
+   * and the cap has no consumption to enforce against.
+   *
+   * Until the sponsor-payment path exists (SponsorshipCommitment → sponsor
+   * invoice → sponsor payment settling student AR), these endpoints are gated
+   * off by default. The gate is HERE, at the controller: hiding the tab in the
+   * web app is presentation, not a control, and any client can call the API
+   * directly.
+   */
+  private assertSponsorshipEnabled() {
+    if (process.env.SCHOOL_SPONSORSHIP_ENABLED !== 'true') {
+      throw new ForbiddenException(
+        'Sponsorship is not production-ready and is disabled. It records a cap it cannot enforce ' +
+          'and cannot attribute collections to a sponsor, because no sponsor-payment path exists. ' +
+          'Set SCHOOL_SPONSORSHIP_ENABLED=true only in a non-production environment.',
+      );
+    }
+  }
+
   @Post('sponsorships')
   @Idempotent()
   @RequirePermissions(PERMISSIONS.school.manageFees)
   createSponsorship(@Body() dto: any) {
+    this.assertSponsorshipEnabled();
     return this.finance.createSponsorship(dto);
   }
 
   @Get('sponsorships')
   @RequirePermissions(PERMISSIONS.school.read)
   listSponsorships(@Query() q: PaginationDto, @Query('studentProfileId') studentProfileId?: string) {
+    this.assertSponsorshipEnabled();
     return this.finance.listSponsorships(studentProfileId);
   }
 
   @Get('sponsors/:sponsorId/statement')
   @RequirePermissions(PERMISSIONS.school.read)
   sponsorStatement(@Param('sponsorId') sponsorId: string) {
+    this.assertSponsorshipEnabled();
     return this.finance.sponsorStatement(sponsorId);
+  }
+
+  /**
+   * Whether sponsorship is enabled, so the UI can render an honest
+   * "not production-ready" panel instead of a form that appears to work.
+   * Unguarded by design — it is the question, not the feature.
+   */
+  @Get('sponsorships/availability')
+  @RequirePermissions(PERMISSIONS.school.read)
+  sponsorshipAvailability() {
+    return {
+      enabled: process.env.SCHOOL_SPONSORSHIP_ENABLED === 'true',
+      reason:
+        'No sponsor-payment path exists: collections land on the student AR, so a sponsor cap ' +
+        'cannot be enforced and sponsor-paid amounts cannot be attributed.',
+    };
   }
 
   /* Waivers */

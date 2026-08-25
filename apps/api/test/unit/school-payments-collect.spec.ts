@@ -40,13 +40,30 @@ function makeService(openInvoices: any[] = [], existingPayment: any = null) {
   const createReceipt = jest.fn().mockResolvedValue({ id: 'pay_1' });
   const payments = { createReceipt };
 
-  const finance = { refundableAmount: jest.fn().mockResolvedValue(0) };
+  const finance = {
+    refundableAmount: jest.fn().mockResolvedValue(0),
+    refundableBreakdown: jest.fn().mockResolvedValue({ fromPayments: 0, fromCredits: 0, total: 0, credits: [] }),
+  };
+  // Posting collaborators are used only by the credit-funded half of a refund
+  // (P0-C); collect never reaches them.
+  const posting = { post: jest.fn() };
+  const accounts = { receivableAccount: jest.fn() };
+  const resolver = { ensureByCode: jest.fn() };
+  // P1-B: period control. Open by default; a closed-term test overrides it.
+  const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
+  // P1-C: only reached by the allocatedPaymentId refund mode.
+  const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
   const service = new SchoolPaymentService(
     prisma as any,
     tenant as any,
     events as any,
     payments as any,
     finance as any,
+    posting as any,
+    accounts as any,
+    resolver as any,
+    controls as any,
+    reversals as any,
   );
 
   return { service, documentFindMany, createReceipt, events, paymentFindFirst };
@@ -173,20 +190,45 @@ describe('SchoolPaymentService.collect — delegation details', () => {
     expect(dto.cashSessionId).toBe('sess_1');
   });
 
-  it('replays an existing payment for a duplicate reference instead of collecting twice', async () => {
+  it('replays an existing payment for a duplicate externalReference (P0-B)', async () => {
     const prior = { id: 'pay_prior', unallocatedAmount: 0, allocations: [{ documentId: 'doc_1', amount: 50_000 }] };
-    const { service, createReceipt } = makeService([], prior);
+    const { service, createReceipt, paymentFindFirst } = makeService([], prior);
 
     const result = await service.collect({
       studentProfileId: 'stu_1',
       amount: 50_000,
       paymentMethod: 'mobile_money',
-      reference: 'MM-TXN-123',
-    });
+      externalReference: 'MM-TXN-123',
+      externalReferenceType: 'mobile_money_txn',
+    } as any);
 
     expect(result.replayed).toBe(true);
     expect(result.payment).toBe(prior);
     expect(createReceipt).not.toHaveBeenCalled();
+
+    // The guard keys on the machine-issued column, never on narration.
+    const where = paymentFindFirst.mock.calls[0][0].where;
+    expect(where.externalReference).toBe('MM-TXN-123');
+    expect(where.reference).toBeUndefined();
+  });
+
+  it('does NOT treat a repeated cash narration as a replay (P0-B)', async () => {
+    // `reference` is free text a bursar types. Two cash receipts narrated
+    // "CASH" are two real payments, and the previous guard — which keyed on
+    // `reference` — silently swallowed the second as an idempotent replay.
+    // That is why narration and the idempotency key are now separate columns.
+    const prior = { id: 'pay_prior', unallocatedAmount: 0, allocations: [] };
+    const { service, createReceipt } = makeService([], prior);
+
+    const result = await service.collect({
+      studentProfileId: 'stu_1',
+      amount: 50_000,
+      paymentMethod: 'cash',
+      reference: 'CASH',
+    });
+
+    expect(result.replayed).toBe(false);
+    expect(createReceipt).toHaveBeenCalled();
   });
 
   it('emits a school fee-payment event per allocation', async () => {

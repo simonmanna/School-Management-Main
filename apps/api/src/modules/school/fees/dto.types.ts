@@ -23,6 +23,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EXTERNAL_REFERENCE_TYPES, type ExternalReferenceType } from '@erp/shared';
 
 /**
  * One priced line inside a FeeStructure.
@@ -297,7 +298,24 @@ export class CollectFeePaymentDto {
   @IsArray()
   allocations?: Array<{ documentId: string; amount: number }>;
 
+  /**
+   * Free-text narration printed on the receipt. NOT an idempotency key: a
+   * bursar may legitimately record many cash receipts referencing "CASH" or
+   * "Term 1 fees", so this is never constrained.
+   */
   @IsOptional() @IsString() reference?: string;
+
+  /**
+   * Machine-issued idempotency key — the MoMo/bank/card transaction id, or an
+   * import row reference. A replay returns the original receipt, and the
+   * database unique index makes that guarantee hold under concurrent provider
+   * callbacks (P0-B).
+   */
+  @IsOptional() @IsString() externalReference?: string;
+
+  @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES])
+  externalReferenceType?: ExternalReferenceType;
+
   @IsOptional() @IsString() notes?: string;
 }
 
@@ -317,11 +335,26 @@ export class RefundFeeDto {
   @IsOptional() @IsString() cashSessionId?: string;
   @IsOptional() @IsString() bankAccountId?: string;
 
-  /**
-   * Optional idempotency/replay key. A mobile-money reversal retry with the
-   * same reference returns the original refund rather than paying out twice.
-   */
+  /** Free-text narration. Never an idempotency key — see externalReference. */
   @IsOptional() @IsString() reference?: string;
+
+  /**
+   * Machine-issued idempotency key. A mobile-money reversal retry carrying the
+   * same value returns the original refund rather than paying out twice.
+   */
+  @IsOptional() @IsString() externalReference?: string;
+
+  @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES])
+  externalReferenceType?: ExternalReferenceType;
+
+  /**
+   * Refund an ALREADY-ALLOCATED payment: reverses the allocation first (which
+   * restores the invoice's receivable), then pays out. Omit for the ordinary
+   * case of refunding unallocated cash or a refundable credit — those need no
+   * reversal. See PaymentAllocationReversalService.
+   */
+  @IsOptional() @IsString() allocatedPaymentId?: string;
+
   @IsOptional() @IsString() notes?: string;
 }
 

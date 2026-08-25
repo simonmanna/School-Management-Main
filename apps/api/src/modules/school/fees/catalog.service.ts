@@ -126,9 +126,37 @@ export class FeeStructureService extends BaseCrudService<FeeStructure, CreateFee
     });
   }
 
+  /**
+   * P1-A · pricing provenance. A PUBLISHED structure's components are frozen:
+   * billing prices from the immutable FeeStructureVersion, so silently editing
+   * the JSON underneath would change what the next run charges with no version
+   * bump and no audit trail — and would make two runs of the "same" structure
+   * produce different invoices.
+   *
+   * This is the guarantee the class docstring already claimed ("Editing a
+   * published structure later creates version N+1") and did not implement:
+   * `update` wrote straight through, leaving `status` and `currentVersionId`
+   * untouched.
+   *
+   * Non-pricing fields (name, applicableTo, isActive) stay editable — they do
+   * not change what a student is charged.
+   */
   async update(id: string, dto: UpdateFeeStructureDto): Promise<FeeStructure> {
     const data: Record<string, unknown> = { ...dto };
     if (dto.components) {
+      const organizationId = this.tenant.organizationId;
+      const existing = await this.prisma.client.feeStructure.findFirst({
+        where: { id, organizationId },
+        select: { status: true, name: true },
+      });
+      if (existing?.status === 'published') {
+        throw new ConflictException(
+          `"${existing.name}" is published, so its priced components are frozen (FINANCIAL_INVARIANTS ` +
+            '§Pricing provenance). Reprice through POST /fee-structures/:id/publish with the new ' +
+            'components — that writes the amounts and freezes them as version N+1 in one transaction. ' +
+            'Invoices already issued keep the version they were billed from.',
+        );
+      }
       const components = await this.normalizeComponents(dto.components);
       if (components.length === 0) throw new BadRequestException('A fee structure needs at least one component');
       data.components = components;
@@ -162,11 +190,26 @@ export class FeeStructureService extends BaseCrudService<FeeStructure, CreateFee
    * reproducibility). DocumentLine already protects historical invoices, so a
    * version exists for traceability, not to guard old money.
    */
-  async publish(id: string) {
+  async publish(id: string, dto?: { components?: FeeComponent[] }) {
     const organizationId = this.tenant.organizationId;
+    // A repricing arrives here rather than through `update`, which freezes a
+    // published structure's components (P1-A). Normalizing outside the
+    // transaction keeps the category lookups it performs off the write path.
+    const revised = dto?.components?.length ? await this.normalizeComponents(dto.components) : null;
+    if (dto?.components?.length && !revised?.length) {
+      throw new BadRequestException('A fee structure needs at least one component');
+    }
     return this.prisma.client.$transaction(async (tx: any) => {
-      const structure = await tx.feeStructure.findFirst({ where: { id, organizationId } });
+      let structure = await tx.feeStructure.findFirst({ where: { id, organizationId } });
       if (!structure) throw new NotFoundException(`FeeStructure ${id} not found`);
+      if (revised) {
+        // Write the new prices and freeze them in the same transaction, so the
+        // mutable JSON is never observable in a state no version records.
+        structure = await tx.feeStructure.update({
+          where: { id },
+          data: { components: revised as any },
+        });
+      }
       const last = await tx.feeStructureVersion.findFirst({
         where: { organizationId, feeStructureId: id },
         orderBy: { versionNo: 'desc' },
