@@ -30,7 +30,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
-import { money, sel, Stat } from './fees-shared';
+import { money, sel, Stat, apiError } from './fees-shared';
 
 /* ───────────────────────── Fee Receipt (printable) ───────────────────────── */
 
@@ -178,19 +178,43 @@ export function SchoolFeesCollectPage() {
         paymentMethod: method,
         paymentDate,
         reference: reference || undefined,
+        // Narration and idempotency key are different things: a bursar may
+        // type "CASH" on a hundred receipts, but a MoMo transaction id must
+        // never be processed twice. Only machine-issued keys are constrained.
+        externalReference: method === 'cash' ? undefined : reference || undefined,
+        externalReferenceType:
+          method === 'mobile_money' ? 'mobile_money_txn'
+          : method === 'bank' ? 'bank_txn'
+          : method === 'card' ? 'card_txn'
+          : undefined,
         allocations: allocList.length ? allocList : undefined,
+        // B1: whatever the tender does not settle becomes a fee credit for
+        // this pupil, funded by this receipt, in the same transaction.
+        convertOverpaymentToCredit: unallocated > 0,
       });
       if (res.replayed) notify.success('Payment already recorded (idempotent replay)');
-      else notify.success(`Collected ${money(amount)} · ${res.allocations.length} invoice(s) settled`);
+      else if (res.overpaymentCredit) {
+        notify.success(
+          `Collected ${money(amount)} · ${res.allocations.length} invoice(s) settled · ` +
+            `${money(unallocated)} held as credit ${res.overpaymentCredit.code}`,
+        );
+      } else notify.success(`Collected ${money(amount)} · ${res.allocations.length} invoice(s) settled`);
       setReceipt(res);
       reset();
-    } catch {
-      notify.error('Could not collect payment');
+    } catch (e) {
+      notify.error(apiError(e, 'Could not collect payment'));
     }
   };
 
   const detailsValid = !!studentId && number > 0 && !!paymentDate && !!method;
-  const allocationValid = number > 0 && unallocated === 0 && allocList.length > 0;
+  // B1: an overpayment is a normal event, not an error.
+  //
+  // This used to require `unallocated === 0`, so a parent paying more than was
+  // owed — rounding up to the note they had, or paying next term forward —
+  // could not be recorded at all. The bursar had to turn them away or fudge
+  // the figure. Now the only rule is that the tender is positive and something
+  // is being settled OR deliberately held as credit.
+  const allocationValid = number > 0 && (allocList.length > 0 || unallocated > 0);
 
   return (
     <div className="space-y-4 p-6">
@@ -270,11 +294,29 @@ export function SchoolFeesCollectPage() {
                 <div className="grid grid-cols-3 gap-2 rounded-md border bg-muted/30 p-3 text-center text-sm">
                   <div><div className="font-semibold text-emerald-600">{money(number)}</div><div className="text-xs text-muted-foreground">Total payment</div></div>
                   <div><div className="font-semibold">{money(allocated)}</div><div className="text-xs text-muted-foreground">Allocated</div></div>
-                  <div><div className={`font-semibold ${unallocated > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{money(unallocated)}</div><div className="text-xs text-muted-foreground">Unallocated</div></div>
+                  <div><div className={`font-semibold ${unallocated > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{money(unallocated)}</div><div className="text-xs text-muted-foreground">Unallocated</div></div>
                 </div>
 
+                {/*
+                  B1: an overpayment is routine — a parent rounds up to the note
+                  they have, or pays next term forward. It is stated plainly as
+                  money the school is holding, not flagged as an error.
+                */}
+                {unallocated > 0 && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+                    <p className="font-medium">{money(unallocated)} more than is owed on these invoices.</p>
+                    <p className="mt-1 text-muted-foreground">
+                      This will be held as a fee credit for this pupil and applied automatically to their
+                      next invoice. It stays refundable until it is spent.
+                    </p>
+                  </div>
+                )}
+
                 {openInvoices.length === 0 && (
-                  <p className="text-sm text-muted-foreground">This student has no unsettled invoices — the payment will be recorded as an unallocated credit. Use <b>Automatic</b> is unavailable here.</p>
+                  <p className="text-sm text-muted-foreground">
+                    This pupil has no unsettled invoices. The whole payment will be held as a fee credit
+                    against their next bill.
+                  </p>
                 )}
 
                 <div className="space-y-2">
@@ -351,11 +393,25 @@ export function SchoolFeesCollectPage() {
             {!studentId && <p className="text-sm text-muted-foreground">Select a student to see their fee balance.</p>}
             {statement && (
               <>
+                {/*
+                  "Paid" is money RECEIVED and ties to the receipts list. Waived
+                  and credited are shown separately and only when non-zero — a
+                  bursar answering "why is the balance lower?" needs to see
+                  whether it was paid or forgiven, and the two must never be
+                  added together.
+                */}
                 <div className="mb-3 grid grid-cols-3 gap-2 text-center text-sm">
                   <Stat label="Billed" value={money(statement.totalBilled)} />
-                  <Stat label="Paid" value={money(statement.totalPaid)} />
+                  <Stat label="Paid" value={money(statement.collected)} />
                   <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
                 </div>
+                {(statement.waived > 0 || statement.credited > 0 || statement.adjusted !== 0) && (
+                  <div className="mb-3 grid grid-cols-3 gap-2 text-center text-xs text-muted-foreground">
+                    <span>Waived {money(statement.waived)}</span>
+                    <span>Credit applied {money(statement.credited)}</span>
+                    <span>Adjustments {money(statement.adjusted)}</span>
+                  </div>
+                )}
                 <table className="w-full text-sm">
                   <thead className="text-left text-muted-foreground"><tr><th className="py-1">Invoice</th><th>Total</th><th>Residual</th><th>Status</th></tr></thead>
                   <tbody>

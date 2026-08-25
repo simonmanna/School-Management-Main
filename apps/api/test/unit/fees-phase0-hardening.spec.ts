@@ -76,6 +76,8 @@ function makeCollectService(openInvoices: any[] = []) {
   const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
   // P1-C: only reached by the allocatedPaymentId refund mode.
   const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
+  // B1: only reached when a tender exceeds what is owed.
+  const advanced = { createCredit: jest.fn().mockResolvedValue({ id: 'cr_1', code: 'CR-000001' }) };
   const service = new SchoolPaymentService(
     prisma as any,
     tenant as any,
@@ -87,6 +89,7 @@ function makeCollectService(openInvoices: any[] = []) {
     resolver as any,
     controls as any,
     reversals as any,
+    advanced as any,
   );
   return { service, documentFindMany };
 }
@@ -126,6 +129,7 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
   const events = { publish: jest.fn() };
   const createCustomerRefund = jest.fn().mockResolvedValue({ id: 'refund_1' });
   const feeCreditUpdate = jest.fn().mockResolvedValue({});
+  const feeCreditClaim = jest.fn().mockResolvedValue({ count: 1 });
   const tx = {
     studentProfile: {
       findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }),
@@ -140,7 +144,16 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
       aggregate: jest.fn().mockResolvedValue({
         _sum: { remaining: new Prisma.Decimal(opts.creditRemaining) },
       }),
-      // P0-C: the drawdown the refund now performs on a credit it spends.
+      // P0-C: the drawdown the refund performs on a credit it spends.
+      //
+      // It is a CONDITIONAL DECREMENT, not a computed write: two simultaneous
+      // refunds of one credit both used to read the same `remaining`, both
+      // write the same zero, and both pay out. `updateMany` with
+      // `remaining >= take` makes Postgres re-evaluate against the committed
+      // value so the loser matches no rows. `count` is what the service checks.
+      updateMany: feeCreditClaim,
+      // Re-read after the decrement to set the terminal status.
+      findFirst: jest.fn().mockResolvedValue({ remaining: new Prisma.Decimal(0) }),
       update: feeCreditUpdate,
     },
   };
@@ -169,6 +182,8 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
   const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
   // P1-C: only reached by the allocatedPaymentId refund mode.
   const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
+  // B1: only reached when a tender exceeds what is owed.
+  const advanced = { createCredit: jest.fn().mockResolvedValue({ id: 'cr_1', code: 'CR-000001' }) };
   const service = new SchoolPaymentService(
     prisma as any,
     tenant as any,
@@ -180,8 +195,9 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
     resolver as any,
     controls as any,
     reversals as any,
+    advanced as any,
   );
-  return { service, createCustomerRefund, feeCreditUpdate, posting };
+  return { service, createCustomerRefund, feeCreditUpdate, feeCreditClaim, posting };
 }
 
 describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
@@ -222,10 +238,18 @@ describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
     // the credit in NO way — remaining unchanged, status still 'active', the
     // Fee-Credit Liability never debited. The same 500k could then be refunded
     // again, and applyCredits would still spend it on the next invoice.
-    const { service, feeCreditUpdate, posting } = makeRefundService({ unallocated: 0, creditRemaining: 500_000 });
+    const { service, feeCreditUpdate, feeCreditClaim, posting } = makeRefundService({ unallocated: 0, creditRemaining: 500_000 });
     await service.refundFee(dto);
 
     // Fully consumed -> terminal 'refunded', and no longer drawable.
+    // The claim must be conditional — this is what makes it safe under
+    // concurrency (proven end to end by prisma/audit-fees-concurrency.ts).
+    expect(feeCreditClaim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'cr_1', remaining: { gte: expect.anything() } }),
+        data: { remaining: { decrement: expect.anything() } },
+      }),
+    );
     expect(feeCreditUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'cr_1' },
@@ -251,8 +275,9 @@ describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
     // A plain overpayment refund reverses its own receipt (Dr AR / Cr Cash).
     // There is no liability to retire, so neither a drawdown nor a
     // compensating entry belongs here.
-    const { service, feeCreditUpdate, posting } = makeRefundService({ unallocated: 500_000, creditRemaining: 0 });
+    const { service, feeCreditUpdate, feeCreditClaim, posting } = makeRefundService({ unallocated: 500_000, creditRemaining: 0 });
     await service.refundFee(dto);
+    expect(feeCreditClaim).not.toHaveBeenCalled();
     expect(feeCreditUpdate).not.toHaveBeenCalled();
     expect(posting.post).not.toHaveBeenCalled();
   });

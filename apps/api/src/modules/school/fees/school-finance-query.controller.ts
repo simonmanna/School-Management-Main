@@ -75,4 +75,91 @@ export class SchoolFinanceQueryController {
   reconcileOperationalCash() {
     return this.finance.reconcileOperationalCash();
   }
+
+  /* ── B2 · receipts a bursar can find again ── */
+
+  @Get('receipts')
+  @RequirePermissions(PERMISSIONS.school.read)
+  searchReceipts(
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.finance.searchReceipts({
+      q,
+      from,
+      to,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    });
+  }
+
+  @Get('receipts/:id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  getReceipt(@Param('id') id: string) {
+    return this.finance.getReceipt(id);
+  }
+
+  /* ── C1 · fee clearance before exams ── */
+
+  @Get('clearance/student/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  feeClearance(
+    @Param('studentProfileId') studentProfileId: string,
+    @Query('thresholdPercent') thresholdPercent?: string,
+  ) {
+    return this.finance.feeClearance(studentProfileId, {
+      thresholdPercent: thresholdPercent ? Number(thresholdPercent) : undefined,
+    });
+  }
+
+  @Get('clearance/class/:classId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  classFeeClearance(@Param('classId') classId: string, @Query('thresholdPercent') thresholdPercent?: string) {
+    return this.finance.classFeeClearance(classId, {
+      thresholdPercent: thresholdPercent ? Number(thresholdPercent) : undefined,
+    });
+  }
+
+  /* ── C4 · the statement a parent is handed ── */
+
+  @Get('statement/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  termStatement(@Param('studentProfileId') studentProfileId: string, @Query('termId') termId?: string) {
+    return this.finance.termStatement(studentProfileId, termId);
+  }
+
+  /**
+   * "Why does this pupil owe this?" — the panel a bursar reads out at the
+   * window when a parent disputes a balance.
+   */
+  @Get('explain/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  explainBalance(@Param('studentProfileId') studentProfileId: string) {
+    return this.finance.explainBalance(studentProfileId);
+  }
+
+  /* ── D2 · instalment progress ── */
+
+  @Get('installments/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  installmentProgress(@Param('studentProfileId') studentProfileId: string, @Query('termId') termId?: string) {
+    return this.finance.installmentProgress(studentProfileId, termId);
+  }
+
+  /* ── E1 / E2 · reports that leave the screen ── */
+
+  @Get('reports/cash-book')
+  @RequirePermissions(PERMISSIONS.school.read)
+  dailyCashBook(@Query('date') date?: string) {
+    return this.finance.dailyCashBook(date);
+  }
+
+  @Get('reports/budget-variance')
+  @RequirePermissions(PERMISSIONS.school.read)
+  budgetVariance(@Query('termId') termId?: string) {
+    return this.finance.budgetVariance(termId);
+  }
 }

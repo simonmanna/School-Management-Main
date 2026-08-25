@@ -55,7 +55,18 @@ export interface Guardian {
 export interface FeeStatement {
   studentId: string;
   totalBilled: number;
-  totalPaid: number;
+  /**
+   * Money actually RECEIVED — SUM(PaymentAllocation). Reconciles exactly with
+   * the `payments` array below.
+   *
+   * Replaces `totalPaid`, which was derived as `billed - balance` and so
+   * counted waivers and credits as if a family had paid them. Reductions are
+   * reported as their own fields precisely so they are never mistaken for cash.
+   */
+  collected: number;
+  waived: number;
+  credited: number;
+  adjusted: number;
   balance: number;
   invoices: Array<{ id: string; documentNumber: string; totalAmount: string; amountResidual: string; paymentStatus: string; issueDate: string }>;
   payments: Array<{ id: string; paymentNumber: string; amount: string; paymentDate: string; paymentMethod: string }>;
@@ -1095,9 +1106,20 @@ export interface FeeStructure {
   name: string;
   academicYearId: string;
   components: FeeComponent[];
-  applicableTo?: { classIds?: string[]; gradeLevelIds?: string[] } | null;
+  /**
+   * Targeting. Every dimension is AND-ed; an empty one means "no constraint on
+   * this axis". `residenceTypes` prices boarders and day pupils apart.
+   */
+  applicableTo?: {
+    classIds?: string[];
+    gradeLevelIds?: string[];
+    residenceTypes?: string[];
+  } | null;
   isActive?: boolean;
+  /** draft | published | archived. Only a published structure can be billed. */
   status?: string;
+  /** The frozen version billing prices from. Null = never published = unbillable. */
+  currentVersionId?: string | null;
   academicYear?: { id: string; name: string } | null;
   schedules?: Array<{ id: string; termId: string; dueDate: string }>;
 }
@@ -1325,6 +1347,8 @@ export interface CollectResult {
   payment: { id: string; paymentNumber?: string; amount: string; paymentMethod?: string; paymentDate?: string } | null;
   allocations: Array<{ documentId: string; amount: number }>;
   unallocated: number;
+  /** B1: the fee credit an overpayment became, when conversion was requested. */
+  overpaymentCredit?: { id: string; code: string; amount: string } | null;
   replayed: boolean;
 }
 
@@ -1337,13 +1361,406 @@ export function useCollectPayment() {
       paymentMethod: 'cash' | 'bank' | 'mobile_money' | 'card';
       cashSessionId?: string;
       reference?: string;
+      /** Machine-issued idempotency key (MoMo/bank txn id) — never narration. */
+      externalReference?: string;
+      externalReferenceType?: 'mobile_money_txn' | 'bank_txn' | 'card_txn' | 'import_row';
       paymentDate?: string;
       allocations?: Array<{ documentId: string; amount: number }>;
+      /** B1: turn whatever the tender does not settle into a fee credit. */
+      convertOverpaymentToCredit?: boolean;
     }) => (await api.post<CollectResult>(`${S}/payments/collect`, dto)).data,
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
       qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'receipts'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'clearance'] });
     },
+  });
+}
+
+/* ── B4 · reporting day: a whole class of receipts at once ── */
+
+export interface BatchRow {
+  studentProfileId: string;
+  amount: number;
+  paymentMethod?: 'cash' | 'bank' | 'mobile_money' | 'card';
+  reference?: string;
+  externalReference?: string;
+  convertOverpaymentToCredit?: boolean;
+}
+export interface BatchResult {
+  total: number;
+  posted: number;
+  replayed: number;
+  failed: number;
+  totalCollected: number;
+  results: Array<{
+    studentProfileId: string;
+    status: 'posted' | 'replayed' | 'failed';
+    paymentNumber?: string;
+    allocated?: number;
+    unallocated?: number;
+    creditCode?: string;
+    error?: string;
+  }>;
+}
+export function useCollectBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { rows: BatchRow[]; paymentDate?: string; cashSessionId?: string }) =>
+      (await api.post<BatchResult>(`${S}/payments/collect-batch`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance'] });
+    },
+  });
+}
+
+/* ── B2 · receipts a bursar can find again ── */
+
+export interface ReceiptRow {
+  id: string;
+  paymentNumber: string;
+  paymentDate: string;
+  paymentMethod: string;
+  amount: number;
+  allocatedAmount: number;
+  unallocatedAmount: number;
+  reference?: string | null;
+  externalReference?: string | null;
+  status: string;
+  reversed: boolean;
+  studentProfileId: string | null;
+  admissionNo: string | null;
+  studentName: string | null;
+  phone: string | null;
+  allocations: Array<{ id: string; documentId: string; documentNumber: string | null; amount: number; status: string }>;
+  reversedAllocations: number;
+}
+export function useReceiptSearch(params: { q?: string; from?: string; to?: string; page?: number; pageSize?: number }) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'receipts', params],
+    queryFn: async () =>
+      (await api.get<{ data: ReceiptRow[]; total: number; page: number; pageSize: number }>(
+        `${S}/finance/receipts`,
+        { params },
+      )).data,
+  });
+}
+export function useReceipt(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'receipt', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<any>(`${S}/finance/receipts/${id}`)).data,
+  });
+}
+
+/* ── B3 · correcting a mis-keyed receipt ── */
+
+export function useReverseAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ allocationId, reason }: { allocationId: string; reason: string }) =>
+      (await api.post(`${S}/finance/allocations/${allocationId}/reverse`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
+  });
+}
+export function useReversePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ paymentId, reason }: { paymentId: string; reason: string }) =>
+      (await api.post(`${S}/finance/payments/${paymentId}/reverse`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
+  });
+}
+export function useReallocatePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      paymentId,
+      allocations,
+      reason,
+    }: {
+      paymentId: string;
+      allocations: Array<{ documentId: string; amount: number }>;
+      reason: string;
+    }) => (await api.post(`${S}/finance/payments/${paymentId}/reallocate`, { allocations, reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
+  });
+}
+
+/* ── C1 · fee clearance before exams ── */
+
+export interface ClearanceRow {
+  studentProfileId: string;
+  admissionNo?: string | null;
+  studentName?: string;
+  status: 'cleared' | 'partial' | 'blocked';
+  billed: number;
+  settled: number;
+  outstanding: number;
+  settledPercent: number;
+  thresholdPercent: number;
+  shortfall: number;
+}
+export function useFeeClearance(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'clearance', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<ClearanceRow>(`${S}/finance/clearance/student/${studentProfileId}`)).data,
+  });
+}
+export function useClassFeeClearance(classId?: string, thresholdPercent?: number) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'clearance', 'class', classId, thresholdPercent],
+    enabled: !!classId,
+    queryFn: async () =>
+      (await api.get<{
+        classId: string;
+        thresholdPercent: number;
+        total: number;
+        cleared: number;
+        partial: number;
+        blocked: number;
+        rows: ClearanceRow[];
+      }>(`${S}/finance/clearance/class/${classId}`, { params: { thresholdPercent } })).data,
+  });
+}
+
+/* ── C2 · SMS reminders ── */
+
+export function useSendFeeReminders() {
+  return useMutation({
+    mutationFn: async (dto: { classId?: string; daysAhead?: number; overdue?: boolean; minBalance?: number }) =>
+      (await api.post<{ sent: number; skipped: number; students: number }>(
+        `${S}/finance/reminders/send`,
+        dto,
+      )).data,
+  });
+}
+
+/* ── C4 · the statement a parent is handed ── */
+
+export function useTermStatement(studentProfileId?: string, termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'statement', studentProfileId, termId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<any>(`${S}/finance/statement/${studentProfileId}`, { params: { termId } })).data,
+  });
+}
+
+/* ── Live mobile money (MTN MoMo / Airtel) ── */
+
+export interface MomoRequest {
+  id: string;
+  provider: string;
+  providerRef: string;
+  msisdn: string;
+  amount: number;
+  status: 'pending' | 'succeeded' | 'failed';
+  failureReason?: string | null;
+  settledAt?: string | null;
+  createdAt: string;
+  studentProfile?: { admissionNo: string; partner?: { name: string } | null } | null;
+}
+export function useMomoAvailability() {
+  return useQuery({
+    queryKey: ['school', 'momo', 'availability'],
+    queryFn: async () => (await api.get<{ mtn: boolean; airtel: boolean }>(`${S}/mobile-money/availability`)).data,
+  });
+}
+export function useMomoRequests(params: { studentProfileId?: string; status?: string } = {}) {
+  return useQuery({
+    queryKey: ['school', 'momo', 'requests', params],
+    refetchInterval: 10_000, // a pending prompt resolves on the parent's phone
+    queryFn: async () => (await api.get<MomoRequest[]>(`${S}/mobile-money/requests`, { params })).data,
+  });
+}
+export function useRequestMomoPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { provider: 'mtn' | 'airtel'; studentProfileId: string; amount: number; phone: string; note?: string }) => {
+      const { provider, ...body } = dto;
+      return (await api.post<{ id: string; reference: string; status: string; message?: string }>(
+        `${S}/mobile-money/${provider}/request`,
+        body,
+      )).data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'momo'] }),
+  });
+}
+
+/* ── "Why does this pupil owe this?" ── */
+
+export interface BalanceExplainer {
+  studentProfileId: string;
+  studentName: string | null;
+  admissionNo: string;
+  className: string | null;
+  headline: string;
+  summary: { billed: number; paid: number; waived: number; credited: number; adjusted: number; outstanding: number };
+  lines: Array<{
+    date: string;
+    label: string;
+    amount: number;
+    kind: string;
+    sourceType: string;
+    sourceId: string;
+    reference: string;
+    runningBalance: number;
+  }>;
+  clearance?: ClearanceRow | null;
+}
+export function useBalanceExplainer(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'explain', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<BalanceExplainer>(`${S}/finance/explain/${studentProfileId}`)).data,
+  });
+}
+
+/* ── Parent self-service payment ── */
+
+export function useParentPayQuote(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'portal', 'pay-quote', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<{
+        studentProfileId: string;
+        outstanding: number;
+        billed: number;
+        collected: number;
+        providers: { mtn: boolean; airtel: boolean };
+      }>(`${S}/portals/parent/${studentProfileId}/pay-quote`)).data,
+  });
+}
+export function useParentPay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; provider: 'mtn' | 'airtel'; amount: number; phone: string }) => {
+      const { studentProfileId, ...body } = dto;
+      return (await api.post<{ status: string; reference: string; message?: string }>(
+        `${S}/portals/parent/${studentProfileId}/pay`,
+        body,
+      )).data;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'portal', 'payments', v.studentProfileId] });
+      qc.invalidateQueries({ queryKey: ['school', 'portal', 'pay-quote', v.studentProfileId] });
+    },
+  });
+}
+export function useParentPayments(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'portal', 'payments', studentProfileId],
+    enabled: !!studentProfileId,
+    refetchInterval: 10_000,
+    queryFn: async () => (await api.get<MomoRequest[]>(`${S}/portals/parent/${studentProfileId}/payments`)).data,
+  });
+}
+
+/* ── D3 · per-pupil fee overrides ── */
+
+export interface StudentFeeAssignment {
+  id: string;
+  studentProfileId: string;
+  feeStructureId: string;
+  termId: string;
+  /** { componentCode: amount } — what THIS pupil pays for that component. */
+  customDiscount: Record<string, number>;
+  studentProfile?: { admissionNo: string; partner?: { name: string } | null } | null;
+  feeStructure?: { name: string } | null;
+  term?: { name: string } | null;
+}
+
+export function useStudentFeeAssignments(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['school', 'fee-assignments', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<StudentFeeAssignment[]>(`${S}/student-fee-assignments/by-student/${studentProfileId}`)).data,
+  });
+}
+export function useUpsertStudentFeeAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      id?: string;
+      studentProfileId: string;
+      feeStructureId: string;
+      termId: string;
+      customDiscount: Record<string, number>;
+    }) => {
+      const { id, ...body } = dto;
+      // An override for a (pupil, structure, term) already exists or it does
+      // not; the caller does not need to care which.
+      return id
+        ? (await api.patch(`${S}/student-fee-assignments/${id}`, body)).data
+        : (await api.post(`${S}/student-fee-assignments`, body)).data;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'fee-assignments', v.studentProfileId] });
+    },
+  });
+}
+export function useDeleteStudentFeeAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/student-fee-assignments/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-assignments'] }),
+  });
+}
+
+/* ── D2 · instalment progress ── */
+
+export function useInstallmentProgress(studentProfileId?: string, termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'installments', studentProfileId, termId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<any>(`${S}/finance/installments/${studentProfileId}`, { params: { termId } })).data,
+  });
+}
+
+/* ── E1 / E2 · reports ── */
+
+export interface CashBook {
+  date: string;
+  byMethod: Array<{ method: string; count: number; total: number }>;
+  totalCollected: number;
+  receiptCount: number;
+  cashTotal: number;
+  refundsPaid: number;
+  refundCount: number;
+  netCash: number;
+  reversedCount: number;
+  reversedTotal: number;
+  receipts: Array<{
+    id: string; paymentNumber: string; time: string; payer: string;
+    method: string; reference?: string | null; amount: number;
+  }>;
+}
+export function useCashBook(date?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'cash-book', date],
+    queryFn: async () => (await api.get<CashBook>(`${S}/finance/reports/cash-book`, { params: { date } })).data,
+  });
+}
+export function useBudgetVariance(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'budget-variance', termId],
+    queryFn: async () =>
+      (await api.get<{
+        rows: Array<{
+          id: string; category: string; name: string; termName?: string | null;
+          planned: number; actual: number; variance: number; achievedPercent: number | null;
+        }>;
+        totalPlanned: number;
+        totalActual: number;
+      }>(`${S}/finance/reports/budget-variance`, { params: { termId } })).data,
   });
 }
 
@@ -4326,18 +4743,46 @@ export function useConfirmImportRow() {
   });
 }
 
+/**
+ * Publish a fee structure — freeze its priced components as an immutable
+ * FeeStructureVersion. Billing prices from that version, never from the
+ * editable components (FINANCIAL_INVARIANTS §Pricing provenance), so a
+ * structure that has never been published cannot be billed at all.
+ *
+ * Pass `components` to REPRICE a structure that is already published: `PATCH`
+ * refuses component edits once published, and this is the one door that writes
+ * new amounts and freezes them as version N+1 in a single transaction.
+ * Invoices already issued keep the version they were billed from.
+ */
 export function usePublishFeeStructure() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => (await api.post(`${S}/fee-structures/${id}/publish`, {})).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] }),
+    mutationFn: async (arg: string | { id: string; components?: FeeComponent[] }) => {
+      const { id, components } = typeof arg === 'string' ? { id: arg, components: undefined } : arg;
+      return (await api.post(`${S}/fee-structures/${id}/publish`, components ? { components } : {})).data;
+    },
+    onSuccess: (_d, arg) => {
+      const id = typeof arg === 'string' ? arg : arg.id;
+      qc.invalidateQueries({ queryKey: ['school', 'fee-structures'] });
+      qc.invalidateQueries({ queryKey: ['school', 'fee-structures', id, 'versions'] });
+    },
   });
+}
+
+export interface FeeStructureVersion {
+  id: string;
+  versionNo: number;
+  isImmutable: boolean;
+  publishedAt?: string | null;
+  publishedById?: string | null;
+  createdAt: string;
+  items?: Array<{ id: string; code: string; name: string; amount: number; isOptional: boolean }>;
 }
 export function useFeeStructureVersions(id?: string) {
   return useQuery({
     queryKey: ['school', 'fee-structures', id, 'versions'],
     enabled: !!id,
-    queryFn: async () => (await api.get<any[]>(`${S}/fee-structures/${id}/versions`)).data,
+    queryFn: async () => (await api.get<FeeStructureVersion[]>(`${S}/fee-structures/${id}/versions`)).data,
   });
 }
 

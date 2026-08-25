@@ -288,7 +288,7 @@ function StudentDetail({
             <h3 className="mb-2 text-sm font-semibold">Fees</h3>
             <div className="grid grid-cols-3 gap-2 text-center text-sm">
               <Stat label="Billed" value={money(statement.totalBilled)} />
-              <Stat label="Paid" value={money(statement.totalPaid)} />
+              <Stat label="Paid" value={money(statement.collected)} />
               <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
             </div>
           </div>

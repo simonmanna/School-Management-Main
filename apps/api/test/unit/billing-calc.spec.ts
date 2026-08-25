@@ -34,6 +34,10 @@ function makeService(): { service: BillingService; mocks: MockContext } {
       discount: { findMany: jest.fn().mockResolvedValue([]) },
       // P3: the optional-fee opt-in lookup runs in the same batched Promise.all.
       studentOptionalFee: { findMany: jest.fn().mockResolvedValue([]) },
+      // D4: proration reads the school's policy and the term's dates.
+      // Absent policy = 'none', so billing is unchanged.
+      schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) },
+      term: { findFirst: jest.fn().mockResolvedValue(null) },
       schoolFeeInvoice: { create: jest.fn() },
       // P1-A: billing prices from the immutable FeeStructureVersion's FeeItem
       // rows, never the mutable FeeStructure.components JSON. One TUITION item

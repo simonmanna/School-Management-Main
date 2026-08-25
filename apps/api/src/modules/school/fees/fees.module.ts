@@ -34,6 +34,10 @@ import { BudgetService } from './budget.service';
 import { BudgetController } from './budget.controller';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { PaymentAllocationReversalService } from './allocation-reversal.service';
+import { FeeNotificationsSubscriber } from './fee-notifications.subscriber';
+import { MobileMoneyService } from './mobile-money.service';
+import { DunningCronWorker } from './dunning-cron.worker';
+import { MobileMoneyController } from './mobile-money.controller';
 import { SchoolFinanceQueryController } from './school-finance-query.controller';
 import { FinanceControlsService } from './finance-controls.service';
 import { FinanceControlsController } from './finance-controls.controller';
@@ -58,6 +62,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
 @Module({
   imports: [InvoicingModule, AccountingModule],
   controllers: [
+    MobileMoneyController,
     FeeStructureController,
     FeeCategoryController,
     FeeScheduleController,
@@ -95,6 +100,15 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     BudgetService,
     SchoolFinanceQueryService,
     PaymentAllocationReversalService,
+    // C2/C3: fee events → guardian SMS. The messaging service already existed;
+    // attendance was using it and fees had no subscriber at all.
+    FeeNotificationsSubscriber,
+    // Live MTN MoMo / Airtel collection. Funnels every confirmed callback into
+    // SchoolPaymentService.collect — one payment writer, not two.
+    MobileMoneyService,
+    // Automated reminder ladder. Off unless DUNNING_CRON_ENABLED=true — SMS
+    // costs money and an unwanted reminder is worse than none.
+    DunningCronWorker,
     FinanceControlsService,
     BillingRunService,
     PaymentReconciliationService,
@@ -116,6 +130,15 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     PenaltyCronWorker,
     SchoolFinanceQueryService,
     PaymentAllocationReversalService,
+    // C2/C3: fee events → guardian SMS. The messaging service already existed;
+    // attendance was using it and fees had no subscriber at all.
+    FeeNotificationsSubscriber,
+    // Live MTN MoMo / Airtel collection. Funnels every confirmed callback into
+    // SchoolPaymentService.collect — one payment writer, not two.
+    MobileMoneyService,
+    // Automated reminder ladder. Off unless DUNNING_CRON_ENABLED=true — SMS
+    // costs money and an unwanted reminder is worse than none.
+    DunningCronWorker,
     FinanceControlsService,
     BillingRunService,
   ],

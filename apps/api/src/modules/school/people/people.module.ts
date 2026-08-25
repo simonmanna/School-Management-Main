@@ -16,8 +16,13 @@ import { PromotionService } from './promotion.service';
 import { PromotionController } from './promotion.controller';
 import { EnrollmentService } from './enrollment.service';
 import { EnrollmentController } from './enrollment.controller';
+import { FeesModule } from '../fees/fees.module';
 
 @Module({
+  // D1: the fee statement must read the ONE canonical fee calculation
+  // (SchoolFinanceQueryService), not compute a balance of its own — that
+  // divergence is exactly how it came to report waivers as money paid.
+  imports: [FeesModule],
   controllers: [
     StudentController,
     GuardianController,

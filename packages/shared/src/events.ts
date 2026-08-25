@@ -281,6 +281,7 @@ export const EVENTS = {
   // an invoice and returns value to the payment's unallocated balance. A
   // payment reversal unwinds a receipt that should never have existed. Neither
   // is a refund, which returns money that genuinely arrived.
+  SchoolMomoSettled: 'school.fee.momo.settled',
   SchoolAllocationReversed: 'school.fee.allocation.reversed',
   SchoolPaymentReversed: 'school.fee.payment.reversed',
   // Library + transport
@@ -907,6 +908,16 @@ export interface DomainEventMap {
     termId: string;
     reopenedById: string;
     reason?: string;
+  };
+  'school.fee.momo.settled': {
+    organizationId: string;
+    requestId: string;
+    studentProfileId: string;
+    provider: string;
+    amount: string;
+    paymentId: string | null;
+    /** True when the provider re-delivered a callback we had already posted. */
+    replayed: boolean;
   };
   'school.fee.allocation.reversed': {
     organizationId: string;

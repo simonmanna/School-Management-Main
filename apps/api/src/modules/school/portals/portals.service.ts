@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
-import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
+import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 
 /**
  * PortalsService — composes existing services to build role-specific dashboards.
@@ -19,6 +19,9 @@ export class PortalsService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly statusConfig: AttendanceStatusConfigService,
+    // D1: the ONE canonical fee calculation. The portal must not compute a
+    // balance of its own, or it will disagree with the bursar.
+    private readonly finance: SchoolFinanceQueryService,
   ) {}
 
   /**
@@ -39,7 +42,7 @@ export class PortalsService {
     for (const s of students) {
       const [attendance, fees, announcements] = await Promise.all([
         this.recentAttendance(s.id),
-        this.feeBalance(s.partnerId),
+        this.feeBalance(s.partnerId, s.id),
         this.recentAnnouncements(s.currentClassId),
       ]);
       result.push({ student: s, attendance, fees, announcements });
@@ -307,23 +310,35 @@ export class PortalsService {
    * Aggregated in the database rather than summed in JS — the old version
    * loaded every matching document row to add up two columns.
    *
-   * NOTE (P0-4, fixed in A1): `paid` is still derived as billed − balance, so it
-   * counts waived and credited amounts as if they were money received. The
-   * honest figure comes from PaymentAllocation, which arrives with
-   * SchoolFinanceQueryService; this method then delegates to it.
+   * D1: `paid` used to be derived as `billed − balance`. Waivers, credit
+   * applications and credit adjustments all reduce `amountResidual`, so every
+   * shilling the school FORGAVE was reported to the parent as money they had
+   * paid. A bursary pupil whose fees were waived saw "paid: 400,000" against a
+   * family that had handed over nothing.
+   *
+   * The docstring here previously claimed this method "then delegates to"
+   * SchoolFinanceQueryService. It did not — the delegation was described and
+   * never carried out. It is now real, so the portal, the bursar statement and
+   * the ledger cannot disagree (FINANCIAL_INVARIANTS §Terminology: amountPaid
+   * is realized payment consideration and EXCLUDES waivers, credits,
+   * write-offs and adjustments).
+   *
+   * `collected` is SUM(PaymentAllocation) — money actually received. The
+   * reductions are reported alongside it as their own figures, because a
+   * parent is entitled to see that a balance fell because it was forgiven
+   * rather than because someone paid.
    */
-  private async feeBalance(partnerId: string) {
-    const where = { ...POSTED_FEE_WHERE, partnerId };
-    const [agg, invoiceCount] = await Promise.all([
-      this.prisma.client.document.aggregate({
-        where,
-        _sum: { totalAmount: true, amountResidual: true },
-      }),
-      this.prisma.client.document.count({ where }),
-    ]);
-    const total = Number(agg._sum.totalAmount ?? 0);
-    const balance = Number(agg._sum.amountResidual ?? 0);
-    return { total, paid: total - balance, balance, invoiceCount };
+  private async feeBalance(partnerId: string, studentProfileId: string) {
+    const b = await this.finance.studentBalance(studentProfileId);
+    return {
+      total: b.billed,
+      collected: b.collected,
+      waived: b.waived,
+      credited: b.credited,
+      adjusted: b.adjusted,
+      balance: b.balance,
+      invoiceCount: b.invoiceCount,
+    };
   }
 
   private async recentAnnouncements(classId: string | null | undefined) {

@@ -33,6 +33,10 @@ function makeBilling(feeStructure: any, items: any[] = []) {
       scholarship: { findMany: jest.fn().mockResolvedValue([]) },
       discount: { findMany: jest.fn().mockResolvedValue([]) },
       studentOptionalFee: { findMany: jest.fn().mockResolvedValue([]) },
+      // D4: proration reads the school's policy and the term's dates.
+      // Absent policy = 'none', so billing is unchanged.
+      schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) },
+      term: { findFirst: jest.fn().mockResolvedValue(null) },
       feeItem: { findMany: jest.fn().mockResolvedValue(items) },
       document: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(),

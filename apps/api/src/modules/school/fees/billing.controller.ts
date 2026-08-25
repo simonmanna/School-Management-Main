@@ -57,4 +57,33 @@ export class SchoolPaymentController {
   refund(@Body() dto: RefundFeeDto) {
     return this.payments.refundFee(dto);
   }
+
+  /**
+   * B4 · reporting day. A whole class of receipts in one submission.
+   *
+   * Deliberately NOT @Idempotent at the batch level: each row carries its own
+   * `externalReference` replay guard, and a bursar re-submitting a corrected
+   * batch after three rows failed must have the other rows replay rather than
+   * the whole request return a cached response for a body it no longer sends.
+   */
+  @Post('collect-batch')
+  @RequirePermissions(PERMISSIONS.school.collectPayments)
+  collectBatch(
+    @Body()
+    dto: {
+      rows: Array<{
+        studentProfileId: string;
+        amount: number;
+        paymentMethod?: 'cash' | 'bank' | 'mobile_money' | 'card';
+        reference?: string;
+        externalReference?: string;
+        convertOverpaymentToCredit?: boolean;
+      }>;
+      paymentDate?: string;
+      cashSessionId?: string;
+      bankAccountId?: string;
+    },
+  ) {
+    return this.payments.collectBatch(dto);
+  }
 }

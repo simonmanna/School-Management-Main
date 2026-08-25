@@ -8,6 +8,7 @@ import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
+import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
 
 /**
@@ -51,6 +52,9 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly sequence: SequenceService,
+    // D1: the ONE canonical fee calculation. The statement must not compute a
+    // balance of its own, or it will disagree with the parent portal.
+    private readonly finance: SchoolFinanceQueryService,
   ) {
     super(prisma.client.studentProfile as unknown as CrudDelegate);
   }
@@ -338,14 +342,25 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       select: { id: true, paymentNumber: true, amount: true, paymentDate: true, paymentMethod: true },
     });
 
-    const totalBilled = invoices.reduce((s, d) => s + Number(d.totalAmount), 0);
-    const balance = invoices.reduce((s, d) => s + Number(d.amountResidual), 0);
-    // NOTE (P0-4, fixed in A1): derived by subtraction, so waived and credited
-    // amounts are reported as if money had been received — and this figure will
-    // not reconcile with the `payments` array rendered beside it. The honest
-    // number is SUM(PaymentAllocation); it arrives with
-    // SchoolFinanceQueryService, which this method then delegates to.
-    const totalPaid = totalBilled - balance;
+    // D1: every figure comes from the ONE canonical calculation.
+    //
+    // `totalPaid` used to be `totalBilled - balance`. `balance` sums
+    // `amountResidual`, which waivers, credit applications and credit
+    // adjustments all reduce — so forgiven money was reported as money
+    // received. This statement renders that figure directly beside the
+    // `payments` array below, so on any pupil who had ever received a waiver
+    // the two numbers on the same page contradicted each other.
+    //
+    // The old comment claimed this method "then delegates to"
+    // SchoolFinanceQueryService. It did not; that delegation is now real, so
+    // the bursar statement, the parent portal and the ledger cannot disagree
+    // (FINANCIAL_INVARIANTS §Terminology).
+    //
+    // `collected` is SUM(PaymentAllocation) and now reconciles exactly with
+    // the receipts listed below it. Reductions are reported as their own
+    // figures rather than folded into "paid", because a parent asking why
+    // their balance fell deserves to know whether it was paid or forgiven.
+    const b = await this.finance.studentBalance(studentProfileId);
 
     return {
       studentId: profile.id,
@@ -353,9 +368,12 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       admissionNo: profile.admissionNo,
       profile,
       partner,
-      totalBilled,
-      totalPaid,
-      balance,
+      totalBilled: b.billed,
+      collected: b.collected,
+      waived: b.waived,
+      credited: b.credited,
+      adjusted: b.adjusted,
+      balance: b.balance,
       invoices,
       payments,
     };

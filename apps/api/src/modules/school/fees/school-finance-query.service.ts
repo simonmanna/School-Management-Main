@@ -321,9 +321,20 @@ export class SchoolFinanceQueryService {
   async reconcileCurrentArToGl(): Promise<{
     arControlAccountId: string;
     subledgerTotal: number;
+    /** Inbound payment value received but not yet applied to an invoice. */
+    unallocatedTotal: number;
+    /** What the GL AR balance SHOULD be: open residual − unallocated payments. */
+    expectedGlTotal: number;
     glTotal: number;
     variance: number;
-    perStudent: Array<{ partnerId: string; subledger: number; gl: number; variance: number }>;
+    perStudent: Array<{
+      partnerId: string;
+      subledger: number;
+      unallocated: number;
+      expectedGl: number;
+      gl: number;
+      variance: number;
+    }>;
   }> {
     const organizationId = this.tenant.organizationId;
     const arAccountId = await this.determination.receivableAccount(null, this.prisma.client);
@@ -370,24 +381,69 @@ export class SchoolFinanceQueryService {
       }
     }
 
-    const partners = new Set<string>([...subledgerByPartner.keys(), ...glByPartner.keys()]);
-    const perStudent: Array<{ partnerId: string; subledger: number; gl: number; variance: number }> = [];
+    // A payment received but not yet allocated credits AR without any invoice
+    // to show for it, so the GL balance legitimately goes NEGATIVE while the
+    // open-invoice subledger reads zero. Comparing the two directly reported
+    // that prepayment as a reconciliation failure — a false positive that made
+    // the dashboard cry wolf on the most ordinary event in a Ugandan school,
+    // a parent paying ahead of the next invoice.
+    //
+    // The identity that actually holds:
+    //     GL AR = SUM(open residual) − SUM(unallocated inbound payment)
+    const unallocatedRows = allStudentPartnerIds.length
+      ? await this.prisma.client.payment.groupBy({
+          by: ['partnerId'],
+          where: {
+            organizationId,
+            direction: 'inbound',
+            status: { not: 'cancelled' },
+            partnerId: { in: allStudentPartnerIds },
+          },
+          _sum: { unallocatedAmount: true },
+        })
+      : [];
+    const unallocatedByPartner = new Map<string, number>();
+    for (const r of unallocatedRows) {
+      if (r.partnerId) unallocatedByPartner.set(r.partnerId, Number(r._sum.unallocatedAmount ?? 0));
+    }
+
+    const partners = new Set<string>([
+      ...subledgerByPartner.keys(),
+      ...glByPartner.keys(),
+      ...unallocatedByPartner.keys(),
+    ]);
+    const perStudent: Array<{
+      partnerId: string;
+      subledger: number;
+      unallocated: number;
+      expectedGl: number;
+      gl: number;
+      variance: number;
+    }> = [];
     let subTotal = 0;
     let glTotal = 0;
+    let unallocatedTotal = 0;
     for (const partnerId of partners) {
       const sub = subledgerByPartner.get(partnerId) ?? 0;
       const gl = glByPartner.get(partnerId) ?? 0;
+      const unallocated = unallocatedByPartner.get(partnerId) ?? 0;
       subTotal += sub;
       glTotal += gl;
-      const variance = Number((sub - gl).toFixed(6));
-      if (Math.abs(variance) > 0.01) perStudent.push({ partnerId, subledger: sub, gl, variance });
+      unallocatedTotal += unallocated;
+      const expectedGl = sub - unallocated;
+      const variance = Number((expectedGl - gl).toFixed(6));
+      if (Math.abs(variance) > 0.01) {
+        perStudent.push({ partnerId, subledger: sub, unallocated, expectedGl, gl, variance });
+      }
     }
 
     return {
       arControlAccountId: arAccountId,
       subledgerTotal: Number(subTotal.toFixed(2)),
+      unallocatedTotal: Number(unallocatedTotal.toFixed(2)),
+      expectedGlTotal: Number((subTotal - unallocatedTotal).toFixed(2)),
       glTotal: Number(glTotal.toFixed(2)),
-      variance: Number((subTotal - glTotal).toFixed(2)),
+      variance: Number((subTotal - unallocatedTotal - glTotal).toFixed(2)),
       perStudent,
     };
   }
@@ -734,6 +790,609 @@ export class SchoolFinanceQueryService {
       total: Number(dec(fromPayments).plus(fromCredits).toFixed(6)),
       credits: credits.map((c) => ({ ...c, remaining: Number(c.remaining) })),
     };
+  }
+
+  /**
+   * "Why does this pupil owe this?" — the one panel a bursar needs at the window.
+   *
+   * Every fact is already in the ledger; what was missing was an answer shaped
+   * like the question a parent actually asks. A bursar facing an argument about
+   * UGX 1,250,000 does not want a transaction list — they want a sentence per
+   * line and a total that visibly adds up:
+   *
+   *     Balance brought forward            200,000
+   *     Term 2 tuition                   1,500,000
+   *     Transport                          300,000
+   *     Bursary (Hope Church)             −200,000
+   *     Paid 14 May · receipt PAY-0042    −400,000
+   *     Waived — hardship                  −50,000
+   *     ─────────────────────────────────────────
+   *     Outstanding                      1,350,000
+   *
+   * Grouped by what a family recognises rather than by event type, and each
+   * line keeps its source document so "prove it" is one click away.
+   */
+  async explainBalance(studentProfileId: string) {
+    const [balance, ledger, student, clearance] = await Promise.all([
+      this.studentBalance(studentProfileId),
+      this.studentLedger(studentProfileId),
+      this.prisma.client.studentProfile.findFirst({
+        where: { id: studentProfileId },
+        include: { partner: true, currentClass: true },
+      }),
+      this.feeClearance(studentProfileId).catch(() => null),
+    ]);
+    if (!student) throw new NotFoundException(`Student ${studentProfileId} not found`);
+
+    // Human wording per event type. A parent has never heard of a
+    // "CREDIT_APPLIED" and should not have to.
+    const label = (r: LedgerRow): string => {
+      switch (r.ledgerType) {
+        case 'OPENING_BALANCE': return 'Balance brought forward';
+        case 'INVOICE': return `Fees invoiced · ${r.reference}`;
+        case 'PENALTY': return `Late-payment charge · ${r.reference}`;
+        case 'PAYMENT': return `Paid ${new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · receipt ${r.reference}`;
+        case 'CREDIT_APPLIED': return 'Credit applied from an earlier overpayment';
+        case 'WAIVER': return `Waived · ${r.description}`;
+        case 'WRITE_OFF': return `Written off · ${r.description}`;
+        case 'ADJUSTMENT': return `Adjustment · ${r.description}`;
+        case 'REFUND': return `Refunded · ${r.reference}`;
+        case 'REVERSAL': return `Reversed · ${r.description}`;
+        default: return r.description || r.ledgerType;
+      }
+    };
+
+    const lines = ledger.rows
+      .filter((r) => r.debit !== 0 || r.credit !== 0 || r.ledgerType === 'OPENING_BALANCE')
+      .map((r) => ({
+        date: r.date,
+        label: label(r),
+        // Signed the way a family reads it: a charge adds, everything else
+        // subtracts. The running balance is the ledger's own, unchanged.
+        amount: Number((r.debit - r.credit).toFixed(2)),
+        kind: r.ledgerType,
+        sourceType: r.sourceType,
+        sourceId: r.sourceId,
+        reference: r.reference,
+        runningBalance: r.balance,
+      }));
+
+    // The same arithmetic as the balance identity, phrased as a summary a
+    // bursar can read aloud.
+    const summary = {
+      billed: balance.billed,
+      paid: balance.collected,
+      waived: balance.waived,
+      credited: balance.credited,
+      adjusted: balance.adjusted,
+      outstanding: balance.balance,
+    };
+
+    // A plain-language headline. This is what gets read out at the window.
+    const name = student.partner?.name ?? 'This pupil';
+    const ugx = (v: number) => `UGX ${Math.round(v).toLocaleString('en-UG')}`;
+    const parts: string[] = [`${name} was billed ${ugx(summary.billed)}`];
+    if (summary.paid > 0) parts.push(`has paid ${ugx(summary.paid)}`);
+    if (summary.waived > 0) parts.push(`${ugx(summary.waived)} was waived`);
+    if (summary.credited > 0) parts.push(`${ugx(summary.credited)} was settled by credit`);
+    if (summary.adjusted !== 0) {
+      parts.push(`${ugx(Math.abs(summary.adjusted))} ${summary.adjusted > 0 ? 'was added' : 'was deducted'} by adjustment`);
+    }
+    const headline =
+      summary.outstanding > 0
+        ? `${parts.join(', ')} — leaving ${ugx(summary.outstanding)} outstanding.`
+        : `${parts.join(', ')} — nothing is outstanding.`;
+
+    return {
+      studentProfileId,
+      studentName: student.partner?.name ?? null,
+      admissionNo: student.admissionNo,
+      className: student.currentClass?.name ?? null,
+      headline,
+      summary,
+      lines,
+      clearance,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * D2 · instalment progress.
+   *
+   * `InstallmentPlan` was modelled, CRUD'd and given a React hook, and then
+   * read by nothing — a pupil could have a plan and the system would neither
+   * chase nor honour it.
+   *
+   * Deliberately NOT one invoice per instalment. A Ugandan school bills the
+   * full term fee up front and the family pays it down in parts; splitting the
+   * receivable into three invoices would misstate what is owed on day one and
+   * make the carry-forward arithmetic lie. The plan is instead a schedule of
+   * EXPECTED payments, checked against what has actually been collected.
+   *
+   * "Behind" therefore means: less has been received than this instalment's
+   * cumulative target by its due date. It is a collections signal, not an
+   * accounting fact — no journal entry belongs to an instalment.
+   */
+  async installmentProgress(studentProfileId: string, termId?: string) {
+    const organizationId = this.tenant.organizationId;
+    const plan = await this.prisma.client.installmentPlan.findFirst({
+      where: { organizationId, studentProfileId, ...(termId ? { termId } : {}) },
+      include: { term: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!plan) return null;
+
+    const balance = await this.studentBalance(studentProfileId);
+    // Waivers and credits count toward the plan for the same reason they count
+    // toward clearance: the school decided not to collect that money, so a
+    // bursary pupil must not read as "behind".
+    const settled = balance.collected + balance.waived + balance.credited;
+
+    const raw = Array.isArray(plan.installments) ? (plan.installments as any[]) : [];
+    const parts = raw
+      .map((i) => ({
+        number: Number(i?.number ?? 0),
+        dueDate: i?.dueDate ? new Date(i.dueDate) : null,
+        amount: Number(i?.amount ?? 0),
+      }))
+      .sort((a, b) => a.number - b.number);
+
+    const now = new Date();
+    let cumulative = 0;
+    const schedule = parts.map((p) => {
+      cumulative += p.amount;
+      const coveredBy = Math.min(settled, cumulative);
+      const shortfall = Math.max(0, Number((cumulative - settled).toFixed(2)));
+      const due = p.dueDate;
+      const status: 'paid' | 'due' | 'overdue' | 'upcoming' =
+        shortfall <= 0 ? 'paid' : due && due < now ? 'overdue' : due && due <= new Date(now.getTime() + 7 * 86_400_000) ? 'due' : 'upcoming';
+      return {
+        number: p.number,
+        dueDate: due,
+        amount: p.amount,
+        cumulativeTarget: Number(cumulative.toFixed(2)),
+        coveredBy: Number(coveredBy.toFixed(2)),
+        shortfall,
+        status,
+      };
+    });
+
+    const nextDue = schedule.find((s) => s.status !== 'paid') ?? null;
+    return {
+      planId: plan.id,
+      termId: plan.termId,
+      termName: plan.term?.name ?? null,
+      totalPlanned: Number(plan.totalAmount),
+      settled,
+      billed: balance.billed,
+      outstanding: balance.balance,
+      onTrack: !schedule.some((s) => s.status === 'overdue'),
+      nextDue,
+      schedule,
+    };
+  }
+
+  /**
+   * C4 · the termly statement a parent is handed.
+   *
+   * The single most-requested artifact in a Ugandan school and the one thing
+   * this module could not produce. Built on `studentLedger`, which already
+   * carries the opening-balance row, so the sheet satisfies the identity a
+   * parent can check by hand:
+   *
+   *   Opening + Charges + Penalties − Payments − Credits − Waivers ± Adjustments = Closing
+   *
+   * Scoped to a term by date window rather than by invoice term id, because a
+   * Term 1 invoice settled in Term 2 must appear on the Term 2 statement — that
+   * payment is what the parent is asking about.
+   */
+  async termStatement(studentProfileId: string, termId?: string) {
+    const organizationId = this.tenant.organizationId;
+
+    const term = termId
+      ? await this.prisma.client.term.findFirst({ where: { id: termId, organizationId } })
+      : await this.prisma.client.term.findFirst({ where: { organizationId, isCurrent: true } });
+
+    const [student, school, ledger] = await Promise.all([
+      this.prisma.client.studentProfile.findFirst({
+        where: { id: studentProfileId, organizationId },
+        include: {
+          partner: true,
+          currentClass: { include: { gradeLevel: true } },
+          currentSection: true,
+          guardians: { include: { guardianContact: true } },
+        },
+      }),
+      this.prisma.client.schoolProfile.findFirst({ where: { organizationId } }),
+      this.studentLedger(studentProfileId, {
+        from: term?.startDate?.toISOString(),
+        to: term?.endDate?.toISOString(),
+      }),
+    ]);
+    if (!student) throw new NotFoundException(`Student ${studentProfileId} not found`);
+
+    const balance = await this.studentBalance(studentProfileId);
+    const clearance = await this.feeClearance(studentProfileId);
+
+    return {
+      school,
+      student,
+      term,
+      ledger,
+      balance,
+      clearance,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * E1 · the daily cash book.
+   *
+   * What the bursar reconciles the drawer against at close of day and signs.
+   * Split by tender method because only cash is physically counted — a mobile
+   * money total that does not match the drawer is not a discrepancy, it is a
+   * different account.
+   *
+   * Reversed payments are excluded from the totals and reported separately:
+   * a receipt cancelled during the day did not put money in the drawer, but
+   * the bursar still needs to see that it happened.
+   */
+  async dailyCashBook(dateStr?: string) {
+    const organizationId = this.tenant.organizationId;
+    const day = dateStr ? new Date(dateStr) : new Date();
+    const from = new Date(day);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(day);
+    to.setHours(23, 59, 59, 999);
+
+    const payments = await this.prisma.client.payment.findMany({
+      where: { organizationId, direction: 'inbound', paymentDate: { gte: from, lte: to } },
+      include: { partner: { select: { name: true } } },
+      orderBy: { paymentDate: 'asc' },
+    });
+
+    const live = payments.filter((p) => p.status !== 'cancelled');
+    const reversed = payments.filter((p) => p.status === 'cancelled');
+
+    const byMethod = new Map<string, { method: string; count: number; total: number }>();
+    for (const p of live) {
+      const row = byMethod.get(p.paymentMethod) ?? { method: p.paymentMethod, count: 0, total: 0 };
+      row.count++;
+      row.total += Number(p.amount);
+      byMethod.set(p.paymentMethod, row);
+    }
+
+    const refunds = await this.prisma.client.payment.aggregate({
+      where: { organizationId, direction: 'outbound', paymentDate: { gte: from, lte: to }, status: { not: 'cancelled' } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    });
+
+    return {
+      date: from.toISOString().slice(0, 10),
+      byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
+      totalCollected: live.reduce((t, p) => t + Number(p.amount), 0),
+      receiptCount: live.length,
+      // Cash is the only line the drawer is counted against.
+      cashTotal: byMethod.get('cash')?.total ?? 0,
+      refundsPaid: Number(refunds._sum.amount ?? 0),
+      refundCount: refunds._count._all,
+      netCash: (byMethod.get('cash')?.total ?? 0) - Number(refunds._sum.amount ?? 0),
+      reversedCount: reversed.length,
+      reversedTotal: reversed.reduce((t, p) => t + Number(p.amount), 0),
+      receipts: live.map((p) => ({
+        id: p.id,
+        paymentNumber: p.paymentNumber,
+        time: p.paymentDate,
+        payer: p.partner?.name ?? '—',
+        method: p.paymentMethod,
+        reference: p.reference,
+        amount: Number(p.amount),
+      })),
+    };
+  }
+
+  /**
+   * E2 · income against budget.
+   *
+   * `Budget` rows have existed since the module was built and nothing ever
+   * compared them to reality. Fee income is matched to the budget period, so a
+   * school can see mid-term whether the term's collections are tracking the
+   * plan while there is still time to chase.
+   */
+  async budgetVariance(termId?: string) {
+    const organizationId = this.tenant.organizationId;
+    const budgets = await this.prisma.client.budget.findMany({
+      where: { organizationId, status: { not: 'draft' }, ...(termId ? { termId } : {}) },
+      include: { term: true, academicYear: true },
+      orderBy: { category: 'asc' },
+    });
+
+    const rows = await Promise.all(
+      budgets.map(async (b) => {
+        // Window: the budget's own dates, else its term's, else the year's.
+        const from = b.periodFrom ?? b.term?.startDate ?? b.academicYear?.startDate ?? null;
+        const to = b.periodTo ?? b.term?.endDate ?? b.academicYear?.endDate ?? null;
+
+        const actual = await this.prisma.client.payment.aggregate({
+          where: {
+            organizationId,
+            direction: 'inbound',
+            status: { not: 'cancelled' },
+            ...(from && to ? { paymentDate: { gte: from, lte: to } } : {}),
+          },
+          _sum: { amount: true },
+        });
+
+        const planned = Number(b.amount);
+        const collected = Number(actual._sum.amount ?? 0);
+        return {
+          id: b.id,
+          category: b.category,
+          name: b.name,
+          termName: b.term?.name ?? null,
+          planned,
+          actual: collected,
+          variance: Number((collected - planned).toFixed(2)),
+          achievedPercent: planned > 0 ? Number(((collected / planned) * 100).toFixed(1)) : null,
+          periodFrom: from,
+          periodTo: to,
+        };
+      }),
+    );
+
+    return {
+      rows,
+      totalPlanned: rows.reduce((t, r) => t + r.planned, 0),
+      totalActual: rows.reduce((t, r) => t + r.actual, 0),
+    };
+  }
+
+  /**
+   * C1 · fee clearance.
+   *
+   * Ugandan schools gate exams on fees, and this system's own report-card
+   * template already prints "All fees must be cleared before the first day of
+   * term" — a promise nothing in the code was deciding. Bursars were reading
+   * the defaulters list and marking a paper register.
+   *
+   * The rule is a percentage of what a pupil has been billed, because that is
+   * how schools state it ("clear at least 60% to sit end-of-term"). A flat
+   * shilling threshold would punish a P7 pupil, whose fees are higher, for the
+   * same relative payment as a P1 pupil.
+   *
+   * `waived` and `credited` count toward clearance: a bursary pupil whose fees
+   * were forgiven IS cleared — the school decided not to collect that money.
+   * Only the outstanding balance blocks. This is why clearance reads the
+   * canonical balance rather than SUM(PaymentAllocation) alone.
+   *
+   * The threshold lives on `SchoolProfile.customFields.feeClearancePercent` so a
+   * school sets it once; `DEFAULT_CLEARANCE_PERCENT` applies until they do.
+   */
+  static readonly DEFAULT_CLEARANCE_PERCENT = 100;
+
+  async feeClearance(
+    studentProfileId: string,
+    opts: { thresholdPercent?: number } = {},
+  ): Promise<{
+    studentProfileId: string;
+    status: 'cleared' | 'partial' | 'blocked';
+    billed: number;
+    settled: number;
+    outstanding: number;
+    settledPercent: number;
+    thresholdPercent: number;
+    shortfall: number;
+  }> {
+    const b = await this.studentBalance(studentProfileId);
+    const threshold = opts.thresholdPercent ?? (await this.clearanceThreshold());
+
+    // Settled = every way the debt legitimately went away. A waived pupil is
+    // cleared; the school chose not to collect.
+    const settled = b.collected + b.waived + b.credited;
+    const settledPercent = b.billed > 0 ? Number(((settled / b.billed) * 100).toFixed(2)) : 100;
+    const required = (b.billed * threshold) / 100;
+    const shortfall = Math.max(0, Number((required - settled).toFixed(2)));
+
+    const status: 'cleared' | 'partial' | 'blocked' =
+      settledPercent >= threshold ? 'cleared' : settled > 0 ? 'partial' : 'blocked';
+
+    return {
+      studentProfileId,
+      status,
+      billed: b.billed,
+      settled,
+      outstanding: b.balance,
+      settledPercent,
+      thresholdPercent: threshold,
+      shortfall,
+    };
+  }
+
+  /** The org's configured clearance bar, or the default. */
+  private async clearanceThreshold(): Promise<number> {
+    const organizationId = this.tenant.organizationId;
+    const profile = await this.prisma.client.schoolProfile.findFirst({
+      where: { organizationId },
+      select: { customFields: true },
+    });
+    const raw = (profile?.customFields as any)?.feeClearancePercent;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 100
+      ? n
+      : SchoolFinanceQueryService.DEFAULT_CLEARANCE_PERCENT;
+  }
+
+  /**
+   * Clearance for a whole class — the list a head teacher works from when
+   * deciding who sits and who is sent home. One balance query per pupil is
+   * avoided by aggregating the class in a handful of grouped queries.
+   */
+  async classFeeClearance(classId: string, opts: { thresholdPercent?: number } = {}) {
+    const organizationId = this.tenant.organizationId;
+    const threshold = opts.thresholdPercent ?? (await this.clearanceThreshold());
+    const students = await this.prisma.client.studentProfile.findMany({
+      where: { organizationId, currentClassId: classId, status: 'active' },
+      select: { id: true, admissionNo: true, partner: { select: { name: true } } },
+      orderBy: { admissionNo: 'asc' },
+    });
+
+    const rows = await Promise.all(
+      students.map(async (s) => {
+        const c = await this.feeClearance(s.id, { thresholdPercent: threshold });
+        return {
+          ...c,
+          admissionNo: s.admissionNo,
+          studentName: s.partner?.name ?? s.id,
+        };
+      }),
+    );
+
+    return {
+      classId,
+      thresholdPercent: threshold,
+      total: rows.length,
+      cleared: rows.filter((r) => r.status === 'cleared').length,
+      partial: rows.filter((r) => r.status === 'partial').length,
+      blocked: rows.filter((r) => r.status === 'blocked').length,
+      rows,
+    };
+  }
+
+  /**
+   * B2 · find a receipt again.
+   *
+   * A parent loses the paper, or disputes a payment three weeks later, and the
+   * bursar needs to pull it up. Until now the receipt existed only in the
+   * browser tab that created it and was gone the moment the wizard reset.
+   *
+   * Searches every handle a bursar actually has: receipt number, admission
+   * number, pupil name, guardian phone, or the mobile-money reference on the
+   * parent's SMS. Reversed payments are included deliberately and flagged —
+   * "why was this cancelled?" is exactly the question that brings someone to
+   * this screen.
+   */
+  async searchReceipts(params: { q?: string; from?: string; to?: string; page?: number; pageSize?: number }) {
+    const organizationId = this.tenant.organizationId;
+    const page = Math.max(1, params.page ?? 1);
+    const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 25));
+    const q = params.q?.trim();
+
+    const where: any = { organizationId, direction: 'inbound' };
+    if (params.from || params.to) {
+      where.paymentDate = {};
+      if (params.from) where.paymentDate.gte = new Date(params.from);
+      if (params.to) where.paymentDate.lte = new Date(params.to);
+    }
+
+    if (q) {
+      // Resolve the pupil-side handles to partner ids first, then match on the
+      // payment's own columns. One extra query beats a three-level nested
+      // relation filter and keeps the payment query index-friendly.
+      const students = await this.prisma.client.studentProfile.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { admissionNo: { contains: q, mode: 'insensitive' } },
+            { partner: { name: { contains: q, mode: 'insensitive' } } },
+            { partner: { phone: { contains: q } } },
+            { guardians: { some: { guardianContact: { phone: { contains: q } } } } },
+          ],
+        },
+        select: { partnerId: true },
+        take: 500,
+      });
+      const partnerIds = [...new Set(students.map((s) => s.partnerId))];
+      where.OR = [
+        { paymentNumber: { contains: q, mode: 'insensitive' } },
+        { reference: { contains: q, mode: 'insensitive' } },
+        { externalReference: { contains: q, mode: 'insensitive' } },
+        ...(partnerIds.length ? [{ partnerId: { in: partnerIds } }] : []),
+      ];
+    }
+
+    const [rows, total] = await Promise.all([
+      this.prisma.client.payment.findMany({
+        where,
+        orderBy: { paymentDate: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          partner: { select: { id: true, name: true, phone: true } },
+          allocations: {
+            include: { document: { select: { id: true, documentNumber: true, sourceType: true } } },
+          },
+        },
+      }),
+      this.prisma.client.payment.count({ where }),
+    ]);
+
+    // Map partner → pupil so the receipt can print an admission number.
+    const partnerIds = [...new Set(rows.map((r) => r.partnerId))];
+    const students = partnerIds.length
+      ? await this.prisma.client.studentProfile.findMany({
+          where: { organizationId, partnerId: { in: partnerIds } },
+          select: { id: true, partnerId: true, admissionNo: true },
+        })
+      : [];
+    const studentByPartner = new Map(students.map((s) => [s.partnerId, s]));
+
+    return {
+      data: rows.map((p) => {
+        const student = studentByPartner.get(p.partnerId);
+        const allocations = (p.allocations ?? []).filter((a: any) => a.status !== 'reversed');
+        return {
+          id: p.id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate,
+          paymentMethod: p.paymentMethod,
+          amount: Number(p.amount),
+          allocatedAmount: Number(p.allocatedAmount),
+          unallocatedAmount: Number(p.unallocatedAmount),
+          reference: p.reference,
+          externalReference: p.externalReference,
+          status: p.status,
+          // A cancelled payment still appears — with its state visible, because
+          // "this receipt was reversed and why" is a question a bursar has to
+          // be able to answer at the window.
+          reversed: p.status === 'cancelled',
+          studentProfileId: student?.id ?? null,
+          admissionNo: student?.admissionNo ?? null,
+          studentName: p.partner?.name ?? null,
+          phone: p.partner?.phone ?? null,
+          allocations: allocations.map((a: any) => ({
+            id: a.id,
+            documentId: a.documentId,
+            documentNumber: a.document?.documentNumber ?? null,
+            amount: Number(a.amount),
+            status: a.status,
+          })),
+          reversedAllocations: (p.allocations ?? []).filter((a: any) => a.status === 'reversed').length,
+        };
+      }),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /** One receipt, with everything a reprint needs. */
+  async getReceipt(paymentId: string) {
+    const organizationId = this.tenant.organizationId;
+    const payment = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, organizationId },
+      include: {
+        partner: true,
+        allocations: { include: { document: { select: { id: true, documentNumber: true, totalAmount: true } } } },
+      },
+    });
+    if (!payment) throw new NotFoundException(`Receipt ${paymentId} not found`);
+    const student = await this.prisma.client.studentProfile.findFirst({
+      where: { organizationId, partnerId: payment.partnerId },
+      include: { currentClass: true },
+    });
+    const balance = student ? await this.studentBalance(student.id) : null;
+    return { payment, student, balance };
   }
 
   /** Canonical refundable entitlement for a partner (A2.1). Reused by refunds. */

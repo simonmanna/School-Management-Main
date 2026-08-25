@@ -53,6 +53,8 @@ function makeService(openInvoices: any[] = [], existingPayment: any = null) {
   const controls = { assertDocumentsPeriodOpen: jest.fn().mockResolvedValue(undefined) };
   // P1-C: only reached by the allocatedPaymentId refund mode.
   const reversals = { reverseAllocation: jest.fn().mockResolvedValue({ alreadyReversed: false }) };
+  // B1: only reached when a tender exceeds what is owed.
+  const advanced = { createCredit: jest.fn().mockResolvedValue({ id: 'cr_1', code: 'CR-000001' }) };
   const service = new SchoolPaymentService(
     prisma as any,
     tenant as any,
@@ -64,6 +66,7 @@ function makeService(openInvoices: any[] = [], existingPayment: any = null) {
     resolver as any,
     controls as any,
     reversals as any,
+    advanced as any,
   );
 
   return { service, documentFindMany, createReceipt, events, paymentFindFirst };

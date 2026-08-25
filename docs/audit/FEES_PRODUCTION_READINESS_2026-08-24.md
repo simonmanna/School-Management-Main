@@ -97,7 +97,7 @@ review listed most of these as *missing*, and building them again would be waste
 |---|---|---|
 | Financial invariants are written down and frozen | — | `docs/architecture/FINANCIAL_INVARIANTS.md`, ADR-013 |
 | Balance derived from events, not cached columns | §Outstanding AR | `SchoolFinanceQueryService.studentBalance` — `collected` is `SUM(PaymentAllocation)` |
-| One canonical calculation layer | §Outstanding AR | Portal, statement and ledger all delegate to the query service |
+| One canonical calculation layer | §Outstanding AR | ~~Portal, statement and ledger all delegate to the query service~~ — **corrected 2026-08-25:** only the ledger delegates. The parent portal (`portals.service.ts:325`) and the bursar statement (`people/student.service.ts:347`) still derive `paid` by subtraction and report waivers as money received, despite docstrings claiming otherwise. See D1 in [`FEES_FUNCTIONAL_AUDIT_UGANDA_2026-08-25.md`](./FEES_FUNCTIONAL_AUDIT_UGANDA_2026-08-25.md) |
 | Typed chronological student ledger | §Terminology | `studentLedger` — INVOICE · PENALTY · PAYMENT · CREDIT_APPLIED · WAIVER · WRITE_OFF · ADJUSTMENT |
 | Waiver posts GL on every path | §Economic-event integrity | `applyWaiver` — the partial-application path posts too (the P0-2 fix) |
 | Waiver never touches `amountPaid` | §Terminology | `amountWaived` is a separate column |

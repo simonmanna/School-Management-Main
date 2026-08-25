@@ -456,9 +456,18 @@ export class AdvancedFinanceService {
     sourcePaymentId?: string;
     sourceDocumentId?: string;
     expiresAt?: string;
-  }) {
+  },
+    /**
+     * B1: run inside the caller's transaction. Converting an overpayment to a
+     * credit has to commit atomically with the receipt that funds it — a
+     * receipt without its credit leaves the family's money unaccounted for,
+     * and a credit without its receipt mints a liability from nothing (P1-2).
+     */
+    externalTx?: any,
+  ) {
     const organizationId = this.tenant.organizationId;
-    const student = await this.prisma.client.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
+    const db = externalTx ?? this.prisma.client;
+    const student = await db.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
     if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
     const amount = dec(dto.amount);
     if (amount.lessThanOrEqualTo(ZERO)) throw new BadRequestException('Credit amount must be positive');
@@ -480,7 +489,7 @@ export class AdvancedFinanceService {
       );
     }
 
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const run = async (tx: any) => {
       const code = await this.sequence.next(`feecredit:${new Date().getUTCFullYear()}`, { prefix: 'CR-', padding: 6 }, tx);
       const row = await tx.feeCredit.create({
         data: {
@@ -526,7 +535,11 @@ export class AdvancedFinanceService {
         source,
       });
       return row;
-    });
+    };
+
+    // Join the caller's transaction when given one, so the credit and whatever
+    // funds it commit or roll back together (§Atomicity).
+    return externalTx ? run(externalTx) : this.prisma.client.$transaction(run);
   }
 
   listCredits(studentProfileId?: string) {
@@ -649,15 +662,39 @@ export class AdvancedFinanceService {
       // P1-B: a credit drawdown settles receivable on these documents.
       await this.controls.assertDocumentsPeriodOpen(settledDocIds, tx);
 
-      // Persist drawn-down balances + lifecycle status (A2). remaining stays a
-      // derived cache; status reflects how much of the credit is spent.
+      // Persist the drawdown ATOMICALLY (A2). `remaining` is a derived cache;
+      // `status` reflects how much of the credit is spent.
+      //
+      // Conditional decrement, not read-compute-write. The credits were read at
+      // the top of this transaction; between then and here a concurrent
+      // `applyCredits` or `refundFee` may have taken the same value. Writing a
+      // computed `newRemaining` would silently overwrite their drawdown and
+      // spend one credit twice — against two different invoices, each with its
+      // own GL entry, so the Fee-Credit Liability would no longer reconcile.
+      //
+      // Postgres takes a row lock for the UPDATE and re-evaluates
+      // `remaining >= used` against the committed value, so the loser matches
+      // zero rows and we abort (FINANCIAL_INVARIANTS §Concurrency).
       for (const [id, used] of usedByCredit) {
         const credit = credits.find((c: any) => c.id === id)!;
-        const newRemaining = dec(credit.remaining).minus(used);
-        const status = newRemaining.lessThanOrEqualTo(ZERO) ? 'fully_applied' : 'partially_applied';
+        const claimed = await tx.feeCredit.updateMany({
+          where: { id, remaining: { gte: used } },
+          data: { remaining: { decrement: used } },
+        });
+        if (claimed.count !== 1) {
+          throw new BadRequestException(
+            `Fee credit ${credit.code} was drawn down by another transaction while these invoices ` +
+              'were being settled. Nothing has been applied — retry.',
+          );
+        }
+        const after = await tx.feeCredit.findFirst({ where: { id }, select: { remaining: true } });
+        const nowRemaining = dec(after?.remaining ?? 0);
         await tx.feeCredit.update({
           where: { id },
-          data: { remaining: newRemaining, isActive: newRemaining.greaterThan(ZERO), status },
+          data: {
+            isActive: nowRemaining.greaterThan(ZERO),
+            status: nowRemaining.lessThanOrEqualTo(ZERO) ? 'fully_applied' : 'partially_applied',
+          },
         });
       }
 

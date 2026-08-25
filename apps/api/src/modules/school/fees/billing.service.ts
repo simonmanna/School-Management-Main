@@ -19,6 +19,7 @@ import { EVENTS } from '@erp/shared';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { FinanceControlsService } from './finance-controls.service';
 import { PaymentAllocationReversalService } from './allocation-reversal.service';
+import { AdvancedFinanceService } from './advanced.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 
 /**
@@ -102,6 +103,17 @@ export class BillingService {
     });
     if (schedules.length === 0) throw new BadRequestException(`No fee schedule configured for term ${dto.termId}`);
 
+    // D4: mid-term proration policy + the term's own dates, read once for the
+    // whole run. Default 'none' — an existing school's billing is unchanged
+    // until somebody deliberately turns proration on.
+    const [prorationPolicy, term] = await Promise.all([
+      this.prorationPolicy(),
+      this.prisma.client.term.findFirst({
+        where: { id: dto.termId, organizationId },
+        select: { startDate: true, endDate: true },
+      }),
+    ]);
+
     // A3 perf: batch the per-student lookups that the old loop issued one query
     // at a time. One assignment query, one scholarship query, one discount
     // query for the whole run instead of O(students × 3) round-trips (P1-9).
@@ -158,7 +170,7 @@ export class BillingService {
 
     for (const s of students) {
       const schedule = schedules.find((sch) =>
-        this.appliesTo(sch.feeStructure.applicableTo as any, s.currentClassId ?? ''),
+        this.appliesTo(sch.feeStructure.applicableTo as any, this.targetingAxes(s)),
       );
       if (!schedule) continue;
 
@@ -181,6 +193,7 @@ export class BillingService {
         studentScholarships,
         s,
         optInsByStudent.get(s.id) ?? new Map(),
+        this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
       );
       if (lines.length === 0) continue;
 
@@ -270,6 +283,90 @@ export class BillingService {
     return { components: items, versionId: feeStructure.currentVersionId };
   }
 
+  /** The org's proration policy. 'none' unless a school opts in. */
+  private async prorationPolicy(): Promise<string> {
+    // A school with no profile row yet still bills — proration is opt-in, so
+    // the absence of configuration means "off", never an error.
+    const profile = await this.prisma.client.schoolProfile
+      ?.findFirst({
+        where: { organizationId: this.tenant.organizationId },
+        select: { customFields: true },
+      })
+      .catch(() => null);
+    const raw = (profile?.customFields as any)?.feeProrationPolicy;
+    return ['none', 'daily', 'weekly', 'monthly'].includes(raw) ? raw : 'none';
+  }
+
+  /**
+   * D4 · mid-term joiner proration.
+   *
+   * A pupil admitted in week six was billed the full term. Schools handle this
+   * differently and there is no single right answer, so the policy is
+   * configurable on `SchoolProfile.customFields.feeProrationPolicy`:
+   *
+   *   'none'    bill the full term regardless of join date (the default, and
+   *             what every existing school gets — behaviour is unchanged until
+   *             somebody deliberately turns proration on)
+   *   'monthly' charge whole months remaining ÷ whole months in the term, the
+   *             most common Ugandan practice — a pupil joining any time in
+   *             month two of a three-month term pays two thirds
+   *   'weekly'  charge whole weeks remaining ÷ weeks in the term, for schools
+   *             that bill more finely
+   *   'daily'   exact days remaining ÷ days in the term
+   *
+   * Only MANDATORY, recurring components are prorated. A one-off charge —
+   * admission fee, uniform, PLE registration — is not cheaper for joining late,
+   * and prorating it would under-bill the school for a real cost it has already
+   * incurred. Optional components are opt-in and priced by the opt-in itself.
+   *
+   * Returns 1 (no reduction) whenever proration is off, the pupil joined before
+   * the term began, or the term dates are unusable — the safe direction is
+   * always to bill in full and let a bursar issue a credit adjustment.
+   */
+  private prorationFactor(
+    policy: string,
+    enrollmentDate: Date | null | undefined,
+    term: { startDate?: Date | null; endDate?: Date | null } | null | undefined,
+  ): number {
+    if (!policy || policy === 'none') return 1;
+    if (!enrollmentDate || !term?.startDate || !term?.endDate) return 1;
+
+    const start = new Date(term.startDate);
+    const end = new Date(term.endDate);
+    const joined = new Date(enrollmentDate);
+    if (!(end > start)) return 1;
+    // Joined before (or on) the first day — a full term, nothing to prorate.
+    if (joined <= start) return 1;
+    // Joined after the term ended: nothing of this term was attended. Bill
+    // nothing rather than a negative, and let the next term's run charge them.
+    if (joined >= end) return 0;
+
+    const DAY = 86_400_000;
+    const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / DAY));
+    const remainingDays = Math.max(0, Math.round((end.getTime() - joined.getTime()) / DAY));
+
+    let factor: number;
+    if (policy === 'daily') {
+      factor = remainingDays / totalDays;
+    } else if (policy === 'weekly') {
+      factor = Math.ceil(remainingDays / 7) / Math.ceil(totalDays / 7);
+    } else {
+      // monthly — count calendar months so a term that straddles month
+      // boundaries divides the way a head teacher would describe it.
+      const monthsIn = Math.max(
+        1,
+        (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1,
+      );
+      const monthsLeft = Math.max(
+        0,
+        (end.getFullYear() - joined.getFullYear()) * 12 + (end.getMonth() - joined.getMonth()) + 1,
+      );
+      factor = Math.min(monthsIn, monthsLeft) / monthsIn;
+    }
+    // Never above 1, never negative; round to 4dp so the line price stays clean.
+    return Number(Math.min(1, Math.max(0, factor)).toFixed(4));
+  }
+
   /** A priced FeeItem, in the shape the line calculator already understands. */
   private itemToComponent(item: {
     code: string;
@@ -277,6 +374,7 @@ export class BillingService {
     productId: string | null;
     amount: unknown;
     isOptional: boolean;
+    frequency?: string;
   }): FeeComponent {
     return {
       code: item.code,
@@ -284,6 +382,8 @@ export class BillingService {
       productId: item.productId ?? undefined,
       amount: Number(item.amount),
       isOptional: item.isOptional,
+      // Load-bearing for proration: a one-off charge is never reduced (D4).
+      frequency: item.frequency ?? 'per_term',
     };
   }
 
@@ -305,6 +405,12 @@ export class BillingService {
     scholarships: any[],
     student: any,
     optIns: Map<string, number | null> = new Map(),
+    /**
+     * D4: 1 = full term. Below 1, MANDATORY recurring components are reduced
+     * for a pupil who joined mid-term. One-off charges are never prorated —
+     * an admission fee is not cheaper for arriving in week six.
+     */
+    prorationFactor = 1,
   ): Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> {
     const classId = student.currentClassId ?? '';
     const gradeLevelId = student.currentClass?.gradeLevelId ?? '';
@@ -317,6 +423,15 @@ export class BillingService {
     const billable = components.filter((c) => !c.isOptional || this.hasOptIn(optIns, c));
     if (billable.length === 0) return [];
 
+    const prorate = (c: FeeComponent, amount: number) => {
+      // Optional components are priced by the pupil's own opt-in, and one-off
+      // charges are the same whenever you arrive.
+      if (prorationFactor >= 1 || c.isOptional) return amount;
+      const frequency = (c as any).frequency ?? 'per_term';
+      if (frequency === 'one_time') return amount;
+      return Math.round(amount * prorationFactor);
+    };
+
     const bases = billable.map((c) => {
       // Precedence for the unit price: per-student opt-in amount (only an
       // optional fee has one) → per-student assignment override → the
@@ -324,7 +439,9 @@ export class BillingService {
       const optIn = c.isOptional ? this.optInAmount(optIns, c) : null;
       if (optIn != null) return Number(optIn);
       const override = customDiscount[c.code];
-      return override != null ? Number(override) : Number(c.amount);
+      // A per-pupil override is a deliberate price for THIS pupil, so it is
+      // prorated too — the bursar set what a full term costs them.
+      return prorate(c, override != null ? Number(override) : Number(c.amount));
     });
     const baseTotal = bases.reduce((s, b) => s + b, 0);
 
@@ -427,7 +544,7 @@ export class BillingService {
       include: { feeStructure: true },
     });
     const schedule = schedules.find((sch) =>
-      this.appliesTo(sch.feeStructure.applicableTo as any, s.currentClassId ?? ''),
+      this.appliesTo(sch.feeStructure.applicableTo as any, this.targetingAxes(s)),
     );
     if (!schedule) return { status: 'skipped' };
 
@@ -453,7 +570,19 @@ export class BillingService {
     ]);
     const customDiscount = (assignment?.customDiscount ?? {}) as Record<string, number>;
     const optIns = this.groupOptIns(optionalFees).get(studentProfileId) ?? new Map<string, number | null>();
-    const lines = this.computeLines(components, customDiscount, discounts, studentScholarships, s, optIns);
+    const [prorationPolicy, term] = await Promise.all([
+      this.prorationPolicy(),
+      this.prisma.client.term.findFirst({ where: { id: termId, organizationId }, select: { startDate: true, endDate: true } }),
+    ]);
+    const lines = this.computeLines(
+      components,
+      customDiscount,
+      discounts,
+      studentScholarships,
+      s,
+      optIns,
+      this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
+    );
     if (lines.length === 0) return { status: 'skipped' };
 
     const issueDate = new Date();
@@ -604,12 +733,50 @@ export class BillingService {
     return true;
   }
 
-  private appliesTo(filter: any, classId: string): boolean {
+  /**
+   * D2 · which pupils a fee structure applies to.
+   *
+   * `FeeStructure.applicableTo` is documented in the schema as
+   * `{gradeLevelIds:[...], classIds:[...]}`, and `discountApplies` above has
+   * always honoured both. This did not: it checked `classIds` and returned
+   * `true` for everything else, so a structure scoped to grade levels P1–P3
+   * silently billed the ENTIRE school, P7 included.
+   *
+   * That matters in a Ugandan primary school specifically, because fees are
+   * conventionally set per grade band rather than per class — expressing it by
+   * grade level is the natural configuration, and it did the wrong thing.
+   *
+   * `residenceTypes` is new: boarding and day pupils pay materially different
+   * fees, `StudentProfile.residenceType` already records which a pupil is, and
+   * there was previously no way to price them apart.
+   *
+   * Every dimension is AND-ed, and an absent or empty dimension means "no
+   * constraint on this axis" — so `{}` still applies to everyone, which is the
+   * behaviour existing structures rely on.
+   */
+  private appliesTo(
+    filter: any,
+    student: { classId: string; gradeLevelId: string; residenceType: string },
+  ): boolean {
     if (!filter || typeof filter !== 'object') return true;
-    if (Array.isArray(filter.classIds) && filter.classIds.length > 0) {
-      return filter.classIds.includes(classId);
-    }
+
+    const classIds: string[] = Array.isArray(filter.classIds) ? filter.classIds : [];
+    const gradeLevelIds: string[] = Array.isArray(filter.gradeLevelIds) ? filter.gradeLevelIds : [];
+    const residenceTypes: string[] = Array.isArray(filter.residenceTypes) ? filter.residenceTypes : [];
+
+    if (classIds.length && !classIds.includes(student.classId)) return false;
+    if (gradeLevelIds.length && !gradeLevelIds.includes(student.gradeLevelId)) return false;
+    if (residenceTypes.length && !residenceTypes.includes(student.residenceType)) return false;
     return true;
+  }
+
+  /** The axes `appliesTo` filters on, read off a student profile. */
+  private targetingAxes(s: any): { classId: string; gradeLevelId: string; residenceType: string } {
+    return {
+      classId: s.currentClassId ?? '',
+      gradeLevelId: s.currentClass?.gradeLevelId ?? '',
+      residenceType: s.residenceType ?? 'day',
+    };
   }
 
   /**
@@ -874,6 +1041,8 @@ export class SchoolPaymentService {
     private readonly controls: FinanceControlsService,
     // P1-C: refunding an allocated payment composes an allocation reversal.
     private readonly reversals: PaymentAllocationReversalService,
+    // B1: converting an overpayment to a fee credit, in the receipt's own tx.
+    private readonly advanced: AdvancedFinanceService,
   ) {}
 
   /**
@@ -1053,19 +1222,140 @@ export class SchoolPaymentService {
         });
       }
 
+      const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
+      const unallocatedAmt = Math.max(0, Number(dto.amount) - allocatedTotal);
+
+      // B1 · overpayment.
+      //
+      // A parent paying more than is owed is routine in a Ugandan school —
+      // rounding up to a note they have, or paying next term forward. The
+      // remainder is genuine value the school is holding, so it becomes a
+      // FeeCredit against the payment that funded it, in THIS transaction.
+      //
+      // `sourcePaymentId` is what keeps the entitlement counted once: the
+      // refund calculation subtracts overpayment already converted to a credit,
+      // so the same money can never be both refundable cash and a spendable
+      // credit (FINANCIAL_INVARIANTS §Economic-entitlement uniqueness).
+      //
+      // Left unconverted the money is not lost — it stays on
+      // `Payment.unallocatedAmount` and is still refundable — but it cannot be
+      // spent against next term's invoice until it is a credit.
+      let overpaymentCredit: any = null;
+      if (unallocatedAmt > 0 && dto.convertOverpaymentToCredit) {
+        overpaymentCredit = await this.advanced.createCredit(
+          {
+            studentProfileId: dto.studentProfileId,
+            amount: unallocatedAmt,
+            source: 'overpayment',
+            sourcePaymentId: receipt.id,
+          },
+          tx,
+        );
+      }
+
       const payment = await tx.payment.findFirst({
         where: { id: receipt.id },
         include: { allocations: true },
       });
-      const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
-      const unallocatedAmt = Math.max(0, Number(dto.amount) - allocatedTotal);
       return {
         payment,
         allocations,
         unallocated: unallocatedAmt,
+        overpaymentCredit,
         replayed: false,
       };
     });
+  }
+
+  /**
+   * B4 · reporting day.
+   *
+   * Two hundred parents arrive on the first morning of term and the bursar has
+   * one wizard, three steps deep, per pupil. This takes a whole class at once:
+   * a row per pupil with an amount and a tender method, allocated oldest-first.
+   *
+   * Each row is its OWN transaction, deliberately. One pupil's bad row — a
+   * closed term, a wrong id, a duplicated mobile-money reference — must not
+   * roll back the twenty receipts already keyed in beside it. The result
+   * reports per row so the bursar can fix the failures and re-submit only
+   * those; a re-submitted row carrying the same `externalReference` replays
+   * rather than double-collecting.
+   */
+  async collectBatch(dto: {
+    rows: Array<{
+      studentProfileId: string;
+      amount: number;
+      paymentMethod?: 'cash' | 'bank' | 'mobile_money' | 'card';
+      reference?: string;
+      externalReference?: string;
+      externalReferenceType?: any;
+      convertOverpaymentToCredit?: boolean;
+    }>;
+    paymentDate?: string;
+    cashSessionId?: string;
+    bankAccountId?: string;
+  }) {
+    const results: Array<{
+      studentProfileId: string;
+      status: 'posted' | 'replayed' | 'failed';
+      paymentId?: string;
+      paymentNumber?: string;
+      allocated?: number;
+      unallocated?: number;
+      creditCode?: string;
+      error?: string;
+    }> = [];
+
+    for (const row of dto.rows) {
+      if (!row.studentProfileId || !(Number(row.amount) > 0)) {
+        results.push({
+          studentProfileId: row.studentProfileId,
+          status: 'failed',
+          error: 'A pupil and an amount above zero are required.',
+        });
+        continue;
+      }
+      try {
+        const res: any = await this.collect({
+          studentProfileId: row.studentProfileId,
+          amount: Number(row.amount),
+          paymentMethod: row.paymentMethod ?? 'cash',
+          paymentDate: dto.paymentDate,
+          cashSessionId: dto.cashSessionId,
+          bankAccountId: dto.bankAccountId,
+          reference: row.reference,
+          externalReference: row.externalReference,
+          externalReferenceType: row.externalReferenceType,
+          convertOverpaymentToCredit: row.convertOverpaymentToCredit ?? true,
+        } as CollectFeePaymentDto);
+
+        results.push({
+          studentProfileId: row.studentProfileId,
+          status: res.replayed ? 'replayed' : 'posted',
+          paymentId: res.payment?.id,
+          paymentNumber: res.payment?.paymentNumber,
+          allocated: (res.allocations ?? []).reduce((t: number, a: any) => t + Number(a.amount), 0),
+          unallocated: Number(res.unallocated ?? 0),
+          creditCode: res.overpaymentCredit?.code,
+        });
+      } catch (err: any) {
+        results.push({
+          studentProfileId: row.studentProfileId,
+          status: 'failed',
+          error: err?.message ?? String(err),
+        });
+      }
+    }
+
+    const posted = results.filter((r) => r.status === 'posted');
+    return {
+      total: results.length,
+      posted: posted.length,
+      replayed: results.filter((r) => r.status === 'replayed').length,
+      failed: results.filter((r) => r.status === 'failed').length,
+      totalCollected: posted.reduce((t, r) => t + Number(r.allocated ?? 0) + Number(r.unallocated ?? 0), 0),
+      results,
+    };
   }
 
   /**
@@ -1207,19 +1497,50 @@ export class SchoolPaymentService {
       if (creditPortion.greaterThan(ZERO)) {
         for (const credit of breakdown.credits) {
           if (creditPortion.lessThanOrEqualTo(ZERO)) break;
-          const available = dec(credit.remaining);
-          if (available.lessThanOrEqualTo(ZERO)) continue;
-          const take = Prisma.Decimal.min(creditPortion, available);
-          const newRemaining = available.minus(take);
+          const take = Prisma.Decimal.min(creditPortion, dec(credit.remaining));
+          if (take.lessThanOrEqualTo(ZERO)) continue;
 
+          // ─── The drawdown must be ATOMIC, not read-compute-write. ───
+          //
+          // `breakdown.credits` was read through the query service, which uses
+          // its own connection — so that read is not even inside this
+          // transaction, let alone holding a lock. Two simultaneous refunds of
+          // the same credit both saw `remaining = 300,000`, both computed
+          // `newRemaining = 0`, and both paid out. One credit, two payouts.
+          //
+          // A conditional decrement closes it: Postgres takes a row lock for
+          // the UPDATE, and the second transaction re-evaluates
+          // `remaining >= take` against the value the first one committed. It
+          // matches zero rows and we abort instead of paying unfunded cash.
+          //
+          // FINANCIAL_INVARIANTS §Concurrency — enforced by the database, never
+          // by an application read.
+          const claimed = await tx.feeCredit.updateMany({
+            where: { id: credit.id, remaining: { gte: take } },
+            data: { remaining: { decrement: take } },
+          });
+          if (claimed.count !== 1) {
+            // Someone else took it between our read and this write.
+            throw new BadRequestException(
+              `Fee credit ${credit.code} was drawn down by another transaction while this refund ` +
+                'was being prepared. No money has left the drawer — retry.',
+            );
+          }
+
+          // Re-read the committed value: the row is ours until this transaction
+          // ends, so this is the true post-decrement balance.
+          const after = await tx.feeCredit.findFirst({
+            where: { id: credit.id },
+            select: { remaining: true },
+          });
+          const nowRemaining = dec(after?.remaining ?? 0);
           await tx.feeCredit.update({
             where: { id: credit.id },
             data: {
-              remaining: newRemaining,
               // 'refunded' is terminal for a fully-paid-out credit; a partially
               // refunded one stays drawable for what is left.
-              status: newRemaining.lessThanOrEqualTo(ZERO) ? 'refunded' : 'partially_applied',
-              isActive: newRemaining.greaterThan(ZERO),
+              status: nowRemaining.lessThanOrEqualTo(ZERO) ? 'refunded' : 'partially_applied',
+              isActive: nowRemaining.greaterThan(ZERO),
             },
           });
 
@@ -1228,13 +1549,12 @@ export class SchoolPaymentService {
         }
 
         if (creditPortion.greaterThan(ZERO)) {
-          // The entitlement said this was fundable and the credits say otherwise
-          // — a concurrent drawdown took them. Abort rather than pay out
-          // unfunded cash. An explicit throw is required: a return here would
-          // COMMIT (FINANCIAL_INVARIANTS §Atomicity).
+          // The entitlement said this was fundable and the credits say otherwise.
+          // Abort rather than pay out unfunded cash. An explicit throw is
+          // required: a return here would COMMIT (§Atomicity).
           throw new BadRequestException(
             `Refund of ${wanted.toString()} is short by ${creditPortion.toString()}: the fee credits ` +
-              'funding it were drawn down concurrently. Retry.',
+              'funding it are no longer available. Retry.',
           );
         }
       }

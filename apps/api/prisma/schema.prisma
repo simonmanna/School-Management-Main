@@ -10546,6 +10546,7 @@ model StudentProfile {
   @@index([currentClassId])
   @@index([currentSectionId])
   @@index([currentStreamId])
+  mobileMoneyRequests  MobileMoneyRequest[]
 }
 
 model StudentStatusHistory {
@@ -14206,6 +14207,45 @@ model SchoolFeeInvoice {
 /// A2 — the credit subledger. One row per drawdown of a FeeCredit against an
 /// invoice. FeeCredit.remaining is the cached projection of
 /// amount minus SUM(these) plus SUM(reversals).
+/// A live mobile-money collection request (MTN MoMo / Airtel Money).
+///
+/// A request-to-pay is a PROMPT, not a receipt: money only becomes a Payment
+/// when the provider confirms, and then only through SchoolPaymentService.collect
+/// like every other tender. This row exists so a bursar can see what was asked
+/// for and chase what never completed.
+model MobileMoneyRequest {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  /// mtn | airtel
+  provider         String
+  /// OUR reference, sent to the provider and echoed back on the callback. It
+  /// becomes Payment.externalReference, which carries the unique index that
+  /// makes at-least-once provider retries idempotent.
+  providerRef      String
+  /// Normalised payer MSISDN (256XXXXXXXXX).
+  msisdn           String
+  amount           Decimal   @db.Decimal(20, 6)
+  /// pending | succeeded | failed
+  status           String    @default("pending")
+  note             String?
+  failureReason    String?
+  /// Set once the callback posted the money.
+  paymentId        String?
+  settledAt        DateTime?
+  requestedById    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  /// One request per provider reference — the callback finds its way home by this.
+  @@unique([providerRef])
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([organizationId, status])
+}
+
 model FeeCreditAllocation {
   id             String   @id @default(uuid())
   organizationId String

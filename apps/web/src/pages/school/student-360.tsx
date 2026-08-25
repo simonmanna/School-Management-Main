@@ -580,7 +580,7 @@ function FinancialTab({ statement }: { statement?: FeeStatement }) {
         <CardHeader><CardTitle className="text-base">Fees summary</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-3 gap-3 text-center">
           <Stat label="Billed" value={money(statement.totalBilled)} />
-          <Stat label="Paid" value={money(statement.totalPaid)} />
+          <Stat label="Paid" value={money(statement.collected)} />
           <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
         </CardContent>
       </Card>

@@ -44,6 +44,16 @@ import { SchoolFeeDefaultersPage } from '@/pages/school/fees-subpages';
 import { SchoolBadDebtorsPage } from '@/pages/school/fees-subpages';
 import { SchoolBudgetingPage } from '@/pages/school/fees-subpages';
 import {
+  SchoolReceiptsPage,
+  SchoolBulkCollectPage,
+  SchoolFeeClearancePage,
+  SchoolFeeStatementPage,
+  SchoolCashBookPage,
+  SchoolDiscountsPage,
+  SchoolFeeOverridesPage,
+} from '@/pages/school/fees-operations';
+import { SchoolMobileMoneyPage, SchoolBalanceExplainerPage } from '@/pages/school/fees-momo';
+import {
   SchoolStudentLedgerPage,
   SchoolFinanceDashboardPage,
   SchoolBillingRunsPage,
@@ -484,6 +494,15 @@ export function App() {
           <Route path="/school/fees/defaulters" element={<SchoolFeeDefaultersPage />} />
           <Route path="/school/fees/bad-debtors" element={<SchoolBadDebtorsPage />} />
           <Route path="/school/fees/budgeting" element={<SchoolBudgetingPage />} />
+          <Route path="/school/fees/receipts" element={<SchoolReceiptsPage />} />
+          <Route path="/school/fees/bulk-collect" element={<SchoolBulkCollectPage />} />
+          <Route path="/school/fees/clearance" element={<SchoolFeeClearancePage />} />
+          <Route path="/school/fees/statement" element={<SchoolFeeStatementPage />} />
+          <Route path="/school/fees/cash-book" element={<SchoolCashBookPage />} />
+          <Route path="/school/fees/discounts" element={<SchoolDiscountsPage />} />
+          <Route path="/school/fees/overrides" element={<SchoolFeeOverridesPage />} />
+          <Route path="/school/fees/mobile-money" element={<SchoolMobileMoneyPage />} />
+          <Route path="/school/fees/explain" element={<SchoolBalanceExplainerPage />} />
           <Route path="/school/fees/dashboard" element={<SchoolFinanceDashboardPage />} />
           <Route path="/school/fees/invoices" element={<SchoolInvoicesPage />} />
           <Route path="/school/fees/billing-runs" element={<SchoolBillingRunsPage />} />

@@ -67,6 +67,8 @@ export interface CatalogPageProps<T> {
   filters?: React.ReactNode;
   /** Extra buttons rendered next to Add (e.g. "Invoice Students"). */
   toolbarExtra?: React.ReactNode;
+  /** Extra per-row buttons, rendered before Edit (e.g. "Publish"). */
+  rowActions?: (row: T) => React.ReactNode;
   exportFilename: string;
 }
 
@@ -86,6 +88,7 @@ export function CatalogPage<T>({
   emptyMessage = 'Nothing here yet.',
   filters,
   toolbarExtra,
+  rowActions,
   exportFilename,
 }: CatalogPageProps<T>) {
   const [query, setQuery] = useState('');
@@ -197,6 +200,7 @@ export function CatalogPage<T>({
                         </TableCell>
                       ))}
                       <TableCell className="text-right whitespace-nowrap">
+                        {rowActions?.(r)}
                         <Button variant="ghost" size="sm" onClick={() => onEdit(r)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>

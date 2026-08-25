@@ -485,6 +485,7 @@ export const ORG_SCOPED = new Set<string>([
   // moment they exist.
   'SchoolFeeInvoice',
   'FeeCreditAllocation',
+  'MobileMoneyRequest',
   'FeeAdjustment',
   'BillingRun',
   'BillingRunItem',

@@ -5,6 +5,8 @@ import { RequirePermissions } from '../../../kernel/auth/decorators/require-perm
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { AdvancedFinanceService } from './advanced.service';
+import { FeeNotificationsSubscriber } from './fee-notifications.subscriber';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 
 /**
  * Advanced school finance endpoints (P1/P2): sponsorships, waivers, fee
@@ -15,7 +17,11 @@ import { AdvancedFinanceService } from './advanced.service';
 @Controller('school/finance')
 @UseInterceptors(IdempotencyInterceptor)
 export class AdvancedFinanceController {
-  constructor(private readonly finance: AdvancedFinanceService) {}
+  constructor(
+    private readonly finance: AdvancedFinanceService,
+    private readonly feeNotifications: FeeNotificationsSubscriber,
+    private readonly tenant: TenantContextService,
+  ) {}
 
   /* ── Sponsorships (Phase 5: contained, not production-ready) ──
    *
@@ -162,6 +168,30 @@ export class AdvancedFinanceController {
   @RequirePermissions(PERMISSIONS.school.manageFees)
   deleteWaiverCategory(@Param('id') id: string) {
     return this.finance.deleteWaiverCategory(id);
+  }
+
+  /* ── C2 · SMS reminders ── */
+
+  /**
+   * Remind guardians who still owe. `overdue` switches from "due in N days" to
+   * "already past due"; `classId` narrows it to one class, which is how a head
+   * teacher actually uses it.
+   *
+   * Not idempotent-guarded at the route: the subscriber's per-pupil dedupeKey
+   * already collapses a repeat run on the same day into one message.
+   */
+  @Post('reminders/send')
+  @RequirePermissions(PERMISSIONS.school.collectPayments)
+  sendReminders(
+    @Body() body: { classId?: string; daysAhead?: number; overdue?: boolean; minBalance?: number },
+  ) {
+    return this.feeNotifications.remind({
+      organizationId: this.tenant.organizationId,
+      classId: body?.classId ?? null,
+      daysAhead: body?.daysAhead,
+      overdue: body?.overdue,
+      minBalance: body?.minBalance,
+    });
   }
 
   /* Fee defaulters & bad debtors (read-only reports) */

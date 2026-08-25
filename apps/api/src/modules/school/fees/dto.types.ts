@@ -72,6 +72,15 @@ export class FeeComponent {
   @IsOptional()
   @IsBoolean()
   isOptional?: boolean;
+
+  /**
+   * one_time | per_term | annual. Drives mid-term proration (D4): a one-off
+   * charge — admission fee, uniform, PLE registration — is never reduced for
+   * joining late, because the school's cost is the same.
+   */
+  @IsOptional()
+  @IsIn(['one_time', 'per_term', 'annual'])
+  frequency?: string;
 }
 
 export class CreateFeeStructureDto {
@@ -315,6 +324,17 @@ export class CollectFeePaymentDto {
 
   @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES])
   externalReferenceType?: ExternalReferenceType;
+
+  /**
+   * B1: turn whatever the tender does not settle into a fee credit for this
+   * pupil, funded by this receipt. Routine in a Ugandan school — a parent
+   * rounds up to the note they have, or pays next term forward.
+   *
+   * Off by default so an existing caller's behaviour is unchanged: without it
+   * the remainder stays as unallocated payment value (still refundable, just
+   * not spendable against a future invoice).
+   */
+  @IsOptional() @IsBoolean() convertOverpaymentToCredit?: boolean;
 
   @IsOptional() @IsString() notes?: string;
 }

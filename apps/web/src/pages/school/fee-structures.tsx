@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, CalendarClock, Users } from 'lucide-react';
+import { Plus, Trash2, CalendarClock, Users, BadgeCheck, History, AlertTriangle } from 'lucide-react';
 import {
   useFeeStructures,
   useCreateFeeStructure,
@@ -10,6 +10,8 @@ import {
   useAcademicYears,
   useClasses,
   useServiceProducts,
+  usePublishFeeStructure,
+  useFeeStructureVersions,
   type FeeComponent,
   type FeeStructure,
 } from '@/features/school/api';
@@ -40,6 +42,12 @@ export function SchoolFeeStructuresPage() {
   const createStructure = useCreateFeeStructure();
   const updateStructure = useUpdateFeeStructure();
   const deleteStructure = useDeleteFeeStructure();
+  const publishStructure = usePublishFeeStructure();
+
+  // Publish / version-history dialog. `versionsFor` drives the query, so the
+  // history is only fetched when a bursar actually opens it.
+  const [versionsFor, setVersionsFor] = useState<FeeStructure | null>(null);
+  const { data: versions } = useFeeStructureVersions(versionsFor?.id);
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -167,6 +175,34 @@ export function SchoolFeeStructuresPage() {
     return ids.map((id) => classById.get(id) ?? id).join(', ');
   };
 
+  /**
+   * A structure can only be billed once its prices are frozen into an immutable
+   * version. Billing reads that version, never the components you edit here, so
+   * changing a published structure cannot silently change what the next run
+   * charges — and a structure that has never been published is not billable at
+   * all. That is the single most common reason a billing run reports
+   * "unpriceable_structure" and produces no invoices.
+   */
+  const isPublished = (s: FeeStructure) => s.status === 'published' && !!s.currentVersionId;
+
+  const publish = async (s: FeeStructure, reprice: boolean) => {
+    try {
+      // Repricing sends the current components: PATCH refuses to edit a
+      // published structure's prices, so publish is the door that writes new
+      // amounts and freezes them as version N+1 in one transaction.
+      await publishStructure.mutateAsync(
+        reprice ? { id: s.id, components: s.components ?? [] } : s.id,
+      );
+      notify.success(
+        reprice
+          ? `"${s.name}" repriced — new version published. Invoices already issued are unchanged.`
+          : `"${s.name}" published and ready to bill.`,
+      );
+    } catch (e) {
+      notify.error(apiError(e, 'Could not publish fee structure'));
+    }
+  };
+
   return (
     <>
       <CatalogPage<FeeStructure>
@@ -246,7 +282,40 @@ export function SchoolFeeStructuresPage() {
                 <Badge variant="secondary">Not scheduled</Badge>
               ),
           },
+          {
+            key: 'published',
+            label: 'Billable',
+            exportValue: (s) => (isPublished(s) ? 'published' : 'not published'),
+            render: (s) =>
+              isPublished(s) ? (
+                <Badge variant="default" className="gap-1">
+                  <BadgeCheck className="h-3 w-3" /> Published
+                </Badge>
+              ) : (
+                <Badge variant="destructive" className="gap-1" title="Billing will skip every student on this structure until it is published.">
+                  <AlertTriangle className="h-3 w-3" /> Not billable
+                </Badge>
+              ),
+          },
         ]}
+        rowActions={(s) => (
+          <>
+            {!isPublished(s) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => publish(s, false)}
+                disabled={publishStructure.isPending}
+                title="Freeze these prices so the structure can be billed"
+              >
+                <BadgeCheck className="h-4 w-4" />
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setVersionsFor(s)} title="Price history">
+              <History className="h-4 w-4" />
+            </Button>
+          </>
+        )}
       />
 
       <CatalogDialog
@@ -391,6 +460,97 @@ export function SchoolFeeStructuresPage() {
           <input type="checkbox" checked={draft.isActive} onChange={(e) => set({ isActive: e.target.checked })} />
           Active
         </label>
+      </CatalogDialog>
+
+      {/*
+        Price history. Each version is a frozen snapshot of what the structure
+        charged at the moment it was published; invoices keep the version they
+        were billed from, so an old term's figures never move when this year's
+        prices change.
+      */}
+      <CatalogDialog
+        open={!!versionsFor}
+        onOpenChange={(o) => !o && setVersionsFor(null)}
+        wide
+        title={`Price history — ${versionsFor?.name ?? ''}`}
+        description="Billing prices from the newest published version. Editing prices above and publishing again creates the next version; invoices already issued keep the version they were billed from."
+        onSave={() => setVersionsFor(null)}
+        saveLabel="Close"
+      >
+        {versionsFor && !isPublished(versionsFor) && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <p className="flex items-center gap-2 font-medium text-destructive">
+              <AlertTriangle className="h-4 w-4" /> This structure has never been published.
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              Billing will skip every student on it. Publish to freeze these prices and make it billable.
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              disabled={publishStructure.isPending}
+              onClick={async () => {
+                await publish(versionsFor, false);
+                setVersionsFor(null);
+              }}
+            >
+              <BadgeCheck className="h-4 w-4" /> Publish now
+            </Button>
+          </div>
+        )}
+
+        {versionsFor && isPublished(versionsFor) && (
+          <div className="rounded-md border p-3 text-sm">
+            <p className="text-muted-foreground">
+              Prices are frozen. To change them, edit the components above, then publish again —
+              that creates the next version in one step.
+            </p>
+            <Button
+              className="mt-2"
+              size="sm"
+              variant="outline"
+              disabled={publishStructure.isPending}
+              onClick={async () => {
+                await publish(versionsFor, true);
+                setVersionsFor(null);
+              }}
+            >
+              <BadgeCheck className="h-4 w-4" /> Publish current prices as a new version
+            </Button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {(versions ?? []).map((v) => (
+            <div key={v.id} className="rounded-md border p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">
+                  Version {v.versionNo}
+                  {v.versionNo === 0 && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      (legacy pricing, recorded at migration — never formally published)
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {v.publishedAt ? new Date(v.publishedAt).toLocaleDateString() : '—'}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {(v.items ?? []).map((it) => (
+                  <Badge key={it.id} variant={it.isOptional ? 'secondary' : 'default'} className="font-normal">
+                    {it.name || it.code} · {money(it.amount)}
+                    {it.isOptional && ' (opt)'}
+                  </Badge>
+                ))}
+                {(v.items ?? []).length === 0 && <span className="text-sm text-muted-foreground">No items recorded.</span>}
+              </div>
+            </div>
+          ))}
+          {(versions ?? []).length === 0 && (
+            <p className="text-sm text-muted-foreground">No versions yet.</p>
+          )}
+        </div>
       </CatalogDialog>
     </>
   );
