@@ -21,7 +21,7 @@ function makeCollect(opts: { residual: number } = { residual: 700_000 }) {
         { id: 'doc_1', amountResidual: opts.residual, issueDate: new Date('2026-02-01') },
       ]),
     },
-    payment: { findFirst: jest.fn().mockResolvedValue({ id: 'pay_1', allocations: [] }) },
+    payment: { findFirst: jest.fn().mockResolvedValue({ id: 'pay_1', allocations: [] }), update: jest.fn().mockResolvedValue({}) },
   };
   const prisma = { client: { $transaction: jest.fn(async (cb: any) => cb(tx)) } };
   const service = new SchoolPaymentService(
@@ -57,14 +57,16 @@ describe('B1 · a parent may pay more than is owed', () => {
       convertOverpaymentToCredit: true,
     } as any);
 
-    expect(res.unallocated).toBe(300_000);
+    expect(res.unallocated).toBe(0); // converted to a credit, not free cash
     expect(createCredit).toHaveBeenCalledWith(
       expect.objectContaining({
         studentProfileId: 'stu_1',
         amount: 300_000,
         // The origin is what keeps the entitlement counted once: a refund
         // subtracts overpayment already converted, so the same money can never
-        // be both refundable cash and a spendable credit.
+        // be both refundable cash and a spendable credit. Converting it also
+        // decrements Payment.unallocatedAmount so the audit gate does not
+        // double-count it (Payment.unallocatedAmount + FeeCredit).
         source: 'overpayment',
         sourcePaymentId: 'pay_1',
       }),

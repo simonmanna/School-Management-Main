@@ -1241,6 +1241,7 @@ export class SchoolPaymentService {
       // `Payment.unallocatedAmount` and is still refundable — but it cannot be
       // spent against next term's invoice until it is a credit.
       let overpaymentCredit: any = null;
+      let converted = 0;
       if (unallocatedAmt > 0 && dto.convertOverpaymentToCredit) {
         overpaymentCredit = await this.advanced.createCredit(
           {
@@ -1251,6 +1252,16 @@ export class SchoolPaymentService {
           },
           tx,
         );
+        // Entitlement uniqueness (P1-3 / FINANCIAL_INVARIANTS §Economic-entitlement
+        // uniqueness): the converted amount leaves the payment's unallocated pot
+        // so the same money is never both refundable cash AND a spendable credit.
+        // Without this the audit gate double-counts it (Payment.unallocatedAmount
+        // + FeeCredit) and AR⇄GL reconciliation diverges.
+        await tx.payment.update({
+          where: { id: receipt.id },
+          data: { unallocatedAmount: { decrement: unallocatedAmt } },
+        });
+        converted = unallocatedAmt;
       }
 
       const payment = await tx.payment.findFirst({
@@ -1260,7 +1271,7 @@ export class SchoolPaymentService {
       return {
         payment,
         allocations,
-        unallocated: unallocatedAmt,
+        unallocated: unallocatedAmt - converted,
         overpaymentCredit,
         replayed: false,
       };

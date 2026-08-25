@@ -71,7 +71,7 @@ export class PaymentAllocationReversalService {
    * The original `PaymentAllocation` row is never touched except to update its
    * cached `status`; the reversal row carries the reason, actor and journal.
    */
-  async reverseAllocation(allocationId: string, reason: string, tx?: any) {
+  async reverseAllocation(allocationId: string, reason: string, tx?: any, returnCash = true) {
     if (!reason?.trim()) {
       throw new BadRequestException('A reversal must carry a reason — it is the audit trail.');
     }
@@ -131,7 +131,15 @@ export class PaymentAllocationReversalService {
         where: { id: alloc.paymentId },
         data: {
           allocatedAmount: dec(alloc.payment.allocatedAmount).minus(amount),
-          unallocatedAmount: dec(alloc.payment.unallocatedAmount).plus(amount),
+          // A standalone reversal returns the cash to the payer (the GL posts
+          // Dr AR / Cr Cash), so the money leaves the till and must NOT be added
+          // back to unallocatedAmount — otherwise the audit gate sees the same
+          // cash as both "returned" and "still in the till, available". A
+          // reallocation keeps the value with the school (no cash leg), so it
+          // DOES return the amount to the unallocated pot to be re-applied.
+          ...(returnCash
+            ? {}
+            : { unallocatedAmount: dec(alloc.payment.unallocatedAmount).plus(amount) }),
         },
       });
 
@@ -212,7 +220,7 @@ export class PaymentAllocationReversalService {
         where: { organizationId, paymentId, status: 'posted' },
       });
       for (const alloc of posted) {
-        await this.reverseAllocation(alloc.id, `Reallocation: ${reason}`, tx);
+        await this.reverseAllocation(alloc.id, `Reallocation: ${reason}`, tx, false);
       }
 
       // Re-read: the reversals above returned value to the unallocated pot.
