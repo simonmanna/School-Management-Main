@@ -990,24 +990,57 @@ export class SchoolPaymentService {
       // cash payment on an open session (accountId omitted so that path runs),
       // records the audit row, and emits payment.received/allocated/invoice.paid
       // — all inside this same transaction.
-      const receipt: any = await this.payments.createReceipt(
-        {
-          partnerId,
-          paymentDate: paymentDate.toISOString(),
-          amount: dto.amount,
-          paymentMethod: method,
-          // A bank deposit posts to a specific bank GL account and has no cash
-          // drawer movement; cash / mobile-money / card let determination pick
-          // the default account (and, for cash, keep the CashMovement path live).
-          accountId: method === 'bank' ? dto.bankAccountId : undefined,
-          reference: dto.reference,
-          externalReference: dto.externalReference,
-          externalReferenceType: dto.externalReferenceType,
-          cashSessionId: dto.cashSessionId,
-          allocations,
-        },
-        tx,
-      );
+      //
+      // P0-B idempotency under CONCURRENCY: the application `findFirst` replay
+      // guard above cannot catch two callbacks that race under READ COMMITTED —
+      // both observe "no existing payment" and both reach createReceipt. The
+      // database unique index on (org, externalReferenceType, externalReference,
+      // direction) is the real guarantee: the second insert throws P2002. We
+      // catch that and return the row the first transaction already committed,
+      // so a retried MoMo callback gets an idempotent 200 (replayed: true)
+      // instead of an unhandled 500. The GL/allocation work is re-verified by
+      // the caller against the returned payment, so no double-posting occurs.
+      let receipt: any;
+      try {
+        receipt = await this.payments.createReceipt(
+          {
+            partnerId,
+            paymentDate: paymentDate.toISOString(),
+            amount: dto.amount,
+            paymentMethod: method,
+            accountId: method === 'bank' ? dto.bankAccountId : undefined,
+            reference: dto.reference,
+            externalReference: dto.externalReference,
+            externalReferenceType: dto.externalReferenceType,
+            cashSessionId: dto.cashSessionId,
+            allocations,
+          },
+          tx,
+        );
+      } catch (err: any) {
+        if (
+          err?.code === 'P2002' &&
+          dto.externalReference &&
+          err?.meta?.target?.includes('externalReference')
+        ) {
+          // The competing transaction committed first; this one aborted on the
+          // unique index. Re-read the committed row on the OUTER client (not
+          // `tx`, which is now aborted) so the retried callback still gets an
+          // idempotent result instead of a 500.
+          const existing = await this.prisma.client.payment.findFirst({
+            where: {
+              organizationId,
+              externalReference: dto.externalReference,
+              externalReferenceType: dto.externalReferenceType ?? undefined,
+              direction: 'inbound',
+            },
+            include: { allocations: true },
+          });
+          if (existing) return { payment: existing, allocations: [], unallocated: 0, replayed: true };
+          throw err; // genuine conflict, not the replay we guard
+        }
+        throw err;
+      }
 
       // School-domain signal, in addition to the engine's generic events, so
       // fee-specific subscribers (statements, guardian notifications) can react.
