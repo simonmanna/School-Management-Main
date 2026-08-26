@@ -674,6 +674,31 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         );
       }
 
+      // Concurrency-safe seat claim. `checkEligibility` already proved a seat was
+      // available *when it read* (available = capacity − reserved − occupied), but two
+      // enrolls racing on the last seat could both pass that read. Reserve atomically
+      // here, inside the same transaction, using a conditional update on the capacity
+      // row: it only succeeds while claimedSeats < capacity − reserved − occupied
+      // (occupied = legacy enrollment count at read time; claimedSeats = in-flight
+      // locks). The loser's updateMany affects 0 rows and we reject — so at most
+      // `capacity − reserved − occupied` enrollments ever commit for this row.
+      if (gate.capacity?.id) {
+        const cap = gate.capacity;
+        const headroom = cap.capacity - cap.reservedCapacity - (cap.occupied ?? 0);
+        const claimed = await tx.admissionCapacity.updateMany({
+          where: {
+            id: cap.id,
+            claimedSeats: { lt: headroom },
+          },
+          data: { claimedSeats: { increment: 1 } },
+        });
+        if (claimed.count === 0) {
+          throw new BadRequestException(
+            `No seat available for the requested class (capacity ${cap.capacity}, reserved ${cap.reservedCapacity}, occupied ${cap.occupied ?? 0}, claimed ${cap.claimedSeats ?? 0}).`,
+          );
+        }
+      }
+
       const input: EnrollNewStudentInput = {
         organizationId,
         applicationId: app.id,
@@ -1210,6 +1235,23 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       },
     });
 
+    // Release the claimed seat when an enrolled application is withdrawn, so the
+    // capacity frees up for the next enrolment. Best-effort: only if a capacity row
+    // exists for the application's class/cycle.
+    if (action === 'withdraw' && before.status === 'enrolled') {
+      await tx.admissionCapacity.updateMany({
+        where: {
+          organizationId: before.organizationId,
+          admissionCycleId: before.admissionCycleId ?? undefined,
+          classId: before.applyingForClassId ?? undefined,
+          ...(before.sectionId ? { sectionId: before.sectionId } : {}),
+          ...(before.streamId ? { streamId: before.streamId } : {}),
+          claimedSeats: { gt: 0 },
+        },
+        data: { claimedSeats: { decrement: 1 } },
+      });
+    }
+
     // Queryable per-application timeline the UI renders (the AuditLog is the
     // system-wide record; this is the admissions-scoped one).
     await tx.admissionStatusHistory.create({
@@ -1483,23 +1525,26 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     reservedCapacity?: number;
   }) {
     const organizationId = this.tenant.organizationId;
-    // Prisma 6 requires every column of a compound-unique constraint to be present
-    // and non-null in an upsert `where`; pad a null nullable FK with a sentinel for
-    // the lookup key (the real (possibly-null) value is still written in `create`).
+    // Sentinel for null nullable FKs in the compound-unique key. Prisma 6 rejects a
+    // real `null` in a compound-unique `where`, so we key the row with '__none__' in
+    // BOTH the lookup and the stored value. That keeps the upsert idempotent (no
+    // duplicate rows) AND lets findFirst/countOccupied find it. countOccupied maps
+    // the sentinel back to `null` when counting real enrollments (which store null).
     const SENT = '__none__';
     const sectionKey = dto.sectionId ?? SENT;
     const streamKey = dto.streamId ?? SENT;
+    const where = {
+      organizationId_admissionCycleId_classId_sectionId_streamId: {
+        organizationId,
+        admissionCycleId: dto.admissionCycleId,
+        classId: dto.classId,
+        sectionId: sectionKey,
+        streamId: streamKey,
+      },
+    } as any;
     return this.prisma.client.admissionCapacity.upsert({
-      where: {
-        organizationId_admissionCycleId_classId_sectionId_streamId: {
-          organizationId,
-          admissionCycleId: dto.admissionCycleId,
-          classId: dto.classId,
-          sectionId: sectionKey,
-          streamId: streamKey,
-        },
-      } as any,
-      create: { organizationId, ...dto },
+      where,
+      create: { organizationId, ...dto, sectionId: sectionKey, streamId: streamKey },
       update: { capacity: dto.capacity, reservedCapacity: dto.reservedCapacity ?? 0 },
     });
   }
@@ -1529,6 +1574,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         ...c,
         academicYearId: cycle.academicYearId,
         occupied,
+        claimedSeats: c.claimedSeats ?? 0,
         available: Math.max(0, c.capacity - c.reservedCapacity - occupied),
       });
     }
@@ -1773,20 +1819,25 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     },
   ): Promise<
     | null
-    | { id: string; classId: string; sectionId: string | null; streamId: string | null; capacity: number; reservedCapacity: number; occupied: number; available: number }
+    | { id: string; classId: string; sectionId: string | null; streamId: string | null; capacity: number; reservedCapacity: number; claimedSeats: number; occupied: number; available: number }
   > {
     if (!key.admissionCycleId) return null;
+    const SENT = '__none__';
     const row = await client.admissionCapacity.findFirst({
       where: {
         organizationId: this.tenant.organizationId,
         admissionCycleId: key.admissionCycleId,
         classId: key.classId,
-        sectionId: key.sectionId,
-        streamId: key.streamId,
+        sectionId: key.sectionId ?? SENT,
+        streamId: key.streamId ?? SENT,
       },
     });
     if (!row) return null;
     const occupied = await this.countOccupied(client, row, key.academicYearId);
+    // `claimedSeats` is an atomic, transaction-level seat claim (see enroll()).
+    // `available` is therefore capacity − reserved − claimed, which reflects seats
+    // already committed inside in-flight enroll transactions, preventing
+    // over-admission under concurrency (two enrolls racing on the last seat).
     return {
       id: row.id,
       classId: row.classId,
@@ -1794,19 +1845,30 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       streamId: row.streamId,
       capacity: row.capacity,
       reservedCapacity: row.reservedCapacity,
+      claimedSeats: row.claimedSeats ?? 0,
       occupied,
+      // `occupied` is the authoritative enrollment count (incl. legacy rows created
+      // before claimedSeats existed). `claimedSeats` is only the in-flight lock
+      // incremented inside the enroll transaction, so availability is computed from
+      // `occupied`, NOT claimedSeats (they are different counters for legacy data).
       available: Math.max(0, row.capacity - row.reservedCapacity - occupied),
     };
   }
 
   /** Active enrollments for a capacity row, scoped to one academic year. */
   private async countOccupied(client: any, cap: any, academicYearId: string): Promise<number> {
+    const SENT = '__none__';
+    // The capacity row keys a "no section/stream" with the sentinel '__none__', but
+    // real enrollments store `null` for those. Map the sentinel back to null so the
+    // count matches actual enrollments.
+    const sectionFilter = cap.sectionId && cap.sectionId !== SENT ? cap.sectionId : null;
+    const streamFilter = cap.streamId && cap.streamId !== SENT ? cap.streamId : null;
     return client.enrollment.count({
       where: {
         organizationId: this.tenant.organizationId,
         classId: cap.classId,
-        ...(cap.sectionId ? { sectionId: cap.sectionId } : {}),
-        ...(cap.streamId ? { streamId: cap.streamId } : {}),
+        ...(sectionFilter !== undefined ? { sectionId: sectionFilter } : {}),
+        ...(streamFilter !== undefined ? { streamId: streamFilter } : {}),
         status: 'enrolled',
         endedAt: null,
         term: { academicYearId },

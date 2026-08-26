@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -78,6 +78,8 @@ export class AdmissionsPortalService {
    * caller then operates within.
    */
   async resolveToken(raw: string): Promise<{ organizationId: string; applicationId: string; tokenId: string }> {
+    // A missing/empty token is an unauthenticated request, not a server error.
+    if (!raw) throw new UnauthorizedException('An access token is required');
     const row = await this.prisma.raw.admissionPortalToken.findFirst({ where: { tokenHash: this.hash(raw) } });
     if (!row) throw new NotFoundException('Invalid access link');
     if (row.expiresAt.getTime() < Date.now()) throw new BadRequestException('This access link has expired');

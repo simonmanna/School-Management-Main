@@ -10955,6 +10955,10 @@ model AdmissionCapacity {
   campusId         String?
   capacity         Int     @default(0)
   reservedCapacity Int     @default(0)
+  /// Atomic seat claim used to make enrollment capacity-safe under concurrency.
+  /// Incremented (conditionally) inside the enroll transaction; the ui `available`
+  /// is `capacity - reservedCapacity - claimedSeats`. Decremented on enrolment reversal.
+  claimedSeats     Int     @default(0)
 
   admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
 
