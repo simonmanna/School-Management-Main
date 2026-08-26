@@ -264,6 +264,10 @@ export interface AdmissionApplication {
   parentContactId?: string | null;
   admissionCycleId?: string | null;
   decisionNotes?: string | null;
+  nationality?: string | null;
+  residenceType?: string | null;
+  entryStatus?: string | null;
+  address?: string | null;
   customFields?: Record<string, unknown>;
   createdAt: string;
   academicYear?: { id: string; name: string } | null;
@@ -320,6 +324,11 @@ export interface CreateAdmissionInput {
   nin?: string;
   sourceOfEnquiry?: string;
   siblingOfStudentId?: string;
+  /// Promoted operational fields (Task 3).
+  nationality?: string;
+  residenceType?: 'day' | 'boarder';
+  entryStatus?: string;
+  address?: string;
   asDraft?: boolean;
   guardians?: AdmissionGuardianInput[];
   customFields?: Record<string, unknown>;
@@ -334,6 +343,12 @@ export interface UpdateAdmissionInput {
   parentContactId?: string;
   sourceOfEnquiry?: string;
   siblingOfStudentId?: string;
+  admissionCycleId?: string;
+  /// Promoted operational fields (Task 3).
+  nationality?: string;
+  residenceType?: 'day' | 'boarder';
+  entryStatus?: string;
+  address?: string;
   customFields?: Record<string, unknown>;
 }
 
@@ -588,6 +603,62 @@ export function useAdmissionRequirements(admissionCycleId?: string) {
   return useQuery({
     queryKey: ['school', 'admissions', 'requirements', admissionCycleId ?? 'all'],
     queryFn: async () => (await api.get<AdmissionRequirement[]>(`${S}/admissions/requirements`, { params: admissionCycleId ? { admissionCycleId } : {} })).data,
+  });
+}
+
+// ── Admission cycles ────────────────────────────────────────────────────────
+export interface AdmissionCycle {
+  id: string;
+  organizationId: string;
+  academicYearId: string;
+  name: string;
+  opensAt?: string | null;
+  closesAt?: string | null;
+  status: 'open' | 'closed';
+  createdAt: string;
+  updatedAt: string;
+  capacities?: unknown[];
+  criteriaSets?: unknown[];
+}
+
+export function useAdmissionCycles(academicYearId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'cycles', academicYearId ?? 'all'],
+    queryFn: async () => (await api.get<AdmissionCycle[]>(`${S}/admissions/cycles`, { params: academicYearId ? { academicYearId } : {} })).data,
+  });
+}
+
+// ── Nationalities (org-scoped master data) ──────────────────────────────────
+export interface Nationality {
+  id: string;
+  organizationId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useNationalities() {
+  return useQuery({
+    queryKey: ['school', 'nationalities'],
+    queryFn: async () => (await api.get<Nationality[]>(`${S}/admissions/nationalities`)).data,
+  });
+}
+
+export function useCreateNationality() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string }) => (await api.post<Nationality>(`${S}/admissions/nationalities`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'nationalities'] }),
+  });
+}
+
+export function useUpdateNationality() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; name?: string; isActive?: boolean }) =>
+      (await api.patch<Nationality>(`${S}/admissions/nationalities/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'nationalities'] }),
   });
 }
 

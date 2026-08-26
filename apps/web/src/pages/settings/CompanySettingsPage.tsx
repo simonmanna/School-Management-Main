@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Landmark, BookOpen, ArrowLeftRight, Coins, Boxes, UserPlus, KeyRound, Mail, Check, Building2, Users, ReceiptText, Settings as SettingsIcon, ShieldCheck, ShoppingCart, Percent, DollarSign, FileText } from 'lucide-react';
+import { Save, Loader2, Landmark, BookOpen, ArrowLeftRight, Coins, Boxes, UserPlus, KeyRound, Mail, Check, Building2, Users, ReceiptText, Settings as SettingsIcon, ShieldCheck, ShoppingCart, Percent, DollarSign, FileText, Globe } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { SystemConfigSection, GroupCard } from './system-config';
 import TaxesPage from '@/pages/accounting/taxes';
 import { CurrencyPage } from '@/pages/accounting/currency';
+import { useNationalities, useCreateNationality, useUpdateNationality } from '@/features/school/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -684,6 +685,9 @@ export function CompanySettingsPage() {
             <TabsTrigger value="users" className={tabClass}>
               <Users className="h-4 w-4" /> Users
             </TabsTrigger>
+            <TabsTrigger value="nationalities" className={tabClass}>
+              <Globe className="h-4 w-4" /> Nationalities
+            </TabsTrigger>
             <TabsTrigger value="myaccount" className={tabClass}>
               <ShieldCheck className="h-4 w-4" /> My Account
             </TabsTrigger>
@@ -1043,6 +1047,11 @@ export function CompanySettingsPage() {
               <SystemConfigSection />
             </TabsContent>
 
+            {/* ── Nationalities (org-scoped master data) ── */}
+            <TabsContent value="nationalities" className="mt-0">
+              <NationalitiesSettings />
+            </TabsContent>
+
           </div>
         </Tabs>
       )}
@@ -1099,5 +1108,111 @@ export function CompanySettingsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ── Nationalities (org-scoped master data) ───────────────────────────────────
+function NationalitiesSettings() {
+  const { data, isLoading } = useNationalities();
+  const create = useCreateNationality();
+  const update = useUpdateNationality();
+  const [name, setName] = useState('');
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
+  const [editName, setEditName] = useState('');
+
+  const rows = (data ?? []).slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+  const add = async () => {
+    const v = name.trim();
+    if (!v) return;
+    try {
+      await create.mutateAsync({ name: v });
+      notify.success('Nationality added');
+      setName('');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not add nationality');
+    }
+  };
+
+  const toggleActive = async (id: string, isActive: boolean) => {
+    try {
+      await update.mutateAsync({ id, isActive: !isActive });
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not update nationality');
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    const v = editName.trim();
+    if (!v) return;
+    try {
+      await update.mutateAsync({ id: editing.id, name: v });
+      notify.success('Nationality updated');
+      setEditing(null);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not update nationality');
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Globe className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <CardTitle>Nationalities</CardTitle>
+              <CardDescription>
+                Organization-scoped list used on the application form. Deactivate instead of deleting to keep historical applications intact.
+              </CardDescription>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-end gap-2">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Add nationality</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="E.g. Ugandan" onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+          </div>
+          <Button onClick={add} disabled={create.isPending || !name.trim()}>
+            <Check className="mr-2 h-3.5 w-3.5" /> Add
+          </Button>
+        </div>
+
+        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {!isLoading && rows.length === 0 && (
+          <p className="text-sm text-muted-foreground">No nationalities configured yet.</p>
+        )}
+
+        <div className="divide-y rounded-md border">
+          {rows.map((n: any) => (
+            <div key={n.id} className="flex items-center justify-between px-3 py-2">
+              {editing?.id === n.id ? (
+                <div className="flex flex-1 items-center gap-2">
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="max-w-xs" onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); }} />
+                  <Button size="sm" onClick={saveEdit} disabled={update.isPending}>Save</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{n.name}</span>
+                    {!n.isActive && <Badge variant="outline">Inactive</Badge>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => { setEditing({ id: n.id, name: n.name }); setEditName(n.name); }}>Edit</Button>
+                    <Button size="sm" variant={n.isActive ? 'outline' : 'default'} onClick={() => toggleActive(n.id, n.isActive)}>
+                      {n.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

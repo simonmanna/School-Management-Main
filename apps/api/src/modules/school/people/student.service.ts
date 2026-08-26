@@ -17,10 +17,14 @@ import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
  * can return to `active` (re-admission / reinstatement).
  */
 const STUDENT_STATUS_TRANSITIONS: Record<string, string[]> = {
-  active: ['suspended', 'transferred', 'withdrawn', 'alumni'],
-  suspended: ['active', 'withdrawn', 'transferred'],
-  withdrawn: ['active', 'transferred'],
-  transferred: [],
+  applicant: ['active', 'withdrawn', 'archived'],
+  active: ['suspended', 'transferred', 'withdrawn', 'graduated', 'deceased', 'archived'],
+  suspended: ['active', 'withdrawn', 'transferred', 'deceased', 'archived'],
+  withdrawn: ['active', 'transferred', 'archived'],
+  transferred: ['active', 'withdrawn', 'archived'],
+  graduated: ['archived'],
+  deceased: ['archived'],
+  archived: [],
   alumni: [],
 };
 
@@ -79,6 +83,11 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         nationality: dto.nationality ?? null,
         religion: dto.religion ?? null,
         house: dto.house ?? null,
+        middleName: dto.middleName ?? null,
+        preferredName: dto.preferredName ?? null,
+        countryOfBirth: dto.countryOfBirth ?? null,
+        placeOfBirth: dto.placeOfBirth ?? null,
+        address: dto.address ?? null,
       };
 
       const partner = await tx.partner.create({
@@ -108,7 +117,14 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
           religion: dto.religion ?? null,
           residenceType: dto.residenceType ?? 'day',
           house: dto.house ?? null,
-          customFields: dto.customFields ?? {},
+          customFields: {
+            ...(dto.customFields ?? {}),
+            middleName: dto.middleName ?? null,
+            preferredName: dto.preferredName ?? null,
+            countryOfBirth: dto.countryOfBirth ?? null,
+            placeOfBirth: dto.placeOfBirth ?? null,
+            address: dto.address ?? null,
+          },
         },
       });
 
@@ -178,7 +194,8 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         });
       }
 
-      // Profile-side updates
+      // Profile-side updates. The new name/birth fields live on customFields;
+      // we merge them in rather than overwrite the whole object.
       const profileUpdates: Record<string, unknown> = {};
       for (const k of [
         'currentClassId',
@@ -189,11 +206,22 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         'religion',
         'residenceType',
         'house',
-        'customFields',
       ] as const) {
         if (dto[k] !== undefined) profileUpdates[k] = dto[k];
       }
       if (dto.status !== undefined) profileUpdates.status = dto.status;
+
+      // Merge the new editable profile fields into customFields.
+      const newCfKeys = ['middleName', 'preferredName', 'countryOfBirth', 'placeOfBirth', 'address'] as const;
+      const hasNewCf = newCfKeys.some((k) => dto[k] !== undefined);
+      if (hasNewCf || dto.customFields !== undefined) {
+        const merged = { ...(before.customFields ?? {}) };
+        for (const k of newCfKeys) {
+          if (dto[k] !== undefined) merged[k] = dto[k];
+        }
+        if (dto.customFields) Object.assign(merged, dto.customFields);
+        profileUpdates.customFields = merged;
+      }
 
       await tx.studentProfile.updateMany({ where: { id }, data: profileUpdates });
       const after = await tx.studentProfile.findFirst({ where: { id } });

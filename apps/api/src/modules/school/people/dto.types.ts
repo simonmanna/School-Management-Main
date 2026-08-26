@@ -9,6 +9,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsObject,
   IsOptional,
@@ -19,7 +20,7 @@ import { Type } from 'class-transformer';
 
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
-const STUDENT_STATUS = ['active', 'suspended', 'transferred', 'withdrawn', 'alumni'] as const;
+const STUDENT_STATUS = ['applicant', 'active', 'suspended', 'transferred', 'withdrawn', 'graduated', 'deceased', 'archived', 'alumni'] as const;
 const STAFF_STATUS = ['active', 'on_leave', 'suspended', 'terminated', 'retired'] as const;
 const RELATIONSHIP = ['father', 'mother', 'uncle', 'aunt', 'sibling', 'grandparent', 'guardian', 'other'] as const;
 const CONTRACT = ['permanent', 'contract', 'temporary', 'probation'] as const;
@@ -43,6 +44,11 @@ export class CreateStudentDto {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsString() middleName?: string;
+  @IsOptional() @IsString() preferredName?: string;
+  @IsOptional() @IsString() countryOfBirth?: string;
+  @IsOptional() @IsString() placeOfBirth?: string;
+  @IsOptional() @IsString() address?: string;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
@@ -62,6 +68,12 @@ export class UpdateStudentDto {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() house?: string;
+  // New editable profile fields (stored on StudentProfile.customFields).
+  @IsOptional() @IsString() middleName?: string;
+  @IsOptional() @IsString() preferredName?: string;
+  @IsOptional() @IsString() countryOfBirth?: string;
+  @IsOptional() @IsString() placeOfBirth?: string;
+  @IsOptional() @IsString() address?: string;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
   @IsOptional() @IsIn([...STUDENT_STATUS]) status?: (typeof STUDENT_STATUS)[number];
   @IsOptional() @IsString() reason?: string;
@@ -109,6 +121,35 @@ export class UpsertMedicalRecordDto {
   @IsOptional() @IsString() emergencyNotes?: string;
   @IsOptional() @IsString() doctorName?: string;
   @IsOptional() @IsString() doctorPhone?: string;
+}
+
+export class CreateEmergencyContactDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsString() @IsNotEmpty() firstName!: string;
+  @IsOptional() @IsString() middleName?: string;
+  @IsOptional() @IsString() lastName?: string;
+  @IsOptional() @IsString() preferredName?: string;
+  @IsOptional() @IsString() relationship?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() alternativePhone?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsInt() priority?: number;
+  @IsOptional() @IsBoolean() authorizedPickup?: boolean;
+}
+
+export class UpdateEmergencyContactDto {
+  @IsOptional() @IsString() @IsNotEmpty() firstName?: string;
+  @IsOptional() @IsString() middleName?: string;
+  @IsOptional() @IsString() lastName?: string;
+  @IsOptional() @IsString() preferredName?: string;
+  @IsOptional() @IsString() relationship?: string;
+  @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() alternativePhone?: string;
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsInt() priority?: number;
+  @IsOptional() @IsBoolean() authorizedPickup?: boolean;
 }
 
 export class CreateStudentDocumentDto {

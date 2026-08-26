@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Send, CheckCircle2, XCircle, CalendarClock } from 'lucide-react';
 import {
@@ -17,6 +17,7 @@ import { notify } from '@/lib/notify';
 // copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
 // 7 of the 15 backend states.
 import { NEXT_ACTIONS, statusMeta } from './_components/admission-status';
+import { DecisionDialog } from './_components/DecisionDialog';
 
 export function SchoolApplicationsPage() {
   const navigate = useNavigate();
@@ -24,24 +25,34 @@ export function SchoolApplicationsPage() {
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
+  const [decision, setDecision] = useState<{ app: AdmissionApplication; action: AdmissionAction } | null>(null);
 
   const rows = useMemo(() => data?.data ?? [], [data]);
   const yearNameById = useMemo(() => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])), [years]);
   const classNameById = useMemo(() => Object.fromEntries((classes?.data ?? []).map((c) => [c.id, c.name])), [classes]);
 
   const runAction = async (app: AdmissionApplication, action: AdmissionAction, needsNotes?: boolean) => {
-    let notes: string | undefined;
+    // Decision-grade actions (accept/reject/waitlist/withdraw) require a reason.
+    // Collected via the shared DecisionDialog instead of window.prompt; the API
+    // also enforces the requirement, so bypassing the UI is impossible.
     if (needsNotes) {
-      const entered = window.prompt(`Reason for "${action.replace(/_/g, ' ')}"?`);
-      if (entered === null) return;
-      if (!entered.trim()) {
-        notify.error('A reason is required for this action');
-        return;
-      }
-      notes = entered.trim();
+      setDecision({ app, action });
+      return;
     }
     try {
-      await act.mutateAsync({ id: app.id, action, notes });
+      await act.mutateAsync({ id: app.id, action });
+      notify.success(`Application ${action.replace(/_/g, ' ')}`);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Action failed');
+    }
+  };
+
+  const confirmDecision = async (reason: string, notes: string) => {
+    if (!decision) return;
+    const { app, action } = decision;
+    setDecision(null);
+    try {
+      await act.mutateAsync({ id: app.id, action, notes: reason || notes });
       notify.success(`Application ${action.replace(/_/g, ' ')}`);
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Action failed');
@@ -118,6 +129,17 @@ export function SchoolApplicationsPage() {
           </table>
         </CardContent>
       </Card>
+
+      {/* Decision-reason dialog (Task 1) */}
+      <DecisionDialog
+        open={!!decision}
+        action={decision?.action}
+        applicantName={decision ? `${decision.app.applicantFirstName} ${decision.app.applicantLastName}` : undefined}
+        reasonRequired
+        submitting={act.isPending}
+        onCancel={() => setDecision(null)}
+        onConfirm={confirmDecision}
+      />
     </div>
   );
 }

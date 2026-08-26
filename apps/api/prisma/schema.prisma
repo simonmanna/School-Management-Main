@@ -10466,10 +10466,16 @@ model SchoolCalendarEvent {
 }
 
 enum StudentStatus {
+  applicant
   active
   suspended
   transferred
   withdrawn
+  graduated
+  deceased
+  archived
+  /// Legacy terminal state (graduated/deceased supersede it). Kept for data
+  /// safety — Postgres enums cannot drop a value that rows still use.
   alumni
 }
 
@@ -10538,6 +10544,7 @@ model StudentProfile {
   incidentStudents    TransportIncidentStudent[] @relation("incidentStudents")
   hostelAllocation    HostelAllocation[]
   installmentPlans    InstallmentPlan[]
+  emergencyContacts   EmergencyContact[]
 
   outcomeAchievements StudentOutcomeAchievement[]
 
@@ -10590,6 +10597,36 @@ model StudentGuardian {
   @@unique([studentProfileId, guardianContactId])
   @@index([organizationId])
   @@index([guardianContactId])
+}
+
+/// Emergency contacts are NOT guardians and NOT AR contacts — they are
+/// standalone people the school may call if a guardian can't be reached.
+/// Stored as their own rows (not Contact) so they never pollute the AR ledger
+/// or guardian pickers. Soft-delete via deletedAt.
+model EmergencyContact {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  firstName        String
+  middleName       String?
+  lastName         String?
+  preferredName    String?
+  relationship     String?
+  phone            String?
+  alternativePhone String?
+  email            String?
+  address          String?
+  priority         Int      @default(1)
+  authorizedPickup Boolean  @default(false)
+  customFields     Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
 }
 
 model MedicalRecord {
@@ -10890,6 +10927,22 @@ model AdmissionCycle {
   @@index([academicYearId])
 }
 
+/// Organization-scoped nationality master data. Replaces the hardcoded
+/// dropdown on the application form. Physical deletion is avoided: deactivation
+/// (isActive=false) keeps historical applications intact while hiding the value
+/// from new-application selects.
+model Nationality {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
 /// Phase-3 capacity. Holds ONLY the declared capacity + reserved seats. Occupied
 /// seats are DERIVED from active Enrollments (never stored, to avoid sync drift).
 model AdmissionCapacity {
@@ -11006,6 +11059,13 @@ model AdmissionApplication {
   ninCiphertext      String?
   ninIv              String?
   ninTag             String?
+  /// Promoted operational fields previously stored in customFields JSON.
+  /// Stored top-level so they are queryable and type-checked (no enum migration
+  /// risk — residenceType keeps the existing 'day'|'boarder' string convention).
+  nationality        String?
+  residenceType      String?
+  entryStatus        String?
+  address            String?
   customFields       Json            @default("{}")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt

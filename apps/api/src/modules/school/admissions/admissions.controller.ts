@@ -8,13 +8,16 @@ import {
   BulkEnrollDto,
   ChargeFeeDto,
   CreateApplicationDto,
+  CreateNationalityDto,
   EnrollApplicationDto,
   IssueOfferDto,
   ReEnrollDto,
+  ReviewApplicationDto,
   ScheduleInterviewDto,
   ScoreApplicationDto,
   TransferInDto,
   UpdateApplicationDto,
+  UpdateNationalityDto,
   WithdrawStudentDto,
 } from './dto.types';
 
@@ -32,12 +35,6 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.read)
   byStatus(@Param('status') status: string) {
     return this.admissions.byStatus(status);
-  }
-
-  @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
-  findOne(@Param('id') id: string) {
-    return this.admissions.findOne(id);
   }
 
   @Post()
@@ -66,16 +63,27 @@ export class AdmissionsController {
    */
   @Post(':id/review')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  review(
-    @Param('id') id: string,
-    @Body('action')
-    action:
-      | 'review' | 'screen' | 'schedule_interview' | 'complete_interview' | 'reschedule'
-      | 'schedule_exam' | 'exam_done' | 'score' | 'accept' | 'reject' | 'waitlist'
-      | 'issue_offer' | 'accept_offer' | 'decline_offer' | 'withdraw',
-    @Body('notes') notes?: string,
-  ) {
-    return this.admissions.review(id, action, notes);
+  review(@Param('id') id: string, @Body() dto: ReviewApplicationDto) {
+    return this.admissions.review(id, dto.action, dto.reason ?? dto.notes);
+  }
+
+  // ── Nationalities (org-scoped master data) ──
+  @Get('nationalities')
+  @RequirePermissions(PERMISSIONS.school.read)
+  listNationalities() {
+    return this.admissions.listNationalities();
+  }
+
+  @Post('nationalities')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  createNationality(@Body() dto: CreateNationalityDto) {
+    return this.admissions.createNationality(dto);
+  }
+
+  @Patch('nationalities/:id')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  updateNationality(@Param('id') id: string, @Body() dto: UpdateNationalityDto) {
+    return this.admissions.updateNationality(id, dto);
   }
 
   /** Submit a draft into the pipeline (draft → submitted | documents_pending). */
@@ -306,5 +314,13 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
   remove(@Param('id') id: string) {
     return this.admissions.remove(id);
+  }
+
+  // Registered AFTER the static collection routes (cycles, nationalities, …) so
+  // Express matches those before this catch-all `:id` param route.
+  @Get(':id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  findOne(@Param('id') id: string) {
+    return this.admissions.findOne(id);
   }
 }

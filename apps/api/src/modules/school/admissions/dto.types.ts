@@ -49,6 +49,11 @@ export class CreateApplicationDto {
   @IsOptional() @IsString() nin?: string;
   @IsOptional() @IsString() sourceOfEnquiry?: string;
   @IsOptional() @IsString() siblingOfStudentId?: string;
+  /// Promoted operational fields (previously lived in customFields JSON).
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() entryStatus?: string;
+  @IsOptional() @IsString() address?: string;
   /// When true the application is created as a `draft` (portal / save-and-continue).
   @IsOptional() @IsBoolean() asDraft?: boolean;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
@@ -57,6 +62,7 @@ export class CreateApplicationDto {
 
 export class UpdateApplicationDto {
   @IsOptional() @IsString() @IsNotEmpty() academicYearId?: string;
+  @IsOptional() @IsString() admissionCycleId?: string;
   @IsOptional() @IsString() @IsNotEmpty() applicantFirstName?: string;
   @IsOptional() @IsString() @IsNotEmpty() applicantLastName?: string;
   @IsOptional() @IsString() applicantDob?: string;
@@ -66,8 +72,34 @@ export class UpdateApplicationDto {
   @IsOptional() @IsString() nin?: string;
   @IsOptional() @IsString() sourceOfEnquiry?: string;
   @IsOptional() @IsString() siblingOfStudentId?: string;
+  /// Promoted operational fields (previously lived in customFields JSON).
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() entryStatus?: string;
+  @IsOptional() @IsString() address?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
+}
+
+/// Review action that must carry a decision reason (recorded in history + audit).
+const REQUIRED_REASON_ACTIONS = ['accept', 'reject', 'waitlist', 'withdraw'] as const;
+
+export class ReviewApplicationDto {
+  @IsIn([...REQUIRED_REASON_ACTIONS, 'review', 'request_documents', 'screen', 'schedule_interview', 'complete_interview', 'reschedule', 'schedule_exam', 'exam_done', 'score', 'issue_offer', 'accept_offer', 'decline_offer', 'expire_offer'] as const)
+  action!: string;
+  /// Required (non-empty) for accept/reject/waitlist/withdraw; optional otherwise.
+  @IsOptional() @IsString() reason?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+// ── Nationalities (organization-scoped master data) ──────────────────────────
+export class CreateNationalityDto {
+  @IsString() @IsNotEmpty() name!: string;
+}
+
+export class UpdateNationalityDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
 export class AddExamScoreDto {

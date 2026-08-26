@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Plus, FilePlus2, Send, CheckCircle2, XCircle, CalendarClock, LogOut, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Send, CheckCircle2, XCircle, CalendarClock, LogOut, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
 import {
   useAdmissions,
-  useCreateAdmission,
   useAdmissionAction,
   useEnrollAdmission,
   useIssueAdmissionOffer,
@@ -14,7 +14,6 @@ import {
   useTerms,
   type AdmissionApplication,
   type AdmissionAction,
-  type CreateAdmissionInput,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,21 +23,22 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
 import { NEXT_ACTIONS, offerStage, statusMeta } from './_components/admission-status';
+import { DecisionDialog } from './_components/DecisionDialog';
 
 export function SchoolAdmissionsPage() {
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>({});
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
   const [enrollForm, setEnrollForm] = useState<Record<string, string>>({});
   const [offerFor, setOfferFor] = useState<AdmissionApplication | null>(null);
   const [offerForm, setOfferForm] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<string>('');
+  // Decision-reason dialog state (Task 1): replaces the legacy window.prompt.
+  const [decision, setDecision] = useState<{ app: AdmissionApplication; action: AdmissionAction } | null>(null);
 
+  const navigate = useNavigate();
   const { data, isLoading } = useAdmissions({ pageSize: 50 });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const { data: terms } = useTerms();
-  const create = useCreateAdmission();
   const act = useAdmissionAction();
   const enroll = useEnrollAdmission();
   const issueOffer = useIssueAdmissionOffer();
@@ -63,50 +63,35 @@ export function SchoolAdmissionsPage() {
   );
 
   const openCreate = () => {
-    const firstYear = (years?.data ?? [])[0]?.id ?? '';
-    setForm({ academicYearId: firstYear });
-    setOpen(true);
-  };
-
-  const submit = async () => {
-    if (!form.academicYearId || !form.applicantFirstName || !form.applicantLastName) {
-      notify.error('Academic year, first and last name are required');
-      return;
-    }
-    const dto: CreateAdmissionInput = {
-      academicYearId: form.academicYearId,
-      applicantFirstName: form.applicantFirstName,
-      applicantLastName: form.applicantLastName,
-      applicantDob: form.applicantDob || undefined,
-      applicantGender: (form.applicantGender || undefined) as CreateAdmissionInput['applicantGender'],
-      applyingForClassId: form.applyingForClassId || undefined,
-    };
-    try {
-      await create.mutateAsync(dto);
-      notify.success('Application submitted');
-      setOpen(false);
-      setForm({});
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Could not create application');
-    }
+    // The full application form lives on its own page
+    // (/school/applications/new) — we navigate there instead of opening the
+    // inline dialog, so the admissions "New application" action and the
+    // applications "New application" action are the same form.
+    navigate('/school/applications/new');
   };
 
   const runAction = async (app: AdmissionApplication, action: AdmissionAction, needsNotes?: boolean) => {
-    // Decisions must carry a reason. The old page declared an `actionNotes` state
-    // and never set it, so every accept/reject/withdraw was recorded with no
-    // rationale at all.
-    let notes: string | undefined;
+    // Decision-grade actions (accept/reject/waitlist/withdraw) require a reason.
+    // We collect it through the shared DecisionDialog instead of window.prompt;
+    // the API also enforces the requirement, so bypassing the UI is impossible.
     if (needsNotes) {
-      const entered = window.prompt(`Reason for "${action.replace(/_/g, ' ')}"?`);
-      if (entered === null) return;
-      if (!entered.trim()) {
-        notify.error('A reason is required for this action');
-        return;
-      }
-      notes = entered.trim();
+      setDecision({ app, action });
+      return;
     }
     try {
-      await act.mutateAsync({ id: app.id, action, notes });
+      await act.mutateAsync({ id: app.id, action });
+      notify.success(`Application ${action.replace(/_/g, ' ')}`);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Action failed');
+    }
+  };
+
+  const confirmDecision = async (reason: string, notes: string) => {
+    if (!decision) return;
+    const { app, action } = decision;
+    setDecision(null);
+    try {
+      await act.mutateAsync({ id: app.id, action, notes: reason || notes });
       notify.success(`Application ${action.replace(/_/g, ' ')}`);
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Action failed');
@@ -305,52 +290,6 @@ export function SchoolAdmissionsPage() {
         </CardContent>
       </Card>
 
-      {/* Create application dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New admission application</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Academic year" required>
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={form.academicYearId ?? ''} onChange={(e) => setForm({ ...form, academicYearId: e.target.value })}>
-                <option value="">—</option>
-                {(years?.data ?? []).map((y) => <option key={y.id} value={y.id}>{y.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Applying for class">
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={form.applyingForClassId ?? ''} onChange={(e) => setForm({ ...form, applyingForClassId: e.target.value })}>
-                <option value="">—</option>
-                {(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label="First name" required>
-              <Input value={form.applicantFirstName ?? ''} onChange={(e) => setForm({ ...form, applicantFirstName: e.target.value })} />
-            </Field>
-            <Field label="Last name" required>
-              <Input value={form.applicantLastName ?? ''} onChange={(e) => setForm({ ...form, applicantLastName: e.target.value })} />
-            </Field>
-            <Field label="Date of birth">
-              <Input type="date" value={form.applicantDob ?? ''} onChange={(e) => setForm({ ...form, applicantDob: e.target.value })} />
-            </Field>
-            <Field label="Gender">
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={form.applicantGender ?? ''} onChange={(e) => setForm({ ...form, applicantGender: e.target.value })}>
-                <option value="">—</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={create.isPending}>
-              <FilePlus2 className="h-4 w-4" /> Submit
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Issue offer dialog */}
       <Dialog open={!!offerFor} onOpenChange={(v) => { if (!v) setOfferFor(null); }}>
         <DialogContent>
@@ -435,6 +374,17 @@ export function SchoolAdmissionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Decision-reason dialog (Task 1) */}
+      <DecisionDialog
+        open={!!decision}
+        action={decision?.action}
+        applicantName={decision ? `${decision.app.applicantFirstName} ${decision.app.applicantLastName}` : undefined}
+        reasonRequired
+        submitting={act.isPending}
+        onCancel={() => setDecision(null)}
+        onConfirm={confirmDecision}
+      />
     </div>
   );
 }

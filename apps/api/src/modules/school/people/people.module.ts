@@ -3,6 +3,8 @@ import { StudentService } from './student.service';
 import { StudentController } from './student.controller';
 import { GuardianService } from './guardian.service';
 import { GuardianController } from './guardian.controller';
+import { EmergencyContactService } from './emergency-contact.service';
+import { EmergencyContactController } from './emergency-contact.controller';
 import { MedicalRecordService } from './medical-record.service';
 import { StudentDocumentService } from './student-document.service';
 import { MedicalRecordController, StudentDocumentController } from './medical-document.controller';
@@ -26,6 +28,7 @@ import { FeesModule } from '../fees/fees.module';
   controllers: [
     StudentController,
     GuardianController,
+    EmergencyContactController,
     MedicalRecordController,
     StudentDocumentController,
     StaffController,
@@ -37,6 +40,7 @@ import { FeesModule } from '../fees/fees.module';
   providers: [
     StudentService,
     GuardianService,
+    EmergencyContactService,
     MedicalRecordService,
     StudentDocumentService,
     StaffService,
@@ -48,6 +52,7 @@ import { FeesModule } from '../fees/fees.module';
   exports: [
     StudentService,
     GuardianService,
+    EmergencyContactService,
     MedicalRecordService,
     StudentDocumentService,
     StaffService,

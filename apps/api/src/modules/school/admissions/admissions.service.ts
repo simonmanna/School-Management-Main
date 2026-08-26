@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AdmissionApplication } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -207,7 +207,29 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * here before delegating.
    */
   async update(id: string, dto: UpdateApplicationDto): Promise<AdmissionApplication> {
-    const { nin, guardians, ...rest } = dto as any;
+    const { nin, guardians, admissionCycleId, ...rest } = dto as any;
+
+    // Admission-cycle validation (Task 2): if the caller is (re)assigning a
+    // cycle, it must exist and belong to this organization. A closed cycle may
+    // not be (re)attached to an application.
+    if (admissionCycleId !== undefined && admissionCycleId !== null) {
+      const organizationId = this.tenant.organizationId;
+      const cycle = await this.prisma.client.admissionCycle.findFirst({
+        where: { id: admissionCycleId, organizationId },
+      });
+      if (!cycle) {
+        throw new BadRequestException(
+          `Admission cycle ${admissionCycleId} does not exist or belongs to another organization.`,
+        );
+      }
+      if (cycle.status === 'closed') {
+        throw new BadRequestException(
+          `Admission cycle ${cycle.name} is closed and cannot be assigned to an application.`,
+        );
+      }
+      rest.admissionCycleId = admissionCycleId;
+    }
+
     const data: Record<string, unknown> = { ...rest };
     if (nin !== undefined) {
       const enc = this.encryption.encrypt(nin);
@@ -279,6 +301,50 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         );
       }
 
+      // Advisory duplicate detection (Task 5): same name + same admission cycle +
+      // same applying-for class. This is a WARNING, never a hard block, so that
+      // a legitimate re-application (e.g. different DoB) is still possible. The
+      // hard same-year guard above remains the authoritative rejection.
+      if (dto.admissionCycleId && dto.applyingForClassId) {
+        const advisory = await tx.admissionApplication.findFirst({
+          where: {
+            organizationId,
+            admissionCycleId: dto.admissionCycleId,
+            applyingForClassId: dto.applyingForClassId,
+            applicantFirstName: { equals: dto.applicantFirstName.trim(), mode: 'insensitive' },
+            applicantLastName: { equals: dto.applicantLastName.trim(), mode: 'insensitive' },
+          },
+          select: { id: true, applicationNumber: true },
+        });
+        if (advisory) {
+          throw new ConflictException({
+            code: 'ADVISORY_DUPLICATE',
+            message:
+              `Possible existing application ${advisory.applicationNumber} for the same ` +
+              `applicant, admission cycle and class. Confirm this is not a duplicate.`,
+            existingApplicationNumber: advisory.applicationNumber,
+          });
+        }
+      }
+
+      // Admission-cycle validation (Task 2): if supplied, the cycle must exist,
+      // belong to this organization, and be open.
+      if (dto.admissionCycleId) {
+        const cycle = await tx.admissionCycle.findFirst({
+          where: { id: dto.admissionCycleId, organizationId },
+        });
+        if (!cycle) {
+          throw new BadRequestException(
+            `Admission cycle ${dto.admissionCycleId} does not exist or belongs to another organization.`,
+          );
+        }
+        if (cycle.status === 'closed') {
+          throw new BadRequestException(
+            `Admission cycle ${cycle.name} is closed and cannot accept new applications.`,
+          );
+        }
+      }
+
       const applicationNumber = await this.sequence.next(
         `admission:${new Date().getUTCFullYear()}`,
         { prefix: 'APP-', padding: 6 },
@@ -302,6 +368,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           parentContactId: dto.parentContactId ?? null,
           sourceOfEnquiry: dto.sourceOfEnquiry ?? null,
           siblingOfStudentId: dto.siblingOfStudentId ?? null,
+          // Promoted operational fields (Task 3) — stored top-level, not in customFields.
+          nationality: dto.nationality ?? null,
+          residenceType: dto.residenceType ?? null,
+          entryStatus: dto.entryStatus ?? null,
+          address: dto.address ?? null,
           ninCiphertext: nin?.ciphertext ?? null,
           ninIv: nin?.iv ?? null,
           ninTag: nin?.tag ?? null,
@@ -1117,6 +1188,16 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     if (!newStatus) throw new BadRequestException(`Unknown admission action: ${action}`);
     const before = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
     if (!before) throw new NotFoundException(`Application ${applicationId} not found`);
+
+    // Decision-grade actions must carry a non-empty reason. Enforced here (not
+    // just in the UI) so the rule holds even if the web client is bypassed.
+    const REQUIRED_REASON_ACTIONS = ['accept', 'reject', 'waitlist', 'withdraw'];
+    if (REQUIRED_REASON_ACTIONS.includes(action) && (!reason || !reason.trim())) {
+      throw new BadRequestException(
+        `A reason is required to ${action} an application.`,
+      );
+    }
+
     this.assertTransition(before.status, action);
 
     const stampField = TIMESTAMP_MAP[action];
@@ -1318,6 +1399,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   // ---- Admission Cycle ----
   async createCycle(dto: { academicYearId: string; name: string; opensAt?: string; closesAt?: string; admissionCycleId?: never }) {
     const organizationId = this.tenant.organizationId;
+    if (!dto.academicYearId) throw new BadRequestException('academicYearId is required.');
+    // Validate the academic year belongs to this organization.
+    const ay = await this.prisma.client.academicYear.findFirst({ where: { id: dto.academicYearId, organizationId } });
+    if (!ay) throw new BadRequestException('Academic year not found for this organization.');
     return this.prisma.client.admissionCycle.create({
       data: {
         organizationId,
@@ -1336,6 +1421,55 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       orderBy: { createdAt: 'desc' },
       include: { capacities: true, criteriaSets: { include: { criteria: true } } },
     });
+  }
+
+  // ── Nationalities (org-scoped master data) ──
+  async listNationalities() {
+    const organizationId = this.tenant.organizationId;
+    return this.prisma.client.nationality.findMany({
+      where: { organizationId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createNationality(dto: { name: string }) {
+    const organizationId = this.tenant.organizationId;
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Nationality name is required.');
+    const existing = await this.prisma.client.nationality.findFirst({
+      where: { organizationId, name: { equals: name, mode: 'insensitive' } },
+    });
+    if (existing) {
+      // Hard duplicate within the org (Task 6): reject rather than silently
+      // re-activating, so the UI can surface a clear "already exists" message.
+      if (existing.isActive) {
+        throw new ConflictException(`Nationality "${name}" already exists.`);
+      }
+      // Allow re-creation of a deactivated (soft-removed) value by re-activating it.
+      return this.prisma.client.nationality.update({
+        where: { id: existing.id },
+        data: { isActive: true },
+      });
+    }
+    return this.prisma.client.nationality.create({ data: { organizationId, name } });
+  }
+
+  async updateNationality(id: string, dto: { name?: string; isActive?: boolean }) {
+    const organizationId = this.tenant.organizationId;
+    const current = await this.prisma.client.nationality.findFirst({ where: { id, organizationId } });
+    if (!current) throw new NotFoundException(`Nationality ${id} not found.`);
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException('Nationality name cannot be empty.');
+      const clash = await this.prisma.client.nationality.findFirst({
+        where: { organizationId, name: { equals: name, mode: 'insensitive' }, id: { not: id } },
+      });
+      if (clash) throw new BadRequestException(`Nationality "${name}" already exists.`);
+      data.name = name;
+    }
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+    return this.prisma.client.nationality.update({ where: { id }, data });
   }
 
   // ---- Capacity (DERIVED occupancy; declared capacity stored only) ----
