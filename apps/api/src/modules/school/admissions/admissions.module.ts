@@ -14,7 +14,11 @@ import { NotificationsModule } from '../../../kernel/notifications/notifications
 
 @Module({
   imports: [PeopleModule, NotificationsModule],
-  controllers: [AdmissionsController, AdmissionsConfigController, AdmissionsPortalController],
+  // Order matters: AdmissionsController declares `@Get(':id')` (findOne). If it is
+  // registered before the config/portal controllers, that `:id` param route shadows
+  // their static GETs (`requirements`, `offer-templates`, `enquiries`), returning 404.
+  // Registering the static-route controllers first lets their paths win over `:id`.
+  controllers: [AdmissionsConfigController, AdmissionsPortalController, AdmissionsController],
   providers: [
     AdmissionsService,
     AdmissionsConfigService,

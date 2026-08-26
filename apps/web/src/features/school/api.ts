@@ -606,6 +606,34 @@ export function useAdmissionRequirements(admissionCycleId?: string) {
   });
 }
 
+// ── Application documents ──────────────────────────────────────────────────
+// Attach a platform File to an application as a named document (e.g. a required
+// requirement code). Backend links it via ApplicationDocument.fileId.
+export function useAddDocument(applicationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { type: string; fileId: string; required?: boolean }) =>
+      (await api.post(`${S}/admissions/${applicationId}/documents`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'admissions', applicationId] });
+      qc.invalidateQueries({ queryKey: ['school', 'admissions', 'eligibility', applicationId] });
+    },
+  });
+}
+
+// Verify or reject an attached document (decision-grade; rejection needs a reason).
+export function useVerifyDocument(documentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ verified, rejectionReason }: { verified: boolean; rejectionReason?: string }) =>
+      (await api.post(`${S}/admissions/documents/${documentId}/verify`, { verified, rejectionReason })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'admissions'] });
+      qc.invalidateQueries({ queryKey: ['school', 'admissions', 'eligibility'] });
+    },
+  });
+}
+
 // ── Admission cycles ────────────────────────────────────────────────────────
 export interface AdmissionCycle {
   id: string;
