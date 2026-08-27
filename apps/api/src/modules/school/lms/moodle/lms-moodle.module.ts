@@ -38,6 +38,8 @@ import { LmsCalendarService } from './reports/lms-calendar.service';
 import { CourseBackupService } from './backup/course-backup.service';
 import { PackageServeService } from './packages/package-serve.service';
 import { PackageServeController } from './packages/package-serve.controller';
+import { LtiService } from './lti/lti.service';
+import { LtiController } from './lti/lti.controller';
 import { GradebookService } from './gradebook/gradebook.service';
 
 // P7 — reports, badges, plan bridge
@@ -78,6 +80,7 @@ const CORE_SERVICES = [
   LmsCalendarService,
   CourseBackupService,
   PackageServeService,
+  LtiService,
   GradebookService,
   LmsReportsService,
   BadgesService,
@@ -101,7 +104,7 @@ const PLUGINS = [
   // AssessmentModule supplies MarkingService — the grade bridge posts marks
   // through its ledger rather than writing the derived score columns itself.
   imports: [AssessmentModule],
-  controllers: [LmsCourseController, LmsOpsController, LmsRolesController, LearnerController, LmsFileController, PackageServeController],
+  controllers: [LmsCourseController, LmsOpsController, LmsRolesController, LearnerController, LmsFileController, PackageServeController, LtiController],
   providers: [...CORE_SERVICES, ...PLUGINS],
   exports: [...CORE_SERVICES],
 })

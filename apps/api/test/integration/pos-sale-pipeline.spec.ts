@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { describeDb } from './_setup';
 import { ensureAccountCategories, makeAccountFactory } from './_accounts';
 import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { PosModule } from '../../src/modules/pos/pos.module';
 import { PosService } from '../../src/modules/pos/pos.service';
 import { PosOrdersService } from '../../src/modules/pos/order/pos-orders.service';
@@ -72,7 +73,7 @@ describeDb('integration: POS sale → Order → Invoice → Receipt', () => {
       })
     ).id;
 
-    moduleRef = await Test.createTestingModule({ imports: [KernelModule, PosModule] }).compile();
+    moduleRef = await Test.createTestingModule({ imports: [KernelModule, DocumentsModule, PosModule] }).compile();
     await moduleRef.init();
     pos = moduleRef.get(PosService);
     tenant = moduleRef.get(TenantContextService);

@@ -47,11 +47,20 @@ describe('Admissions — EnrollApplicationDto (nested student)', () => {
 });
 
 describe('Attendance — BulkMarkAttendanceDto (nested entries)', () => {
-  it('rejects an invalid entry status', () => {
-    const d = plainToInstance(BulkMarkAttendanceDto, {
-      date: '2026-02-02', classId: 'c1', entries: [{ studentProfileId: 's1', status: 'maybe' }],
+  it('accepts an org-configured status code, and rejects an empty one', () => {
+    // `status` is deliberately a free string: it holds an
+    // `AttendanceStatusConfig.code`, and schools define their own. This test
+    // used to assert a fixed enum and predates that change — what is still
+    // validated is that the code is a non-empty string.
+    const custom = plainToInstance(BulkMarkAttendanceDto, {
+      date: '2026-02-02', classId: 'c1', entries: [{ studentProfileId: 's1', status: 'sick_bay' }],
     });
-    expect(errs(d).length).toBeGreaterThan(0);
+    expect(errs(custom)).toHaveLength(0);
+
+    const empty = plainToInstance(BulkMarkAttendanceDto, {
+      date: '2026-02-02', classId: 'c1', entries: [{ studentProfileId: 's1', status: '' }],
+    });
+    expect(errs(empty).length).toBeGreaterThan(0);
   });
   it('accepts valid entries', () => {
     const d = plainToInstance(BulkMarkAttendanceDto, {

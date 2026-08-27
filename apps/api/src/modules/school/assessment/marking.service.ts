@@ -156,6 +156,17 @@ export class MarkingService {
       /** Only the exam projection and backfills may re-post an approved mark. */
       allowWhenApproved?: boolean;
       writeHistory?: boolean;
+      /**
+       * Optimistic concurrency. The version the caller believes it is editing;
+       * a mismatch means someone else has written since they read, so the write
+       * is refused rather than silently overwriting them.
+       *
+       * This guard was documented as living here after the GradeEntry retirement
+       * but was never actually implemented — `version` was only ever incremented.
+       * Two markers on the same paper could therefore clobber each other, last
+       * write winning, with no error.
+       */
+      expectedVersion?: number;
     },
   ): Promise<StudentAssessment> {
     const round = input.round ?? 'first';
@@ -180,6 +191,13 @@ export class MarkingService {
     }
     if (sa.approvalStatus === 'approved' && !input.allowWhenApproved) {
       throw new BadRequestException('Marks are approved; reject them before recording new marks');
+    }
+    // A stale editor loses. 409, like the lock check above: the request is
+    // well-formed, the STATE has moved on.
+    if (input.expectedVersion != null && sa.version !== input.expectedVersion) {
+      throw new ConflictException(
+        `These marks changed since you loaded them (version ${sa.version}, you have ${input.expectedVersion}). Reload and re-enter.`,
+      );
     }
 
     if (input.score === null) {

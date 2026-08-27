@@ -226,6 +226,10 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
             markerId: this.tenant.userId ?? null,
             snapshot: { classId: schedule?.classId, termId: schedule?.exam?.termId },
             writeHistory: false,
+            // Pass the caller's version through so a second marker holding a
+            // stale copy is refused. It used to be dropped here, which is why
+            // the concurrency guard this method's docstring promises never fired.
+            expectedVersion: (e as { version?: number }).version,
           });
           this.events.publish(EVENTS.SchoolGradePosted, {
             organizationId,
@@ -310,8 +314,13 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         select: { id: true },
       });
       if (!assessment) return { updated: 0 };
+      // `rejected` is a valid from-state, not just `draft`. A head of department
+      // rejects a paper, the teacher corrects the marks and submits again — that
+      // is the whole point of the reject affordance. Accepting only `draft` left
+      // rejected rows stranded: nothing moved them back, so the paper could never
+      // be approved and the marks were stuck for good.
       const res = await tx.studentAssessment.updateMany({
-        where: { assessmentId: assessment.id, approvalStatus: 'draft' },
+        where: { assessmentId: assessment.id, approvalStatus: { in: ['draft', 'rejected'] } },
         data: { approvalStatus: 'submitted', enteredAt: new Date(), rejectionReason: null },
       });
       if (res.count > 0) {

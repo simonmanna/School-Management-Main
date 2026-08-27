@@ -9,7 +9,8 @@ import { Type } from 'class-transformer';
 // P-att-status: status is now a free string (the AttendanceStatusConfig.code).
 // The mark/correct endpoints accept any non-empty string; the UI only offers
 // org-configured codes, but we keep it permissive so legacy/custom values persist.
-const ATT_STATUS = ['present', 'absent', 'late', 'excused', 'early_departure', 'unexcused'] as const;
+// The former fixed `ATT_STATUS` list is gone with the @IsIn that used it —
+// leaving the constant behind read as though the values were still enforced.
 
 export class AttendanceEntry {
   @IsString() @IsNotEmpty() studentProfileId!: string;

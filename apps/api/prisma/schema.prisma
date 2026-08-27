@@ -17713,3 +17713,86 @@ model PortalIdentity {
   @@index([organizationId, studentProfileId])
   @@index([organizationId, guardianContactId])
 }
+
+/// Platform signing key for LTI 1.3 (L8).
+///
+/// LTI makes this installation the *platform*: it mints a signed `id_token` that
+/// the external tool verifies against our published JWKS. That needs an RSA
+/// keypair per organization — one tenant must never be able to sign a launch that
+/// another tenant's tool would accept.
+///
+/// The private key is stored encrypted (AES-256-GCM via EncryptionService), never
+/// in plaintext. `kid` is published in the JWKS so a tool can pick the right key
+/// during rotation: a retired key stays readable for verification while new
+/// launches are signed by the active one.
+model LtiPlatformKey {
+  id             String    @id @default(uuid())
+  organizationId String
+  /// JWKS key id, published to tools.
+  kid            String
+  publicKeyPem   String
+  /// AES-256-GCM ciphertext of the PKCS#8 private key.
+  privateKeyCipher String
+  privateKeyIv     String
+  privateKeyTag    String
+  /// Null while active. Set on rotation; kept so old launches still verify.
+  retiredAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@unique([organizationId, kid])
+  @@index([organizationId, retiredAt])
+}
+
+/// One in-flight LTI launch (L8).
+///
+/// OIDC requires the platform to echo back the `state` and `nonce` it issued, and
+/// to reject a replay. Rows are short-lived and consumed on use — a nonce that
+/// has already been redeemed must not authenticate a second launch.
+model LtiLaunchSession {
+  id             String    @id @default(uuid())
+  organizationId String
+  courseModuleId String
+  /// Who the launch is for; resolved from the token, never from the request.
+  userId           String?
+  studentProfileId String?
+  state          String
+  nonce          String
+  consumedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  @@unique([organizationId, state])
+  @@index([organizationId, expiresAt])
+}
+
+/// One pupil's journey through a branching lesson (L8).
+///
+/// `mod_lesson` is a choose-your-path activity: a page offers answers, each
+/// answer names the next page. Without per-pupil state the activity is just a
+/// list of pages — the branching has nowhere to live, and a pupil who leaves
+/// mid-lesson starts again from the top.
+///
+/// `seen` is the ordered path actually taken, which is what makes a lesson
+/// reviewable ("she went down the wrong branch at page 3") rather than a single
+/// pass/fail.
+model ModLessonAttempt {
+  id               String    @id @default(uuid())
+  organizationId   String
+  lessonId         String
+  courseModuleId   String
+  studentProfileId String
+  /// Page the pupil is on. Null once finished.
+  currentPageId    String?
+  /// Ordered page ids visited, oldest first.
+  seen             String[]
+  /// Answers given, keyed by page id.
+  answers          Json      @default("{}")
+  correctCount     Int       @default(0)
+  answeredCount    Int       @default(0)
+  finishedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([lessonId, studentProfileId])
+  @@index([organizationId, courseModuleId])
+}

@@ -118,9 +118,31 @@ describeDb('integration: school fees integrity (invariants)', () => {
         organizationId,
         name: 'Standard Term Fees',
         academicYearId: year.id,
+        status: 'published',
         components: [{ code: 'TUITION', productId: product.id, amount: TUITION }],
         applicableTo: { classIds: [schoolClass.id] },
       },
+    });
+    // Billing refuses to price from the mutable `components` JSON (P1-G): a
+    // structure must have a published, immutable version with FeeItem rows.
+    // This seed predates that hardening, which is why every billing assertion
+    // below was quietly getting zero invoices.
+    const feeVersion = await raw.feeStructureVersion.create({
+      data: {
+        organizationId, feeStructureId: feeStructure.id, versionNo: 1,
+        isImmutable: true, publishedAt: new Date(),
+      },
+    });
+    await raw.feeItem.create({
+      data: {
+        organizationId, feeStructureVersionId: feeVersion.id, code: 'TUITION',
+        name: 'Tuition', productId: product.id, amount: TUITION,
+        isOptional: false, frequency: 'termly', appliesTo: {},
+      },
+    });
+    await raw.feeStructure.update({
+      where: { id: feeStructure.id },
+      data: { currentVersionId: feeVersion.id },
     });
     await raw.feeSchedule.create({
       data: { organizationId, feeStructureId: feeStructure.id, termId, dueDate: new Date('2026-02-15') },

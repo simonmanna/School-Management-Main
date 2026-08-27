@@ -34,6 +34,21 @@ takes effect immediately rather than at token expiry.
 
 ### Correctness
 
+Three bugs found by fixing the stale exam suites, all in production code:
+
+- **A rejected paper could never be re-approved.** `submit()` moved rows only from
+  `draft`, but a rejection leaves them at `rejected` and nothing reset them. The
+  service's own docstring promised "from `rejected` the enterer can resubmit";
+  there was no such path, so those marks were stuck for good.
+- **Optimistic concurrency did not exist.** `postMark` incremented `version` but
+  never checked it, and `bulkUpsert` dropped the client's copy — so two teachers
+  marking the same paper silently overwrote each other, last write winning. The
+  docstring claimed the guard "lives inside postMark".
+- **`saveMark` returned null for every saved mark.** It built its response from
+  `bulkUpsert`'s `results`, a re-read of the frozen GradeEntry table that is never
+  written — so the marks workspace blanked a mark the instant a teacher entered it.
+
+
 - **Unreleased marks leaked.** `gradebook.userReport` served `effectiveScore`
   regardless of `approvalStatus`. Marks now reach a learner only once moderation
   has **approved** them, and an unreleased mark renders as "not released yet" —
@@ -74,11 +89,24 @@ backup/rollover, and the SCORM/H5P player. See §3.
 | `lms-orphan-check` | 7 | Dangling `instanceId` detection |
 | `lms-package-serve` | 8 | Zip-slip traversal, package ACL |
 | **`school-lms-authz`** (DB) | 10 | CHECK constraint, live guardianship, tenancy |
+| `lms-lti` | 16 | Replay refusal, subject binding, AGS rescaling, JWKS hygiene |
 | **`school-lms-e2e`** (DB) | 13 | Add → submit → mark → approve → release → rollover |
 
-Unit total: **577 passing** (was 457 before this work). Two pre-existing failures
-remain, unrelated to the LMS: `exam-projection` (imports a service that no longer
-exists) and one `school-dto-validation` attendance case.
+**593 unit + 252 integration, all passing — 41/41 integration suites green.**
+
+Fourteen integration suites were failing before this pass. None were LMS bugs:
+
+- `RecurringService` (kernel) injected `DmsTypeResolver` from `modules/documents`,
+  breaking the repo's own `kernel-must-not-import-modules` rule. The architecture
+  linter missed it because the class appeared only in constructor TYPE position,
+  so TypeScript emitted it as decorator metadata and dependency-cruiser saw no
+  import. Ten suites could not construct a Nest graph because of it.
+- Five test graphs omitted the `@Global` `DocumentsModule` the production app
+  always registers.
+- Two seeds predated `Document.documentTypeId` becoming required.
+- Four school suites still asserted against `GradeEntry`, frozen by the B6 flip.
+
+Fixing the last group surfaced three genuine production bugs — see §1.
 
 ---
 
@@ -108,19 +136,32 @@ exists) and one `school-dto-validation` attendance case.
 
 ### Known gaps at deploy
 
-- **LTI 1.3 launches are not issued.** Tool registrations store correctly, but
-  OIDC login, JWT signing and AGS passback need a key-management story this
-  installation does not have. The UI says so plainly rather than failing at launch.
-- **`mod_lesson` branching, `mod_wiki` version history and `mod_glossary`** store
-  and display but have no deeper workflow (no branch navigation state, no diff view).
+- **Browser E2E of the signed-in LMS has not been run.** Routing, build and
+  console health are verified; the logged-in journeys are covered by the DB-backed
+  integration suite rather than a browser driver. Running it needs a real login,
+  so it is a task for someone with credentials.
 - **Three stale migration entries** (`lms_moodle_spine`,
   `lms_mod_assign_submission`, `gradeentry_readonly`) — the tables exist but the
   ledger does not record them, from an earlier `db push`. Reconcile before the
   next deploy; `migrate resolve --applied` would tidy it but would also mask real
   drift, so check first.
-- **Browser E2E of the signed-in LMS has not been run.** Routing, build and
-  console health are verified; the logged-in journeys are covered by the DB-backed
-  integration suite rather than a browser driver.
+
+### LTI 1.3
+
+Implemented as a platform: OIDC login initiation, RS256-signed `id_token`,
+published JWKS, and an AGS score sink.
+
+- Signing keys are **per organization** and generated on first use; the private
+  key is AES-256-GCM encrypted at rest. `POST lti/keys/rotate` mints a new key and
+  retires the old one without deleting it, so a launch signed moments earlier
+  still verifies against the cached JWKS.
+- Set `LTI_ISSUER` (or `PUBLIC_BASE_URL`) to the installation's public origin —
+  tools key their registration on the issuer, so changing it later re-registers
+  every tool.
+- Register each tool with: issuer, client id, deployment id, its OIDC login URL,
+  and our JWKS at `/api/v1/school/lms/lti/.well-known/jwks.json`.
+- An incoming AGS score is **rescaled** against the activity's own maximum: a tool
+  reporting 95/100 for work marked out of 20 lands as 19.
 
 ### Running the integration suite
 

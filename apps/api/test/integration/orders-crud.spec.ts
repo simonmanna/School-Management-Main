@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { describeDb } from './_setup';
 import { ensureAccountCategories, makeAccountFactory } from './_accounts';
 import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { PosModule } from '../../src/modules/pos/pos.module';
 import { OrdersModule } from '../../src/modules/orders/orders.module';
 import { OrdersService } from '../../src/modules/orders/orders.service';
@@ -73,7 +74,7 @@ describeDb('integration: back-office Orders CRUD (menu + product sources, billin
       data: { organizationId, cashRegisterId: register.id, userId: 'integration-test-cashier', status: 'open', openingFloat: 0 },
     })).id;
 
-    moduleRef = await Test.createTestingModule({ imports: [KernelModule, PosModule, OrdersModule] }).compile();
+    moduleRef = await Test.createTestingModule({ imports: [KernelModule, DocumentsModule, PosModule, OrdersModule] }).compile();
     await moduleRef.init();
     orders = moduleRef.get(OrdersService);
     tenant = moduleRef.get(TenantContextService);

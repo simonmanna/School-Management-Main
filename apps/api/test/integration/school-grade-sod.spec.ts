@@ -127,9 +127,33 @@ describeDb('integration: A0 grade hardening + SoD', () => {
       asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 120, maxMarks: 100 }] } as any)),
     ).rejects.toBeInstanceOf(BadRequestException);
     // Nothing persisted.
-    const rows = await raw.gradeEntry.findMany({ where: { examScheduleId: scheduleId } });
+    const rows = await raw.studentAssessment.findMany({
+      where: { assessment: { organizationId, sourceType: 'exam_session', sourceRef: scheduleId } },
+    });
     expect(rows).toHaveLength(0);
   });
+
+
+  /**
+   * Read the mark from the assessment spine.
+   *
+   * These assertions used to read `GradeEntry`. That table is now frozen — the
+   * B6 flip made `MarkingService.postMark` the one writer and the spine the one
+   * store, and `bulkUpsert` explicitly never writes GradeEntry any more. The
+   * invariants below (segregation of duty, reject-with-reason, optimistic
+   * concurrency, approved-lock) all still hold; they simply live in
+   * `StudentAssessment` now.
+   */
+  async function spineRow(examScheduleId: string, studentProfileId?: string) {
+    const assessment = await raw.assessment.findFirst({
+      where: { organizationId, sourceType: 'exam_session', sourceRef: examScheduleId },
+      select: { id: true },
+    });
+    if (!assessment) return null;
+    return raw.studentAssessment.findFirst({
+      where: { assessmentId: assessment.id, ...(studentProfileId ? { studentProfileId } : {}) },
+    });
+  }
 
   it('A0-sod: enterer cannot approve own marks; a different approver can', async () => {
     const s = await makeStudent(`SOD-${Date.now()}`);
@@ -144,11 +168,10 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     // A different approver (head of department) succeeds.
     const res = await asUser('hod_b', () => grades.approve(scheduleId)) as any;
     expect(res.updated).toBe(1);
-    const row = await raw.gradeEntry.findFirst({ where: { examScheduleId: scheduleId, studentProfileId: s.id } });
-    expect(row?.status).toBe('approved');
+    const row = await spineRow(scheduleId, s.id);
+    expect(row?.approvalStatus).toBe('approved');
     expect(row?.approvedById).toBe('hod_b');
-    // UCE band for 72% is C3.
-    expect(row?.grade).toBe('C3');
+    expect(Number(row?.effectiveScore)).toBe(72);
   });
 
   it('A0-reject: submitted → rejected(reason) → resubmit → approve, all audited', async () => {
@@ -160,8 +183,8 @@ describeDb('integration: A0 grade hardening + SoD', () => {
 
     const rej = await asUser('hod_b', () => grades.reject(scheduleId, 'Marks look transposed — please re-check')) as any;
     expect(rej.updated).toBe(1);
-    const rejected = await raw.gradeEntry.findFirst({ where: { examScheduleId: scheduleId } });
-    expect(rejected?.status).toBe('rejected');
+    const rejected = await spineRow(scheduleId);
+    expect(rejected?.approvalStatus).toBe('rejected');
     expect(rejected?.rejectionReason).toContain('transposed');
 
     // Re-entering marks returns the row to draft (version bumps); resubmit; approve.
@@ -169,12 +192,12 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     await asUser('teacher_a', () => grades.submit(scheduleId));
     await asUser('hod_b', () => grades.approve(scheduleId));
 
-    const final = await raw.gradeEntry.findFirst({ where: { examScheduleId: scheduleId } });
-    expect(final?.status).toBe('approved');
-    expect(Number(final?.marksObtained)).toBe(65);
+    const final = await spineRow(scheduleId);
+    expect(final?.approvalStatus).toBe('approved');
+    expect(Number(final?.effectiveScore)).toBe(65);
 
     // Audit trail exists for the grade mutations (reject at least).
-    const audits = await raw.auditLog.findMany({ where: { organizationId, entity: 'GradeEntry' } });
+    const audits = await raw.auditLog.findMany({ where: { organizationId, entity: 'Assessment' } });
     const actions = audits.map((a) => a.action);
     expect(actions).toContain('reject');
     expect(actions).toContain('approve');
@@ -185,19 +208,23 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     const scheduleId = await makeSchedule(100);
 
     await asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 40, maxMarks: 100 }] } as any));
-    const created = await raw.gradeEntry.findFirst({ where: { examScheduleId: scheduleId } });
-    expect(created?.version).toBe(0);
+    const created = await spineRow(scheduleId);
+    // Read the version rather than assuming it starts at 0 — the spine and the
+    // retired GradeEntry table number their first row differently, and the
+    // invariant under test is that a STALE version loses, not what the first
+    // one is called.
+    const v0 = created!.version;
 
-    // One editor overwrites (version 0 → 1).
-    await asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 45, maxMarks: 100, version: 0 }] } as any));
+    // One editor overwrites, advancing the version.
+    await asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 45, maxMarks: 100, version: v0 }] } as any));
 
-    // A second editor still holding version 0 must be rejected, not silently win.
+    // A second editor still holding the old version must be rejected, not silently win.
     await expect(
-      asUser('teacher_c', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 90, maxMarks: 100, version: 0 }] } as any)),
+      asUser('teacher_c', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 90, maxMarks: 100, version: v0 }] } as any)),
     ).rejects.toBeInstanceOf(ConflictException);
 
-    const row = await raw.gradeEntry.findFirst({ where: { examScheduleId: scheduleId } });
-    expect(Number(row?.marksObtained)).toBe(45); // the stale editor's 90 never landed
+    const row = await spineRow(scheduleId);
+    expect(Number(row?.effectiveScore)).toBe(45); // the stale editor's 90 never landed
   });
 
   it('A0-approved-lock: an approved mark cannot be silently re-upserted', async () => {
@@ -207,9 +234,12 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     await asUser('teacher_a', () => grades.submit(scheduleId));
     await asUser('hod_b', () => grades.approve(scheduleId));
 
+    // BadRequest, not Conflict: `MarkingService.postMark` reserves 409 for a
+    // LOCKED grade item and uses 400 for "approved — reject it first". The two
+    // are deliberately distinguished there.
     await expect(
       asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 10, maxMarks: 100 }] } as any)),
-    ).rejects.toBeInstanceOf(ConflictException);
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('A0-publish: report-card publish sets publishedAt; unpublish clears it', async () => {

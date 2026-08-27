@@ -1,9 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { EventBus } from '../events/event-bus';
 import { AuditService } from '../audit/audit.service';
-import { DmsTypeResolver } from '../../modules/documents/dms-type-resolver.service';
 import type { DocumentType, RecurringFrequency } from '@prisma/client';
 
 /**
@@ -51,8 +50,36 @@ export class RecurringService {
       private readonly tenant: TenantContextService,
       private readonly events: EventBus,
       private readonly audit: AuditService,
-      private readonly dmsTypes: DmsTypeResolver,
     ) {}
+
+  /**
+   * Document-type id for a type code.
+   *
+   * This used to inject `DmsTypeResolver` from `modules/documents`, which broke
+   * the kernel's own layering rule (`kernel-must-not-import-modules`) — the
+   * kernel is the root and may not depend on a feature module. The architecture
+   * linter did not catch it: the class appeared only in constructor TYPE
+   * position, so TypeScript emitted it solely as decorator metadata and
+   * dependency-cruiser saw no import at all.
+   *
+   * The practical cost was that any Nest graph importing KernelModule without
+   * DocumentsModule failed to construct — which is why ten integration suites
+   * could not boot. The resolver's only value here was a cache, and a recurring
+   * sweep runs every ten minutes, so a direct lookup is equivalent.
+   */
+  private async resolveDocumentTypeId(code: string): Promise<string> {
+    const cached = this.documentTypeIds.get(code);
+    if (cached) return cached;
+    const def = await this.prisma.raw.documentTypeDef.findUnique({
+      where: { code },
+      select: { id: true },
+    });
+    if (!def) throw new NotFoundException(`Unknown document type code: ${code}`);
+    this.documentTypeIds.set(code, def.id);
+    return def.id;
+  }
+
+  private readonly documentTypeIds = new Map<string, string>();
 
   create(params: {
     name: string;
@@ -150,7 +177,7 @@ export class RecurringService {
         organizationId: orgId,
         documentNumber: `DRAFT-${r.id.slice(0, 8)}-${r.lastRunAt?.getTime() ?? now.getTime()}`,
                 documentType: r.documentType,
-                documentTypeId: await this.dmsTypes.resolveIdByCode(r.documentType, this.prisma.raw),
+                documentTypeId: await this.resolveDocumentTypeId(r.documentType),
                 partnerId: template.partnerId,
         currencyId: template.currencyId ?? null,
         exchangeRate: template.exchangeRate ?? 1,

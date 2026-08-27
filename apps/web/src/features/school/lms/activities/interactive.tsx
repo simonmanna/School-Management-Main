@@ -11,6 +11,8 @@ import { can, CAP } from '../types';
 import type { ActivityUiPlugin, ActivityViewProps } from './shared';
 import { iconFor } from './shared';
 import { Empty } from './content';
+import { api } from '@/lib/api';
+import { notify } from '@/lib/notify';
 
 /** mod_forum — threaded discussion. */
 function ForumView({ view, run, busy }: ActivityViewProps) {
@@ -216,11 +218,29 @@ function PackagedView({ view }: ActivityViewProps) {
           </div>
         </div>
         {type === 'lti' ? (
-          // LTI needs a signed OIDC launch, which this installation does not issue.
-          <p className="text-xs text-muted-foreground">
-            External tool links are configured here but launching them requires LTI keys
-            to be registered for this installation.
-          </p>
+          target ? (
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  // The platform mints a single-use OIDC session and tells us
+                  // where to send the browser; the signed launch follows from there.
+                  const { data } = await api.post<{ redirectUrl: string; state: string }>(
+                    `/school/lms/lti/${view.module.id}/launch/begin`,
+                  );
+                  window.open(data.redirectUrl, inst.launchContainer === 'embed' ? '_self' : '_blank', 'noopener');
+                } catch (e: any) {
+                  notify.error(e?.response?.data?.message ?? 'This tool is not configured for launch');
+                }
+              }}
+            >
+              Launch tool
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              This external tool has no launch URL configured yet.
+            </p>
+          )
         ) : target ? (
           <Button size="sm" asChild>
             <a href={`/school/lms/modules/${view.module.id}/play`}>Launch</a>

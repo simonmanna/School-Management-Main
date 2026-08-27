@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { describeDb } from './_setup';
 import { ensureAccountCategories, makeAccountFactory } from './_accounts';
 import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { ProcurementModule } from '../../src/modules/procurement/procurement.module';
 import { PurchaseOrdersService } from '../../src/modules/procurement/purchase-orders.service';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
@@ -118,7 +119,7 @@ describeDb('integration: purchase order → goods receipt → GL', () => {
     ).id;
 
     moduleRef = await Test.createTestingModule({
-      imports: [KernelModule, ProcurementModule],
+      imports: [KernelModule, DocumentsModule, ProcurementModule],
     }).compile();
     await moduleRef.init();
     pos = moduleRef.get(PurchaseOrdersService);

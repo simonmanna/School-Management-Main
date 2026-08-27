@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { describeDb } from './_setup';
 import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { PosModule } from '../../src/modules/pos/pos.module';
 import { PosTableZonesService } from '../../src/modules/pos/pos-table-zones.service';
 import { PosTablesService } from '../../src/modules/pos/pos-tables.service';
@@ -35,7 +36,7 @@ describeDb('integration: configurable table zones (PosTableZonesService)', () =>
     });
     organizationId = org.id;
 
-    moduleRef = await Test.createTestingModule({ imports: [KernelModule, PosModule] }).compile();
+    moduleRef = await Test.createTestingModule({ imports: [KernelModule, DocumentsModule, PosModule] }).compile();
     await moduleRef.init();
     zones = moduleRef.get(PosTableZonesService);
     tenant = moduleRef.get(TenantContextService);

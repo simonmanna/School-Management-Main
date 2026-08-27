@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { describeDb } from './_setup';
 import { ensureAccountCategories, makeAccountFactory } from './_accounts';
 import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { CoreModule } from '../../src/modules/core/core.module';
 import { InventoryModule } from '../../src/modules/inventory/inventory.module';
 import { PosModule } from '../../src/modules/pos/pos.module';
@@ -79,7 +80,7 @@ describeDb('integration: stock posting jobs', () => {
     ).id;
 
     moduleRef = await Test.createTestingModule({
-      imports: [KernelModule, CoreModule, InventoryModule, PosModule, AccountingModule],
+      imports: [KernelModule, DocumentsModule, CoreModule, InventoryModule, PosModule, AccountingModule],
     }).compile();
     await moduleRef.init();
     billing = moduleRef.get(PosInvoiceService);

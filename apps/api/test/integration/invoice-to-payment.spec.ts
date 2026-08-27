@@ -98,10 +98,16 @@ describeDb('integration: invoice → payment → AR aging', () => {
 
   it('runs the full invoice → payment → AR flow', async () => {
     // 1. Create a draft invoice.
+    // `documentTypeId` became a required FK; this seed predates it and so the
+    // suite could not compile. Resolve the id from the DMS registry rather than
+    // hard-coding one, since the registry is seeded per environment.
+    const typeDef = await prisma.documentTypeDef.findUnique({ where: { code: 'sales_invoice' } });
+    if (!typeDef) throw new Error('DMS registry has no sales_invoice type; run the seeder');
     const invoice = await prisma.document.create({
       data: {
         organizationId,
         documentType: 'sales_invoice',
+        documentTypeId: typeDef.id,
         documentNumber: 'INV-TEST-1',
         partnerId: customerId,
         issueDate: new Date(),

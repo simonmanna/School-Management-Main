@@ -433,12 +433,29 @@ export class MarksWorkspaceService {
       ],
     });
 
-    const row = res.results?.[0];
+    // Read the SPINE back, not `res.results`. That array is a re-read of the
+    // frozen GradeEntry table, which the B6 flip stopped writing — so it is
+    // always empty and this method returned `marks: null` for every successful
+    // save, blanking the mark in the workspace the instant a teacher entered it.
+    void res;
+    const assessment = await this.prisma.client.assessment.findFirst({
+      where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },
+      select: { id: true },
+    });
+    const row = assessment
+      ? await this.prisma.client.studentAssessment.findFirst({
+          where: { assessmentId: assessment.id, studentProfileId: dto.studentProfileId },
+          select: { id: true, effectiveScore: true, percentage: true, version: true },
+        })
+      : null;
+    const band = row?.percentage != null
+      ? await this.grading.bandFor(Number(row.effectiveScore ?? 0), maxMarks).catch(() => null)
+      : null;
     return {
       examScheduleId: schedule.id,
-      gradeEntryId: row?.id ?? null,
-      marks: row?.marksObtained != null ? Number(row.marksObtained) : null,
-      grade: row?.grade ?? null,
+      studentAssessmentId: row?.id ?? null,
+      marks: row?.effectiveScore != null ? Number(row.effectiveScore) : null,
+      grade: (band as { grade?: string } | null)?.grade ?? null,
       version: row?.version ?? 0,
     };
   }

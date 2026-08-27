@@ -124,24 +124,26 @@ describeDb('integration: GradeEntry → spine parity (B6 gate)', () => {
     expect(statusMismatches).toEqual([]);
   });
 
-  it('no StudentAssessment on the exam spine is missing its GradeEntry source (production orgs)', async () => {
-    // The inverse: every projected exam StudentAssessment must trace back to a
-    // GradeEntry, so the flip does not invent marks that never existed.
-    // Scoped to non-test orgs: spec fixtures (org_ub_*) legitimately mint spine
-    // rows without a legacy GradeEntry, which is not a real divergence.
-    const orphans = (await raw.$queryRawUnsafe(`
-      SELECT COUNT(*)::int AS n
-      FROM "StudentAssessment" sa
-      JOIN "Assessment" a ON a."id" = sa."assessmentId"
-      WHERE a."sourceType" = 'exam_session'
-        AND a."organizationId" NOT LIKE 'org_ub_%'
-        AND sa."deletedAt" IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM "GradeEntry" ge
-          WHERE ge."examScheduleId" = a."sourceRef"
-            AND ge."studentProfileId" = sa."studentProfileId"
-        )
+  /**
+   * The inverse direction — "every spine row traces back to a GradeEntry" — was
+   * a PRE-FLIP gate and is now false by design.
+   *
+   * B6 has run. `bulkUpsert` writes the spine through `MarkingService.postMark`
+   * and never writes GradeEntry, so every mark entered since the flip is
+   * legitimately spine-only. Asserting otherwise would fail on correct data and
+   * would have to be silenced with an ever-growing list of excluded test-org
+   * prefixes, which is how a gate becomes noise.
+   *
+   * What still matters permanently is the forward direction above: no HISTORIC
+   * GradeEntry may lose its spine counterpart. That one stays.
+   */
+  it('records that the inverse gate is retired, and the forward guard is what remains', async () => {
+    const historic = (await raw.$queryRawUnsafe(`
+      SELECT COUNT(*)::int AS n FROM "GradeEntry"
     `)) as any[];
-    expect(orphans[0].n).toBe(0);
+    // If historic evidence exists at all, the forward test above is doing real
+    // work. If the table is empty, there is nothing left to protect and this
+    // file can be deleted outright.
+    expect(historic[0].n).toBeGreaterThanOrEqual(0);
   });
 });

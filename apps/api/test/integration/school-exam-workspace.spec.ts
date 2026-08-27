@@ -160,17 +160,22 @@ describeDb('integration: exam workspace — create → apply → mark → result
     expect(sheet.students.every((s) => s.marks === null)).toBe(true);
   });
 
-  it('step 3: a saved mark lands on the GradeEntry row the rest of the system reads', async () => {
+  it('step 3: a saved mark lands on the spine row the rest of the system reads', async () => {
     await asTenant(() => marks.saveMark({ examId, classId, subjectId: mathsId, studentProfileId: studentIds[0], marks: 82 }));
 
     const schedule = await raw.examSchedule.findFirst({ where: { examId, classId, subjectId: mathsId } });
-    const entry = await raw.gradeEntry.findFirst({
-      where: { examScheduleId: schedule!.id, studentProfileId: studentIds[0] },
+    // The B6 flip made StudentAssessment the store and froze GradeEntry, which
+    // is never written any more. The invariant is unchanged — a saved mark is
+    // immediately readable by everything downstream — only its home moved.
+    const assessment = await raw.assessment.findFirst({
+      where: { organizationId, sourceType: 'exam_session', sourceRef: schedule!.id },
+    });
+    const entry = await raw.studentAssessment.findFirst({
+      where: { assessmentId: assessment!.id, studentProfileId: studentIds[0] },
     });
 
     expect(entry).not.toBeNull();
-    expect(Number(entry!.marksObtained)).toBe(82);
-    expect(entry!.grade).toBeTruthy(); // resolved against the school's grading scale
+    expect(Number(entry!.effectiveScore)).toBe(82);
     expect(entry!.enteredById).toBe(userId);
 
     const sheet = await asTenant(() => marks.sheet({ examId, classId, subjectId: mathsId }));
@@ -203,6 +208,34 @@ describeDb('integration: exam workspace — create → apply → mark → result
     expect(grace.marks).toBeNull();
     expect(grace.participation).toBe('absent');
     expect(sheet.entered).toBe(2); // 82 + one resolved absence
+  });
+
+  /**
+   * Relocated from the deleted `exam-projection` unit spec.
+   *
+   * That suite pinned two bugs in the GradeEntry → spine projection, a component
+   * the B6 flip removed entirely. Participation is covered above; this is the
+   * other half — clearing a mark must actually remove it from the spine. When it
+   * did not, the marksheet showed an empty cell while the gradebook, the result
+   * run and the report card all still counted the old score.
+   */
+  it('step 3: clearing a mark removes it from the spine, it does not linger', async () => {
+    await asTenant(() => marks.saveMark({ examId, classId, subjectId: mathsId, studentProfileId: studentIds[1], marks: 64 }));
+    const schedule = await raw.examSchedule.findFirst({ where: { examId, classId, subjectId: mathsId } });
+    const assessment = await raw.assessment.findFirst({
+      where: { organizationId, sourceType: 'exam_session', sourceRef: schedule!.id },
+    });
+    const before = await raw.studentAssessment.findFirst({
+      where: { assessmentId: assessment!.id, studentProfileId: studentIds[1] },
+    });
+    expect(Number(before!.effectiveScore)).toBe(64);
+
+    await asTenant(() => marks.saveMark({ examId, classId, subjectId: mathsId, studentProfileId: studentIds[1], marks: null }));
+
+    const after = await raw.studentAssessment.findFirst({
+      where: { assessmentId: assessment!.id, studentProfileId: studentIds[1] },
+    });
+    expect(after?.effectiveScore ?? null).toBeNull();
   });
 
   it('step 3: a mark above the paper maximum is refused', async () => {

@@ -12,11 +12,15 @@ describeDb('POS Print Lifecycle (T5)', () => {
   let line2: any;
 
   async function createTestDoc() {
+    // Required FK the original seed predates — resolved from the DMS registry.
+    const typeDef = await prisma.documentTypeDef.findUnique({ where: { code: 'sales_invoice' } });
+    if (!typeDef) throw new Error('DMS registry has no sales_invoice type; run the seeder');
     const d = await prisma.document.create({
       data: {
         organizationId: orgId,
         documentNumber: `LFT-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         documentType: 'sales_invoice',
+        documentTypeId: typeDef.id,
         status: 'draft',
         partnerId,
         currencyId,
