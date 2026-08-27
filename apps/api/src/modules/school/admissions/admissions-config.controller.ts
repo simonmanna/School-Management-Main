@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AdmissionsConfigService } from './admissions-config.service';
 import { AdmissionsCommitteeService } from './admissions-committee.service';
 import { AdmissionsAnalyticsService } from './admissions-analytics.service';
+import { AdmissionsWorkflowService } from './admissions-workflow.service';
 
 /**
  * Configuration, committee and analytics endpoints for admissions. Kept in a
@@ -15,7 +16,66 @@ export class AdmissionsConfigController {
     private readonly config: AdmissionsConfigService,
     private readonly committee: AdmissionsCommitteeService,
     private readonly analytics: AdmissionsAnalyticsService,
+    private readonly workflow: AdmissionsWorkflowService,
   ) {}
+
+  // ── Admission workflow ──
+  //
+  // Declared FIRST, above every `:id`-prefixed route in this module. Nest matches in
+  // declaration order, so `workflows/schema` would otherwise bind as `:id = "workflows"`
+  // on a two-segment param route — the shadowing bug fixed in 016596b.
+  //
+  // Mutations are gated on the existing `manageAdmissions` grant. A dedicated
+  // `school:admissions:workflow` permission is registered but NOT enforced: the guard
+  // ANDs its requirements, and the admissions sub-grants are still dormant pending a
+  // role backfill, so enforcing a new one here would 403 every current administrator.
+
+  @Get('workflows/schema')
+  @RequirePermissions(PERMISSIONS.school.read)
+  workflowSchema() {
+    return this.workflow.schema();
+  }
+
+  @Get('workflows')
+  @RequirePermissions(PERMISSIONS.school.read)
+  listWorkflows() {
+    return this.workflow.list();
+  }
+
+  @Post('workflows')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  createWorkflow(@Body() dto: any) {
+    return this.workflow.create(dto);
+  }
+
+  @Patch('workflows/:workflowId')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  updateWorkflow(@Param('workflowId') workflowId: string, @Body() dto: any) {
+    return this.workflow.update(workflowId, dto);
+  }
+
+  @Post('workflows/:workflowId/preset')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  applyWorkflowPreset(@Param('workflowId') workflowId: string, @Body() dto: { presetKey: string }) {
+    return this.workflow.applyPreset(workflowId, dto.presetKey);
+  }
+
+  /** Archive, never hard-delete — a workflow is configuration history. */
+  @Delete('workflows/:workflowId')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  archiveWorkflow(@Param('workflowId') workflowId: string) {
+    return this.workflow.archive(workflowId);
+  }
+
+  /**
+   * Assign a workflow to an admission cycle. Governs applications created from now on:
+   * existing applications keep the snapshot they were created with.
+   */
+  @Patch('cycles/:cycleId/workflow')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  assignCycleWorkflow(@Param('cycleId') cycleId: string, @Body() dto: { workflowId: string | null }) {
+    return this.workflow.assignToCycle(cycleId, dto.workflowId ?? null);
+  }
 
   // ── Requirements ──
   @Get('requirements')

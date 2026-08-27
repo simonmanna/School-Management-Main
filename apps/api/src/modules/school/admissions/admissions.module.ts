@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdmissionsService } from './admissions.service';
 import { AdmissionsController } from './admissions.controller';
 import { AdmissionsConfigService } from './admissions-config.service';
+import { AdmissionsWorkflowService } from './admissions-workflow.service';
 import { AdmissionsCommitteeService } from './admissions-committee.service';
 import { AdmissionsAnalyticsService } from './admissions-analytics.service';
 import { AdmissionsPortalService } from './admissions-portal.service';
@@ -22,12 +23,13 @@ import { NotificationsModule } from '../../../kernel/notifications/notifications
   providers: [
     AdmissionsService,
     AdmissionsConfigService,
+    AdmissionsWorkflowService,
     AdmissionsCommitteeService,
     AdmissionsAnalyticsService,
     AdmissionsPortalService,
     AdmissionsNotificationsSubscriber,
     OfferExpiryWorker,
   ],
-  exports: [AdmissionsService, AdmissionsConfigService],
+  exports: [AdmissionsService, AdmissionsConfigService, AdmissionsWorkflowService],
 })
 export class AdmissionsModule {}

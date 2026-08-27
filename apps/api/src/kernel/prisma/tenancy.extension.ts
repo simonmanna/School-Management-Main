@@ -363,6 +363,9 @@ export const ORG_SCOPED = new Set<string>([
   'ApplicantIdentityMatch',
   'AdmissionCycle',
   'AdmissionCapacity',
+  // Configurable admission workflow: org-scoped configuration read by the resolver
+  // and assignable to cycles, so it must be tenant-filtered like the rest.
+  'AdmissionWorkflow',
   'AdmissionCriteriaSet',
   'AdmissionCriterion',
   'AdmissionDecision',

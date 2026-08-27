@@ -80,6 +80,7 @@ import { SchoolApplicationsPage } from '@/pages/school/applications';
 import { SchoolApplicationFormPage } from '@/pages/school/application-form';
 import { SchoolAdmissionsAnalyticsPage } from '@/pages/school/admissions-analytics';
 import { SchoolAdmissionsConfigPage } from '@/pages/school/admissions-config';
+import { SchoolAdmissionsWorkflowPage } from '@/pages/school/admissions-workflow';
 import { SchoolApplyTrackPage } from '@/pages/school/apply-track';
 import { SchoolStaffPage } from '@/pages/school/staff';
 import { SchoolCampusesPage } from '@/pages/school/campuses';
@@ -524,6 +525,7 @@ export function App() {
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
           <Route path="/school/admissions/analytics" element={<SchoolAdmissionsAnalyticsPage />} />
           <Route path="/school/admissions/config" element={<SchoolAdmissionsConfigPage />} />
+          <Route path="/school/admissions/workflow" element={<SchoolAdmissionsWorkflowPage />} />
           <Route path="/school/admissions/enrollment-summary" element={<SchoolEnrollmentSummaryPage />} />
           <Route path="/school/applications/new" element={<SchoolApplicationFormPage />} />
           <Route path="/school/applications/:id" element={<SchoolApplicationFormPage />} />

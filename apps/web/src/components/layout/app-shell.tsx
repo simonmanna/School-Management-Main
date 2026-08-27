@@ -85,6 +85,7 @@ import {
   MessagesSquare,
   Target,
   GitBranch,
+  Workflow,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -220,6 +221,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
       { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
+      { to: '/school/admissions/workflow', label: 'Admission Workflow', icon: Workflow, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
     ],
   },

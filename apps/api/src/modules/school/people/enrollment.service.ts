@@ -285,10 +285,72 @@ export class EnrollmentService {
         data: { status: toStatus === 'withdrawn' ? 'withdrawn' : 'transferred' },
       });
 
+      await this.releaseAdmissionSeat(tx, organizationId, enrollment);
+
       await this.audit.recordInTx(tx, { entity: 'Enrollment', entityId: id, action: 'update', oldValues: { status: enrollment.status }, newValues: { status: toStatus } });
       this.events.publish(EVENTS.SchoolEnrollmentEnded, { organizationId, enrollmentId: id, toStatus, reason: dto.reason });
       return tx.enrollment.findFirst({ where: { id } });
     });
+  }
+
+  /**
+   * Give the admission seat back when an enrollment ends.
+   *
+   * `AdmissionCapacity.claimedSeats` is the seat ledger: enrol claims one, ending the
+   * enrollment must return it, or a class silently shrinks by one seat every time a
+   * student leaves and eventually refuses admissions it has room for.
+   *
+   * This lives here, not in the admissions FSM, because ending an enrollment is the
+   * only path that actually happens: `enrolled` is a TERMINAL admission status, so the
+   * release that used to hang off `applyReview('withdraw')` could never fire.
+   *
+   * Best-effort and idempotent-ish: no capacity row configured means the class is
+   * unconstrained, and the `claimedSeats > 0` guard stops it going negative. Keyed with
+   * the same `'__none__'` sentinel `resolveCapacity` uses for an absent section/stream,
+   * so the seat returns to exactly the row it was taken from.
+   */
+  private async releaseAdmissionSeat(tx: any, organizationId: string, enrollment: any) {
+    const key = await this.admissionCapacityFor(tx, organizationId, enrollment);
+    if (!key) return;
+    await tx.admissionCapacity.updateMany({
+      where: { ...key, claimedSeats: { gt: 0 } },
+      data: { claimedSeats: { decrement: 1 } },
+    });
+  }
+
+  /** Resolve the capacity row an enrollment's seat belongs to, or null if unconstrained. */
+  private async admissionCapacityFor(tx: any, organizationId: string, enrollment: any) {
+    if (!enrollment.applicationId) return null;
+    const application = await tx.admissionApplication.findFirst({
+      where: { id: enrollment.applicationId },
+      select: { admissionCycleId: true },
+    });
+    if (!application?.admissionCycleId) return null;
+    const SENT = '__none__';
+    return {
+      organizationId,
+      admissionCycleId: application.admissionCycleId,
+      classId: enrollment.classId,
+      sectionId: enrollment.sectionId ?? SENT,
+      streamId: enrollment.streamId ?? SENT,
+    };
+  }
+
+  /** Take the seat back when a student returns. Refuses to exceed capacity. */
+  private async reclaimAdmissionSeat(tx: any, organizationId: string, enrollment: any) {
+    const key = await this.admissionCapacityFor(tx, organizationId, enrollment);
+    if (!key) return;
+    const row = await tx.admissionCapacity.findFirst({ where: key });
+    if (!row) return;
+    const claimed = await tx.admissionCapacity.updateMany({
+      where: { id: row.id, claimedSeats: { lt: row.capacity - row.reservedCapacity } },
+      data: { claimedSeats: { increment: 1 } },
+    });
+    if (claimed.count === 0) {
+      throw new BadRequestException(
+        `No seat available to re-enroll into this class (capacity ${row.capacity}, reserved ${row.reservedCapacity}, claimed ${row.claimedSeats}).`,
+      );
+    }
   }
 
   transferOut(id: string, dto: EndEnrollmentDto) { return this.endEnrollment(id, 'transferred_out', dto); }
@@ -311,6 +373,12 @@ export class EnrollmentService {
         where: { id: enrollment.studentProfileId },
         data: { status: 'active', currentClassId: enrollment.classId, currentSectionId: enrollment.sectionId, currentStreamId: enrollment.streamId },
       });
+
+      // Re-opening an enrollment occupies a seat again, so re-claim it. Conditional on
+      // there being room, exactly like the original claim in enroll(): a class that
+      // filled up while the student was away must not be pushed over capacity.
+      await this.reclaimAdmissionSeat(tx, organizationId, enrollment);
+
       await this.audit.recordInTx(tx, { entity: 'Enrollment', entityId: id, action: 'update', oldValues: { status: enrollment.status }, newValues: { status: 'enrolled' } });
       this.events.publish(EVENTS.SchoolEnrollmentReEnrolled, { organizationId, enrollmentId: id });
       return tx.enrollment.findFirst({ where: { id } });

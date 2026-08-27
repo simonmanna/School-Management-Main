@@ -375,6 +375,11 @@ export const PERMISSIONS = {
     scheduleAdmissionInterviews: 'school:admissions:interview',
     issueAdmissionOffers: 'school:admissions:offer',
     collectAdmissionFees: 'school:admissions:fee',
+    // Registered but NOT yet enforced anywhere: the workflow endpoints gate on
+    // manageAdmissions above. PermissionsGuard ANDs its requirements, so enforcing a
+    // brand-new grant would 403 every existing administrator until roles are
+    // backfilled. Wire it up in the same pass that activates the sub-grants above.
+    manageAdmissionWorkflow: 'school:admissions:workflow',
     takeAttendance: 'school:attendance:write',
     // P-att-status: configure the org's attendance status catalog (CRUD).
     manageAttendanceStatuses: 'school:attendance:status:write',

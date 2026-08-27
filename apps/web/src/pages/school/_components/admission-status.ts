@@ -21,7 +21,10 @@ export const STATUS_META: Record<AdmissionStatus, { cls: string; label: string }
   documents_pending: { cls: 'bg-yellow-100 text-yellow-800', label: 'Documents pending' },
   screening: { cls: 'bg-amber-100 text-amber-800', label: 'Screening' },
   interview_scheduled: { cls: 'bg-violet-100 text-violet-700', label: 'Interview scheduled' },
-  interviewed: { cls: 'bg-violet-100 text-violet-800', label: 'Interviewed' },
+  // `exam_done` also lands here (STATUS_MAP in admissions.service.ts), so this state
+  // means "evaluation outcome recorded" and not necessarily that an interview took
+  // place. Labelling it 'Interviewed' misreported every exam-only applicant.
+  interviewed: { cls: 'bg-violet-100 text-violet-800', label: 'Evaluation complete' },
   exam_scheduled: { cls: 'bg-sky-100 text-sky-700', label: 'Exam scheduled' },
   scored: { cls: 'bg-cyan-100 text-cyan-800', label: 'Scored' },
   accepted: { cls: 'bg-emerald-100 text-emerald-700', label: 'Accepted' },
@@ -133,3 +136,53 @@ export function offerStage(status: AdmissionStatus | string): 'issue' | 'respond
   if (status === 'offer_accepted') return 'enroll';
   return null;
 }
+
+/**
+ * Button label for each FSM action.
+ *
+ * Which actions are OFFERED is decided by the backend workflow resolver
+ * (`GET /school/admissions/:id/workflow`, and the `workflow` block on each list row) —
+ * this map only says how to render one. `NEXT_ACTIONS` above is retained as a
+ * fallback for older clients and for tests; it must not drive the pipeline table,
+ * because a hardcoded table cannot know which stages a school configured away.
+ */
+export const ACTION_LABELS: Record<AdmissionAction, string> = {
+  submit: 'Submit',
+  review: 'Start review',
+  request_documents: 'Request documents',
+  resolve_documents: 'Documents received',
+  screen: 'Screen',
+  schedule_interview: 'Schedule interview',
+  complete_interview: 'Record interview',
+  reschedule: 'Reschedule',
+  schedule_exam: 'Schedule exam',
+  // `exam_done` lands on the `interviewed` status — see the note on STATUS_META.
+  exam_done: 'Exam complete',
+  score: 'Score',
+  accept: 'Accept',
+  reject: 'Reject',
+  waitlist: 'Waitlist',
+  issue_offer: 'Issue offer',
+  accept_offer: 'Offer accepted',
+  decline_offer: 'Offer declined',
+  expire_offer: 'Expire offer',
+  enroll: 'Enroll',
+  withdraw: 'Withdraw',
+};
+
+/**
+ * Decision-grade actions the backend refuses without a reason
+ * (REQUIRED_REASON_ACTIONS in admissions.service.ts). The UI prompts for one first so
+ * the operator gets a dialog rather than a 400.
+ */
+export const NEEDS_REASON: AdmissionAction[] = ['accept', 'reject', 'waitlist', 'withdraw'];
+
+/** Human-readable names for the configurable workflow stages. */
+export const STAGE_LABELS: Record<string, string> = {
+  APPLICATION: 'Application',
+  EVALUATION: 'Evaluation',
+  DECISION: 'Decision',
+  OFFER: 'Offer',
+  APPLICANT_ACCEPTANCE: 'Applicant acceptance',
+  ENROLLMENT: 'Enrollment',
+};

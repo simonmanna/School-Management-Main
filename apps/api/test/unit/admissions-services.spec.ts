@@ -6,6 +6,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AdmissionsCommitteeService } from '../../src/modules/school/admissions/admissions-committee.service';
 import { AdmissionsConfigService } from '../../src/modules/school/admissions/admissions-config.service';
+import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
 import { AdmissionsAnalyticsService } from '../../src/modules/school/admissions/admissions-analytics.service';
 import { AdmissionsPortalService } from '../../src/modules/school/admissions/admissions-portal.service';
 
@@ -126,9 +127,19 @@ describe('AdmissionsAnalyticsService.funnel', () => {
   function make(byStatus: Record<string, number>) {
     const grouped = Object.entries(byStatus).map(([status, n]) => ({ status, _count: { _all: n } }));
     const client = {
-      admissionApplication: { groupBy: jest.fn().mockResolvedValue(grouped) },
+      // groupBy drives the status funnel; findMany drives stageCoverage, which needs
+      // each application's own workflow snapshot. Empty here — the conversion-rate
+      // assertions below are about the status sums.
+      admissionApplication: {
+        groupBy: jest.fn().mockResolvedValue(grouped),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
-    return new AdmissionsAnalyticsService({ client } as any, tenant());
+    const workflow = new AdmissionsWorkflowService({ client } as any, tenant() as any, {
+      record: jest.fn(),
+      recordInTx: jest.fn(),
+    } as any);
+    return new AdmissionsAnalyticsService({ client } as any, tenant(), workflow);
   }
 
   it('excludes drafts from the total and computes conversion rates', async () => {

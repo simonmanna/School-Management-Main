@@ -23,6 +23,8 @@ import type {
   ReEnrollDto,
 } from './dto.types';
 import { EnrollmentService, type EnrollNewStudentInput } from '../people/enrollment.service';
+import { AdmissionsWorkflowService } from './admissions-workflow.service';
+import type { StageKey } from './admission-workflow.schema';
 
 /**
  * Student lifecycle FSM (mirror of people/student.service.ts) used by
@@ -196,6 +198,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     private readonly sequence: SequenceService,
     private readonly enrollment: EnrollmentService,
     private readonly encryption: EncryptionService,
+    private readonly workflow: AdmissionsWorkflowService,
   ) {
     super(prisma.client.admissionApplication as unknown as CrudDelegate);
   }
@@ -354,11 +357,24 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // customFields where every `school:read` holder could read it.
       const nin = this.encryption.encrypt(dto.nin);
       const status = dto.asDraft ? 'draft' : 'submitted';
+
+      // Freeze the admission workflow onto the application, once, at creation.
+      // `workflowSnapshot` is authoritative for this application's whole lifecycle:
+      // later edits to the workflow, or reassignment of the cycle's workflow, must
+      // never retroactively change the stages an in-flight application has to clear.
+      // `workflowId` alongside it is provenance only — progression never reads it.
+      const { snapshot, workflowId } = await this.workflow.snapshotForCycle(
+        tx,
+        dto.admissionCycleId ?? null,
+      );
+
       const row = await tx.admissionApplication.create({
         data: {
           organizationId,
           academicYearId: dto.academicYearId,
           admissionCycleId: dto.admissionCycleId ?? null,
+          workflowId,
+          workflowSnapshot: snapshot as any,
           applicationNumber,
           applicantFirstName: dto.applicantFirstName,
           applicantLastName: dto.applicantLastName,
@@ -656,12 +672,37 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   async enroll(dto: EnrollApplicationDto) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
-      const app = await tx.admissionApplication.findFirst({ where: { id: dto.applicationId } });
+      const app = await tx.admissionApplication.findFirst({
+        where: { id: dto.applicationId },
+        include: { offerLetter: true, decision: true },
+      });
       if (!app) throw new NotFoundException(`Application ${dto.applicationId} not found`);
 
-      // The eligibility gate is now enforced, not advisory: offer accepted and
-      // unexpired, required documents verified, application fee settled, and a
-      // seat actually available in the target class.
+      // Enforcement order: workflow → eligibility → seat → promotion → transition.
+      //
+      // 1. Workflow. Throws 409 naming the first REQUIRED stage this school's
+      //    configuration demands that is not yet complete. A school configured
+      //    Application → Enrollment has none, so a submitted application passes
+      //    straight through; a Selective school does not.
+      const stages = this.workflow.stagesFor(app);
+      this.workflow.validateProgress(app, 'ENROLLMENT', stages);
+
+      // 2. The workflow's authorization for a direct transition, plus the record of
+      //    what it bypasses. Both are derived here, on the server, from the
+      //    application's frozen snapshot — never from the request.
+      const workflowAllowed = this.workflow.shortcutAllowed(app, stages);
+      const skippedStages = this.workflow.skippedStagesFor(app, 'ENROLLMENT', stages);
+
+      // 2b. FSM legality, checked HERE rather than only at the closing applyReview.
+      //     The transition would be rejected there anyway and the transaction rolled
+      //     back, but not before a Partner, StudentProfile and Enrollment had been
+      //     created and a seat claimed. Fail before doing any of that work.
+      this.assertTransition(app.status, 'enroll', workflowAllowed);
+
+      // 3. The eligibility gate is enforced, not advisory: every required stage
+      //    complete, offer valid where the workflow uses offers, required documents
+      //    verified, application fee settled, and a seat available in the target
+      //    class. None of these is skippable by configuration.
       const gate = await this.checkEligibility(tx, app.id, {
         classId: dto.classId,
         sectionId: dto.sectionId ?? null,
@@ -674,17 +715,21 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         );
       }
 
-      // Concurrency-safe seat claim. `checkEligibility` already proved a seat was
-      // available *when it read* (available = capacity − reserved − occupied), but two
-      // enrolls racing on the last seat could both pass that read. Reserve atomically
-      // here, inside the same transaction, using a conditional update on the capacity
-      // row: it only succeeds while claimedSeats < capacity − reserved − occupied
-      // (occupied = legacy enrollment count at read time; claimedSeats = in-flight
-      // locks). The loser's updateMany affects 0 rows and we reject — so at most
-      // `capacity − reserved − occupied` enrollments ever commit for this row.
+      // Concurrency-safe seat claim. `claimedSeats` is the SINGLE seat ledger (see the
+      // capacity state contract on `resolveCapacity`): it counts every seat consumed by a
+      // committed or in-flight enrollment, and is released on withdrawal. The claim is a
+      // conditional update inside this transaction — it only succeeds while
+      // claimedSeats < capacity − reserved — so the loser of a race on the last seat
+      // affects 0 rows and is rejected. At most `capacity − reserved` enrollments ever
+      // commit for this row.
+      //
+      // `occupied` (the derived Enrollment count) is deliberately NOT in this guard.
+      // Subtracting it as well double-counted every committed seat — it appears in both
+      // `occupied` and `claimedSeats` once the enrollment commits — so a capacity-2 class
+      // admitted only one student sequentially. `occupied` is now a reporting figure only.
       if (gate.capacity?.id) {
         const cap = gate.capacity;
-        const headroom = cap.capacity - cap.reservedCapacity - (cap.occupied ?? 0);
+        const headroom = cap.capacity - cap.reservedCapacity;
         const claimed = await tx.admissionCapacity.updateMany({
           where: {
             id: cap.id,
@@ -694,7 +739,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         });
         if (claimed.count === 0) {
           throw new BadRequestException(
-            `No seat available for the requested class (capacity ${cap.capacity}, reserved ${cap.reservedCapacity}, occupied ${cap.occupied ?? 0}, claimed ${cap.claimedSeats ?? 0}).`,
+            `No seat available for the requested class (capacity ${cap.capacity}, reserved ${cap.reservedCapacity}, claimed ${cap.claimedSeats ?? 0}).`,
           );
         }
       }
@@ -732,7 +777,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // enrolled student had zero guardians (no fee payer, no emergency contact).
       await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
 
-      await this.applyReview(tx, app.id, 'enroll');
+      await this.applyReview(tx, app.id, 'enroll', undefined, {
+        allowed: workflowAllowed,
+        skippedStages,
+      });
 
       this.events.publish(EVENTS.SchoolAdmissionEnrolled, {
         organizationId,
@@ -1208,7 +1256,19 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * status history, the AuditLog row and the domain event are applied uniformly
    * and cannot be bypassed. `review()` used to carry a second copy of all of this.
    */
-  private async applyReview(tx: any, applicationId: string, action: string, reason?: string) {
+  private async applyReview(
+    tx: any,
+    applicationId: string,
+    action: string,
+    reason?: string,
+    /**
+     * Workflow extension + provenance, supplied only by callers that resolved the
+     * workflow first (currently enroll()). `skippedStages` is what this REAL
+     * transition legitimately bypassed; it is always computed server-side from the
+     * snapshot and never accepted from a request body.
+     */
+    workflow?: { allowed: readonly string[]; skippedStages: StageKey[] },
+  ) {
     const newStatus = STATUS_MAP[action];
     if (!newStatus) throw new BadRequestException(`Unknown admission action: ${action}`);
     const before = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
@@ -1223,7 +1283,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       );
     }
 
-    this.assertTransition(before.status, action);
+    this.assertTransition(before.status, action, workflow?.allowed ?? []);
 
     const stampField = TIMESTAMP_MAP[action];
     await tx.admissionApplication.updateMany({
@@ -1235,22 +1295,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       },
     });
 
-    // Release the claimed seat when an enrolled application is withdrawn, so the
-    // capacity frees up for the next enrolment. Best-effort: only if a capacity row
-    // exists for the application's class/cycle.
-    if (action === 'withdraw' && before.status === 'enrolled') {
-      await tx.admissionCapacity.updateMany({
-        where: {
-          organizationId: before.organizationId,
-          admissionCycleId: before.admissionCycleId ?? undefined,
-          classId: before.applyingForClassId ?? undefined,
-          ...(before.sectionId ? { sectionId: before.sectionId } : {}),
-          ...(before.streamId ? { streamId: before.streamId } : {}),
-          claimedSeats: { gt: 0 },
-        },
-        data: { claimedSeats: { decrement: 1 } },
-      });
-    }
+    // NOTE: the admission seat is released in EnrollmentService.endEnrollment, not
+    // here. `enrolled` is a TERMINAL admission status (ADMISSION_TRANSITIONS above),
+    // so a release hanging off `withdraw` from `enrolled` could never fire — a seat
+    // was never actually returned, and every departure permanently shrank the class.
+    // Ending the Enrollment is the path that really happens.
 
     // Queryable per-application timeline the UI renders (the AuditLog is the
     // system-wide record; this is the admissions-scoped one).
@@ -1262,6 +1311,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         toStatus: newStatus,
         action,
         reason: reason ?? null,
+        // Which business stages this real transition bypassed, e.g. a `simple`
+        // workflow enrolling straight from `submitted`. Nothing is synthesized: there
+        // is no fabricated `accepted`/`offer_issued`/`offer_accepted` row and no
+        // OfferLetter, so `offer_issued` always means an offer really was issued.
+        skippedStages: workflow?.skippedStages ?? [],
         changedById: this.tenant.userId ?? null,
       },
     });
@@ -1285,15 +1339,23 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     return { id: applicationId, status: newStatus };
   }
 
-  /** Reusable FSM guard that throws BadRequestException on an illegal transition. */
-  private assertTransition(current: string, action: string) {
+  /**
+   * Reusable FSM guard that throws BadRequestException on an illegal transition.
+   *
+   * `workflowAllowed` is the narrow extension the admission workflow may grant on top
+   * of ADMISSION_TRANSITIONS — see AdmissionsWorkflowService.shortcutAllowed(). It can
+   * only ever ADD an action, never remove one, and only ever an action belonging to
+   * the application's next required stage when every intervening stage is configured
+   * `skip`. The base table itself is never rewritten, so the FSM stays the canonical
+   * description of the domain.
+   */
+  private assertTransition(current: string, action: string, workflowAllowed: readonly string[] = []) {
     const allowed = ADMISSION_TRANSITIONS[current] ?? [];
-    if (!allowed.includes(action)) {
-      throw new BadRequestException(
-        `Cannot ${action} an application in status '${current}'. ` +
-          `Allowed actions from '${current}': [${allowed.join(', ') || '(none — terminal)'}].`,
-      );
-    }
+    if (allowed.includes(action) || workflowAllowed.includes(action)) return;
+    throw new BadRequestException(
+      `Cannot ${action} an application in status '${current}'. ` +
+        `Allowed actions from '${current}': [${allowed.join(', ') || '(none — terminal)'}].`,
+    );
   }
 
   /** Resolve a DMS document-type id within a transaction. */
@@ -1575,7 +1637,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         academicYearId: cycle.academicYearId,
         occupied,
         claimedSeats: c.claimedSeats ?? 0,
-        available: Math.max(0, c.capacity - c.reservedCapacity - occupied),
+        // `claimedSeats` is the seat ledger; `occupied` is reported alongside it so an
+        // operator can reconcile the two (they should match for settled data). See the
+        // capacity state contract on resolveCapacity().
+        available: Math.max(0, c.capacity - c.reservedCapacity - (c.claimedSeats ?? 0)),
       });
     }
     return out;
@@ -1737,6 +1802,42 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   }
 
   /**
+   * Everything the UI needs to render one application's controls, so the browser
+   * never reconstructs business rules from raw stage modes.
+   *
+   * Workflow and eligibility are returned side by side but kept orthogonal: the client
+   * renders buttons from the action lists and *enables* them from `eligibility`,
+   * showing `missing[]` verbatim when blocked. These lists are guidance, never
+   * authorization — every mutating endpoint independently re-runs permissions, FSM
+   * legality, workflow and eligibility, and trusts nothing it told a client earlier.
+   */
+  async applicationWorkflow(applicationId: string) {
+    const app = await this.prisma.client.admissionApplication.findFirst({
+      where: { id: applicationId },
+      include: { offerLetter: true, decision: true },
+    });
+    if (!app) throw new NotFoundException(`Application ${applicationId} not found`);
+
+    const fsmLegal = ADMISSION_TRANSITIONS[app.status] ?? [];
+    const resolution = this.workflow.resolve(app, fsmLegal);
+    const snapshot: any = app.workflowSnapshot ?? null;
+
+    return {
+      applicationId,
+      status: app.status,
+      workflow: {
+        name: snapshot?.workflowName ?? null,
+        presetKey: snapshot?.presetKey ?? 'standard',
+        version: snapshot?.version ?? null,
+        /** True for applications created before workflows existed. */
+        inherited: snapshot == null,
+      },
+      ...resolution,
+      eligibility: await this.checkEligibility(this.prisma.client, applicationId),
+    };
+  }
+
+  /**
    * The single enrollment gate, shared by the read-only eligibility endpoint and
    * by `enroll()` itself.
    *
@@ -1749,16 +1850,36 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   private async checkEligibility(client: any, applicationId: string, target?: EnrollmentTarget) {
     const app = await client.admissionApplication.findFirst({
       where: { id: applicationId },
-      include: { documents: true, offerLetter: true, fee: true },
+      include: { documents: true, offerLetter: true, fee: true, decision: true },
     });
     if (!app) throw new NotFoundException(`Application ${applicationId} not found`);
 
     const missing: string[] = [];
-    if (app.status !== 'offer_accepted') missing.push(`offer not accepted (status=${app.status})`);
-    if (!app.offerLetter) missing.push('no offer on file');
-    else if (app.offerLetter.status === 'withdrawn') missing.push('offer withdrawn');
-    else if (app.offerLetter.expiresAt && app.offerLetter.expiresAt.getTime() < Date.now()) {
-      missing.push(`offer expired on ${app.offerLetter.expiresAt.toISOString().slice(0, 10)}`);
+
+    // Workflow half of the gate. The stages a school requires are configurable, so
+    // "is this application ready?" is "has every REQUIRED stage before ENROLLMENT been
+    // completed?" — not the old hardcoded `status === 'offer_accepted'`, which assumed
+    // every school runs an offer round.
+    const stages = this.workflow.stagesFor(app);
+    const offerSkipped = stages.find((s) => s.stage === 'OFFER')?.mode === 'skip';
+    const nextStage = this.workflow.nextRequiredStage(app, stages);
+    if (nextStage !== 'ENROLLMENT') {
+      missing.push(
+        nextStage
+          ? `workflow stage ${nextStage} is not complete (status=${app.status})`
+          : `application is ${app.status} and cannot be enrolled`,
+      );
+    }
+
+    // Offer conditions apply only when this school's workflow actually routes through
+    // an offer. Everything below — documents, fee, capacity — applies to every school
+    // and is never skippable by configuration.
+    if (!offerSkipped) {
+      if (!app.offerLetter) missing.push('no offer on file');
+      else if (app.offerLetter.status === 'withdrawn') missing.push('offer withdrawn');
+      else if (app.offerLetter.expiresAt && app.offerLetter.expiresAt.getTime() < Date.now()) {
+        missing.push(`offer expired on ${app.offerLetter.expiresAt.toISOString().slice(0, 10)}`);
+      }
     }
 
     const unverified = app.documents.filter((d: any) => d.required && !d.verified);
@@ -1783,7 +1904,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       });
       if (capacity && capacity.available <= 0) {
         missing.push(
-          `no seats available for the requested class (capacity ${capacity.capacity}, reserved ${capacity.reservedCapacity}, occupied ${capacity.occupied})`,
+          `no seats available for the requested class (capacity ${capacity.capacity}, reserved ${capacity.reservedCapacity}, claimed ${capacity.claimedSeats})`,
         );
       }
     }
@@ -1847,11 +1968,20 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       reservedCapacity: row.reservedCapacity,
       claimedSeats: row.claimedSeats ?? 0,
       occupied,
-      // `occupied` is the authoritative enrollment count (incl. legacy rows created
-      // before claimedSeats existed). `claimedSeats` is only the in-flight lock
-      // incremented inside the enroll transaction, so availability is computed from
-      // `occupied`, NOT claimedSeats (they are different counters for legacy data).
-      available: Math.max(0, row.capacity - row.reservedCapacity - occupied),
+      // Capacity state contract:
+      //   capacity          declared seats for (cycle, class, section, stream)
+      //   reservedCapacity  seats held back from admissions (siblings, staff, transfers)
+      //   claimedSeats      THE SEAT LEDGER — every seat consumed by a committed or
+      //                     in-flight enrollment. +1 atomically inside enroll(), −1 when
+      //                     an enrolled application is withdrawn. Backfilled from existing
+      //                     enrollments by 20260826120000_admissions_workflow.
+      //   occupied          derived Enrollment.count for the cycle's academic year.
+      //                     REPORTING AND RECONCILIATION ONLY — never an input to the
+      //                     seat guard, because a committed seat appears in both counters.
+      //   available         capacity − reservedCapacity − claimedSeats
+      // Seats are consumed only at enrollment: acceptance, offer issue and offer
+      // acceptance consume nothing, so an over-issued offer round is caught at the gate.
+      available: Math.max(0, row.capacity - row.reservedCapacity - (row.claimedSeats ?? 0)),
     };
   }
 
@@ -1945,6 +2075,45 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       where: { status: status as any },
       orderBy: { submittedAt: 'desc' },
     });
+  }
+
+  /**
+   * Paginated list, each row carrying its resolved workflow actions.
+   *
+   * The pipeline table renders one set of buttons per row. Resolving that per row
+   * over HTTP would be an N+1; resolving it here costs ONE extra query for the whole
+   * page (the offer/decision artifacts the completion predicates read), after which
+   * resolution is pure computation.
+   *
+   * Eligibility is deliberately NOT included: it hits capacity and documents per
+   * application and belongs on the detail view, where the Enroll dialog fetches it.
+   */
+  async listWithWorkflow(query: any) {
+    const page = await this.list(query);
+    const rows: any[] = page.data ?? [];
+    if (!rows.length) return page;
+
+    const ids = rows.map((r) => r.id);
+    const [offers, decisions] = await Promise.all([
+      this.prisma.client.offerLetter.findMany({ where: { applicationId: { in: ids } } }),
+      this.prisma.client.admissionDecision.findMany({ where: { applicationId: { in: ids } } }),
+    ]);
+    const offerBy = new Map(offers.map((o: any) => [o.applicationId, o]));
+    const decisionBy = new Map(decisions.map((d: any) => [d.applicationId, d]));
+
+    return {
+      ...page,
+      data: rows.map((row) => {
+        const app = {
+          ...row,
+          offerLetter: offerBy.get(row.id) ?? null,
+          decision: decisionBy.get(row.id) ?? null,
+        };
+        const fsmLegal = ADMISSION_TRANSITIONS[row.status] ?? [];
+        const { stages, ...resolution } = this.workflow.resolve(app, fsmLegal);
+        return { ...row, workflow: resolution };
+      }),
+    };
   }
 
   /**

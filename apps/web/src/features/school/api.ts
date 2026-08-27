@@ -248,6 +248,9 @@ export type AdmissionAction =
   | 'accept_offer'
   | 'decline_offer'
   | 'expire_offer'
+  // Routed through POST /enroll rather than /review, but it is an FSM action and the
+  // workflow resolver returns it like any other.
+  | 'enroll'
   | 'withdraw';
 
 export interface AdmissionApplication {
@@ -273,6 +276,13 @@ export interface AdmissionApplication {
   academicYear?: { id: string; name: string } | null;
   offerLetter?: AdmissionOffer | null;
   documents?: AdmissionDocument[];
+  /**
+   * Resolved on every list row by `GET /school/admissions`, so the pipeline table can
+   * render the actions this application's workflow permits without an N+1 of
+   * per-application requests. Eligibility is not included here — it is fetched on
+   * demand by the Enroll dialog.
+   */
+  workflow?: Omit<AdmissionWorkflowState, 'applicationId' | 'status' | 'workflow' | 'stages' | 'eligibility'>;
 }
 
 export interface AdmissionOffer {
@@ -446,6 +456,176 @@ export function useAdmissionEligibility(id?: string) {
     queryKey: ['school', 'admissions', 'eligibility', id],
     enabled: !!id,
     queryFn: async () => (await api.get<AdmissionEligibility>(`${S}/admissions/${id}/eligibility`)).data,
+  });
+}
+
+/* ───────────────────── Configurable admission workflow ─────────────────────
+ *
+ * Which business stages a school requires is configuration; the eligibility
+ * conditions (documents, fee, capacity) never are. The backend resolves both and
+ * this client renders them — it must NOT recompute skip logic from stage modes.
+ */
+
+export type AdmissionStageKey =
+  | 'APPLICATION'
+  | 'EVALUATION'
+  | 'DECISION'
+  | 'OFFER'
+  | 'APPLICANT_ACCEPTANCE'
+  | 'ENROLLMENT';
+
+/**
+ * - `required` blocks progression until complete
+ * - `optional` is available to staff but never blocks
+ * - `skip` is not part of this school's process (hidden, but not forbidden)
+ */
+export type AdmissionStageMode = 'required' | 'optional' | 'skip';
+
+export type AdmissionEvaluationStep = 'screening' | 'interview' | 'exam';
+
+export interface AdmissionStageConfig {
+  stage: AdmissionStageKey;
+  mode: AdmissionStageMode;
+  order: number;
+  steps?: Record<AdmissionEvaluationStep, AdmissionStageMode>;
+}
+
+export interface AdmissionWorkflow {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  /** Null once hand-tuned away from a preset. */
+  presetKey?: string | null;
+  isDefault: boolean;
+  active: boolean;
+  stages: AdmissionStageConfig[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** `GET /school/admissions/workflows/schema` — drives the settings UI generically. */
+export interface AdmissionWorkflowSchema {
+  stages: Array<{
+    stage: AdmissionStageKey;
+    label: string;
+    order: number;
+    locked?: boolean;
+    hasSteps?: boolean;
+    help: string;
+  }>;
+  modes: Array<{ value: AdmissionStageMode; label: string; help: string }>;
+  evaluationSteps: Array<{ key: AdmissionEvaluationStep; label: string }>;
+  presets: Array<{ key: string; label: string; description: string; stages: AdmissionStageConfig[] }>;
+  snapshotVersion: number;
+}
+
+export interface AdmissionStageState {
+  stage: AdmissionStageKey;
+  label: string;
+  mode: AdmissionStageMode;
+  order: number;
+  complete: boolean;
+  steps?: Record<string, { mode: AdmissionStageMode; complete: boolean }>;
+}
+
+/**
+ * `GET /school/admissions/:id/workflow`.
+ *
+ * `requiredActions` may legitimately be empty while the application is not stuck —
+ * under Standard at `submitted`, Decision is next but the operator gets there via the
+ * optional `review`. Render both lists; enable from `eligibility`.
+ */
+export interface AdmissionWorkflowState {
+  applicationId: string;
+  status: AdmissionStatus;
+  workflow: {
+    name: string | null;
+    presetKey: string | null;
+    version: number | null;
+    /** True for applications created before workflows existed. */
+    inherited: boolean;
+  };
+  stages: AdmissionStageState[];
+  nextRequiredStage: AdmissionStageKey | null;
+  requiredActions: AdmissionAction[];
+  optionalActions: AdmissionAction[];
+  alwaysAvailable: AdmissionAction[];
+  skippedStages: AdmissionStageKey[];
+  eligibility: AdmissionEligibility;
+}
+
+export function useAdmissionWorkflowSchema() {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'workflow-schema'],
+    staleTime: Infinity,
+    queryFn: async () => (await api.get<AdmissionWorkflowSchema>(`${S}/admissions/workflows/schema`)).data,
+  });
+}
+
+export function useAdmissionWorkflows() {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'workflows'],
+    queryFn: async () => (await api.get<AdmissionWorkflow[]>(`${S}/admissions/workflows`)).data,
+  });
+}
+
+/** Per-application resolution: stage state, permitted actions and eligibility. */
+export function useApplicationWorkflow(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'workflow', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<AdmissionWorkflowState>(`${S}/admissions/${id}/workflow`)).data,
+  });
+}
+
+const invalidateWorkflows = (qc: ReturnType<typeof useQueryClient>) => {
+  qc.invalidateQueries({ queryKey: ['school', 'admissions', 'workflows'] });
+  qc.invalidateQueries({ queryKey: ['school', 'admissions', 'cycles'] });
+};
+
+export function useCreateAdmissionWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; description?: string; presetKey?: string; stages?: AdmissionStageConfig[]; isDefault?: boolean }) =>
+      (await api.post<AdmissionWorkflow>(`${S}/admissions/workflows`, dto)).data,
+    onSuccess: () => invalidateWorkflows(qc),
+  });
+}
+
+export function useUpdateAdmissionWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; name?: string; description?: string; stages?: AdmissionStageConfig[]; isDefault?: boolean }) =>
+      (await api.patch<AdmissionWorkflow>(`${S}/admissions/workflows/${id}`, dto)).data,
+    onSuccess: () => invalidateWorkflows(qc),
+  });
+}
+
+export function useApplyAdmissionWorkflowPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, presetKey }: { id: string; presetKey: string }) =>
+      (await api.post<AdmissionWorkflow>(`${S}/admissions/workflows/${id}/preset`, { presetKey })).data,
+    onSuccess: () => invalidateWorkflows(qc),
+  });
+}
+
+/** Archives (active=false). Refused with 409 while any cycle or application uses it. */
+export function useArchiveAdmissionWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/admissions/workflows/${id}`)).data,
+    onSuccess: () => invalidateWorkflows(qc),
+  });
+}
+
+export function useAssignCycleWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ cycleId, workflowId }: { cycleId: string; workflowId: string | null }) =>
+      (await api.patch(`${S}/admissions/cycles/${cycleId}/workflow`, { workflowId })).data,
+    onSuccess: () => invalidateWorkflows(qc),
   });
 }
 
@@ -643,6 +823,8 @@ export interface AdmissionCycle {
   opensAt?: string | null;
   closesAt?: string | null;
   status: 'open' | 'closed';
+  /** Workflow applied to applications created in this cycle FROM NOW ON. */
+  workflowId?: string | null;
   createdAt: string;
   updatedAt: string;
   capacities?: unknown[];

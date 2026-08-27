@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
-import { NEXT_ACTIONS, offerStage, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, STAGE_LABELS, statusMeta } from './_components/admission-status';
 import { DecisionDialog } from './_components/DecisionDialog';
 
 export function SchoolAdmissionsPage() {
@@ -229,7 +229,49 @@ export function SchoolAdmissionsPage() {
                 )}
                 {rows.map((a) => {
                   const meta = statusMeta(a.status);
-                  const stage = offerStage(a.status);
+                  // The backend resolves which actions this application's workflow
+                  // permits. The UI must not reconstruct skip logic from stage modes.
+                  const wf = a.workflow;
+
+                  /**
+                   * One action button. `issue_offer`, `accept_offer` and `decline_offer`
+                   * have dedicated endpoints (they create or settle an OfferLetter), so
+                   * they route to their dialogs rather than the generic /review action.
+                   */
+                  const renderAction = (action: AdmissionAction, kind: 'required' | 'optional' | 'terminal') => {
+                    const label = ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
+                    const variant = kind === 'terminal' ? 'ghost' : kind === 'required' ? 'default' : 'secondary';
+                    const onClick = () => {
+                      if (action === 'issue_offer') return openOffer(a);
+                      if (action === 'accept_offer') return respondToOffer(a, true);
+                      if (action === 'decline_offer') return respondToOffer(a, false);
+                      if (action === 'enroll') return openEnroll(a);
+                      return runAction(a, action, NEEDS_REASON.includes(action));
+                    };
+                    return (
+                      <Button
+                        key={kind + '-' + action}
+                        variant={variant as 'default' | 'secondary' | 'ghost'}
+                        size="sm"
+                        disabled={busy || (action === 'enroll' && enroll.isPending)}
+                        title={kind === 'optional' ? 'Optional in this workflow' : undefined}
+                        onClick={onClick}
+                      >
+                        {action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                        {action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
+                        {action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
+                        {action === 'review' && <Send className="h-3.5 w-3.5" />}
+                        {action === 'withdraw' && <LogOut className="h-3.5 w-3.5" />}
+                        {action === 'issue_offer' && <Mail className="h-3.5 w-3.5" />}
+                        {action === 'accept_offer' && <ThumbsUp className="h-3.5 w-3.5" />}
+                        {action === 'decline_offer' && <ThumbsDown className="h-3.5 w-3.5" />}
+                        {action === 'enroll' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                        {label}
+                        {kind === 'optional' && <span className="ml-1 opacity-60">(optional)</span>}
+                      </Button>
+                    );
+                  };
+
                   return (
                     <tr key={a.id} className="border-b last:border-0 hover:bg-muted/40">
                       <td className="px-4 py-2 font-mono text-xs">{a.applicationNumber}</td>
@@ -242,43 +284,12 @@ export function SchoolAdmissionsPage() {
                         <Badge className={meta.cls}>{meta.label}</Badge>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {(NEXT_ACTIONS[a.status] ?? []).map((n) => (
-                            <Button
-                              key={n.action}
-                              variant={n.tone === 'success' ? 'default' : n.tone === 'danger' ? 'destructive' : 'secondary'}
-                              size="sm"
-                              disabled={busy}
-                              onClick={() => runAction(a, n.action, n.needsNotes)}
-                            >
-                              {n.action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
-                              {n.action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
-                              {n.action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
-                              {n.action === 'review' && <Send className="h-3.5 w-3.5" />}
-                              {n.action === 'withdraw' && <LogOut className="h-3.5 w-3.5" />}
-                              {n.label}
-                            </Button>
-                          ))}
-                          {stage === 'issue' && (
-                            <Button variant="default" size="sm" disabled={busy} onClick={() => openOffer(a)}>
-                              <Mail className="h-3.5 w-3.5" /> Issue offer
-                            </Button>
-                          )}
-                          {stage === 'respond' && (
-                            <>
-                              <Button variant="default" size="sm" disabled={busy} onClick={() => respondToOffer(a, true)}>
-                                <ThumbsUp className="h-3.5 w-3.5" /> Offer accepted
-                              </Button>
-                              <Button variant="destructive" size="sm" disabled={busy} onClick={() => respondToOffer(a, false)}>
-                                <ThumbsDown className="h-3.5 w-3.5" /> Offer declined
-                              </Button>
-                            </>
-                          )}
-                          {stage === 'enroll' && (
-                            <Button variant="default" size="sm" disabled={enroll.isPending} onClick={() => openEnroll(a)}>
-                              <CheckCircle2 className="h-3.5 w-3.5" /> Enroll
-                            </Button>
-                          )}
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          {(wf?.requiredActions ?? []).map((action) => renderAction(action, 'required'))}
+                          {(wf?.optionalActions ?? []).map((action) => renderAction(action, 'optional'))}
+                          {(wf?.alwaysAvailable ?? [])
+                            .filter((action) => action !== 'request_documents')
+                            .map((action) => renderAction(action, 'terminal'))}
                         </div>
                       </td>
                     </tr>
@@ -327,6 +338,18 @@ export function SchoolAdmissionsPage() {
           <DialogHeader>
             <DialogTitle>Enroll {enrollFor?.applicantFirstName} {enrollFor?.applicantLastName}</DialogTitle>
           </DialogHeader>
+          {!!enrollFor?.workflow?.skippedStages?.length && (
+            <div className="rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
+              This admission workflow enrols directly. No offer or acceptance record will be
+              created for{' '}
+              <strong>
+                {enrollFor.workflow.skippedStages
+                  .map((s) => STAGE_LABELS[s] ?? s)
+                  .join(', ')}
+              </strong>
+              , and the applicant&apos;s timeline will record them as skipped.
+            </div>
+          )}
           {eligibility && eligibility.status === 'BLOCKED' && (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
               <p className="font-medium">This applicant cannot be enrolled yet:</p>

@@ -1,3 +1,18 @@
+> **SUPERSEDED IN PART — see [ADR-015](adr/ADR-015-configurable-admission-workflow.md).**
+>
+> The configurable-workflow architecture below was accepted and built. Two things in it
+> were **rejected during implementation** and must not be used as a reference:
+>
+> 1. **The auto-advance skip mechanism (§4, §6, §9 case 1).** Synthesizing FSM hops writes
+>    `status = offer_issued` when no OfferLetter exists. Replaced by workflow-authorized
+>    REAL transitions plus `AdmissionStatusHistory.skippedStages`.
+> 2. **`workflowId`-only snapshotting (§2).** It leaves an in-flight application exposed to
+>    later edits of the workflow row. Replaced by an immutable `workflowSnapshot` JSON.
+>
+> Also corrected: `offer_expired` is not terminal; stage config is one `mode`
+> (required/optional/skip) rather than `enabled` + `required`; and the capacity guard in
+> §6 P1.1 double-counted committed seats.
+
 # School Admissions — Detailed Revised Plan (v3)
 
 > **Status:** Architecture from v2 accepted. This v3 settles the four open decisions,

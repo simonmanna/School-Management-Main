@@ -17,6 +17,7 @@
  */
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
+import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
 
 function makeService() {
   const tenant = { organizationId: 'org_test', userId: 'user_1' };
@@ -44,6 +45,7 @@ function makeService() {
     expiresAt: null,
   });
   const enrollmentFindFirst = jest.fn().mockResolvedValue(null);
+  const capacityUpdateMany = jest.fn().mockReturnValue({ count: 1 });
 
   const tx = {
     admissionApplication: {
@@ -68,8 +70,18 @@ function makeService() {
     },
     admissionFee: { upsert: upsertable(), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
     admissionDecision: { upsert: upsertable() },
-    admissionCapacity: { findFirst: jest.fn().mockResolvedValue(null) },
-    admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1' }) },
+    // `updateMany` is the atomic seat claim: enroll() reserves a seat with a
+    // conditional update, so the mock has to report how many rows it affected.
+    // count:1 = the claim succeeded. (The release lives in EnrollmentService, because
+    // `enrolled` is a terminal admission status.)
+    admissionCapacity: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: capacityUpdateMany,
+    },
+    admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1', workflowId: null }) },
+    // Workflow resolution on create(): with no rows the snapshot falls back to the
+    // built-in Standard workflow, i.e. pre-workflow behaviour.
+    admissionWorkflow: { findFirst: jest.fn().mockResolvedValue(null) },
     waitingList: { findFirst: jest.fn().mockResolvedValue(null), count: jest.fn().mockResolvedValue(0), create: jest.fn().mockImplementation((a: any) => ({ id: 'wl_1', ...a.data })) },
     applicantIdentityMatch: { create: jest.fn().mockResolvedValue(undefined) },
     contact: { findFirst: jest.fn().mockResolvedValue({ partnerId: 'partner_9' }), create: jest.fn().mockImplementation((a: any) => ({ id: 'contact_new', ...a.data })) },
@@ -92,7 +104,8 @@ function makeService() {
       applicantIdentityMatch: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
       admissionCriteriaSet: { findFirst: jest.fn().mockResolvedValue(null) },
       admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1' }) },
-      admissionCapacity: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
+      admissionCapacity: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), updateMany: capacityUpdateMany },
+      admissionWorkflow: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
       offerLetter: { updateMany: jest.fn().mockReturnValue({ count: 2 }) },
       enrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
       waitingList: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
@@ -118,6 +131,17 @@ function makeService() {
     decrypt: jest.fn((p: any) => (p ? String(p.ciphertext).replace(/^ct\((.*)\)$/, '$1') : null)),
   };
 
+  // AdmissionsWorkflowService — the eighth constructor argument. The REAL service, not
+  // a stub: its resolver is pure logic over the application's workflow snapshot, so
+  // wiring it in means these tests exercise the actual stage rules. Applications in
+  // this suite carry no snapshot, which resolves to the built-in Standard workflow —
+  // i.e. exactly the behaviour that existed before workflows were configurable.
+  const workflowSvc = new AdmissionsWorkflowService(
+    prisma as any,
+    tenant as any,
+    { recordInTx: auditRecordInTx, record: jest.fn() } as any,
+  );
+
   const service = new AdmissionsService(
     prisma as any,
     tenant as any,
@@ -126,6 +150,7 @@ function makeService() {
     sequence as any,
     enrollmentSvc as any,
     encryption as any,
+    workflowSvc,
   );
 
   return {
@@ -192,7 +217,7 @@ describe('AdmissionsService.review — state machine', () => {
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: 'submitted' })
       .mockResolvedValueOnce({ id: 'app_1', status: 'withdrawn' });
-    const result: any = await service.review('app_1', 'withdraw');
+    const result: any = await service.review('app_1', 'withdraw', 'applicant relocated');
     expect(result.status).toBe('withdrawn');
   });
 
@@ -221,7 +246,7 @@ describe('AdmissionsService.review — state machine', () => {
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: 'accepted' })
       .mockResolvedValueOnce({ id: 'app_1', status: 'withdrawn' });
-    const result: any = await service.review('app_1', 'withdraw');
+    const result: any = await service.review('app_1', 'withdraw', 'applicant relocated');
     expect(result.status).toBe('withdrawn');
   });
 
@@ -314,11 +339,19 @@ describe('AdmissionsService — extended lifecycle', () => {
     decline_offer: 'offer_declined', withdraw: 'withdrawn',
   };
 
+  /**
+   * Decision-grade actions (accept/reject/waitlist/withdraw) are refused without a
+   * reason — enforced in applyReview, not just in the UI, so the rule holds when the
+   * web client is bypassed. Supply one here so these tests exercise the transition
+   * rather than the reason guard, which has its own tests.
+   */
+  const REASON_REQUIRED = ['accept', 'reject', 'waitlist', 'withdraw'];
+
   async function driveReview(service: any, mocks: any, from: string, action: string) {
     mocks.applicationFindFirst
       .mockResolvedValueOnce({ id: 'app_1', status: from, organizationId: 'org_test' })
       .mockResolvedValueOnce({ id: 'app_1', status: targetOf[action] });
-    return service.review('app_1', action);
+    return service.review('app_1', action, REASON_REQUIRED.includes(action) ? 'test reason' : undefined);
   }
 
   it.each([
@@ -580,14 +613,40 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
   });
 
+  // `claimedSeats` is the seat ledger, so availability is capacity - reserved -
+  // claimedSeats. `enrollment.count` (occupied) is reported for reconciliation but is
+  // deliberately NOT an input: subtracting both double-counted every committed seat,
+  // which capped a capacity-2 class at one student.
   it('refuses to enroll when the class is full', async () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
     mocks.tx.admissionCapacity.findFirst.mockResolvedValue({
       id: 'cap_1', classId: 'c_1', sectionId: null, streamId: null, capacity: 30, reservedCapacity: 0,
+      claimedSeats: 30,
     });
     mocks.tx.enrollment.count.mockResolvedValue(30);
     await expect(service.enroll(enrollDto as any)).rejects.toThrow(/no seats available/);
+  });
+
+  it('does not double-count a committed seat against the ledger', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
+    // One seat already taken: capacity 2, one enrollment committed, so claimedSeats
+    // and occupied both read 1. The second enrollment must still succeed — the old
+    // guard subtracted both and rejected it.
+    mocks.tx.admissionCapacity.findFirst.mockResolvedValue({
+      id: 'cap_1', classId: 'c_1', sectionId: null, streamId: null, capacity: 2, reservedCapacity: 0,
+      claimedSeats: 1,
+    });
+    mocks.tx.enrollment.count.mockResolvedValue(1);
+    await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();
+    // The claim is conditional on there being room: claimedSeats < capacity - reserved.
+    expect(mocks.tx.admissionCapacity.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'cap_1', claimedSeats: { lt: 2 } }),
+        data: { claimedSeats: { increment: 1 } },
+      }),
+    );
   });
 
   it('allows enrollment when capacity remains', async () => {
@@ -595,6 +654,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ admissionCycleId: 'cyc_1' }));
     mocks.tx.admissionCapacity.findFirst.mockResolvedValue({
       id: 'cap_1', classId: 'c_1', sectionId: null, streamId: null, capacity: 30, reservedCapacity: 2,
+      claimedSeats: 27,
     });
     mocks.tx.enrollment.count.mockResolvedValue(27);
     await expect(service.enroll(enrollDto as any)).resolves.toBeDefined();

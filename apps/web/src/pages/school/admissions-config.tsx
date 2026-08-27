@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Plus, Trash2, FileText, ListChecks, MessageSquare } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Trash2, FileText, ListChecks, MessageSquare, Workflow } from 'lucide-react';
 import {
   useAdmissionRequirements,
   useUpsertRequirement,
@@ -25,9 +26,19 @@ export function SchoolAdmissionsConfigPage() {
   const [tab, setTab] = useState<Tab>('requirements');
   return (
     <div className="space-y-4 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">Admissions configuration</h1>
-        <p className="text-sm text-muted-foreground">Requirements, offer-letter templates and enquiries.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Admissions configuration</h1>
+          <p className="text-sm text-muted-foreground">Requirements, offer-letter templates and enquiries.</p>
+        </div>
+        {/* Which stages a school requires lives on its own page — it is a different
+            kind of setting from the per-item CRUD in these tabs. */}
+        <Link
+          to="/school/admissions/workflow"
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          <Workflow className="h-4 w-4" /> Admission workflow
+        </Link>
       </div>
       <div className="flex gap-1 border-b">
         {([['requirements', 'Requirements', ListChecks], ['templates', 'Offer templates', FileText], ['enquiries', 'Enquiries', MessageSquare]] as const).map(([k, label, Icon]) => (

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { AdmissionsWorkflowService } from './admissions-workflow.service';
+import { STAGE_DEFS } from './admission-workflow.schema';
 
 /**
  * Admissions analytics (Phase 5). Every aggregate is computed in the database
@@ -13,10 +15,66 @@ export class AdmissionsAnalyticsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly workflow: AdmissionsWorkflowService,
   ) {}
 
   private scope(academicYearId?: string) {
     return { ...(academicYearId ? { academicYearId } : {}), deletedAt: null };
+  }
+
+  /**
+   * Per-stage coverage across every application's own workflow snapshot.
+   *
+   * Three states that must never be conflated in a report:
+   *   completed — the stage is part of this application's process and it happened
+   *   pending   — part of the process, not done yet
+   *   skipped   — not part of this school's process at all
+   *
+   * Without this split, "Offer: 75" is unreadable: is the remainder waiting, or did
+   * those schools not run an offer round?
+   *
+   * Cost note: unlike the groupBy aggregates above, this needs each application's own
+   * snapshot, so it reads one narrow row per application in scope. Scoped by academic
+   * year and limited to the columns the completion predicates read. If this ever
+   * becomes hot, denormalise the resolved preset onto the application and group on it.
+   */
+  async stageCoverage(academicYearId?: string) {
+    const apps = await this.prisma.client.admissionApplication.findMany({
+      where: { ...this.scope(academicYearId), status: { not: 'draft' } },
+      select: {
+        status: true,
+        workflowSnapshot: true,
+        screenedAt: true,
+        interviewedAt: true,
+        scoredAt: true,
+        acceptedAt: true,
+        offerAcceptedAt: true,
+        enrolledAt: true,
+        decision: { select: { id: true } },
+        offerLetter: { select: { status: true, expiresAt: true } },
+      },
+    });
+
+    const empty = () => ({ required: 0, optional: 0, completed: 0, pending: 0, skipped: 0 });
+    const out: Record<string, ReturnType<typeof empty>> = {};
+    for (const def of STAGE_DEFS) out[def.stage] = empty();
+
+    for (const app of apps) {
+      const stages = this.workflow.stagesFor(app as any);
+      for (const cfg of stages) {
+        const bucket = out[cfg.stage];
+        const complete = this.workflow.isStageComplete(app as any, cfg);
+        if (cfg.mode === 'skip') {
+          bucket.skipped += 1;
+          continue;
+        }
+        if (cfg.mode === 'required') bucket.required += 1;
+        else bucket.optional += 1;
+        if (complete) bucket.completed += 1;
+        else bucket.pending += 1;
+      }
+    }
+    return out;
   }
 
   /** Count of applications in each status, for one academic year or all. */
@@ -37,6 +95,7 @@ export class AdmissionsAnalyticsService {
    */
   async funnel(academicYearId?: string) {
     const byStatus = await this.statusBreakdown(academicYearId);
+    const stageCoverage = await this.stageCoverage(academicYearId);
     const sum = (keys: string[]) => keys.reduce((n, k) => n + (byStatus[k] ?? 0), 0);
 
     const drafts = byStatus['draft'] ?? 0;
@@ -57,6 +116,15 @@ export class AdmissionsAnalyticsService {
       drafts,
       total,
       stages: { submitted, reviewed, accepted, offered, offerAccepted, enrolled },
+      /**
+       * Per-stage required/completed/pending/skipped. Read this ALONGSIDE `stages`.
+       *
+       * `stages` sums statuses, so a school running `Application → Enrollment` shows
+       * `offered: 0` — which means "the offer stage is not part of that process", NOT
+       * "nobody received an offer". Conversion rates below share that caveat: their
+       * denominators only describe applications whose workflow includes the stage.
+       */
+      stageCoverage,
       buckets: { waitlisted, rejected },
       conversion: {
         acceptanceRate: pct(accepted, submitted),

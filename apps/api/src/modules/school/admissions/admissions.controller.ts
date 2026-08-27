@@ -25,10 +25,14 @@ import {
 export class AdmissionsController {
   constructor(private readonly admissions: AdmissionsService) {}
 
+  /**
+   * Each row carries its resolved workflow actions so the pipeline table can render
+   * the right buttons without an N+1 of per-application workflow requests.
+   */
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
   list(@Query() q: PaginationDto) {
-    return this.admissions.list(q);
+    return this.admissions.listWithWorkflow(q);
   }
 
   @Get('by-status/:status')
@@ -283,6 +287,19 @@ export class AdmissionsController {
   @RequirePermissions(PERMISSIONS.school.read)
   enrollmentEligibility(@Param('id') id: string) {
     return this.admissions.enrollmentEligibility(id);
+  }
+
+  /**
+   * Everything the UI needs to render this application's controls: stage state,
+   * the next required stage, the permitted required/optional actions, and the
+   * eligibility verdict. Workflow and eligibility stay orthogonal — the client picks
+   * which buttons exist from the action lists and whether they are enabled from
+   * `eligibility`. Guidance only: every mutating endpoint re-checks all of it.
+   */
+  @Get(':id/workflow')
+  @RequirePermissions(PERMISSIONS.school.read)
+  applicationWorkflow(@Param('id') id: string) {
+    return this.admissions.applicationWorkflow(id);
   }
 
   @Post('waitlist/:classId/rank')

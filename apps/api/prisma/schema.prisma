@@ -10905,6 +10905,38 @@ model ApplicantIdentityMatch {
 /// Phase-3 admission cycle: a scoped admissions campaign under an AcademicYear
 /// (e.g. "Primary 1 2027/28"). Owns capacity, criteria, deadlines — not the
 /// application FSM itself.
+/// Configurable admission process for one organization. Which business stages a
+/// school requires (Application → Evaluation → Decision → Offer → Applicant
+/// Acceptance → Enrollment) is configuration; the eligibility conditions
+/// (verified documents, application fee, capacity, FSM legality) never are.
+///
+/// Stage config lives in `stages` as JSON rather than a child table: six fixed,
+/// ordered stages are configuration, not queryable domain rows. The shape is owned
+/// and validated server-side by admission-workflow.schema.ts — never trusted raw.
+model AdmissionWorkflow {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  /// The preset this was created from; null once hand-tuned (the ReportCardSettings
+  /// convention). Purely informational — `stages` is always authoritative.
+  presetKey      String?
+  isDefault      Boolean  @default(false)
+  /// false = cannot be assigned to new cycles or applications. Never hides the row
+  /// from historical reads: a workflow is configuration history.
+  active         Boolean  @default(true)
+  /// Ordered StageConfig[]; see admission-workflow.schema.ts.
+  stages         Json     @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  cycles       AdmissionCycle[]
+  applications AdmissionApplication[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+}
+
 model AdmissionCycle {
   id             String   @id @default(uuid())
   organizationId String
@@ -10913,11 +10945,16 @@ model AdmissionCycle {
   opensAt        DateTime?
   closesAt       DateTime?
   status         String   @default("open") /// open | closed
+  /// Admission workflow applied to applications created in this cycle FROM NOW ON.
+  /// Reassigning it never alters applications that already exist — each one carries
+  /// its own immutable snapshot. Null = fall back to the org default workflow.
+  workflowId     String?
   customFields   Json     @default("{}")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   academicYear  AcademicYear        @relation(fields: [academicYearId], references: [id])
+  workflow       AdmissionWorkflow?    @relation(fields: [workflowId], references: [id])
   applications   AdmissionApplication[]
   capacities     AdmissionCapacity[]
   criteriaSets   AdmissionCriteriaSet[]
@@ -10925,6 +10962,7 @@ model AdmissionCycle {
   @@unique([organizationId, academicYearId, name])
   @@index([organizationId])
   @@index([academicYearId])
+  @@index([workflowId])
 }
 
 /// Organization-scoped nationality master data. Replaces the hardcoded
@@ -10955,9 +10993,12 @@ model AdmissionCapacity {
   campusId         String?
   capacity         Int     @default(0)
   reservedCapacity Int     @default(0)
-  /// Atomic seat claim used to make enrollment capacity-safe under concurrency.
-  /// Incremented (conditionally) inside the enroll transaction; the ui `available`
-  /// is `capacity - reservedCapacity - claimedSeats`. Decremented on enrolment reversal.
+  /// THE SEAT LEDGER. Counts every seat consumed by a committed or in-flight
+  /// enrollment: incremented (conditionally, so races cannot over-admit) inside the
+  /// enroll transaction, decremented when an enrolled application is withdrawn.
+  /// `available = capacity - reservedCapacity - claimedSeats`. The derived
+  /// Enrollment count (`occupied`) is reported for reconciliation but is NOT part of
+  /// the seat guard — subtracting both double-counted every committed seat.
   claimedSeats     Int     @default(0)
 
   admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
@@ -11070,6 +11111,18 @@ model AdmissionApplication {
   residenceType      String?
   entryStatus        String?
   address            String?
+  /// PROVENANCE ONLY — the workflow configuration this application was created from.
+  /// Progression logic must NEVER load a workflow through this id: doing so would
+  /// re-expose the application to later edits of that row and destroy snapshot
+  /// immutability. Use `workflowSnapshot`.
+  workflowId         String?
+  /// AUTHORITATIVE. The workflow configuration frozen at creation:
+  /// `{ version, presetKey, workflowName, stages[] }`. Written exactly once, never
+  /// updated — editing a workflow or reassigning a cycle's workflow can never change
+  /// the required stages of an application that already exists. Null (rows predating
+  /// this feature) resolves to the built-in Standard workflow in the registry, which
+  /// reproduces the pre-workflow behaviour.
+  workflowSnapshot   Json?
   customFields       Json            @default("{}")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -11094,12 +11147,14 @@ model AdmissionApplication {
   reviewerAssignments AdmissionReviewerAssignment[]
   portalTokens  AdmissionPortalToken[]
   statusHistory AdmissionStatusHistory[]
+  workflow      AdmissionWorkflow?    @relation(fields: [workflowId], references: [id])
 
   @@unique([organizationId, applicationNumber])
   @@index([organizationId])
   @@index([academicYearId])
   @@index([status])
   @@index([organizationId, status, academicYearId])
+  @@index([workflowId])
 }
 
 /// Structured guardian captured on an application. Promoted to a real
@@ -11141,6 +11196,15 @@ model AdmissionStatusHistory {
   toStatus       String
   action         String
   reason         String?
+  /// Business stages this REAL transition was authorized to bypass, e.g. a `simple`
+  /// workflow enrolling straight from `submitted` records
+  /// ['EVALUATION','DECISION','OFFER','APPLICANT_ACCEPTANCE'].
+  ///
+  /// Nothing is synthesized: a skipped stage leaves no status row and no artifact, so
+  /// `offer_issued` always means an offer really was issued. Always derived
+  /// server-side from the snapshot + current state + target action; never accepted
+  /// from a request body, or audit history would be client-forgeable.
+  skippedStages  String[] @default([])
   changedById    String?
   changedAt      DateTime @default(now())
 

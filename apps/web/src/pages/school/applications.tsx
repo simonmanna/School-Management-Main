@@ -16,7 +16,10 @@ import { notify } from '@/lib/notify';
 // Single source of truth for the lifecycle. This page previously carried its own
 // copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
 // 7 of the 15 backend states.
-import { NEXT_ACTIONS, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, statusMeta } from './_components/admission-status';
+
+/** Handled by the admissions pipeline page, which owns the offer/enrol dialogs. */
+const OFFER_STAGE_ACTIONS = ['issue_offer', 'accept_offer', 'decline_offer', 'enroll', 'request_documents'];
 import { DecisionDialog } from './_components/DecisionDialog';
 
 export function SchoolApplicationsPage() {
@@ -106,21 +109,33 @@ export function SchoolApplicationsPage() {
                   </td>
                   <td className="px-4 py-2 text-right">
                     <div className="flex flex-wrap justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                      {(NEXT_ACTIONS[a.status] ?? []).map((n) => (
-                        <Button
-                          key={n.action}
-                          variant={n.tone === 'success' ? 'default' : n.tone === 'danger' ? 'destructive' : 'secondary'}
-                          size="sm"
-                          disabled={act.isPending}
-                          onClick={() => runAction(a, n.action, n.needsNotes)}
-                        >
-                          {n.action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
-                          {n.action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
-                          {n.action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
-                          {n.action === 'review' && <Send className="h-3.5 w-3.5" />}
-                          {n.label}
-                        </Button>
-                      ))}
+                      {/* Offered actions come from the backend workflow resolver on each
+                          row, so a school that skips a stage never sees its buttons.
+                          Offer/enrolment actions live on the admissions pipeline page,
+                          which has the dialogs they need. */}
+                      {[
+                        ...(a.workflow?.requiredActions ?? []),
+                        ...(a.workflow?.optionalActions ?? []),
+                        ...(a.workflow?.alwaysAvailable ?? []),
+                      ]
+                        .filter((action) => !OFFER_STAGE_ACTIONS.includes(action))
+                        .map((action) => (
+                          <Button
+                            key={action}
+                            variant={
+                              action === 'reject' || action === 'withdraw' ? 'ghost' : 'secondary'
+                            }
+                            size="sm"
+                            disabled={act.isPending}
+                            onClick={() => runAction(a, action, NEEDS_REASON.includes(action))}
+                          >
+                            {action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
+                            {action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
+                            {action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
+                            {action === 'review' && <Send className="h-3.5 w-3.5" />}
+                            {ACTION_LABELS[action] ?? action.replace(/_/g, ' ')}
+                          </Button>
+                        ))}
                     </div>
                   </td>
                 </tr>
