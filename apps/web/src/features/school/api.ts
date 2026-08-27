@@ -4731,7 +4731,9 @@ export function useUpdateLessonPlan() {
 }
 export function useTransitionLessonPlan() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, action, requestedChanges }: any) => (await api.post<any>(`${LP}/lesson-plans/${id}/transition`, { action, requestedChanges })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
+  // `version` is forwarded so the optimistic-concurrency guard on submit still
+  // applies — omitting it lets a stale editor overwrite a newer revision.
+  return useMutation({ mutationFn: async ({ id, action, version, comment, requestedChanges }: any) => (await api.post<any>(`${LP}/lesson-plans/${id}/transition`, { action, version, comment, requestedChanges })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
 }
 export function useCreateFromTimetable() {
   const qc = useQueryClient();

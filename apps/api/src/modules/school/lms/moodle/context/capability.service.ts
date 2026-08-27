@@ -1,3 +1,4 @@
+import { ALL_CAPABILITIES, CAP } from '../capabilities';
 import { Injectable } from '@nestjs/common';
 import type { LmsContext, LmsPermission } from '@prisma/client';
 import { PrismaService } from '../../../../../kernel/prisma/prisma.service';
@@ -24,6 +25,44 @@ function principalKey(p: Principal): string {
  * Results are memoised per (org, principal, context) and invalidated by bumping the
  * org's cache version on any role/assignment/override write.
  */
+
+/**
+ * Coarse school permissions → LMS capabilities held org-wide.
+ *
+ * Moodle grants a system-level role its capabilities at every context beneath it.
+ * Without an equivalent, this installation locked everyone out: capabilities come
+ * only from `LmsRoleAssignment`, nothing seeds those assignments, and a fresh
+ * course therefore denied even a full administrator the right to open it.
+ *
+ * The two layers compose rather than compete:
+ *   - a coarse permission says WHAT a staff member may do across the school;
+ *   - an `LmsRoleAssignment` says WHICH course a person is attached to.
+ *
+ * So `school:courses:write` — a registrar-grade grant — confers manager
+ * capabilities everywhere, while `school:courses:teach` deliberately does NOT:
+ * letting every teacher edit every course is exactly the scoping this system
+ * exists to provide.
+ */
+const PERMISSION_CAPABILITIES: Array<{ permission: string; capabilities: readonly string[] }> = [
+  // Administers courses org-wide.
+  { permission: 'school:courses:write', capabilities: ALL_CAPABILITIES },
+  // Marks work: needs to open a course and write grades in it.
+  {
+    permission: 'school:grades:write',
+    capabilities: [
+      CAP.courseView, CAP.activityView, CAP.gradeView, CAP.gradeViewAll, CAP.gradeEdit,
+      CAP.courseViewParticipants, CAP.assignViewSubmissions, CAP.assignGrade, CAP.quizGrade,
+      CAP.courseViewReports, CAP.completionOverride,
+    ],
+  },
+  // Enrols learners.
+  { permission: 'school:courses:enrol', capabilities: [CAP.courseView, CAP.courseEnrol, CAP.courseViewParticipants] },
+  // Plain staff read. Enough to open a course page; per-pupil data is gated
+  // separately by the capabilities above, so this does not leak anyone's work.
+  { permission: 'school:lms:read', capabilities: [CAP.courseView, CAP.activityView] },
+  { permission: 'school:read', capabilities: [CAP.courseView, CAP.activityView] },
+];
+
 @Injectable()
 export class CapabilityService {
   private readonly cache = new Map<string, { version: number; caps: Map<string, LmsPermission> }>();
@@ -74,6 +113,24 @@ export class CapabilityService {
     return this.effective(principal, ctx.id);
   }
 
+
+  /**
+   * Capabilities a staff principal holds from their coarse school permissions.
+   *
+   * Students and guardians get nothing here: their access is scoped by
+   * enrolment and guardianship, never by a school-wide permission.
+   */
+  private fromPermissions(principal: Principal): Map<string, LmsPermission> {
+    const caps = new Map<string, LmsPermission>();
+    if (!principal.userId) return caps;
+    const held = new Set(this.tenant.permissions);
+    for (const { permission, capabilities } of PERMISSION_CAPABILITIES) {
+      if (!held.has(permission)) continue;
+      for (const cap of capabilities) caps.set(cap, 'allow');
+    }
+    return caps;
+  }
+
   private async resolveAll(principal: Principal, contextId: string): Promise<Map<string, LmsPermission>> {
     const key = `${this.org}:${principalKey(principal)}:${contextId}`;
     const cached = this.cache.get(key);
@@ -105,9 +162,15 @@ export class CapabilityService {
           : { studentProfileId: principal.studentProfileId ?? '__none__' }),
       },
     });
+    // A staff member's coarse permissions grant capabilities org-wide, exactly
+    // as a Moodle system role would. Without this, an installation that has
+    // never assigned an LMS role — which is every fresh one — denies everybody,
+    // including an administrator, the right to open a course.
+    const implicit = this.fromPermissions(principal);
+
     if (assignments.length === 0) {
-      this.cache.set(key, { version: this.version(), caps: empty });
-      return empty;
+      this.cache.set(key, { version: this.version(), caps: implicit });
+      return implicit;
     }
 
     const roleIds = Array.from(new Set(assignments.map((a) => a.roleId)));
@@ -146,6 +209,14 @@ export class CapabilityService {
         }
       }
       result.set(cap, prohibited ? 'prohibit' : verdict);
+    }
+
+    // An explicit `prohibit` still wins: it is the one verdict that cannot be
+    // overridden from above, so a person barred from one course stays barred
+    // even if their coarse permissions would otherwise allow it.
+    for (const [cap, perm] of implicit) {
+      if (result.get(cap) === 'prohibit') continue;
+      if (perm === 'allow' && result.get(cap) !== 'allow') result.set(cap, 'allow');
     }
 
     this.cache.set(key, { version: this.version(), caps: result });

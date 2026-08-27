@@ -50,8 +50,13 @@ export function SchoolLmsLessonPlansPage() {
     } catch (e: any) { notify.error(e?.message ?? 'Failed'); }
   };
 
-  const doTransition = async (id: string, action: string, requestedChanges?: string) => {
-    try { await transition.mutateAsync({ id, action, requestedChanges }); notify.success(`→ ${action}`); } catch (e: any) { notify.error(e?.message ?? 'Failed'); }
+  const doTransition = async (id: string, action: string, version?: number, requestedChanges?: string) => {
+    try {
+      await transition.mutateAsync({ id, action, version, requestedChanges });
+      notify.success(`→ ${action}`);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? e?.message ?? 'Failed');
+    }
   };
 
   return (
@@ -78,9 +83,9 @@ export function SchoolLmsLessonPlansPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={(STATUS_COLORS[p.workflowStatus] as any) ?? 'outline'}>{p.workflowStatus}</Badge>
-                  {p.workflowStatus === 'draft' && <Button size="sm" variant="outline" onClick={() => doTransition(p.id, 'submitted')}><Send className="h-3 w-3" /> Submit</Button>}
-                  {p.workflowStatus === 'submitted' && <><Button size="sm" onClick={() => doTransition(p.id, 'approved')}><Check className="h-3 w-3" /> Approve</Button><Button size="sm" variant="destructive" onClick={() => doTransition(p.id, 'needs_revision', 'Please revise')}><RotateCcw className="h-3 w-3" /> Revise</Button></>}
-                  {p.workflowStatus === 'needs_revision' && <Button size="sm" onClick={() => doTransition(p.id, 'submitted')}><Send className="h-3 w-3" /> Resubmit</Button>}
+                  {p.workflowStatus === 'draft' && <Button size="sm" variant="outline" onClick={() => doTransition(p.id, 'submitted', p.version)}><Send className="h-3 w-3" /> Submit</Button>}
+                  {p.workflowStatus === 'submitted' && <><Button size="sm" onClick={() => doTransition(p.id, 'approved', p.version)}><Check className="h-3 w-3" /> Approve</Button><Button size="sm" variant="destructive" onClick={() => doTransition(p.id, 'needs_revision', p.version, 'Please revise')}><RotateCcw className="h-3 w-3" /> Revise</Button></>}
+                  {p.workflowStatus === 'needs_revision' && <Button size="sm" onClick={() => doTransition(p.id, 'submitted', p.version)}><Send className="h-3 w-3" /> Resubmit</Button>}
                   {p.workflowStatus === 'approved' && <Button size="sm" variant="outline" onClick={() => archive.mutateAsync(p.id)}><Archive className="h-3 w-3" /> Archive</Button>}
                 </div>
               </div>

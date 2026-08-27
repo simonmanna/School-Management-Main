@@ -4,13 +4,14 @@ import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { LessonPlanningService } from './lesson-planning.service';
 import {
+  AddCourseOfferingTeacherDto,
   CreateCourseOfferingDto,
   CreateFromTimetableDto,
   CreateLessonPlanDto,
-  AddCourseOfferingTeacherDto,
   ReviewLessonPlanDto,
   SaveTemplateDto,
   SubmitLessonPlanDto,
+  TransitionLessonPlanDto,
   UpdateLessonPlanDto,
 } from './dto.lp';
 
@@ -83,6 +84,29 @@ export class LessonPlanningController {
   @RequirePermissions(PERMISSIONS.school.approveLessonPlans)
   review(@Param('id') id: string, @Body() dto: ReviewLessonPlanDto) {
     return this.svc.reviewLessonPlan(id, dto);
+  }
+
+  /**
+   * One workflow move, named by the state to reach.
+   *
+   * The web client drives its buttons off the target status, so it calls this
+   * rather than choosing between `submit` and `review`; both of those remain for
+   * callers that want the narrower contract. Permission is the union of the two,
+   * and the service re-checks which one actually applies.
+   */
+  @Post('lesson-plans/:id/transition')
+  // The route takes the lower permission; approving is checked per-branch in the
+  // service, because @RequirePermissions is an AND and demanding both here would
+  // lock out a teacher who may submit but not approve.
+  @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
+  transition(@Param('id') id: string, @Body() dto: TransitionLessonPlanDto) {
+    return this.svc.transitionLessonPlan(id, dto);
+  }
+
+  @Post('lesson-plans/:id/archive')
+  @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
+  archive(@Param('id') id: string) {
+    return this.svc.archiveLessonPlan(id);
   }
 
   @Post('lesson-plans/:id/save-template')

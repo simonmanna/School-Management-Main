@@ -108,6 +108,24 @@ export class ReviewLessonPlanDto {
   @IsOptional() @IsString() requestedChanges?: string;
 }
 
+/**
+ * One workflow move on a lesson plan, expressed as the state to reach.
+ *
+ * The web client drives the plan's buttons off the target status, so a single
+ * endpoint that dispatches is a better fit than making it choose between
+ * `submit` and `review`. `version` stays optional but is honoured when sent —
+ * dropping it silently would remove the optimistic-concurrency guard that
+ * `submitLessonPlan` relies on.
+ */
+export class TransitionLessonPlanDto {
+  @IsIn(['submitted', 'approved', 'needs_revision', 'archived', 'draft'])
+  action!: 'submitted' | 'approved' | 'needs_revision' | 'archived' | 'draft';
+
+  @IsOptional() @IsInt() @Min(1) version?: number;
+  @IsOptional() @IsString() comment?: string;
+  @IsOptional() @IsString() requestedChanges?: string;
+}
+
 export class SaveTemplateDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsIn(['school', 'department', 'subject', 'teacher']) scope!: 'school' | 'department' | 'subject' | 'teacher';

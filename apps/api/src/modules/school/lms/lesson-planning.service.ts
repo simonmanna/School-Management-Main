@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PERMISSIONS } from '@erp/shared';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CourseOffering, LessonPlan } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -301,6 +302,76 @@ export class LessonPlanningService {
     await this.recordReview(id, lp.workflowStatus, 'submitted');
     await this.snapshot(id, next, lp.teacherPartnerId ?? undefined);
     return this.getLessonPlan(id);
+  }
+
+  /**
+   * Retire a plan without deleting it.
+   *
+   * Archived rather than removed: a plan is the evidence that a lesson was
+   * prepared and approved, and a delivered lesson still points at it. LP_WORKFLOW
+   * allows archived → draft, so a plan can be brought back for the next year.
+   */
+  async archiveLessonPlan(id: string) {
+    const lp = await this.getLessonPlan(id);
+    if (!LP_WORKFLOW[lp.workflowStatus]?.includes('archived')) {
+      throw new BadRequestException(`Cannot archive a plan in status '${lp.workflowStatus}'`);
+    }
+    const next = lp.version + 1;
+    await this.prisma.client.lessonPlan.update({
+      where: { id }, data: { workflowStatus: 'archived', version: next },
+    });
+    await this.recordReview(id, lp.workflowStatus, 'archived');
+    await this.snapshot(id, next);
+    return this.getLessonPlan(id);
+  }
+
+  /**
+   * One entry point for every workflow move, dispatching on the target state.
+   *
+   * The plan's own status decides which underlying operation applies, so a
+   * caller never has to know that "submitted" is a different code path from
+   * "approved". Each branch keeps its own guards: submitting still checks the
+   * version, reviewing still refuses anything but a submitted plan, and an
+   * illegal hop is refused by LP_WORKFLOW rather than silently applied.
+   */
+  async transitionLessonPlan(
+    id: string,
+    dto: { action: string; version?: number; comment?: string; requestedChanges?: string },
+  ) {
+    const lp = await this.getLessonPlan(id);
+    const to = dto.action;
+    if (!LP_WORKFLOW[lp.workflowStatus]?.includes(to)) {
+      throw new BadRequestException(`Cannot move a plan from '${lp.workflowStatus}' to '${to}'`);
+    }
+    switch (to) {
+      case 'submitted':
+        // Use the caller's version when supplied so a stale editor still loses.
+        return this.submitLessonPlan(id, { version: dto.version ?? lp.version });
+      case 'approved':
+      case 'needs_revision': {
+        // Reviewing is a separate authority from writing a plan: a teacher may
+        // submit their own work but must not approve it.
+        if (!this.tenant.permissions.includes(PERMISSIONS.school.approveLessonPlans)) {
+          throw new ForbiddenException('You do not have permission to review lesson plans');
+        }
+        return this.reviewLessonPlan(id, {
+          toStatus: to, comment: dto.comment, requestedChanges: dto.requestedChanges,
+        });
+      }
+      case 'archived':
+        return this.archiveLessonPlan(id);
+      case 'draft': {
+        const next = lp.version + 1;
+        await this.prisma.client.lessonPlan.update({
+          where: { id }, data: { workflowStatus: 'draft', version: next },
+        });
+        await this.recordReview(id, lp.workflowStatus, 'draft', dto.comment);
+        await this.snapshot(id, next);
+        return this.getLessonPlan(id);
+      }
+      default:
+        throw new BadRequestException(`Unknown lesson-plan action '${to}'`);
+    }
   }
 
   async reviewLessonPlan(id: string, dto: { toStatus: 'approved' | 'needs_revision'; comment?: string; requestedChanges?: string }) {
