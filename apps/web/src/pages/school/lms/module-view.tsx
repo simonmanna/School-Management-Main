@@ -1,103 +1,143 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Send } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Circle, Clock, Lock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useLmsModuleView, useLmsModuleAction } from '@/features/school/api';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { SafeHtml } from '@/components/ui/safe-html';
+import { useLmsModuleView, useLmsModuleAction, useLmsSetCompletion } from '@/features/school/api';
+import { activityUi } from '@/features/school/lms/activities/registry';
+import { formatDue } from '@/features/school/lms/activities/shared';
+import { can, CAP, type ModuleViewEnvelope } from '@/features/school/lms/types';
 import { notify } from '@/lib/notify';
 
 /**
- * Generic activity page (ADR-014 §6). Renders whatever the plugin's view returns —
- * the course page never switches on activity type, and neither does this shell beyond
- * offering the plugin's common actions.
+ * The activity page: common chrome rendered once, body delegated to the registered
+ * plugin component (ADR-014 §6).
+ *
+ * This page used to duck-type the response (`guessType(view)`) and fall back to
+ * `<pre>{JSON.stringify(view)}</pre>` for anything it could not place. The server
+ * now returns a tagged envelope, so dispatch is a registry lookup and the chrome —
+ * title, due date, availability reason, grade, completion tick — is written once
+ * instead of per activity type.
  */
 export function SchoolLmsModuleViewPage() {
   const { id = '' } = useParams();
+  const [params] = useSearchParams();
+  const asStudent = params.get('asStudent') ?? undefined;
   const nav = useNavigate();
-  const { data, isLoading } = useLmsModuleView(id);
-  const act = useLmsModuleAction();
-  const [text, setText] = useState('');
 
-  const view: any = data ?? {};
-  const instance = view.instance ?? view;
-  const type: string = instance?.activityType ?? guessType(view);
+  const { data, isLoading, refetch } = useLmsModuleView(id, asStudent);
+  const act = useLmsModuleAction();
+  const setCompletion = useLmsSetCompletion();
+  const [busy, setBusy] = useState(false);
+
+  if (isLoading) return <p className="p-4 text-sm text-muted-foreground">Loading…</p>;
+  const view = data as ModuleViewEnvelope | undefined;
+  if (!view?.module) return <p className="p-4 text-sm text-muted-foreground">Activity not found.</p>;
+
+  const { module: cm, course, audience } = view;
+  const ui = activityUi(cm.activityType);
+  const Body = audience === 'teacher' ? ui.TeacherView : ui.StudentView;
+  const Icon = ui.icon;
 
   const run = async (action: string, dto: Record<string, unknown> = {}) => {
-    try { await act.mutateAsync({ id, action, ...dto }); notify.success(`${action} ok`); setText(''); }
-    catch (e: any) { notify.error(e?.message ?? 'Failed'); }
+    setBusy(true);
+    try {
+      await act.mutateAsync({ id, action, ...dto, ...(asStudent ? { asStudent } : {}) });
+      await refetch();
+      notify.success('Saved');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? e?.message ?? 'Action failed');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const due = formatDue(cm.dueAt);
+  const overdue = cm.dueAt && new Date(cm.dueAt) < new Date() && cm.grade?.submissionStatus === 'assigned';
+  const complete = cm.completion && cm.completion.state !== 'incomplete';
+  const mayTick =
+    cm.completion?.mode === 'manual' &&
+    (view.viewingAs.kind === 'student' || can(view.capabilities, CAP.completionOverride));
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => nav(-1)}><ArrowLeft className="h-4 w-4" /></Button>
-        <h1 className="text-xl font-semibold">{instance?.name ?? 'Activity'}</h1>
-        <Badge variant="outline">{type}</Badge>
+    <div className="mx-auto max-w-4xl space-y-4 p-4">
+      <div className="flex items-start gap-3">
+        <Button variant="ghost" size="icon" onClick={() => nav(`/school/lms/courses/${course.id}`)}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <Icon className="mt-1 h-6 w-6 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold leading-tight">{cm.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            {course.name}
+            {audience === 'teacher' && <Badge variant="outline" className="ml-2 text-[10px]">Teacher view</Badge>}
+            {view.viewingAs.kind === 'guardian' && <Badge variant="outline" className="ml-2 text-[10px]">Parent view</Badge>}
+          </p>
+        </div>
+        {mayTick && (
+          <Button
+            variant={complete ? 'secondary' : 'outline'}
+            size="sm"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await setCompletion.mutateAsync({ id, state: complete ? 'incomplete' : 'complete', asStudent });
+                await refetch();
+              } catch (e: any) {
+                notify.error(e?.response?.data?.message ?? 'Could not update');
+              } finally { setBusy(false); }
+            }}
+          >
+            {complete ? <CheckCircle2 className="mr-1 h-4 w-4 text-emerald-600" /> : <Circle className="mr-1 h-4 w-4" />}
+            {complete ? 'Completed' : 'Mark as done'}
+          </Button>
+        )}
       </div>
 
-      {instance?.intro && <Card><CardContent className="prose prose-sm max-w-none py-4" dangerouslySetInnerHTML={{ __html: instance.intro }} /></Card>}
-      {instance?.content && <Card><CardContent className="prose prose-sm max-w-none py-4" dangerouslySetInnerHTML={{ __html: instance.content }} /></Card>}
-      {instance?.externalUrl && <Card><CardContent className="py-4"><a className="text-primary underline" href={instance.externalUrl} target="_blank" rel="noreferrer">{instance.externalUrl}</a></CardContent></Card>}
+      {(due || complete) && (
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          {due && (
+            <span className={`flex items-center gap-1 ${overdue ? 'text-destructive' : 'text-muted-foreground'}`}>
+              {overdue ? <AlertTriangle className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+              {overdue ? `Overdue — was due ${due}` : `Due ${due}`}
+            </span>
+          )}
+          {complete && (
+            <span className="flex items-center gap-1 text-emerald-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {cm.completion?.state === 'complete_fail' ? 'Completed (not passed)' : 'Completed'}
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Type-specific quick actions */}
-      {(view.discussions !== undefined) && (
-        <Card>
-          <CardHeader className="py-3"><CardTitle className="text-base">Discussions</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {(view.discussions ?? []).map((d: any) => (
-              <div key={d.id} className="rounded border p-2 text-sm"><div className="font-medium">{d.title}</div><div className="text-xs text-muted-foreground">{(d.posts ?? []).length} posts</div></div>
-            ))}
-            <div className="flex items-end gap-2 pt-2">
-              <div className="flex-1"><Label className="text-xs">New discussion</Label><Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Title" /></div>
-              <Button size="sm" onClick={() => run('startDiscussion', { title: text })}><Send className="mr-1 h-4 w-4" />Post</Button>
+      {/* The server decides availability; the client only explains it. */}
+      {cm.availability && !cm.availability.available && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="flex items-start gap-2 py-3 text-sm">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="font-medium">Not available yet</p>
+              {cm.availability.reasons.length > 0 && (
+                <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                  {cm.availability.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              )}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {type === 'assign' && (
-        <Card>
-          <CardHeader className="py-3"><CardTitle className="text-base">Your submission</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {view.submission && <div className="rounded border bg-muted/30 p-2 text-sm">{view.submission.content ?? '(attachment submitted)'} <Badge variant="outline" className="ml-2">{view.submission.status}</Badge></div>}
-            <Label className="text-xs">Online text</Label>
-            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Type your submission" />
-            <Button size="sm" onClick={() => run('submit', { content: text })}><Send className="mr-1 h-4 w-4" />Submit</Button>
-          </CardContent>
-        </Card>
+      {cm.intro && cm.activityType !== 'label' && cm.activityType !== 'page' && (
+        <Card><CardContent className="py-4">
+          <SafeHtml className="prose prose-sm dark:prose-invert max-w-none" html={cm.intro} />
+        </CardContent></Card>
       )}
 
-      {type === 'choice' && instance?.options && (
-        <Card>
-          <CardHeader className="py-3"><CardTitle className="text-base">Choose</CardTitle></CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {(instance.options as any[]).map((o: any, i: number) => (
-              <Button key={i} variant="outline" size="sm" onClick={() => run('choose', { optionKey: o.key ?? String(i) })}>{o.label ?? o.text ?? `Option ${i + 1}`}</Button>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Raw payload for any other type — honest fallback so nothing is hidden. */}
-      <Card>
-        <CardHeader className="py-3"><CardTitle className="text-sm text-muted-foreground">Activity data</CardTitle></CardHeader>
-        <CardContent><pre className="overflow-x-auto rounded bg-muted/40 p-3 text-xs">{JSON.stringify(view, null, 2)}</pre></CardContent>
-      </Card>
+      <Body view={view} run={run} busy={busy} />
     </div>
   );
-}
-
-function guessType(view: any): string {
-  if (view.discussions !== undefined) return 'forum';
-  if (view.submission !== undefined || view.submissions !== undefined) return 'assign';
-  if (view.slotCount !== undefined || view.slots !== undefined) return 'quiz';
-  if (view.tracks !== undefined) return 'scorm';
-  if (view.entries !== undefined) return 'glossary';
-  if (view.pages !== undefined) return view.instance?.wikiMode ? 'wiki' : 'lesson';
-  return view.instance?.externalUrl ? 'url' : 'page';
 }

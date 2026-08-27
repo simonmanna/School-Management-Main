@@ -5,6 +5,10 @@ import { TenantContextService } from '../../../../../kernel/tenancy/tenant-conte
 import { LmsContextService } from '../context/context.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { LmsEventService } from '../lms-event.service';
+import { sanitizeDto } from '../util/sanitize';
+import { ViewEnvelopeService } from './view-envelope.service';
+import type { CoursePageView, CourseSectionView, ModuleAvailability } from './view-envelope.types';
+import { PortalIdentityService } from '../../../../../kernel/auth/portal-identity.service';
 
 /**
  * Course spine — offering settings, sections, and the assembled course-page payload
@@ -19,6 +23,8 @@ export class CourseService {
     private readonly contexts: LmsContextService,
     private readonly availability: AvailabilityService,
     private readonly events: LmsEventService,
+    private readonly envelope: ViewEnvelopeService,
+    private readonly portalIdentity: PortalIdentityService,
   ) {}
 
   private get org() {
@@ -53,7 +59,7 @@ export class CourseService {
     const updated = await this.prisma.client.courseOffering.update({
       where: { id },
       data: {
-        ...dto,
+        ...sanitizeDto(dto),
         ...(dto.startDate !== undefined ? { startDate: dto.startDate ? new Date(dto.startDate) : null } : {}),
         ...(dto.endDate !== undefined ? { endDate: dto.endDate ? new Date(dto.endDate) : null } : {}),
       },
@@ -85,7 +91,7 @@ export class CourseService {
     await this.getOffering(id);
     const max = await this.prisma.client.courseSection.aggregate({ where: { organizationId: this.org, courseOfferingId: id }, _max: { sectionNo: true } });
     return this.prisma.client.courseSection.create({
-      data: { organizationId: this.org, courseOfferingId: id, sectionNo: (max._max.sectionNo ?? -1) + 1, name: dto.name, summary: dto.summary },
+      data: { organizationId: this.org, courseOfferingId: id, sectionNo: (max._max.sectionNo ?? -1) + 1, name: dto.name, summary: sanitizeDto(dto).summary },
     });
   }
 
@@ -94,7 +100,7 @@ export class CourseService {
     if (!sec) throw new NotFoundException('Section not found');
     return this.prisma.client.courseSection.update({
       where: { id: sectionId },
-      data: { ...dto, availability: dto.availability === undefined ? undefined : (dto.availability as Prisma.InputJsonValue) },
+      data: { ...sanitizeDto(dto), availability: dto.availability === undefined ? undefined : (dto.availability as Prisma.InputJsonValue) },
     });
   }
 
@@ -103,7 +109,7 @@ export class CourseService {
    * dropped, unavailable modules are greyed (or hidden), and completion state is
    * attached. Otherwise the full teacher view is returned.
    */
-  async coursePage(id: string, opts: { studentProfileId?: string; canViewHidden: boolean }) {
+  async coursePage(id: string, opts: { studentProfileId?: string; canViewHidden: boolean }): Promise<CoursePageView> {
     const offering = await this.getOffering(id);
     const sections = await this.prisma.client.courseSection.findMany({
       where: { organizationId: this.org, courseOfferingId: id, deletedAt: null },
@@ -113,38 +119,70 @@ export class CourseService {
       where: { organizationId: this.org, courseOfferingId: id, deletedAt: null },
     });
 
-    const completions = opts.studentProfileId
-      ? await this.prisma.client.courseModuleCompletion.findMany({
-          where: { organizationId: this.org, studentProfileId: opts.studentProfileId, courseModuleId: { in: modules.map((m) => m.id) } },
-        })
-      : [];
-    const completionByModule = new Map(completions.map((c) => [c.courseModuleId, c]));
+    // Availability is resolved up front for every surviving module, so the
+    // envelope builder can attach reasons without re-evaluating the tree.
+    const availByModule = new Map<string, ModuleAvailability>();
+    const visibleModules: typeof modules = [];
+    const sectionAvail = new Map<string, ModuleAvailability>();
+    const keptSections: typeof sections = [];
 
-    const sectionOut = [];
     for (const sec of sections) {
-      if (opts.studentProfileId && !sec.visible && !opts.canViewHidden) continue;
-      // Section-level availability
-      let sectionAvail = { available: true, reasons: [] as string[], showGreyed: true };
-      if (opts.studentProfileId) sectionAvail = await this.availability.evaluate(sec.availability, { studentProfileId: opts.studentProfileId, courseOfferingId: id });
-      if (!sectionAvail.available && !sectionAvail.showGreyed && !opts.canViewHidden) continue;
-
-      const inSection = this.ordered(modules.filter((m) => m.sectionId === sec.id), sec.sequence);
-      const modOut = [];
-      for (const m of inSection) {
-        if (!m.visible && !opts.canViewHidden) continue;
-        let avail = { available: true, reasons: [] as string[], showGreyed: true };
-        if (opts.studentProfileId) avail = await this.availability.evaluate(m.availability, { studentProfileId: opts.studentProfileId, courseOfferingId: id });
-        if (!avail.available && !avail.showGreyed && !opts.canViewHidden) continue;
-        modOut.push({
-          ...m,
-          availability: undefined,
-          availabilityInfo: opts.studentProfileId ? avail : undefined,
-          completion: opts.studentProfileId ? completionByModule.get(m.id)?.state ?? 'incomplete' : undefined,
-        });
+      if (!sec.visible && !opts.canViewHidden) continue;
+      let secA = { available: true, reasons: [] as string[], showGreyed: true };
+      if (opts.studentProfileId) {
+        secA = await this.availability.evaluate(sec.availability, { studentProfileId: opts.studentProfileId, courseOfferingId: id });
       }
-      sectionOut.push({ ...sec, availabilityInfo: opts.studentProfileId ? sectionAvail : undefined, modules: modOut });
+      if (!secA.available && !secA.showGreyed && !opts.canViewHidden) continue;
+      sectionAvail.set(sec.id, { available: secA.available, reasons: secA.reasons, greyed: secA.showGreyed });
+      keptSections.push(sec);
+
+      for (const m of this.ordered(modules.filter((x) => x.sectionId === sec.id), sec.sequence)) {
+        if (!m.visible && !opts.canViewHidden) continue;
+        let a = { available: true, reasons: [] as string[], showGreyed: true };
+        if (opts.studentProfileId) {
+          a = await this.availability.evaluate(m.availability, { studentProfileId: opts.studentProfileId, courseOfferingId: id });
+        }
+        if (!a.available && !a.showGreyed && !opts.canViewHidden) continue;
+        if (opts.studentProfileId) {
+          availByModule.set(m.id, { available: a.available, reasons: a.reasons, greyed: a.showGreyed });
+        }
+        visibleModules.push(m);
+      }
     }
-    return { offering, sections: sectionOut };
+
+    const [header, capabilities, moduleViews] = await Promise.all([
+      this.envelope.courseHeader(offering),
+      this.envelope.capabilitiesFor(id),
+      this.envelope.moduleViews(visibleModules, {
+        studentProfileId: opts.studentProfileId,
+        availabilityByModule: availByModule,
+        // A course may withhold grades from learners wholesale; staff still see them.
+        showGrades: offering.showGradesToStudents || !opts.studentProfileId,
+      }),
+    ]);
+    const viewByModule = new Map(moduleViews.map((v) => [v.id, v]));
+
+    const sectionOut: CourseSectionView[] = keptSections.map((sec) => ({
+      id: sec.id,
+      sectionNo: sec.sectionNo,
+      name: sec.name ?? null,
+      summary: sec.summary ?? null,
+      visible: sec.visible,
+      weekOf: sec.weekOf?.toISOString() ?? null,
+      availability: sectionAvail.get(sec.id) ?? null,
+      modules: this.ordered(visibleModules.filter((m) => m.sectionId === sec.id), sec.sequence)
+        .map((m) => viewByModule.get(m.id))
+        .filter((v): v is NonNullable<typeof v> => Boolean(v)),
+    }));
+
+    const principal = this.portalIdentity.principal();
+    return {
+      course: header,
+      sections: sectionOut,
+      capabilities,
+      progress: opts.studentProfileId ? await this.envelope.progressFor(id, opts.studentProfileId) : null,
+      viewingAs: { kind: principal.kind, studentProfileId: opts.studentProfileId ?? null },
+    };
   }
 
   /** Order modules by the section's denormalised sequence, appending any not yet listed. */

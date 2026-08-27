@@ -44,8 +44,17 @@ export class ModScormPlugin extends BaseActivityPlugin {
   async action(ctx: PluginCtx, cm: CourseModule, action: string, dto: Record<string, unknown>) {
     if (action !== 'commit') throw new BadRequestException(`Unknown mod_scorm action '${action}'`);
     if (!ctx.studentProfileId) throw new BadRequestException('commit requires a student');
+    const inst: any = await this.getInstance(ctx, cm.instanceId);
     const sco = (dto.scoIdentifier as string) ?? 'default';
     const attempt = (dto.attempt as number) ?? 1;
+
+    // Attempt ceiling. `maxAttempts` was stored and ignored, so a package could
+    // be re-run indefinitely and each run overwrote the grade.
+    const maxAttempts = Number(inst?.maxAttempts ?? 0); // 0 = unlimited
+    if (maxAttempts > 0 && attempt > maxAttempts) {
+      throw new BadRequestException(`You have used all ${maxAttempts} attempt(s) at this package`);
+    }
+
     const cmi = (dto.cmi as Record<string, unknown>) ?? {};
     const scoreRaw = cmi['cmi.core.score.raw'] ?? cmi['cmi.score.raw'];
     const lessonStatus = String(cmi['cmi.core.lesson_status'] ?? cmi['cmi.completion_status'] ?? 'incomplete');
@@ -54,12 +63,37 @@ export class ModScormPlugin extends BaseActivityPlugin {
       create: { organizationId: this.org, scormId: cm.instanceId, studentProfileId: ctx.studentProfileId, scoIdentifier: sco, attempt, cmi: cmi as any, lessonStatus, scoreRaw: scoreRaw != null ? Number(scoreRaw) : null },
       update: { cmi: cmi as any, lessonStatus, scoreRaw: scoreRaw != null ? Number(scoreRaw) : null },
     });
-    if (scoreRaw != null && cm.assessmentId) {
-      const sa = await this.ensureSa(cm.assessmentId, ctx.studentProfileId);
-      await this.prisma.client.$transaction(async (tx: any) =>
-        this.grades.setScore({ studentAssessmentId: sa.id, score: Number(scoreRaw), source: 'plugin' }, tx));
+
+    if (cm.assessmentId) {
+      // The grade is the one the package's OWN grading method selects across
+      // attempts — writing the latest raw score meant a pupil could lower their
+      // mark by re-opening a completed package.
+      const graded = await this.gradeFromTracks(cm.instanceId, ctx.studentProfileId, String(inst?.gradingMethod ?? 'highest'));
+      if (graded != null) {
+        const sa = await this.ensureSa(cm.assessmentId, ctx.studentProfileId);
+        await this.prisma.client.$transaction(async (tx: any) =>
+          this.grades.setScore({ studentAssessmentId: sa.id, score: graded, source: 'plugin' }, tx));
+      }
     }
-    return { ok: true };
+    return { ok: true, attempt };
+  }
+
+  /** Reduce a pupil's tracked attempts to one mark, per the package's setting. */
+  private async gradeFromTracks(scormId: string, studentProfileId: string, method: string): Promise<number | null> {
+    const tracks: Array<{ attempt: number; scoreRaw: unknown }> = await this.db.scormTrack.findMany({
+      where: { organizationId: this.org, scormId, studentProfileId, scoreRaw: { not: null } },
+      orderBy: { attempt: 'asc' },
+      select: { attempt: true, scoreRaw: true },
+    });
+    const scores = tracks.map((t) => Number(t.scoreRaw)).filter((n) => Number.isFinite(n));
+    if (scores.length === 0) return null;
+    switch (method) {
+      case 'first': return scores[0];
+      case 'last': return scores[scores.length - 1];
+      case 'average': return Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 100) / 100;
+      case 'highest':
+      default: return Math.max(...scores);
+    }
   }
   async evaluateCompletion(ctx: PluginCtx, cm: CourseModule): Promise<CompletionState> {
     if (!ctx.studentProfileId) return 'incomplete';
@@ -146,7 +180,16 @@ export class ModH5pPlugin extends BaseActivityPlugin {
     if (action !== 'xapi') throw new BadRequestException(`Unknown mod_h5p action '${action}'`);
     const result = (dto.result as Record<string, unknown>) ?? {};
     await this.db.xapiStatement.create({ data: { organizationId: this.org, h5pId: cm.instanceId, courseModuleId: cm.id, studentProfileId: ctx.studentProfileId ?? null, userId: ctx.userId ?? null, verb: (dto.verb as string) ?? 'experienced', object: (dto.object as string) ?? cm.instanceId, result: result as any, raw: (dto.raw as any) ?? {} } });
-    const scaled = result['score.scaled'] ?? (result as any).scaled;
+    // xAPI nests the score: `result.score.{raw,max,scaled}`. The flat
+    // `result['score.scaled']` lookup this replaced never matched a real
+    // statement, so H5P activities silently never graded.
+    const score = (result.score ?? {}) as Record<string, unknown>;
+    const scaled =
+      score.scaled != null
+        ? Number(score.scaled)
+        : score.raw != null && score.max != null && Number(score.max) > 0
+          ? Number(score.raw) / Number(score.max)
+          : (result as any)['score.scaled'] ?? null;
     if (scaled != null && cm.assessmentId && ctx.studentProfileId) {
       const inst: any = await this.getInstance(ctx, cm.instanceId);
       const a = await this.db.assessment.findFirst({ where: { id: cm.assessmentId } });
@@ -188,20 +231,120 @@ export class ModWorkshopPlugin extends BaseActivityPlugin {
     return { instance: inst, submissions };
   }
   async action(ctx: PluginCtx, cm: CourseModule, action: string, dto: Record<string, unknown>) {
+    const inst: any = await this.getInstance(ctx, cm.instanceId);
+    const phase = String(inst?.phase ?? 'setup');
+
     switch (action) {
       case 'submit': {
         if (!ctx.studentProfileId) throw new BadRequestException('submit requires a student');
+        // Phases are the whole point of a workshop: work must be in before peers
+        // review it, or a reviewer sees a half-finished draft and marks it.
+        if (phase !== 'submission') {
+          throw new BadRequestException(`This workshop is in the ${phase} phase and is not accepting submissions`);
+        }
+        const already = await this.db.modWorkshopSubmission.findFirst({
+          where: { workshopId: cm.instanceId, studentProfileId: ctx.studentProfileId },
+        });
+        if (already) {
+          return this.db.modWorkshopSubmission.update({
+            where: { id: already.id },
+            data: { title: (dto.title as string) ?? already.title, content: (dto.content as string) ?? already.content, attachments: (dto.attachments as any) ?? already.attachments },
+          });
+        }
         return this.db.modWorkshopSubmission.create({ data: { organizationId: this.org, workshopId: cm.instanceId, studentProfileId: ctx.studentProfileId, title: (dto.title as string) ?? 'Submission', content: (dto.content as string) ?? null, attachments: (dto.attachments as any) ?? [] } });
       }
+
       case 'allocate': {
         return this.db.modWorkshopAllocation.create({ data: { organizationId: this.org, workshopId: cm.instanceId, submissionId: dto.submissionId as string, reviewerProfileId: dto.reviewerProfileId as string } });
       }
-      case 'assess': {
-        return this.db.modWorkshopAllocation.update({ where: { id: dto.allocationId as string }, data: { grade: Number(dto.grade), feedback: (dto.feedback as string) ?? null, filledRubric: (dto.filledRubric as any) ?? {}, submittedAt: new Date() } });
+
+      /**
+       * Spread reviewers round-robin so every submission gets `numReviewers`, and
+       * nobody reviews their own work. Doing this by hand for a class of 30 is
+       * why teachers avoid peer assessment.
+       */
+      case 'autoAllocate': {
+        const submissions = await this.db.modWorkshopSubmission.findMany({ where: { workshopId: cm.instanceId } });
+        if (submissions.length < 2) throw new BadRequestException('Need at least two submissions to allocate reviewers');
+        const perSubmission = Math.min(Number(inst?.numReviewers ?? 2), submissions.length - 1);
+        await this.db.modWorkshopAllocation.deleteMany({ where: { workshopId: cm.instanceId, submittedAt: null } });
+        const created = [];
+        for (let i = 0; i < submissions.length; i++) {
+          for (let n = 1; n <= perSubmission; n++) {
+            const reviewer = submissions[(i + n) % submissions.length];
+            if (reviewer.studentProfileId === submissions[i].studentProfileId) continue;
+            created.push(await this.db.modWorkshopAllocation.create({
+              data: {
+                organizationId: this.org, workshopId: cm.instanceId,
+                submissionId: submissions[i].id, reviewerProfileId: reviewer.studentProfileId,
+              },
+            }));
+          }
+        }
+        return { allocated: created.length, perSubmission };
       }
+
+      case 'assess': {
+        if (phase !== 'assessment') {
+          throw new BadRequestException(`This workshop is in the ${phase} phase and is not accepting assessments`);
+        }
+        const allocation = await this.db.modWorkshopAllocation.findFirst({
+          where: { id: dto.allocationId as string, workshopId: cm.instanceId },
+        });
+        if (!allocation) throw new BadRequestException('Allocation not found');
+        // A reviewer may only fill in the review assigned to them.
+        if (ctx.studentProfileId && allocation.reviewerProfileId !== ctx.studentProfileId) {
+          throw new BadRequestException('This review is allocated to someone else');
+        }
+        return this.db.modWorkshopAllocation.update({ where: { id: allocation.id }, data: { grade: Number(dto.grade), feedback: (dto.feedback as string) ?? null, filledRubric: (dto.filledRubric as any) ?? {}, submittedAt: new Date() } });
+      }
+
+      /**
+       * Move to the next phase. Closing assessment computes each author's mark
+       * from the peer reviews and posts it to the spine — the point at which a
+       * workshop becomes a graded activity rather than a discussion.
+       */
+      case 'setPhase': {
+        const next = String(dto.phase ?? '');
+        const allowed = ['setup', 'submission', 'assessment', 'grading', 'closed'];
+        if (!allowed.includes(next)) throw new BadRequestException(`Unknown workshop phase '${next}'`);
+        await this.model().update({ where: { id: cm.instanceId }, data: { phase: next } });
+        if (next === 'grading' || next === 'closed') await this.computePeerGrades(cm);
+        return { ok: true, phase: next };
+      }
+
       default:
         throw new BadRequestException(`Unknown mod_workshop action '${action}'`);
     }
+  }
+
+  /** Average the submitted peer reviews per author and post to the assessment spine. */
+  private async computePeerGrades(cm: CourseModule): Promise<{ graded: number }> {
+    if (!cm.assessmentId) return { graded: 0 };
+    const submissions = await this.db.modWorkshopSubmission.findMany({ where: { workshopId: cm.instanceId } });
+    let graded = 0;
+    for (const sub of submissions) {
+      const reviews = await this.db.modWorkshopAllocation.findMany({
+        where: { workshopId: cm.instanceId, submissionId: sub.id, submittedAt: { not: null }, grade: { not: null } },
+        select: { grade: true },
+      });
+      if (reviews.length === 0) continue; // nobody reviewed it; leave unmarked rather than score zero
+      const mean = reviews.reduce((a: number, r: any) => a + Number(r.grade), 0) / reviews.length;
+      const sa = await this.ensureSa(cm.assessmentId, sub.studentProfileId);
+      await this.prisma.client.$transaction(async (tx: any) =>
+        this.grades.setScore({ studentAssessmentId: sa.id, score: Math.round(mean * 100) / 100, source: 'plugin' }, tx));
+      graded += 1;
+    }
+    return { graded };
+  }
+
+  private async ensureSa(assessmentId: string, studentProfileId: string) {
+    const a = await this.db.assessment.findFirst({ where: { id: assessmentId } });
+    return this.db.studentAssessment.upsert({
+      where: { assessmentId_studentProfileId: { assessmentId, studentProfileId } },
+      create: { organizationId: this.org, assessmentId, studentProfileId, classId: a?.classId ?? null, termId: a?.termId ?? null, maxScore: a?.maxScore ?? 100 },
+      update: {},
+    });
   }
 }
 

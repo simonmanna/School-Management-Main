@@ -9,6 +9,12 @@ import { CompletionService } from '../completion/completion.service';
 import { AvailabilityService } from '../availability/availability.service';
 import { LmsEventService } from '../lms-event.service';
 import type { PluginCtx } from '../plugin.types';
+import { sanitizeDto } from '../util/sanitize';
+import { PortalIdentityService } from '../../../../../kernel/auth/portal-identity.service';
+import { CapabilityService } from '../context/capability.service';
+import { CAP } from '../capabilities';
+import { ViewEnvelopeService } from './view-envelope.service';
+import type { ModuleViewEnvelope, ModuleAvailability } from './view-envelope.types';
 
 /**
  * Placement + delivery of activities (ADR-014 §5). Owns the spine responsibilities the
@@ -26,6 +32,9 @@ export class CourseModuleService {
     private readonly completion: CompletionService,
     private readonly availability: AvailabilityService,
     private readonly events: LmsEventService,
+    private readonly portalIdentity: PortalIdentityService,
+    private readonly caps: CapabilityService,
+    private readonly envelope: ViewEnvelopeService,
   ) {}
 
   private get org() {
@@ -50,7 +59,9 @@ export class CourseModuleService {
     if (!section) throw new NotFoundException('Section not found in this course');
     const plugin = this.registry.get(dto.activityType);
 
-    const { instanceId } = await plugin.createInstance(this.ctx(), dto);
+    // Teacher-authored HTML is cleaned here, at the single point where a DTO
+    // reaches a plugin, so no plugin can forget and no stored row is ever dirty.
+    const { instanceId } = await plugin.createInstance(this.ctx(), sanitizeDto(dto));
     const max = await this.prisma.client.courseModule.aggregate({ where: { organizationId: this.org, sectionId: section.id }, _max: { sequence: true } });
 
     const cm = await this.prisma.client.courseModule.create({
@@ -89,7 +100,10 @@ export class CourseModuleService {
     }
 
     await this.events.log({ eventName: `mod_${dto.activityType}.created`, component: `mod_${dto.activityType}`, action: 'created', target: 'course_module', courseOfferingId, courseModuleId: cm.id, objectId: cm.id });
-    return cm;
+    // Re-read: the grade bridge writes `assessmentId` onto the row after it was
+    // created, so the in-memory copy still says null. Returning that told the
+    // caller a gradable activity had no assessment.
+    return (await this.prisma.client.courseModule.findFirst({ where: { id: cm.id } })) ?? cm;
   }
 
   /** Update spine-level fields (visibility, dates, availability, completion rules). */
@@ -112,7 +126,7 @@ export class CourseModuleService {
   /** Delegate a per-type edit to the plugin. */
   async updateInstance(id: string, dto: Record<string, unknown>): Promise<{ ok: true }> {
     const cm = await this.get(id);
-    await this.registry.get(cm.activityType).updateInstance(this.ctx(cm), cm.instanceId, dto);
+    await this.registry.get(cm.activityType).updateInstance(this.ctx(cm), cm.instanceId, sanitizeDto(dto));
     return { ok: true };
   }
 
@@ -169,39 +183,146 @@ export class CourseModuleService {
     return { ok: true };
   }
 
-  /** Open an activity. Enforces availability for students, records a view, delegates the body to the plugin. */
-  async view(id: string, opts: { studentProfileId?: string }): Promise<unknown> {
+  /**
+   * Resolve WHICH student a request acts for.
+   *
+   * The subject comes from the verified token, never from the caller. Staff may
+   * name a student explicitly (`asStudent`) — a teacher previewing what a pupil
+   * sees — but only with the capability to view on others' behalf. A student may
+   * only ever be themselves: passing someone else's id is refused rather than
+   * silently ignored, so a probe shows up as a 403 in the logs.
+   */
+  private async resolveSubject(asStudent?: string): Promise<string | undefined> {
+    const p = this.portalIdentity.principal();
+    if (p.kind === 'student') {
+      if (asStudent && asStudent !== p.studentProfileId) {
+        throw new ForbiddenException('You may only act as yourself');
+      }
+      return p.studentProfileId;
+    }
+    if (p.kind === 'guardian') {
+      // A guardian reads on behalf of a child and must name which one.
+      if (!asStudent) return undefined;
+      if (!(await this.portalIdentity.canAccessStudent(asStudent))) {
+        throw new ForbiddenException('Not a guardian of this student');
+      }
+      return asStudent;
+    }
+    return asStudent;
+  }
+
+  /**
+   * Open an activity.
+   *
+   * Returns a ModuleViewEnvelope: common chrome (name, due date, grade,
+   * completion, capabilities) assembled by the spine, with the plugin's own
+   * payload under `body`. Before the envelope existed the raw plugin payload was
+   * returned untagged, so the client duck-typed the response to guess the
+   * activity type and fell back to printing raw JSON on screen.
+   */
+  async view(id: string, opts: { asStudent?: string } = {}): Promise<ModuleViewEnvelope> {
     const cm = await this.get(id);
-    const pctx: PluginCtx = { organizationId: this.org, userId: this.tenant.userId, studentProfileId: opts.studentProfileId, courseModule: cm };
+    const principal = this.portalIdentity.principal();
+    const studentProfileId = await this.resolveSubject(opts.asStudent);
+    const pctx: PluginCtx = { organizationId: this.org, userId: this.tenant.userId, studentProfileId, courseModule: cm };
     const plugin = this.registry.get(cm.activityType);
 
-    if (opts.studentProfileId) {
-      const avail = await this.availability.evaluate(cm.availability, { studentProfileId: opts.studentProfileId, courseOfferingId: cm.courseOfferingId });
-      if (!avail.available) throw new ForbiddenException(`Not available: ${avail.reasons.join('; ') || 'restricted'}`);
-      await this.completion.markViewed(cm, opts.studentProfileId);
-      await this.events.log({ eventName: `mod_${cm.activityType}.viewed`, component: `mod_${cm.activityType}`, action: 'viewed', target: 'course_module', courseModuleId: id, studentProfileId: opts.studentProfileId });
-      return plugin.viewForStudent(pctx, cm);
+    // Staff naming a student get the STUDENT view, and only with the capability
+    // to do so. Previously the teacher view was reachable simply by omitting the
+    // parameter, which handed submission lists and answer keys to any caller.
+    if (principal.kind === 'staff' && !opts.asStudent) {
+      const canTeach = await this.caps.canAtCourse(
+        { userId: principal.userId }, CAP.courseManageActivities, cm.courseOfferingId,
+      );
+      if (!canTeach) throw new ForbiddenException('Missing LMS capability to view this activity as a teacher');
+      await this.events.log({ eventName: `mod_${cm.activityType}.viewed`, component: `mod_${cm.activityType}`, action: 'viewed', target: 'course_module', courseModuleId: id });
+      const body = await plugin.viewForTeacher(pctx, cm);
+      return this.wrap(cm, body, 'teacher', undefined, null);
     }
-    await this.events.log({ eventName: `mod_${cm.activityType}.viewed`, component: `mod_${cm.activityType}`, action: 'viewed', target: 'course_module', courseModuleId: id });
-    return plugin.viewForTeacher(pctx, cm);
+
+    if (!studentProfileId) throw new ForbiddenException('No student subject for this request');
+    if (principal.kind === 'staff') {
+      const canPreview = await this.caps.canAtCourse(
+        { userId: principal.userId }, CAP.courseViewHidden, cm.courseOfferingId,
+      );
+      if (!canPreview) throw new ForbiddenException('Missing LMS capability to view on behalf of a student');
+    }
+
+    const avail = await this.availability.evaluate(cm.availability, { studentProfileId, courseOfferingId: cm.courseOfferingId });
+    if (!avail.available) throw new ForbiddenException(`Not available: ${avail.reasons.join('; ') || 'restricted'}`);
+    // Only a real student visit counts towards completion — a teacher preview
+    // or a guardian looking in must not tick the box on the pupil's behalf.
+    if (principal.kind === 'student') await this.completion.markViewed(cm, studentProfileId);
+    await this.events.log({ eventName: `mod_${cm.activityType}.viewed`, component: `mod_${cm.activityType}`, action: 'viewed', target: 'course_module', courseModuleId: id, studentProfileId });
+    const body = await plugin.viewForStudent(pctx, cm);
+    return this.wrap(cm, body, 'student', studentProfileId, {
+      available: avail.available,
+      reasons: avail.reasons,
+      greyed: avail.showGreyed,
+    });
+  }
+
+  /** Assemble the envelope around whichever plugin view just ran. */
+  private async wrap(
+    cm: CourseModule,
+    body: unknown,
+    audience: 'student' | 'teacher',
+    studentProfileId: string | undefined,
+    availability: ModuleAvailability | null,
+  ): Promise<ModuleViewEnvelope> {
+    const offering = await this.prisma.client.courseOffering.findFirst({
+      where: { id: cm.courseOfferingId, organizationId: this.org },
+    });
+    const [header, capabilities, views] = await Promise.all([
+      offering ? this.envelope.courseHeader(offering) : Promise.resolve(null),
+      this.envelope.capabilitiesFor(cm.courseOfferingId),
+      this.envelope.moduleViews([cm], {
+        studentProfileId,
+        availabilityByModule: availability ? new Map([[cm.id, availability]]) : undefined,
+        showGrades: offering?.showGradesToStudents !== false || audience === 'teacher',
+      }),
+    ]);
+    const principal = this.portalIdentity.principal();
+    return {
+      module: views[0],
+      course: {
+        id: cm.courseOfferingId,
+        name: header?.name ?? 'Course',
+        subject: header?.subject ?? null,
+        className: header?.className ?? null,
+        term: header?.term ?? null,
+      },
+      capabilities,
+      viewingAs: { kind: principal.kind, studentProfileId: studentProfileId ?? null },
+      audience,
+      body,
+    };
   }
 
   /** A plugin-defined verb (submit, start-attempt, post…). Recomputes completion + evidence after. */
-  async action(id: string, action: string, dto: Record<string, unknown>, opts: { studentProfileId?: string }): Promise<unknown> {
+  async action(id: string, action: string, dto: Record<string, unknown>, opts: { asStudent?: string } = {}): Promise<unknown> {
     const cm = await this.get(id);
     const plugin = this.registry.get(cm.activityType);
     if (!plugin.action) throw new BadRequestException(`Activity '${cm.activityType}' supports no actions`);
-    const pctx: PluginCtx = { organizationId: this.org, userId: this.tenant.userId, studentProfileId: opts.studentProfileId, courseModule: cm };
-    const result = await plugin.action(pctx, cm, action, dto);
+    const principal = this.portalIdentity.principal();
+    // A guardian may read a child's course but never act in it — submitting work
+    // or posting as the pupil would corrupt the academic record.
+    if (principal.kind === 'guardian') throw new ForbiddenException('Guardians cannot submit or post on behalf of a student');
+    const studentProfileId = await this.resolveSubject(opts.asStudent);
+    const pctx: PluginCtx = { organizationId: this.org, userId: this.tenant.userId, studentProfileId, courseModule: cm };
+    // Student-authored bodies (forum posts, wiki edits, glossary definitions) run
+    // through the same cleaner as teacher content — a peer reading a post is just
+    // as exposed as a student reading a page.
+    const result = await plugin.action(pctx, cm, action, sanitizeDto(dto));
 
-    if (opts.studentProfileId) {
-      if (cm.completionMode === 'automatic') await this.completion.recomputeAuto(cm, opts.studentProfileId);
+    if (studentProfileId) {
+      if (cm.completionMode === 'automatic') await this.completion.recomputeAuto(cm, studentProfileId);
       if (plugin.emitEvidence) {
         const rows = await plugin.emitEvidence(pctx, cm);
         for (const r of rows) {
           await this.prisma.client.learningObjectiveEvidence.create({
             data: {
-              organizationId: this.org, studentProfileId: opts.studentProfileId, learningObjectiveId: r.learningObjectiveId,
+              organizationId: this.org, studentProfileId, learningObjectiveId: r.learningObjectiveId,
               sourceType: r.sourceType, sourceId: r.sourceId,
               normalizedScore: r.normalizedScore ?? null, proficiency: r.proficiency ?? null,
             },
@@ -209,7 +330,7 @@ export class CourseModuleService {
         }
       }
     }
-    await this.events.log({ eventName: `mod_${cm.activityType}.${action}`, component: `mod_${cm.activityType}`, action, target: 'course_module', courseModuleId: id, studentProfileId: opts.studentProfileId });
+    await this.events.log({ eventName: `mod_${cm.activityType}.${action}`, component: `mod_${cm.activityType}`, action, target: 'course_module', courseModuleId: id, studentProfileId });
     return result;
   }
 }

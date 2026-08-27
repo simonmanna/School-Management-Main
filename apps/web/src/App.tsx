@@ -129,6 +129,11 @@ import { SchoolLmsDiscussionsPage } from '@/pages/school/lms/discussions';
 import { SchoolLmsMasteryPage } from '@/pages/school/lms/mastery';
 import { SchoolLmsCoveragePage } from '@/pages/school/lms/coverage';
 import { SchoolLmsCoursesPage } from '@/pages/school/lms/courses';
+import { SchoolLmsMyLearningPage } from '@/pages/school/lms/my-learning';
+import { SchoolLmsQuizAttemptPage } from '@/pages/school/lms/quiz-attempt';
+import { SchoolLmsCalendarPage } from '@/pages/school/lms/calendar';
+import { SchoolLmsCourseReportsPage } from '@/pages/school/lms/course-reports';
+import { SchoolLmsPackagePlayerPage } from '@/pages/school/lms/package-player';
 import { SchoolLmsCoursePage } from '@/pages/school/lms/course-page';
 import { SchoolLmsModuleViewPage } from '@/pages/school/lms/module-view';
 import { SchoolLmsParticipantsPage } from '@/pages/school/lms/participants';
@@ -579,6 +584,11 @@ export function App() {
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
+          <Route path="/school/lms/my" element={<SchoolLmsMyLearningPage />} />
+          <Route path="/school/lms/quiz/:id/attempt" element={<SchoolLmsQuizAttemptPage />} />
+          <Route path="/school/lms/calendar" element={<SchoolLmsCalendarPage />} />
+          <Route path="/school/lms/modules/:id/play" element={<SchoolLmsPackagePlayerPage />} />
+          <Route path="/school/lms/courses/:id/reports" element={<SchoolLmsCourseReportsPage />} />
           <Route path="/school/lms/courses" element={<SchoolLmsCoursesPage />} />
           <Route path="/school/lms/courses/:id" element={<SchoolLmsCoursePage />} />
           <Route path="/school/lms/courses/:id/participants" element={<SchoolLmsParticipantsPage />} />

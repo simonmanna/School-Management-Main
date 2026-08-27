@@ -179,6 +179,10 @@ async function bootstrap(): Promise<void> {
             organizationId: effective.organizationId,
             userId: effective.sub,
             permissions: effective.permissions,
+            // Portal subject travels with the verified token, so downstream
+            // services can answer "which student is this?" without trusting
+            // anything the client sent.
+            portal: effective.portal,
           },
           () => next(),
         );

@@ -136,4 +136,29 @@ export class OneTimeTokenService {
     });
     return { ok: true };
   }
+
+  /**
+   * Accept an invite: set the first password and activate the account.
+   *
+   * Distinct from applyReset because an invited account starts INACTIVE with an
+   * unusable random password — acceptance is what turns it into a login. The
+   * account is activated only on success, so an unaccepted invite can never be
+   * used to sign in.
+   */
+  async acceptInvite(raw: string, newPassword: string): Promise<{ ok: true; userId: string; organizationId: string }> {
+    const consumed = await this.consume(raw, 'invite');
+    if (!consumed) throw new Error('Invalid or expired invite');
+    const hash = await this.password.hash(newPassword);
+    await this.prisma.raw.user.update({
+      where: { id: consumed.userId },
+      data: { passwordHash: hash, isActive: true, failedLoginCount: 0, lockedUntil: null },
+    });
+    await this.audit.record({
+      entity: 'User',
+      entityId: consumed.userId,
+      action: 'update',
+      newValues: { inviteAccepted: true, activated: true },
+    });
+    return { ok: true, userId: consumed.userId, organizationId: consumed.organizationId };
+  }
 }

@@ -3,7 +3,8 @@ import type { CourseModule } from '@prisma/client';
 import { PrismaService } from '../../../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../../../kernel/tenancy/tenant-context.service';
 import { ActivityRegistry } from '../activity/activity-registry.service';
-import type { ActivityPlugin, PluginCtx, PluginFeatures } from '../plugin.types';
+import type { ActivityPlugin, InstanceSummary, PluginCtx, PluginFeatures } from '../plugin.types';
+import { sanitizeDto } from '../util/sanitize';
 
 /**
  * Shared plumbing for activity plugins (ADR-014 §4). A concrete plugin sets `type`,
@@ -48,6 +49,34 @@ export abstract class BaseActivityPlugin implements ActivityPlugin, OnModuleInit
     return this.model().findFirst({ where: { id: instanceId, organizationId: this.org } });
   }
 
+  /**
+   * Existence check for the orphan reconciler. Implemented once here so a plugin
+   * cannot forget it, and so the reconciler never has to guess a table name from
+   * the activity type — `mod_attendance`, for one, borrows another plugin's table.
+   */
+  async liveInstanceIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+    const rows: Array<{ id: string }> = await this.model().findMany({
+      where: { id: { in: ids }, organizationId: this.org },
+      select: { id: true },
+    });
+    return new Set(rows.map((r) => r.id));
+  }
+
+  /**
+   * Names (and blurbs) for a batch of instances. Implemented once here because
+   * every instance table carries `name`; `mod_label` is the exception and
+   * overrides this, since a label is a block of text with no title of its own.
+   */
+  async instanceSummaries(ids: string[]): Promise<Map<string, InstanceSummary>> {
+    if (ids.length === 0) return new Map();
+    const rows: Array<{ id: string; name?: string | null; intro?: string | null }> =
+      await this.model().findMany({ where: { id: { in: ids }, organizationId: this.org } });
+    return new Map(
+      rows.map((r) => [r.id, { name: r.name ?? this.features.label, intro: r.intro ?? null }]),
+    );
+  }
+
   async deleteInstance(_ctx: PluginCtx, instanceId: string): Promise<void> {
     await this.model().deleteMany({ where: { id: instanceId, organizationId: this.org } });
   }
@@ -60,7 +89,9 @@ export abstract class BaseActivityPlugin implements ActivityPlugin, OnModuleInit
   }
 
   async importInstance(_ctx: PluginCtx, payload: unknown): Promise<{ instanceId: string }> {
-    const data = { ...(payload as Record<string, unknown>), organizationId: this.org };
+    // Restore is an untrusted-input path: a course bundle may come from another
+    // installation, so its stored HTML gets the same treatment as fresh input.
+    const data = { ...sanitizeDto(payload as Record<string, unknown>), organizationId: this.org };
     const row = await this.model().create({ data });
     return { instanceId: row.id };
   }

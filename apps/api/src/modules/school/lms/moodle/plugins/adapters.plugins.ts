@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../../../kernel/tenancy/tenant-conte
 import { ActivityRegistry } from '../activity/activity-registry.service';
 import { LmsGradeBridgeService } from '../grade/grade-bridge.service';
 import { BaseActivityPlugin } from './plugin-base';
+import { LmsFileService } from '../files/lms-file.service';
 import type { CompletionState, GradeDefinition, PluginCtx } from '../plugin.types';
 
 /**
@@ -26,6 +27,7 @@ export class ModAssignPlugin extends BaseActivityPlugin {
     tenant: TenantContextService,
     registry: ActivityRegistry,
     private readonly grades: LmsGradeBridgeService,
+    private readonly lmsFiles: LmsFileService,
   ) {
     super(prisma, tenant, registry);
   }
@@ -64,28 +66,119 @@ export class ModAssignPlugin extends BaseActivityPlugin {
   }
 
   async viewForStudent(ctx: PluginCtx, cm: CourseModule) {
-    const inst = await this.getInstance(ctx, cm.instanceId);
+    const inst: any = await this.getInstance(ctx, cm.instanceId);
     const submission = ctx.studentProfileId
       ? await this.db.modAssignSubmission.findFirst({ where: { assignId: cm.instanceId, studentProfileId: ctx.studentProfileId }, orderBy: { attemptNo: 'desc' } })
       : null;
-    return { instance: inst, submission };
+    const now = Date.now();
+    return {
+      instance: inst,
+      submission: submission ? await this.withFiles(cm, submission) : null,
+      // The server states whether submission is still open. The client shows it;
+      // it never decides it, and `action('submit')` re-checks regardless.
+      canSubmit: !(inst?.cutoffDate && new Date(inst.cutoffDate).getTime() < now),
+      isLate: Boolean(inst?.dueDate && new Date(inst.dueDate).getTime() < now && !submission),
+      attemptsUsed: submission?.attemptNo ?? 0,
+      maxAttempts: Number(inst?.maxAttempts ?? 1),
+    };
   }
 
   async viewForTeacher(ctx: PluginCtx, cm: CourseModule) {
     const inst = await this.getInstance(ctx, cm.instanceId);
     const submissions = await this.db.modAssignSubmission.findMany({ where: { assignId: cm.instanceId }, orderBy: { submittedAt: 'desc' } });
-    return { instance: inst, submissions, submissionCount: submissions.length };
+    // Names, so the marking queue is a class list rather than uuid fragments.
+    const ids = submissions.map((x: any) => x.studentProfileId);
+    const profiles = ids.length
+      ? await this.db.studentProfile.findMany({
+          where: { id: { in: ids }, organizationId: this.org },
+          select: { id: true, admissionNo: true, partner: { select: { name: true } } },
+        })
+      : [];
+    const byId = new Map<string, any>(profiles.map((pr: any) => [pr.id, pr]));
+    const withNames = await Promise.all(
+      submissions.map(async (sub: any) => ({
+        ...(await this.withFiles(cm, sub)),
+        // Blind marking hides identity until the mark is in, which is the whole
+        // point of the setting — leaking the name here would defeat it.
+        studentName: (inst as any)?.blindMarking && sub.status !== 'graded'
+          ? null
+          : byId.get(sub.studentProfileId)?.partner?.name ?? null,
+        admissionNo: (inst as any)?.blindMarking && sub.status !== 'graded'
+          ? null
+          : byId.get(sub.studentProfileId)?.admissionNo ?? null,
+      })),
+    );
+    return { instance: inst, submissions: withNames, submissionCount: submissions.length };
+  }
+
+  /** Resolve a submission's stored file ids into displayable references. */
+  private async withFiles(cm: CourseModule, submission: any) {
+    const ids: string[] = Array.isArray(submission.attachments) ? submission.attachments : [];
+    if (ids.length === 0) return { ...submission, files: [], feedbackFiles: [] };
+    const rows = await this.db.file.findMany({
+      where: { id: { in: ids }, organizationId: this.org, deletedAt: null },
+      select: { id: true, filename: true, contentType: true, byteSize: true },
+    });
+    void cm;
+    return { ...submission, files: rows, feedbackFiles: [] };
   }
 
   async action(ctx: PluginCtx, cm: CourseModule, action: string, dto: Record<string, unknown>) {
     switch (action) {
       case 'submit': {
         if (!ctx.studentProfileId) throw new BadRequestException('submit requires a student');
-        return this.db.modAssignSubmission.upsert({
-          where: { assignId_studentProfileId_attemptNo: { assignId: cm.instanceId, studentProfileId: ctx.studentProfileId, attemptNo: 1 } },
-          create: { organizationId: this.org, assignId: cm.instanceId, courseModuleId: cm.id, studentProfileId: ctx.studentProfileId, content: (dto.content as string) ?? null, attachments: (dto.attachments as any) ?? [], status: 'submitted' },
-          update: { content: (dto.content as string) ?? undefined, attachments: (dto.attachments as any) ?? undefined, status: 'submitted', submittedAt: new Date() },
+        const inst: any = await this.getInstance(ctx, cm.instanceId);
+
+        // Hard close. The cutoff was stored but never enforced, so work could be
+        // handed in indefinitely after the deadline the teacher set.
+        const cutoff = inst?.cutoffDate ?? cm.cutoffAt;
+        if (cutoff && new Date(cutoff).getTime() < Date.now()) {
+          throw new BadRequestException('Submissions for this assignment have closed');
+        }
+
+        const existing = await this.db.modAssignSubmission.findFirst({
+          where: { assignId: cm.instanceId, studentProfileId: ctx.studentProfileId },
+          orderBy: { attemptNo: 'desc' },
         });
+        const maxAttempts = Number(inst?.maxAttempts ?? 1);
+        // maxAttempts 0 means unlimited, matching the quiz convention.
+        if (existing && maxAttempts > 0 && existing.attemptNo >= maxAttempts && existing.status !== 'draft') {
+          throw new BadRequestException(`You have used all ${maxAttempts} submission attempt(s)`);
+        }
+
+        // Every attachment is re-homed under this course's submission area, which
+        // is what makes it readable by this pupil and their markers and no one
+        // else. Passing a file id the caller does not own is refused there.
+        const attachmentIds: string[] = Array.isArray(dto.attachments) ? (dto.attachments as string[]) : [];
+        const types: string[] = inst?.submissionTypes ?? ['online_text', 'file'];
+        if (attachmentIds.length > 0 && !types.includes('file')) {
+          throw new BadRequestException('This assignment does not accept file submissions');
+        }
+        if (!dto.content && attachmentIds.length === 0) {
+          throw new BadRequestException('Submit some work: type an answer or attach a file');
+        }
+
+        const saved = await this.db.modAssignSubmission.upsert({
+          where: { assignId_studentProfileId_attemptNo: { assignId: cm.instanceId, studentProfileId: ctx.studentProfileId, attemptNo: 1 } },
+          create: {
+            organizationId: this.org, assignId: cm.instanceId, courseModuleId: cm.id,
+            studentProfileId: ctx.studentProfileId, content: (dto.content as string) ?? null,
+            attachments: attachmentIds as any, status: 'submitted',
+          },
+          update: {
+            content: (dto.content as string) ?? undefined,
+            attachments: attachmentIds.length > 0 ? (attachmentIds as any) : undefined,
+            status: 'submitted', submittedAt: new Date(),
+          },
+        });
+
+        for (const fileId of attachmentIds) {
+          await this.lmsFiles.attach({
+            fileId, courseOfferingId: cm.courseOfferingId, area: 'submission',
+            itemId: saved.id, studentProfileId: ctx.studentProfileId,
+          });
+        }
+        return saved;
       }
       case 'grade': {
         const studentProfileId = dto.studentProfileId as string;
@@ -97,6 +190,20 @@ export class ModAssignPlugin extends BaseActivityPlugin {
           await this.grades.setScore({ studentAssessmentId: sa.id, score: Number(dto.score), source: 'plugin' }, tx);
           await tx.modAssignSubmission.updateMany({ where: { assignId: cm.instanceId, studentProfileId }, data: { status: 'graded', gradedAt: new Date(), feedback: (dto.feedback as string) ?? null } });
         });
+        // Feedback attachments live in their own area: readable by the pupil the
+        // mark is about and by markers, never by the rest of the class.
+        const feedbackFiles: string[] = Array.isArray(dto.feedbackFiles) ? (dto.feedbackFiles as string[]) : [];
+        if (feedbackFiles.length > 0) {
+          const sub = await this.db.modAssignSubmission.findFirst({
+            where: { assignId: cm.instanceId, studentProfileId }, select: { id: true },
+          });
+          for (const fileId of feedbackFiles) {
+            await this.lmsFiles.attach({
+              fileId, courseOfferingId: cm.courseOfferingId, area: 'feedback',
+              itemId: sub?.id ?? cm.id, studentProfileId,
+            });
+          }
+        }
         return { ok: true };
       }
       default:

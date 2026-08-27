@@ -10,6 +10,7 @@ import { CapabilityService } from '../context/capability.service';
 import { LmsCapabilityGuard } from '../context/capability.guard';
 import { RequireCapability } from '../context/require-capability.decorator';
 import { CAP } from '../capabilities';
+import { PortalIdentityService } from '../../../../../kernel/auth/portal-identity.service';
 
 /** P1/P6/P7 — course spine, activity delivery, question bank, plan bridge (ADR-014 §5). */
 @Controller('school/lms')
@@ -21,6 +22,7 @@ export class LmsCourseController {
     private readonly planPublish: PlanPublishService,
     private readonly caps: CapabilityService,
     private readonly tenant: TenantContextService,
+    private readonly portalIdentity: PortalIdentityService,
   ) {}
 
   // ── Courses ──
@@ -32,14 +34,32 @@ export class LmsCourseController {
 
   @Get('courses/:id')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
-  coursePage(@Param('id') id: string, @Query('studentProfileId') studentProfileId?: string) {
-    return this.courses.coursePage(id, { studentProfileId, canViewHidden: !studentProfileId });
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseView, 'courseParam')
+  async coursePage(@Param('id') id: string, @Query('asStudent') asStudent?: string) {
+    const principal = this.portalIdentity.principal();
+    const studentProfileId =
+      principal.kind === 'student'
+        ? principal.studentProfileId
+        : asStudent && (await this.portalIdentity.canAccessStudent(asStudent))
+          ? asStudent
+          : undefined;
+    // Hidden content is a staff view. It used to be granted by simply omitting
+    // the student parameter, which is why a student could see unpublished work.
+    const canViewHidden =
+      principal.kind === 'staff' &&
+      !studentProfileId &&
+      (await this.caps.canAtCourse({ userId: principal.userId }, CAP.courseViewHidden, id));
+    return this.courses.coursePage(id, { studentProfileId, canViewHidden });
   }
 
+  /** Effective capabilities for the CALLER. There is no way to ask about someone else. */
   @Get('courses/:id/permissions')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
-  permissions(@Param('id') id: string, @Query('studentProfileId') studentProfileId?: string) {
-    const principal = studentProfileId ? { studentProfileId } : { userId: this.tenant.userId };
+  permissions(@Param('id') id: string) {
+    const p = this.portalIdentity.principal();
+    const principal =
+      p.kind === 'student' ? { studentProfileId: p.studentProfileId } : { userId: this.tenant.userId };
     return this.caps.effectiveAtCourse(principal, id);
   }
 
@@ -112,38 +132,58 @@ export class LmsCourseController {
 
   @Post('modules/:id/move')
   @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseManageActivities, 'moduleParam')
   moveModule(@Param('id') id: string, @Body() dto: { sectionId: string; sequence?: string[] }) {
     return this.modules.move(id, dto);
   }
 
   @Post('modules/:id/visibility')
   @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseManageActivities, 'moduleParam')
   setVisibility(@Param('id') id: string, @Body() dto: { visible?: boolean; visibleOnPage?: boolean }) {
     return this.modules.setVisibility(id, dto);
   }
 
   @Post('modules/:id/duplicate')
   @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseManageActivities, 'moduleParam')
   duplicate(@Param('id') id: string) {
     return this.modules.duplicate(id);
   }
 
   @Delete('modules/:id')
   @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseManageActivities, 'moduleParam')
   removeModule(@Param('id') id: string) {
     return this.modules.remove(id);
   }
 
+  /**
+   * `asStudent` is a REQUEST, not an assertion: the service checks it against the
+   * caller's verified portal claim and refuses if they are not that student (or a
+   * guardian of them, or staff with the capability to preview). It is not a way to
+   * name yourself — a student's own subject comes from their token.
+   */
   @Get('modules/:id/view')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
-  viewModule(@Param('id') id: string, @Query('studentProfileId') studentProfileId?: string) {
-    return this.modules.view(id, { studentProfileId });
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.activityView, 'moduleParam')
+  viewModule(@Param('id') id: string, @Query('asStudent') asStudent?: string) {
+    return this.modules.view(id, { asStudent });
   }
 
   @Post('modules/:id/action/:action')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.activityView, 'moduleParam')
   actionModule(@Param('id') id: string, @Param('action') action: string, @Body() dto: any) {
-    return this.modules.action(id, action, dto, { studentProfileId: dto?.studentProfileId });
+    // The subject is resolved from the token; `dto.studentProfileId` is ignored
+    // deliberately, so an old client cannot act as someone else.
+    return this.modules.action(id, action, dto, { asStudent: dto?.asStudent });
   }
 
   // ── Question bank (P6) ──

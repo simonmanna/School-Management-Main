@@ -475,6 +475,9 @@ export const PERMISSIONS = {
     parentPortal: 'school:portal:parent',
     studentPortal: 'school:portal:student',
     teacherPortal: 'school:portal:teacher',
+    // Invite / revoke portal logins for students and guardians. Registrar-level:
+    // it mints credentials that can see a family's grades and fee balance.
+    managePortalAccounts: 'school:portal:accounts:write',
   },
   notifications: {
     read: 'notifications:read',

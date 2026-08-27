@@ -9,7 +9,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { MfaLoginDto } from './dto/mfa-login.dto';
 import { MfaEnrollDto } from './dto/mfa-enroll.dto';
-import { ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/password.dto';
+import { AcceptInviteDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthUser } from './jwt-token.service';
@@ -102,6 +102,21 @@ export class AuthController {
   @Post('reset-password')
   reset(@Body() dto: ResetPasswordDto) {
     return this.tokens.applyReset(dto.token, dto.newPassword);
+  }
+
+  /**
+   * Accept a portal invite (student / guardian) and set the first password.
+   *
+   * Public and throttled like the reset routes: the caller holds a one-time,
+   * hashed-at-rest invite token and nothing else. Consuming it activates the
+   * account; the token cannot be replayed.
+   */
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 15 * 60 * 1000 } })
+  @HttpCode(200)
+  @Post('accept-invite')
+  acceptInvite(@Body() dto: AcceptInviteDto) {
+    return this.tokens.acceptInvite(dto.token, dto.newPassword);
   }
 
   /** Authenticated password change (current password required). */

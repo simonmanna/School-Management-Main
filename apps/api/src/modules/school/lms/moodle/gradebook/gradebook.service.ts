@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../../../kernel/tenancy/tenant-context.service';
 import { LmsGradeBridgeService } from '../grade/grade-bridge.service';
 import { GradebookService as SchoolGradebookService } from '../../../assessment/gradebook.service';
+import { ViewEnvelopeService } from '../course/view-envelope.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -18,6 +19,7 @@ export class GradebookService {
     private readonly tenant: TenantContextService,
     private readonly grades: LmsGradeBridgeService,
     private readonly gradebook: SchoolGradebookService,
+    private readonly envelope: ViewEnvelopeService,
   ) {}
 
   private get org() {
@@ -67,7 +69,17 @@ export class GradebookService {
     for (const s of byStudent.values()) {
       s.total = totals.get(s.studentProfileId) ?? null;
     }
-    return { items, students: Array.from(byStudent.values()) };
+    // Names, so the grader report reads as a class list rather than a column of
+    // uuid fragments. Sorted by name for the same reason.
+    const names = await this.envelope.studentNames(Array.from(byStudent.keys()));
+    const students = Array.from(byStudent.values())
+      .map((s) => ({
+        ...s,
+        studentName: names.get(s.studentProfileId)?.name ?? 'Unknown student',
+        admissionNo: names.get(s.studentProfileId)?.admissionNo ?? null,
+      }))
+      .sort((a, b) => a.studentName.localeCompare(b.studentName));
+    return { items, students };
   }
 
   /** One student's report — used by student and parent views. Hidden items are dropped. */
@@ -85,7 +97,21 @@ export class GradebookService {
     return {
       grades: visible.map((a) => {
         const r = rows.find((x) => x.assessmentId === a.id);
-        return { assessmentId: a.id, title: a.title, maxScore: Number(a.maxScore), score: r?.effectiveScore != null ? Number(r.effectiveScore) : null, percentage: r?.percentage != null ? Number(r.percentage) : null };
+        // A mark reaches a learner only once moderation has APPROVED it. This is
+        // the endpoint students and parents read directly, so an entered-but-
+        // unapproved score must not appear here — a head of department may still
+        // change it. `released: false` lets the UI say "not released yet" rather
+        // than render a blank that reads as a zero.
+        const released = r?.approvalStatus === 'approved';
+        return {
+          assessmentId: a.id,
+          title: a.title,
+          maxScore: Number(a.maxScore),
+          score: released && r?.effectiveScore != null ? Number(r.effectiveScore) : null,
+          percentage: released && r?.percentage != null ? Number(r.percentage) : null,
+          submissionStatus: r?.status ?? null,
+          released,
+        };
       }),
     };
   }

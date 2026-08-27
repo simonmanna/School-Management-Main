@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../../../kernel/tenancy/tenant-conte
 import { ActivityRegistry } from '../activity/activity-registry.service';
 import { LmsEventService } from '../lms-event.service';
 import type { CompletionState } from '../plugin.types';
+import { ViewEnvelopeService } from '../course/view-envelope.service';
 
 /**
  * Completion tracking (ADR-014 §3.4) and the rollup that finally gives
@@ -17,6 +18,7 @@ export class CompletionService {
     private readonly tenant: TenantContextService,
     private readonly registry: ActivityRegistry,
     private readonly events: LmsEventService,
+    private readonly envelope: ViewEnvelopeService,
   ) {}
 
   private get org() {
@@ -107,11 +109,18 @@ export class CompletionService {
   async matrix(courseOfferingId: string) {
     const modules = await this.prisma.client.courseModule.findMany({
       where: { organizationId: this.org, courseOfferingId, deletedAt: null, completionMode: { not: 'none' } },
-      select: { id: true, activityType: true },
     });
     const rows = await this.prisma.client.courseModuleCompletion.findMany({
       where: { organizationId: this.org, courseModuleId: { in: modules.map((m) => m.id) } },
     });
-    return { modules, completions: rows };
+    // Names, so the report reads as a list of activities rather than uuid stubs.
+    const views = await this.envelope.moduleViews(modules, { showGrades: false });
+    const studentIds = [...new Set(rows.map((r) => r.studentProfileId))];
+    const names = await this.envelope.studentNames(studentIds);
+    return {
+      modules: views.map((v) => ({ id: v.id, activityType: v.activityType, name: v.name, icon: v.icon })),
+      students: studentIds.map((sid) => ({ studentProfileId: sid, studentName: names.get(sid)?.name ?? null })),
+      completions: rows,
+    };
   }
 }

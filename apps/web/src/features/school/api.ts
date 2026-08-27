@@ -5313,9 +5313,15 @@ export interface LmsActivityType { name: string; label: string; icon: string; gr
 export function useLmsCourses(params: { termId?: string; classId?: string; subjectId?: string } = {}) {
   return useQuery({ queryKey: ['lms', 'courses', params], queryFn: async () => (await api.get<LmsCourse[]>(`${LMS}/courses`, { params })).data });
 }
-export function useLmsCoursePage(id: string, studentProfileId?: string) {
-  return useQuery({ queryKey: ['lms', 'course', id, studentProfileId ?? 'staff'], enabled: !!id,
-    queryFn: async () => (await api.get<{ offering: LmsCourse; sections: LmsSection[] }>(`${LMS}/courses/${id}`, { params: studentProfileId ? { studentProfileId } : {} })).data });
+/**
+ * `asStudent` is a REQUEST to view on a pupil's behalf, not an identity claim.
+ * The server resolves who you are from your token and refuses this unless you
+ * are that student, their guardian, or staff holding the preview capability —
+ * so passing someone else's id yields a 403, not their data. A student omits it.
+ */
+export function useLmsCoursePage(id: string, asStudent?: string) {
+  return useQuery({ queryKey: ['lms', 'course', id, asStudent ?? 'self'], enabled: !!id,
+    queryFn: async () => (await api.get<{ offering: LmsCourse; sections: LmsSection[] }>(`${LMS}/courses/${id}`, { params: asStudent ? { asStudent } : {} })).data });
 }
 export function useLmsPermissions(id: string) {
   return useQuery({ queryKey: ['lms', 'permissions', id], enabled: !!id, queryFn: async () => (await api.get<Record<string, boolean>>(`${LMS}/courses/${id}/permissions`)).data });
@@ -5344,8 +5350,8 @@ export function useLmsDeleteModule() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async (id: string) => (await api.delete(`${LMS}/modules/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'course'] }) });
 }
-export function useLmsModuleView(id: string, studentProfileId?: string) {
-  return useQuery({ queryKey: ['lms', 'module', id, studentProfileId ?? 'staff'], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/modules/${id}/view`, { params: studentProfileId ? { studentProfileId } : {} })).data });
+export function useLmsModuleView(id: string, asStudent?: string) {
+  return useQuery({ queryKey: ['lms', 'module', id, asStudent ?? 'self'], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/modules/${id}/view`, { params: asStudent ? { asStudent } : {} })).data });
 }
 export function useLmsModuleAction() {
   const qc = useQueryClient();
@@ -5367,8 +5373,142 @@ export function useLmsParticipants(courseOfferingId: string) {
 export function useLmsSeedRoles() {
   return useMutation({ mutationFn: async () => (await api.post(`${LMS}/roles/seed`)).data });
 }
+/**
+ * "My learning" (L3.1). The subject is resolved from the caller's token; a
+ * guardian passes `asStudent` to pick a child, which the server checks against
+ * their guardianships. There is no way to ask for an arbitrary pupil.
+ */
+/**
+ * CBT attempt hooks used by the in-course quiz runner.
+ *
+ * `studentProfileId` is intentionally absent from `start`: the server takes the
+ * sitter from the caller's token and refuses an attempt opened in someone else's
+ * name. Ownership is likewise re-checked on every save and on submit.
+ */
+export function useCbtStartAttempt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { paperId: string; studentAssessmentId?: string }) =>
+      (await api.post(`${CBT}/start`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cbt'] }),
+  });
+}
+
+export function useCbtAttempt(attemptId?: string) {
+  return useQuery({
+    queryKey: ['cbt', 'attempt', attemptId],
+    enabled: !!attemptId,
+    queryFn: async () => (await api.get(`${CBT}/attempts/${attemptId}`)).data,
+  });
+}
+
+export function useCbtSaveResponse() {
+  return useMutation({
+    mutationFn: async (dto: {
+      attemptId: string; questionId: string; response: Record<string, unknown>;
+      sequenceNumber: number; clientEventId?: string;
+    }) => (await api.post(`${CBT}/response`, dto)).data,
+  });
+}
+
+export function useCbtSubmitAttempt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { attemptId: string; idempotencyKey?: string }) =>
+      (await api.post(`${CBT}/submit`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['cbt'] }),
+  });
+}
+
+/** Spine fields only — visibility, dates, completion, availability. */
+export function useLmsUpdateModule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: any) => (await api.patch(`${LMS}/modules/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Plugin fields only. Kept separate so a plugin can never write spine state. */
+export function useLmsUpdateInstance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: any) => (await api.patch(`${LMS}/modules/${id}/instance`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Deadlines + lessons in a window. Scope is decided server-side. */
+export function useLmsCalendar(from: string, to: string, asStudent?: string) {
+  return useQuery({
+    queryKey: ['lms', 'calendar', from, to, asStudent ?? 'self'],
+    queryFn: async () => (await api.get(`${LMS}/calendar`, { params: { from, to, ...(asStudent ? { asStudent } : {}) } })).data,
+  });
+}
+
+export function useLmsEngagement(courseId: string) {
+  return useQuery({
+    queryKey: ['lms', 'engagement', courseId],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get(`${LMS}/courses/${courseId}/engagement`)).data,
+  });
+}
+
+/**
+ * Edit one gradebook cell.
+ *
+ * Routes through the LMS gradebook service, which delegates to the grade bridge
+ * and ultimately `MarkingService` — the single permitted writer of a mark. Never
+ * write StudentAssessment.score from anywhere else.
+ */
+export function useLmsEditCell() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; studentAssessmentId: string; score: number }) =>
+      (await api.patch(`${LMS}/courses/${courseId}/gradebook/cell`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Export a course structure as a portable bundle. */
+export function useLmsExportCourse() {
+  return useMutation({
+    mutationFn: async ({ id, includeUserData }: { id: string; includeUserData?: boolean }) =>
+      (await api.post(`${LMS}/courses/${id}/export`, { includeUserData })).data,
+  });
+}
+
+/** Clone a term's course structures into the next term. Structure only. */
+export function useLmsRollover() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { fromTermId: string; toTermId: string; offeringIds?: string[] }) =>
+      (await api.post(`${LMS}/courses/rollover`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsMyDashboard(asStudent?: string) {
+  return useQuery({
+    queryKey: ['lms', 'my', asStudent ?? 'self'],
+    queryFn: async () => (await api.get(`${LMS}/my`, { params: asStudent ? { asStudent } : {} })).data,
+    retry: false,
+  });
+}
+
+/** Children a guardian may switch between. Empty for students and staff. */
+export function useLmsMyChildren() {
+  return useQuery({
+    queryKey: ['lms', 'my', 'children'],
+    queryFn: async () => (await api.get(`${LMS}/my/children`)).data,
+    retry: false,
+  });
+}
+
 export function useLmsSetCompletion() {
   const qc = useQueryClient();
+  // `asStudent` only; the server resolves the subject from the token and refuses
+  // a mismatch, so a client cannot tick a classmate's box.
   return useMutation({ mutationFn: async ({ id, ...dto }: any) => (await api.post(`${LMS}/modules/${id}/completion`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }) });
 }
 export function useLmsActivityReport(id: string) {

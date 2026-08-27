@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { PortalClaim } from '../auth/portal-identity.types';
 
 export interface TenantStore {
   organizationId: string;
   userId?: string;
   permissions?: string[];
+  /** Verified portal subject, copied from the access token. Absent for staff. */
+  portal?: PortalClaim;
 }
 
 /**
@@ -43,5 +46,14 @@ export class TenantContextService {
 
   get permissions(): string[] {
     return this.als.getStore()?.permissions ?? [];
+  }
+
+  /**
+   * The verified portal (student/guardian) claim for this request, if any.
+   * Populated from the signed access token by the middleware in main.ts — never
+   * from a query parameter or request body.
+   */
+  get portal(): PortalClaim | undefined {
+    return this.als.getStore()?.portal;
   }
 }

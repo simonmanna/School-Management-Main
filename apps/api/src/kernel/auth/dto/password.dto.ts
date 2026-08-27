@@ -32,3 +32,15 @@ export class ChangePasswordDto {
   @MinLength(8)
   newPassword!: string;
 }
+
+/** Accept a portal invite: choose the first password for an invited account. */
+export class AcceptInviteDto {
+  @ApiProperty()
+  @IsString()
+  token!: string;
+
+  @ApiProperty({ minLength: 8 })
+  @IsString()
+  @MinLength(8)
+  newPassword!: string;
+}

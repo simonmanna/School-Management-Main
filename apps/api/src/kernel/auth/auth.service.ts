@@ -8,6 +8,7 @@ import { EventBus } from '../events/event-bus';
 import { EncryptionService } from '../encryption/encryption.service';
 import { JwtTokenService, type AuthUser } from './jwt-token.service';
 import { PasswordService } from './password.service';
+import { PortalIdentityService } from './portal-identity.service';
 import { MfaService } from './mfa.service';
 import { hashRefreshToken, newRefreshTokenValue } from './refresh-token.util';
 import { LoginDto } from './dto/login.dto';
@@ -59,6 +60,7 @@ export class AuthService {
     private readonly tenant: TenantContextService,
     private readonly jwt: JwtTokenService,
     private readonly password: PasswordService,
+    private readonly portalIdentity: PortalIdentityService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly mfa: MfaService,
@@ -320,11 +322,15 @@ export class AuthService {
         });
 
         const user = existing.user as UserWithRoles;
+        // Re-resolved on every refresh rather than copied from the old token, so
+        // revoking a PortalIdentity takes effect at the next refresh at latest.
+        const portal = await this.portalIdentity.claimFor(user.id, existing.organizationId);
         const accessToken = this.jwt.signAccess({
           sub: user.id,
           organizationId: existing.organizationId,
           email: user.email,
           permissions: this.aggregatePermissions(user.roles),
+          portal,
         });
         const org = await this.prisma.raw.organization.findUnique({
           where: { id: existing.organizationId },
@@ -473,11 +479,15 @@ export class AuthService {
     _unused: unknown,
   ) {
     const permissions = this.aggregatePermissions(user.roles);
+    // A student/guardian account carries its subject as a signed claim; a staff
+    // account gets `undefined` and is treated as staff everywhere downstream.
+    const portal = await this.portalIdentity.claimFor(user.id, organizationId);
     const accessToken = this.jwt.signAccess({
       sub: user.id,
       organizationId,
       email: user.email,
       permissions,
+      portal,
     });
 
     const refresh = newRefreshTokenValue();

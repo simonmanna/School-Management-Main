@@ -379,4 +379,17 @@ export class CbtAttemptService {
     if (!attempt) throw new NotFoundException(`QuizAttempt ${attemptId} not found`);
     return this.strip(attempt);
   }
+
+  /**
+   * Who sat this attempt. Separate from `getForStudent` because that deliberately
+   * strips identity and answer keys out of its payload, so the caller cannot use
+   * it to authorise anything.
+   */
+  async ownerOf(attemptId: string): Promise<string | null> {
+    const row = await this.prisma.client.quizAttempt.findFirst({
+      where: { id: attemptId },
+      select: { studentProfileId: true },
+    });
+    return row?.studentProfileId ?? null;
+  }
 }

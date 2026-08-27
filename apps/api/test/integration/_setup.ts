@@ -7,6 +7,14 @@
  * Skipped automatically when no DATABASE_URL is configured. In CI we run
  * `docker compose up -d db` then `pnpm test:integration`.
  */
+/**
+ * Integration specs each compile a full Nest module graph and seed a fresh
+ * organization in `beforeAll`, which comfortably exceeds Jest's 5-second default
+ * — especially with several suites running in parallel against one database.
+ * Set once here, since every integration spec imports this module.
+ */
+jest.setTimeout(180_000);
+
 const HAS_DB = !!process.env.DATABASE_URL;
 const describeDb = HAS_DB ? describe : describe.skip;
 

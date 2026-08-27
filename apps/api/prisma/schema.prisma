@@ -444,6 +444,8 @@ model User {
 
   roles           Role[]         @relation("UserRoles")
   refreshTokens   RefreshToken[]
+  /// Portal (student/guardian) subjects this account speaks for. Empty for staff.
+  portalIdentities PortalIdentity[] @relation("PortalIdentityUser")
   tasksAssigned   Task[]         @relation("TaskAssignee")
   tasksSupervised Task[]         @relation("TaskSupervisor")
   tasksVerified   Task[]         @relation("TaskVerifier")
@@ -17671,4 +17673,43 @@ model ModAssignSubmission {
   @@unique([assignId, studentProfileId, attemptNo])
   @@index([organizationId, courseModuleId])
   @@index([studentProfileId])
+}
+
+/// Which real-world person a login account speaks for, when that person is NOT staff.
+///
+/// Before this table the `User` table was staff-only: it had no relation to
+/// StudentProfile, Partner or Contact. Student and guardian identity therefore had
+/// nowhere to live, and every endpoint that needed it took a `studentProfileId`
+/// straight off the URL and trusted it. This is the server-side answer to
+/// "who is calling?" for portal users, and the only permitted source of that
+/// answer — a request may never assert it.
+///
+/// Exactly one of studentProfileId / guardianContactId is set. A guardian row is
+/// created per guardianship, so one guardian User legitimately holds several rows
+/// (one per child) — which is why this is a join table and not two nullable columns
+/// on User.
+model PortalIdentity {
+  id             String  @id @default(uuid())
+  organizationId String
+  userId         String
+  /// 'student' | 'guardian' — denormalised so a claim can be built without a join.
+  subjectType    String
+
+  /// Set iff subjectType = 'student'.
+  studentProfileId String?
+  /// Set iff subjectType = 'guardian'. FK to Contact (matches StudentGuardian).
+  guardianContactId String?
+
+  /// Revoked without deleting, so an audit trail of past access survives.
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+
+  user User @relation("PortalIdentityUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, subjectType, studentProfileId, guardianContactId])
+  @@index([organizationId, userId])
+  @@index([organizationId, studentProfileId])
+  @@index([organizationId, guardianContactId])
 }

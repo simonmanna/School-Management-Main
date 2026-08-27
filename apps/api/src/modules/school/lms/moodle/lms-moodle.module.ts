@@ -27,6 +27,17 @@ import { CompletionService } from './completion/completion.service';
 // P5 — grade bridge, availability, gradebook
 import { LmsGradeBridgeService } from './grade/grade-bridge.service';
 import { AvailabilityService } from './availability/availability.service';
+import { LmsOrphanCheckService } from './maintenance/orphan-check.service';
+import { ViewEnvelopeService } from './course/view-envelope.service';
+import { LearnerService } from './learner/learner.service';
+import { LearnerController } from './learner/learner.controller';
+import { LmsFileService } from './files/lms-file.service';
+import { LmsFileController } from './files/lms-file.controller';
+import { LmsNotifyService } from './notify/lms-notify.service';
+import { LmsCalendarService } from './reports/lms-calendar.service';
+import { CourseBackupService } from './backup/course-backup.service';
+import { PackageServeService } from './packages/package-serve.service';
+import { PackageServeController } from './packages/package-serve.controller';
 import { GradebookService } from './gradebook/gradebook.service';
 
 // P7 — reports, badges, plan bridge
@@ -59,6 +70,14 @@ const CORE_SERVICES = [
   CompletionService,
   LmsGradeBridgeService,
   AvailabilityService,
+  LmsOrphanCheckService,
+  ViewEnvelopeService,
+  LearnerService,
+  LmsFileService,
+  LmsNotifyService,
+  LmsCalendarService,
+  CourseBackupService,
+  PackageServeService,
   GradebookService,
   LmsReportsService,
   BadgesService,
@@ -82,7 +101,7 @@ const PLUGINS = [
   // AssessmentModule supplies MarkingService — the grade bridge posts marks
   // through its ledger rather than writing the derived score columns itself.
   imports: [AssessmentModule],
-  controllers: [LmsCourseController, LmsOpsController, LmsRolesController],
+  controllers: [LmsCourseController, LmsOpsController, LmsRolesController, LearnerController, LmsFileController, PackageServeController],
   providers: [...CORE_SERVICES, ...PLUGINS],
   exports: [...CORE_SERVICES],
 })

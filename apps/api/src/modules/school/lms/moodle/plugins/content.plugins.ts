@@ -31,8 +31,19 @@ export class ModResourcePlugin extends BaseActivityPlugin {
   async updateInstance(_ctx: PluginCtx, id: string, dto: Record<string, unknown>) {
     await this.model().update({ where: { id }, data: { name: dto.name, intro: dto.intro, resourceId: dto.resourceId, fileId: dto.fileId, displayMode: dto.displayMode } });
   }
-  async viewForStudent(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
-  async viewForTeacher(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
+
+  /** Resolve the payload file so the card can show its name, type and size. */
+  private async resolveFile(instanceId: string) {
+    const inst: any = await this.model().findFirst({ where: { id: instanceId, organizationId: this.org } });
+    if (!inst?.fileId) return { instance: inst, file: null };
+    const file = await this.db.file.findFirst({
+      where: { id: inst.fileId, organizationId: this.org, deletedAt: null },
+      select: { id: true, filename: true, contentType: true, byteSize: true },
+    });
+    return { instance: inst, file };
+  }
+  async viewForStudent(_ctx: PluginCtx, cm: CourseModule) { return this.resolveFile(cm.instanceId); }
+  async viewForTeacher(_ctx: PluginCtx, cm: CourseModule) { return this.resolveFile(cm.instanceId); }
 }
 
 /** mod_url — an external link. */
@@ -90,6 +101,23 @@ export class ModLabelPlugin extends BaseActivityPlugin {
   }
   async viewForStudent(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
   async viewForTeacher(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
+
+  /**
+   * A label has no title — it IS its text, rendered inline on the course page.
+   * The base implementation would fall back to the generic type label ("Text"),
+   * so derive something readable from the first line of content instead.
+   */
+  async instanceSummaries(ids: string[]) {
+    if (ids.length === 0) return new Map<string, { name: string; intro?: string | null }>();
+    const rows: Array<{ id: string; content: string }> =
+      await this.model().findMany({ where: { id: { in: ids }, organizationId: this.org } });
+    return new Map(
+      rows.map((r) => {
+        const text = String(r.content ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        return [r.id, { name: text.slice(0, 80) || 'Text', intro: r.content ?? null }];
+      }),
+    );
+  }
 }
 
 /** mod_folder — a set of files. */
@@ -107,8 +135,21 @@ export class ModFolderPlugin extends BaseActivityPlugin {
   async updateInstance(_ctx: PluginCtx, id: string, dto: Record<string, unknown>) {
     await this.model().update({ where: { id }, data: { name: dto.name, intro: dto.intro, fileIds: dto.fileIds } });
   }
-  async viewForStudent(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
-  async viewForTeacher(_ctx: PluginCtx, cm: CourseModule) { return this.getInstance(_ctx, cm.instanceId); }
+
+  /** Resolve the folder's file ids into displayable rows. */
+  private async resolveFiles(instanceId: string) {
+    const inst: any = await this.model().findFirst({ where: { id: instanceId, organizationId: this.org } });
+    const ids: string[] = Array.isArray(inst?.fileIds) ? inst.fileIds : [];
+    const files = ids.length
+      ? await this.db.file.findMany({
+          where: { id: { in: ids }, organizationId: this.org, deletedAt: null },
+          select: { id: true, filename: true, contentType: true, byteSize: true },
+        })
+      : [];
+    return { instance: inst, files };
+  }
+  async viewForStudent(_ctx: PluginCtx, cm: CourseModule) { return this.resolveFiles(cm.instanceId); }
+  async viewForTeacher(_ctx: PluginCtx, cm: CourseModule) { return this.resolveFiles(cm.instanceId); }
 }
 
 export const CONTENT_PLUGINS = [ModResourcePlugin, ModUrlPlugin, ModPagePlugin, ModLabelPlugin, ModFolderPlugin];

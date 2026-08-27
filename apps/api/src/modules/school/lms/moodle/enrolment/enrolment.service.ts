@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../../../kernel/tenancy/tenant-context.service';
 import { LmsRolesService } from '../context/roles.service';
 import { LmsEventService } from '../lms-event.service';
+import { ViewEnvelopeService } from '../course/view-envelope.service';
 
 /**
  * Enrolment (ADR-014 §3.3). Separates HOW someone joins (roster sync / manual / self)
@@ -17,6 +18,7 @@ export class EnrolmentService {
     private readonly tenant: TenantContextService,
     private readonly roles: LmsRolesService,
     private readonly events: LmsEventService,
+    private readonly envelope: ViewEnvelopeService,
   ) {}
 
   private get org() {
@@ -44,10 +46,20 @@ export class EnrolmentService {
   }
 
   async listEnrolments(courseOfferingId: string, filter: { status?: 'active' | 'suspended' } = {}) {
-    return this.prisma.client.courseEnrolment.findMany({
+    const rows = await this.prisma.client.courseEnrolment.findMany({
       where: { organizationId: this.org, courseOfferingId, ...(filter.status ? { status: filter.status } : {}) },
       orderBy: { createdAt: 'asc' },
     });
+    // A participants list of uuid fragments is unusable; resolve the names here
+    // so every caller gets them rather than each page re-deriving them.
+    const names = await this.envelope.studentNames(
+      rows.map((r) => r.studentProfileId).filter((x): x is string => Boolean(x)),
+    );
+    return rows.map((r) => ({
+      ...r,
+      studentName: r.studentProfileId ? names.get(r.studentProfileId)?.name ?? null : null,
+      admissionNo: r.studentProfileId ? names.get(r.studentProfileId)?.admissionNo ?? null : null,
+    }));
   }
 
   /** Manual single enrolment + role assignment. */

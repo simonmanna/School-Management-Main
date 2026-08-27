@@ -1,11 +1,18 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
+import type { PortalClaim } from './portal-identity.types';
 
 export interface AccessTokenPayload {
   sub: string; // user id
   organizationId: string;
   email: string;
   permissions: string[];
+  /**
+   * Portal (student/guardian) subject this account speaks for. Absent for staff.
+   * Signed into the token so the server never has to take a subject id from
+   * request input — see PortalIdentityService.
+   */
+  portal?: PortalClaim;
   /**
    * Optional on the interface because tokens minted before this claim existed
    * are still valid until they expire. `verifyAccess` rejects a *mismatched*

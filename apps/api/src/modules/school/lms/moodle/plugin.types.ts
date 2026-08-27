@@ -29,6 +29,13 @@ export interface PluginCtx {
   contextId?: string;
 }
 
+/** The minimum a plugin must expose for the spine to render its card. */
+export interface InstanceSummary {
+  name: string;
+  /** Short rich-text blurb shown under the title. Already sanitised on write. */
+  intro?: string | null;
+}
+
 export interface GradeDefinition {
   maxScore: number;
   gradingMode: string; // 'points' | 'percentage' | 'scale'
@@ -75,6 +82,23 @@ export interface ActivityPlugin {
 
   /** Objective evidence produced by this student's work on this activity. */
   emitEvidence?(ctx: PluginCtx, cm: CourseModule): Promise<EvidenceRow[]>;
+
+  /**
+   * Which of these instance ids still exist. Used by the nightly orphan
+   * reconciler, which cannot know a plugin's table (ADR-014 accepted the untyped
+   * polymorphic FK on condition such a check exists).
+   */
+  liveInstanceIds?(ids: string[]): Promise<Set<string>>;
+
+  /**
+   * Display data for a batch of instances, for the course page.
+   *
+   * `CourseModule` has no `name` column — the name lives in the per-type instance
+   * row — so without this the spine could only render "quiz · a3f8b21c", which is
+   * exactly what the course page used to show. Batched by design: a 14-week course
+   * must not cost one query per activity.
+   */
+  instanceSummaries?(ids: string[]): Promise<Map<string, InstanceSummary>>;
 
   /** Backup / restore / rollover. */
   exportInstance(ctx: PluginCtx, instanceId: string, opts: { includeUserData: boolean }): Promise<unknown>;
