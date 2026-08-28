@@ -147,8 +147,11 @@ export class AuthService {
     const mfaTokenHash = createHash('sha256').update(dto.mfaToken).digest('hex');
 
     // Look up the pending mfa token (no tenant context yet — fetch raw).
-    const pending = await this.prisma.raw.idempotencyRecord.findUnique({
-      where: { organizationId_key: { organizationId: '', key: `mfa:${mfaTokenHash}` } },
+    // The record was written under the real org id in `login()`, but we have no
+    // tenant here, so match on the namespaced token key alone. The key embeds a
+    // 192-bit random token, so it is not enumerable — matching by key is safe.
+    const pending = await this.prisma.raw.idempotencyRecord.findFirst({
+      where: { key: `mfa:${mfaTokenHash}` },
     });
     if (!pending || pending.status !== 'pending') {
       throw new UnauthorizedException('MFA token invalid or expired');
@@ -229,7 +232,10 @@ export class AuthService {
   /** Verify the user can produce a valid TOTP code, then persist the secret. */
   async verifyMfaEnrollment(auth: AuthUser, code: string): Promise<{ ok: true }> {
     const enrollKey = `mfa-enroll:${createHash('sha256').update(auth.sub).digest('hex')}`;
-    const pending = await this.prisma.raw.idempotencyRecord.findUnique({ where: { organizationId_key: { organizationId: '', key: enrollKey } } });
+    // Written under the user's real org id in `enrollMfa()`; matched by key
+    // alone because we have no tenant context here. The key embeds a 256-bit
+    // hash of the user id, so it is not enumerable.
+    const pending = await this.prisma.raw.idempotencyRecord.findFirst({ where: { key: enrollKey } });
     if (!pending || pending.status !== 'pending') {
       throw new BadRequestException('No MFA enrollment in progress');
     }
