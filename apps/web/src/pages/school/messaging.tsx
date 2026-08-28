@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
+  AlertTriangle,
+  Ban,
   Bell,
-  Check,
+  CalendarClock,
+  CheckCircle2,
   Clock,
-  Mail,
-  Megaphone,
+  Loader2,
   MessageCircle,
   MessageSquare,
+  Megaphone,
   Send,
+  ShieldOff,
   Users,
 } from 'lucide-react';
-import { useClasses, useStudents } from '@/features/school/api';
+import { useClasses, useSections } from '@/features/school/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,177 +23,243 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
 import { cn } from '@/lib/utils';
+import {
+  isBroadcastLive,
+  useAudiencePreview,
+  useBroadcastRecipients,
+  useBroadcastReport,
+  useBroadcasts,
+  useCancelBroadcast,
+  useCreateBroadcast,
+  useSubmitBroadcast,
+  type AudienceScope,
+  type AudienceSelector,
+  type ChannelPolicy,
+  type RecipientKind,
+} from '@/features/communication/broadcast-api';
 
 /**
- * Messaging — parent/guardian/student broadcast console.
+ * Messaging — the parent/guardian/staff broadcast console.
  *
- * DEMO management interface. Composing a message wires the Class + Student
- * pickers to the live school API (useClasses / useStudents), but "Send" is a
- * front-end simulation: it drops the message into the in-session History table
- * and fires a toast. No backend messaging endpoint is called yet — this exists
- * to show clients the messaging surface (channels, audiences, recipients).
+ * This replaces the earlier front-end simulation. Everything here is live:
+ * the audience is counted by the server against the current roster, the segment
+ * count is the one the biller will use, and Send hands the broadcast to the
+ * worker.
+ *
+ * The composer is deliberately count-first. The screen shows how many people
+ * will be reached, how many cannot be, and what it will cost BEFORE the send
+ * button becomes interesting — because the expensive mistakes in school
+ * messaging are not typos, they are sending to the wrong 400 people or
+ * discovering afterwards that 60 of them had no phone number on file.
  */
 
-type ChannelId = 'sms' | 'email' | 'whatsapp' | 'inapp';
-type AudienceScope = 'class' | 'students' | 'all';
-type RecipientType = 'students' | 'guardians' | 'both';
-type MsgStatus = 'sent' | 'scheduled' | 'draft';
-
-const CHANNELS: { id: ChannelId; label: string; icon: typeof Mail; tone: string }[] = [
-  { id: 'sms', label: 'SMS', icon: MessageSquare, tone: 'text-sky-600' },
-  { id: 'email', label: 'Email', icon: Mail, tone: 'text-violet-600' },
-  { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, tone: 'text-emerald-600' },
-  { id: 'inapp', label: 'In-App / Push', icon: Bell, tone: 'text-amber-600' },
-];
-
-const RECIPIENT_TYPES: { id: RecipientType; label: string }[] = [
-  { id: 'guardians', label: 'Parents / Guardians' },
-  { id: 'students', label: 'Students' },
-  { id: 'both', label: 'Both' },
+/** Transport chains offered in the composer, in plain language. */
+const POLICIES: { id: string; label: string; hint: string; policy: ChannelPolicy; icon: typeof Send }[] = [
+  {
+    id: 'wa-sms',
+    label: 'WhatsApp, then SMS',
+    hint: 'Cheapest reliable reach. Falls back to SMS only for parents WhatsApp could not reach.',
+    icon: MessageCircle,
+    policy: {
+      steps: [
+        { providerId: 'whatsapp', transport: 'cloud' },
+        { providerId: 'whatsapp', transport: 'baileys' },
+        { providerId: 'sms' },
+        { providerId: 'internal' },
+      ],
+      fallbackOnFailure: true,
+    },
+  },
+  {
+    id: 'sms',
+    label: 'SMS only',
+    hint: 'Reaches any handset. Costs money per segment — check the estimate below.',
+    icon: MessageSquare,
+    policy: { steps: [{ providerId: 'sms' }], fallbackOnFailure: false },
+  },
+  {
+    id: 'wa',
+    label: 'WhatsApp only',
+    hint: 'Free, but silently misses parents who are not on WhatsApp.',
+    icon: MessageCircle,
+    policy: {
+      steps: [
+        { providerId: 'whatsapp', transport: 'cloud' },
+        { providerId: 'whatsapp', transport: 'baileys' },
+      ],
+      fallbackOnFailure: true,
+    },
+  },
+  {
+    id: 'portal',
+    label: 'Portal / in-app only',
+    hint: 'No cost, but a parent who does not open the portal has not been told.',
+    icon: Bell,
+    policy: { steps: [{ providerId: 'internal' }], fallbackOnFailure: false },
+  },
 ];
 
 const TEMPLATES: { name: string; body: string }[] = [
-  { name: 'Fee reminder', body: 'Dear Parent, this is a reminder that school fees for the current term are due. Kindly clear the outstanding balance at your earliest convenience. Thank you.' },
-  { name: 'PTA meeting', body: 'Dear Parent/Guardian, you are invited to the termly PTA meeting this Saturday at 10:00 AM in the main hall. Your attendance is highly appreciated.' },
-  { name: 'School closure', body: 'Dear Parents, please note that the school will be closed on Friday for a public holiday. Normal classes resume on Monday.' },
-  { name: 'Exam schedule', body: 'Dear Parent, end-of-term examinations begin next week. Please ensure your child is well prepared and reports to school on time.' },
+  {
+    name: 'Fee reminder',
+    body: 'Dear {{recipient.name}}, this is a reminder that school fees for {{student.name}} ({{student.className}}) are due. Kindly clear the outstanding balance at your earliest convenience. Thank you.',
+  },
+  {
+    name: 'PTA meeting',
+    body: 'Dear Parent/Guardian, you are invited to the termly PTA meeting this Saturday at 10:00 AM in the main hall. Your attendance is highly appreciated.',
+  },
+  {
+    name: 'School closure',
+    body: 'Dear Parents, please note that the school will be closed on Friday for a public holiday. Normal classes resume on Monday.',
+  },
+  {
+    name: 'Absence notice',
+    body: 'Dear {{recipient.name}}, {{student.name}} was marked absent today. Please contact the class teacher if this was unexpected.',
+  },
 ];
 
-interface SentMessage {
-  id: string;
-  channels: ChannelId[];
-  audienceLabel: string;
-  recipientType: RecipientType;
-  recipients: number;
-  subject?: string;
-  body: string;
-  status: MsgStatus;
-  at: string; // ISO
+const STATUS_TONE: Record<string, string> = {
+  draft: 'bg-slate-100 text-slate-700',
+  scheduled: 'bg-amber-100 text-amber-800',
+  materializing: 'bg-sky-100 text-sky-800',
+  sending: 'bg-sky-100 text-sky-800',
+  completed: 'bg-emerald-100 text-emerald-800',
+  cancelled: 'bg-slate-200 text-slate-600',
+  failed: 'bg-rose-100 text-rose-800',
+};
+
+const RECIPIENT_STATUS_TONE: Record<string, string> = {
+  delivered: 'text-emerald-600',
+  sent: 'text-sky-600',
+  queued: 'text-slate-500',
+  pending: 'text-slate-400',
+  failed: 'text-rose-600',
+  suppressed: 'text-amber-600',
+  unreachable: 'text-amber-600',
+  cancelled: 'text-slate-400',
+};
+
+/** Debounce a value so typing does not re-resolve the whole roster per keystroke. */
+function useDebounced<T>(value: T, ms = 400): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
 }
 
-const SEED_HISTORY: SentMessage[] = [
-  {
-    id: 'seed-1', channels: ['sms', 'whatsapp'], audienceLabel: 'All Students', recipientType: 'guardians',
-    recipients: 412, body: 'Term 2 opens Monday 2 Sep. Please ensure fees are cleared before reporting.',
-    status: 'sent', at: '2026-08-19T08:12:00',
-  },
-  {
-    id: 'seed-2', channels: ['email'], audienceLabel: 'Class: Senior 4', recipientType: 'both',
-    recipients: 68, subject: 'Mock exam timetable', body: 'Find attached the mock examination timetable for Senior 4 candidates.',
-    status: 'sent', at: '2026-08-18T14:40:00',
-  },
-  {
-    id: 'seed-3', channels: ['inapp'], audienceLabel: 'Class: Primary 5', recipientType: 'guardians',
-    recipients: 34, body: 'Swimming gala moved to next Thursday. Kindly send swimming kits.',
-    status: 'scheduled', at: '2026-08-22T09:00:00',
-  },
-];
-
 export function SchoolMessagingPage() {
-  const { data: classes } = useClasses();
-  const { data: studentsResp } = useStudents({ page: 1, pageSize: 500 });
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') ?? 'compose');
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') === 'history' ? 'history' : 'compose';
-  const setTab = (v: string) =>
-    setSearchParams(v === 'history' ? { tab: 'history' } : {}, { replace: true });
-  const [channels, setChannels] = useState<ChannelId[]>(['sms']);
+  /* ── Composer state ────────────────────────────────────────────────────── */
   const [scope, setScope] = useState<AudienceScope>('class');
-  const [recipientType, setRecipientType] = useState<RecipientType>('guardians');
-  const [classId, setClassId] = useState('');
-  const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [subject, setSubject] = useState('');
+  const [ids, setIds] = useState<string[]>([]);
+  const [recipients, setRecipients] = useState<RecipientKind>('guardians');
+  const [primaryOnly, setPrimaryOnly] = useState(true);
+  const [perStudent, setPerStudent] = useState(false);
+  const [policyId, setPolicyId] = useState('wa-sms');
+  const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [history, setHistory] = useState<SentMessage[]>(SEED_HISTORY);
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [reportId, setReportId] = useState<string | null>(null);
 
-  const allStudents = studentsResp?.data ?? [];
-  const classStudents = useMemo(
-    () => (classId ? allStudents.filter((s) => s.currentClassId === classId) : allStudents),
-    [allStudents, classId],
+  const classes = useClasses();
+  const sections = useSections();
+
+  const policy = useMemo(
+    () => POLICIES.find((p) => p.id === policyId)?.policy ?? POLICIES[0].policy,
+    [policyId],
   );
 
-  const className = (id: string) => classes?.data.find((c) => c.id === id)?.name ?? id;
+  const audience = useMemo<AudienceSelector | null>(() => {
+    const needsIds = scope !== 'all' && scope !== 'staff';
+    if (needsIds && ids.length === 0) return null;
+    return {
+      scope,
+      ...(needsIds ? { ids } : {}),
+      recipients,
+      primaryGuardianOnly: primaryOnly,
+      dedupe: perStudent ? 'per_student' : 'per_recipient',
+    };
+  }, [scope, ids, recipients, primaryOnly, perStudent]);
 
-  const pickedIds = Object.keys(picked).filter((k) => picked[k]);
+  const debouncedBody = useDebounced(body);
+  const preview = useAudiencePreview(audience, debouncedBody, policy, !!audience);
 
-  // Estimated head-count for the chosen audience × recipient type.
-  const baseCount = useMemo(() => {
-    if (scope === 'all') return allStudents.length;
-    if (scope === 'class') return classStudents.length;
-    return pickedIds.length;
-  }, [scope, allStudents.length, classStudents.length, pickedIds.length]);
+  const createBroadcast = useCreateBroadcast();
+  const submitBroadcast = useSubmitBroadcast();
+  const cancelBroadcast = useCancelBroadcast();
+  const broadcasts = useBroadcasts();
 
-  const recipientMultiplier = recipientType === 'both' ? 2 : 1;
-  const estRecipients = baseCount * recipientMultiplier;
+  const sending = createBroadcast.isPending || submitBroadcast.isPending;
 
-  const audienceLabel = useMemo(() => {
-    if (scope === 'all') return 'All Students';
-    if (scope === 'class') return classId ? `Class: ${className(classId)}` : 'Class: —';
-    return `${pickedIds.length} selected student${pickedIds.length === 1 ? '' : 's'}`;
-  }, [scope, classId, pickedIds.length, classes]);
+  const classOptions = classes.data?.data ?? [];
+  const sectionOptions = sections.data?.data ?? [];
 
-  const toggleChannel = (id: ChannelId) =>
-    setChannels((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
-
-  const togglePick = (id: string) =>
-    setPicked((prev) => ({ ...prev, [id]: !prev[id] }));
-
-  const canSend =
-    channels.length > 0 &&
-    body.trim().length > 0 &&
-    (scope === 'all' || (scope === 'class' && !!classId) || (scope === 'students' && pickedIds.length > 0));
-
-  const reset = () => {
-    setSubject('');
-    setBody('');
-    setPicked({});
-  };
-
-  const send = (status: MsgStatus) => {
-    if (!canSend) {
-      notify.error('Choose a channel, an audience and type a message first.');
+  async function handleSend() {
+    if (!audience) {
+      notify.error('Pick an audience first.');
       return;
     }
-    const msg: SentMessage = {
-      id: `m-${Date.now()}`,
-      channels: [...channels],
-      audienceLabel,
-      recipientType,
-      recipients: estRecipients,
-      subject: subject.trim() || undefined,
-      body: body.trim(),
-      status,
-      at: new Date().toISOString(),
-    };
-    setHistory((prev) => [msg, ...prev]);
-    notify.success(
-      status === 'scheduled'
-        ? `Message scheduled to ~${estRecipients} recipient(s).`
-        : `Message sent to ~${estRecipients} recipient(s) via ${channels.map((c) => CHANNELS.find((x) => x.id === c)?.label).join(', ')}.`,
-    );
-    reset();
-    setTab('history');
-  };
+    if (!body.trim()) {
+      notify.error('The message body is empty.');
+      return;
+    }
+    try {
+      const draft = await createBroadcast.mutateAsync({
+        title: title.trim() || undefined,
+        body,
+        audience,
+        channelPolicy: policy,
+        scheduledAt: scheduledAt || undefined,
+      });
+      await submitBroadcast.mutateAsync({ id: draft.id, scheduledAt: scheduledAt || undefined });
+      notify.success(
+        scheduledAt ? 'Broadcast scheduled.' : 'Broadcast started.',
+        scheduledAt
+          ? `Queued for ${new Date(scheduledAt).toLocaleString()}.`
+          : `${preview.data?.counts.members ?? 0} recipients. Track it under History.`,
+      );
+      setBody('');
+      setTitle('');
+      setScheduledAt('');
+      setTab('history');
+    } catch (err) {
+      notify.error('Could not start the broadcast.', (err as Error).message);
+    }
+  }
+
+  const seg = preview.data?.segments;
+  const counts = preview.data?.counts;
+  const smsInChain = policy.steps.some((s) => s.providerId === 'sms');
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-primary/10 p-2 text-primary">
-          <Megaphone className="h-5 w-5" />
-        </div>
+    <div className="space-y-6 p-4 sm:p-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Messaging</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold">
+            <Megaphone className="h-6 w-6 text-primary" /> Messaging
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Send announcements and alerts to parents, guardians and students across SMS, Email,
-            WhatsApp and in-app push — by class or hand-picked recipients.
+            Send to guardians, students or staff over WhatsApp, SMS and the parent portal.
           </p>
         </div>
-      </div>
+      </header>
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
@@ -198,87 +268,70 @@ export function SchoolMessagingPage() {
           </TabsTrigger>
           <TabsTrigger value="history">
             <Clock className="mr-2 h-4 w-4" /> History
-            <Badge variant="secondary" className="ml-2">{history.length}</Badge>
+            {broadcasts.data && broadcasts.data.length > 0 && (
+              <Badge variant="secondary" className="ml-2">{broadcasts.data.length}</Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
         {/* ─────────────── Compose ─────────────── */}
         <TabsContent value="compose">
           <div className="grid gap-4 lg:grid-cols-3">
-            {/* Left: the composer */}
             <div className="space-y-4 lg:col-span-2">
-              {/* Channels */}
+              {/* 1. Audience */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">1. Channel</CardTitle>
-                  <CardDescription>Pick one or more delivery channels.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-wrap gap-2">
-                    {CHANNELS.map((c) => {
-                      const active = channels.includes(c.id);
-                      const Icon = c.icon;
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => toggleChannel(c.id)}
-                          className={cn(
-                            'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors',
-                            active
-                              ? 'border-primary bg-primary/10 font-medium text-foreground'
-                              : 'border-border bg-background text-muted-foreground hover:bg-muted',
-                          )}
-                        >
-                          <Icon className={cn('h-4 w-4', active && c.tone)} />
-                          {c.label}
-                          {active && <Check className="h-3.5 w-3.5 text-primary" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Audience */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">2. Audience</CardTitle>
-                  <CardDescription>Who receives this message.</CardDescription>
+                  <CardTitle className="text-base">1. Audience</CardTitle>
+                  <CardDescription>
+                    Resolved against the roster when the message is actually sent, not now — so a
+                    student who enrols tomorrow morning is still included.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1">
                       <Label>Send to</Label>
-                      <Select value={scope} onValueChange={(v) => { setScope(v as AudienceScope); setPicked({}); }}>
+                      <Select
+                        value={scope}
+                        onValueChange={(v) => {
+                          setScope(v as AudienceScope);
+                          setIds([]);
+                        }}
+                      >
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="class">A whole class</SelectItem>
-                          <SelectItem value="students">Specific students</SelectItem>
-                          <SelectItem value="all">All students (school-wide)</SelectItem>
+                          <SelectItem value="class">A class</SelectItem>
+                          <SelectItem value="section">A section</SelectItem>
+                          <SelectItem value="all">Every student (school-wide)</SelectItem>
+                          <SelectItem value="staff">All staff</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1">
-                      <Label>Recipient</Label>
-                      <Select value={recipientType} onValueChange={(v) => setRecipientType(v as RecipientType)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {RECIPIENT_TYPES.map((r) => (
-                            <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+
+                    {scope !== 'staff' && (
+                      <div className="space-y-1">
+                        <Label>Recipient</Label>
+                        <Select value={recipients} onValueChange={(v) => setRecipients(v as RecipientKind)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="guardians">Parents / Guardians</SelectItem>
+                            <SelectItem value="students">Students</SelectItem>
+                            <SelectItem value="both">Both</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </div>
 
-                  {(scope === 'class' || scope === 'students') && (
+                  {(scope === 'class' || scope === 'section') && (
                     <div className="space-y-1">
-                      <Label>Class</Label>
-                      <Select value={classId} onValueChange={(v) => { setClassId(v); setPicked({}); }}>
-                        <SelectTrigger className="sm:w-1/2"><SelectValue placeholder="Select a class" /></SelectTrigger>
+                      <Label>{scope === 'class' ? 'Class' : 'Section'}</Label>
+                      <Select value={ids[0] ?? ''} onValueChange={(v) => setIds([v])}>
+                        <SelectTrigger className="sm:w-2/3">
+                          <SelectValue placeholder={`Select a ${scope}`} />
+                        </SelectTrigger>
                         <SelectContent>
-                          {(classes?.data ?? []).map((c) => (
+                          {(scope === 'class' ? classOptions : sectionOptions).map((c) => (
                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -286,129 +339,256 @@ export function SchoolMessagingPage() {
                     </div>
                   )}
 
-                  {scope === 'students' && (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <Label>Students {classId && `in ${className(classId)}`}</Label>
-                        <span className="text-xs text-muted-foreground">{pickedIds.length} selected</span>
-                      </div>
-                      <div className="max-h-56 overflow-y-auto rounded-md border">
-                        {!classId ? (
-                          <p className="px-3 py-6 text-center text-sm text-muted-foreground">Choose a class to list students.</p>
-                        ) : classStudents.length === 0 ? (
-                          <p className="px-3 py-6 text-center text-sm text-muted-foreground">No students in this class.</p>
-                        ) : (
-                          classStudents.map((s) => (
-                            <label
-                              key={s.id}
-                              className="flex cursor-pointer items-center gap-3 border-b px-3 py-2 text-sm last:border-0 hover:bg-muted/50"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={!!picked[s.id]}
-                                onChange={() => togglePick(s.id)}
-                                className="h-4 w-4 rounded border-border"
-                              />
-                              <span className="font-mono text-xs text-muted-foreground">{s.admissionNo}</span>
-                              <span className="flex-1">{s.partner?.name ?? '—'}</span>
-                            </label>
-                          ))
-                        )}
-                      </div>
+                  {scope !== 'staff' && recipients !== 'students' && (
+                    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={primaryOnly}
+                          onChange={(e) => setPrimaryOnly(e.target.checked)}
+                        />
+                        <span>
+                          <span className="font-medium">Primary guardian only</span>
+                          <span className="block text-xs text-muted-foreground">
+                            Off means every guardian on file is messaged — a family with three
+                            contacts receives three copies, and pays for three.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={perStudent}
+                          onChange={(e) => setPerStudent(e.target.checked)}
+                        />
+                        <span>
+                          <span className="font-medium">One message per child</span>
+                          <span className="block text-xs text-muted-foreground">
+                            Needed when the body uses {'{{student.name}}'}. A parent of three then
+                            receives three messages, on purpose.
+                          </span>
+                        </span>
+                      </label>
                     </div>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Message */}
+              {/* 2. Transport */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">2. How to reach them</CardTitle>
+                  <CardDescription>
+                    A chain, not a channel: each parent is reached over the first transport that
+                    works for them.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {POLICIES.map((p) => {
+                      const Icon = p.icon;
+                      const active = p.id === policyId;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setPolicyId(p.id)}
+                          className={cn(
+                            'flex flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition-colors',
+                            active
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border bg-background hover:bg-muted',
+                          )}
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            <Icon className={cn('h-4 w-4', active && 'text-primary')} />
+                            {p.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{p.hint}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 3. Message */}
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">3. Message</CardTitle>
-                  <CardDescription>Compose the content, or start from a template.</CardDescription>
+                  <CardDescription>
+                    {'{{recipient.name}}'}, {'{{student.name}}'} and {'{{student.className}}'} are
+                    filled in per recipient.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-end justify-between gap-2">
-                    <div className="space-y-1">
-                      <Label>Template</Label>
-                      <Select onValueChange={(name) => {
-                        const t = TEMPLATES.find((x) => x.name === name);
-                        if (t) setBody(t.body);
-                      }}>
-                        <SelectTrigger className="w-56"><SelectValue placeholder="Insert a template…" /></SelectTrigger>
-                        <SelectContent>
-                          {TEMPLATES.map((t) => <SelectItem key={t.name} value={t.name}>{t.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="flex flex-wrap gap-2">
+                    {TEMPLATES.map((t) => (
+                      <Button key={t.name} variant="outline" size="sm" onClick={() => setBody(t.body)}>
+                        {t.name}
+                      </Button>
+                    ))}
                   </div>
-
-                  {channels.includes('email') && (
-                    <div className="space-y-1">
-                      <Label>Subject</Label>
-                      <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Email subject line" />
-                    </div>
-                  )}
-
                   <div className="space-y-1">
-                    <Label>Message body</Label>
+                    <Label htmlFor="bc-title">Internal label (optional)</Label>
+                    <Input
+                      id="bc-title"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Term 2 fee reminder — P5"
+                    />
+                    <p className="text-xs text-muted-foreground">Shown in History only. Never sent.</p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="bc-body">Body</Label>
                     <Textarea
+                      id="bc-body"
+                      rows={6}
                       value={body}
                       onChange={(e) => setBody(e.target.value)}
-                      rows={6}
-                      placeholder="Type your message…"
+                      placeholder="Dear Parent, …"
                     />
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{channels.includes('sms') && `≈ ${Math.max(1, Math.ceil(body.length / 160))} SMS part(s)`}</span>
-                      <span>{body.length} characters</span>
-                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="bc-when">Send at (optional)</Label>
+                    <Input
+                      id="bc-when"
+                      type="datetime-local"
+                      className="sm:w-64"
+                      value={scheduledAt}
+                      onChange={(e) => setScheduledAt(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to send immediately.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Right: summary + send */}
-            <div className="lg:col-span-1">
-              <Card className="sticky top-4">
+            {/* Right: the count-first summary */}
+            <div className="space-y-4">
+              <Card className="lg:sticky lg:top-4">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Summary</CardTitle>
+                  <CardTitle className="text-base">Before you send</CardTitle>
+                  <CardDescription>{preview.data?.description ?? 'Pick an audience.'}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="rounded-lg border bg-muted/30 p-4 text-center">
-                    <div className="flex items-center justify-center gap-2 text-3xl font-semibold">
-                      <Users className="h-6 w-6 text-muted-foreground" />
-                      ~{estRecipients}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">estimated recipients</p>
-                  </div>
+                  {!audience && (
+                    <p className="text-sm text-muted-foreground">
+                      Choose who this is going to and the numbers will appear here.
+                    </p>
+                  )}
 
-                  <dl className="space-y-2 text-sm">
-                    <Row label="Channels">
-                      {channels.length === 0 ? (
-                        <span className="text-muted-foreground">none</span>
-                      ) : (
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {channels.map((c) => (
-                            <Badge key={c} variant="secondary">{CHANNELS.find((x) => x.id === c)?.label}</Badge>
-                          ))}
+                  {audience && preview.isLoading && (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Counting recipients…
+                    </p>
+                  )}
+
+                  {audience && preview.isError && (
+                    <p className="text-sm text-rose-600">
+                      {(preview.error as Error).message}
+                    </p>
+                  )}
+
+                  {counts && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Stat label="Will be reached" value={counts.members} tone="text-emerald-600" icon={Users} />
+                        <Stat
+                          label="Cannot be reached"
+                          value={counts.unreachable}
+                          tone={counts.unreachable > 0 ? 'text-amber-600' : 'text-muted-foreground'}
+                          icon={AlertTriangle}
+                        />
+                      </div>
+
+                      {counts.unreachable > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                          <p className="font-medium">
+                            {counts.unreachable} {counts.unreachable === 1 ? 'person has' : 'people have'} no
+                            usable phone number or portal account.
+                          </p>
+                          <p className="mt-1">
+                            They are recorded in the delivery report so the registrar can chase the
+                            missing numbers — they are not silently dropped.
+                          </p>
+                          {preview.data && preview.data.unreachableSample.length > 0 && (
+                            <p className="mt-2 text-amber-800">
+                              e.g. {preview.data.unreachableSample.slice(0, 3).map((u) => u.displayName).join(', ')}
+                              {counts.unreachable > 3 ? ` and ${counts.unreachable - 3} more` : ''}
+                            </p>
+                          )}
                         </div>
                       )}
-                    </Row>
-                    <Row label="Audience"><span className="text-right">{audienceLabel}</span></Row>
-                    <Row label="Recipient">
-                      {RECIPIENT_TYPES.find((r) => r.id === recipientType)?.label}
-                    </Row>
-                  </dl>
 
-                  <div className="space-y-2 pt-2">
-                    <Button className="w-full" disabled={!canSend} onClick={() => send('sent')}>
-                      <Send className="mr-2 h-4 w-4" /> Send now
-                    </Button>
-                    <Button variant="outline" className="w-full" disabled={!canSend} onClick={() => send('scheduled')}>
-                      <Clock className="mr-2 h-4 w-4" /> Schedule
-                    </Button>
-                  </div>
-                  <p className="text-center text-[11px] text-muted-foreground">
-                    Demo mode — messages are logged to History, not dispatched.
+                      {seg && body.trim() && (
+                        <div className="space-y-1 rounded-lg border bg-muted/30 p-3 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">Encoding</span>
+                            <span className={cn('font-medium', seg.encoding === 'UCS-2' && 'text-amber-600')}>
+                              {seg.encoding}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground">SMS segments each</span>
+                            <span className="font-medium">{seg.segments}</span>
+                          </div>
+                          {smsInChain && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Worst-case total segments</span>
+                              <span className="font-medium">{preview.data?.estimatedSmsSegments ?? 0}</span>
+                            </div>
+                          )}
+                          {seg.encoding === 'UCS-2' && (
+                            <p className="pt-1 text-amber-700">
+                              A non-GSM character (often a curly quote pasted from Word) cut the
+                              per-segment capacity from 160 to 70. Retyping the quotes roughly halves
+                              the cost.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {preview.data && preview.data.sample.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">First recipients</p>
+                          <ul className="space-y-1 text-xs">
+                            {preview.data.sample.slice(0, 5).map((s, i) => (
+                              <li key={i} className="flex items-center justify-between gap-2">
+                                <span className="truncate">
+                                  {s.displayName}
+                                  {s.studentName && (
+                                    <span className="text-muted-foreground"> · {s.studentName}</span>
+                                  )}
+                                </span>
+                                <span className="shrink-0 font-mono text-muted-foreground">{s.address}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <Button
+                    className="w-full"
+                    disabled={!audience || !body.trim() || sending || (counts?.members ?? 0) === 0}
+                    onClick={handleSend}
+                  >
+                    {sending ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Starting…</>
+                    ) : scheduledAt ? (
+                      <><CalendarClock className="mr-2 h-4 w-4" /> Schedule for {counts?.members ?? 0}</>
+                    ) : (
+                      <><Send className="mr-2 h-4 w-4" /> Send to {counts?.members ?? 0}</>
+                    )}
+                  </Button>
+                  <p className="text-center text-xs text-muted-foreground">
+                    A broadcast can be stopped mid-send from History.
                   </p>
                 </CardContent>
               </Card>
@@ -419,72 +599,285 @@ export function SchoolMessagingPage() {
         {/* ─────────────── History ─────────────── */}
         <TabsContent value="history">
           <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Broadcasts</CardTitle>
+              <CardDescription>Click a row for the full delivery report.</CardDescription>
+            </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-4 py-3">When</th>
-                      <th className="px-4 py-3">Channels</th>
-                      <th className="px-4 py-3">Audience</th>
-                      <th className="px-4 py-3">Recipient</th>
-                      <th className="px-4 py-3 text-right">Recipients</th>
-                      <th className="px-4 py-3">Message</th>
-                      <th className="px-4 py-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.map((m) => (
-                      <tr key={m.id} className="border-b last:border-0 align-top hover:bg-muted/40">
-                        <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                          {new Date(m.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {m.channels.map((c) => (
-                              <Badge key={c} variant="outline">{CHANNELS.find((x) => x.id === c)?.label}</Badge>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">{m.audienceLabel}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                          {RECIPIENT_TYPES.find((r) => r.id === m.recipientType)?.label}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium">{m.recipients}</td>
-                        <td className="max-w-sm px-4 py-3">
-                          {m.subject && <div className="font-medium">{m.subject}</div>}
-                          <div className="truncate text-muted-foreground">{m.body}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={m.status} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Message</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Recipients</TableHead>
+                    <TableHead className="text-right">Delivered</TableHead>
+                    <TableHead className="text-right">Failed</TableHead>
+                    <TableHead className="text-right">Suppressed</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(broadcasts.data ?? []).length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                        Nothing sent yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {(broadcasts.data ?? []).map((b) => (
+                    <TableRow
+                      key={b.id}
+                      className="cursor-pointer"
+                      onClick={() => setReportId(b.id)}
+                    >
+                      <TableCell>
+                        <div className="font-medium">{b.title ?? b.body.slice(0, 60)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(b.createdAt).toLocaleString()}
+                          {b.scheduledAt && b.status === 'scheduled' && (
+                            <> · scheduled {new Date(b.scheduledAt).toLocaleString()}</>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                            STATUS_TONE[b.status] ?? 'bg-slate-100 text-slate-700',
+                          )}
+                        >
+                          {isBroadcastLive(b.status) && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {b.status}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">{b.totalRecipients}</TableCell>
+                      <TableCell className="text-right text-emerald-600">{b.deliveredCount + b.sentCount}</TableCell>
+                      <TableCell className="text-right text-rose-600">{b.failedCount || ''}</TableCell>
+                      <TableCell className="text-right text-amber-600">
+                        {b.suppressedCount + b.unreachableCount || ''}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {isBroadcastLive(b.status) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              cancelBroadcast.mutate(
+                                { id: b.id, reason: 'Stopped from the console' },
+                                {
+                                  onSuccess: (r) =>
+                                    notify.success(
+                                      'Broadcast stopped.',
+                                      `${(r as { cancelledDeliveries: number }).cancelledDeliveries} queued messages were cancelled.`,
+                                    ),
+                                  onError: (err) => notify.error('Could not stop it.', (err as Error).message),
+                                },
+                              );
+                            }}
+                          >
+                            <Ban className="mr-1 h-3.5 w-3.5" /> Stop
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      <BroadcastReportDialog id={reportId} onClose={() => setReportId(null)} />
     </div>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Stat({
+  label,
+  value,
+  tone,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  tone: string;
+  icon: typeof Users;
+}) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium">{children}</dd>
+    <div className="rounded-lg border p-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className={cn('mt-1 text-2xl font-semibold', tone)}>{value}</div>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: MsgStatus }) {
-  const map: Record<MsgStatus, string> = {
-    sent: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
-    scheduled: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
-    draft: 'bg-muted text-muted-foreground',
-  };
-  return <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium capitalize', map[status])}>{status}</span>;
+/**
+ * The delivery report.
+ *
+ * Rows come from the broadcast's recipient list rather than from delivery
+ * records, so a parent with no phone number is visible as `unreachable` instead
+ * of being absent from the report entirely.
+ */
+function BroadcastReportDialog({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const report = useBroadcastReport(id ?? undefined);
+  const recipients = useBroadcastRecipients(
+    id ?? undefined,
+    statusFilter === 'all' ? undefined : statusFilter,
+  );
+
+  useEffect(() => {
+    if (!id) setStatusFilter('all');
+  }, [id]);
+
+  const b = report.data?.broadcast;
+
+  return (
+    <Dialog open={!!id} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{b?.title ?? 'Delivery report'}</DialogTitle>
+          <DialogDescription>
+            {b?.policyDescription && <>Transport chain: {b.policyDescription}. </>}
+            {b?.completedAt
+              ? `Completed ${new Date(b.completedAt).toLocaleString()}.`
+              : b && isBroadcastLive(b.status)
+                ? 'Still sending — this refreshes automatically.'
+                : ''}
+          </DialogDescription>
+        </DialogHeader>
+
+        {report.isLoading && (
+          <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+          </p>
+        )}
+
+        {b && (
+          <>
+            <p className="rounded-lg border bg-muted/30 p-3 text-sm">{b.body}</p>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <ReportStat label="Delivered" value={report.data?.byStatus.delivered ?? 0} icon={CheckCircle2} tone="text-emerald-600" />
+              <ReportStat label="Sent" value={report.data?.byStatus.sent ?? 0} icon={Send} tone="text-sky-600" />
+              <ReportStat label="Failed" value={report.data?.byStatus.failed ?? 0} icon={AlertTriangle} tone="text-rose-600" />
+              <ReportStat
+                label="Opted out"
+                value={report.data?.byStatus.suppressed ?? 0}
+                icon={ShieldOff}
+                tone="text-amber-600"
+              />
+            </div>
+
+            {(report.data?.byStatus.unreachable ?? 0) > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                <span className="font-medium">
+                  {report.data?.byStatus.unreachable} recipients had no phone number or portal account.
+                </span>{' '}
+                Filter by <em>unreachable</em> below for the list to hand to the registrar.
+              </div>
+            )}
+
+            {report.data && report.data.byProvider.length > 0 && (
+              <div className="text-xs text-muted-foreground">
+                By transport:{' '}
+                {report.data.byProvider
+                  .map((p) => `${p.providerId} ${p.status} ${p.count}`)
+                  .join(' · ')}
+                {report.data.totals.segments > 0 && <> · {report.data.totals.segments} SMS segments</>}
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              {['all', 'delivered', 'sent', 'queued', 'failed', 'suppressed', 'unreachable'].map((s) => (
+                <Button
+                  key={s}
+                  variant={statusFilter === s ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setStatusFilter(s)}
+                >
+                  {s}
+                  {s !== 'all' && report.data?.byStatus[s] ? ` (${report.data.byStatus[s]})` : ''}
+                </Button>
+              ))}
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Recipient</TableHead>
+                  <TableHead>Student</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Transport</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(recipients.data?.rows ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                      No recipients with this status.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {(recipients.data?.rows ?? []).map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell>
+                      <div className="font-medium">{r.displayName}</div>
+                      {r.relationship && (
+                        <div className="text-xs text-muted-foreground">{r.relationship}</div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {r.studentName ?? '—'}
+                      {r.className && <span className="text-muted-foreground"> · {r.className}</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{r.address ?? '—'}</TableCell>
+                    <TableCell className="text-sm">{r.providerId ?? '—'}</TableCell>
+                    <TableCell>
+                      <span className={cn('text-sm font-medium', RECIPIENT_STATUS_TONE[r.status])}>
+                        {r.status}
+                      </span>
+                      {(r.lastError || r.suppressionReason) && (
+                        <div className="text-xs text-muted-foreground">
+                          {r.suppressionReason ?? r.lastError}
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
 }
+
+function ReportStat({
+  label,
+  value,
+  icon: Icon,
+  tone,
+}: {
+  label: string;
+  value: number;
+  icon: typeof Send;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" /> {label}
+      </div>
+      <div className={cn('mt-1 text-xl font-semibold', tone)}>{value}</div>
+    </div>
+  );
+}
+
+export default SchoolMessagingPage;

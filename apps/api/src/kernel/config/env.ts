@@ -89,12 +89,19 @@ export function validateEnv(): EnvValidationResult {
   // creds; they are AES-256-GCM encrypted at rest with COMM_ENCRYPTION_KEY. A DB
   // dump must not be a session takeover, so the key is mandatory when that
   // transport is enabled. Must be 32 bytes, base64 (`openssl rand -base64 32`).
+  //
+  // The SMS transport stores each gateway's API credentials in the same
+  // encrypted bag, so it carries the same requirement — a DB dump must not hand
+  // over an account that can bill the school for every SMS on earth.
   const commEnabled = process.env.ENABLE_COMMUNICATION === 'true';
   const waEnabled = commEnabled && process.env.ENABLE_COMMUNICATION_WHATSAPP === 'true';
-  if (waEnabled && process.env.WHATSAPP_TRANSPORT === 'baileys') {
+  const smsEnabled = commEnabled && process.env.ENABLE_COMMUNICATION_SMS === 'true';
+  if ((waEnabled && process.env.WHATSAPP_TRANSPORT === 'baileys') || smsEnabled) {
     const key = process.env.COMM_ENCRYPTION_KEY;
     if (!key) {
-      errors.push('COMM_ENCRYPTION_KEY is required when the Baileys WhatsApp transport is enabled');
+      errors.push(
+        'COMM_ENCRYPTION_KEY is required when the Baileys WhatsApp transport or the SMS provider is enabled',
+      );
     } else {
       let bytes = 0;
       try {

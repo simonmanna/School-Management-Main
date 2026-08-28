@@ -4,6 +4,7 @@ import { ProviderRegistryService } from './provider-registry.service';
 import { BaileysProvider } from './whatsapp/baileys/baileys.provider';
 import { WhatsAppCloudProvider } from './whatsapp/whatsapp-cloud.provider';
 import { TelegramProvider } from './telegram/telegram.provider';
+import { HttpSmsProvider } from './sms/http-sms.provider';
 
 /**
  * Registers the external providers into the ProviderRegistry at boot, honouring
@@ -39,6 +40,13 @@ export class ProviderBootstrapService implements OnModuleInit {
     if (process.env.ENABLE_COMMUNICATION_TELEGRAM === 'true') {
       this.registry.register(this.moduleRef.get(TelegramProvider, { strict: false }));
       this.logger.log('Telegram provider registered');
+    }
+
+    // SMS has ONE adapter for every gateway — the vendor lives in each channel's
+    // config, so there is no transport switch here (see sms-gateway.config.ts).
+    if (process.env.ENABLE_COMMUNICATION_SMS === 'true') {
+      this.registry.register(this.moduleRef.get(HttpSmsProvider, { strict: false }));
+      this.logger.log('SMS provider registered (config-driven HTTP gateway)');
     }
   }
 }

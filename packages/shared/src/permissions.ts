@@ -692,6 +692,11 @@ export const PERMISSIONS = {
     messageSend: 'communication:message:send',
     channelRead: 'communication:channel:read',
     channelManage: 'communication:channel:manage',
+    // Broadcasts are split from ordinary message sending on purpose: composing a
+    // one-to-one reply and pushing an SMS to 4,000 guardians are not the same
+    // authority, and the second one costs the school money.
+    broadcastRead: 'communication:broadcast:read',
+    broadcastSend: 'communication:broadcast:send',
   },
 } as const;
 

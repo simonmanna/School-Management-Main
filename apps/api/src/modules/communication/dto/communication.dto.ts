@@ -107,20 +107,161 @@ export class SetEnabledDto {
 }
 
 export class CreateChannelDto {
-  @ApiProperty({ description: 'internal | whatsapp | telegram' })
+  @ApiProperty({ description: 'internal | whatsapp | telegram | sms' })
   @IsString() @MaxLength(40) providerId!: string;
 
   @ApiProperty()
   @IsString() @MinLength(1) @MaxLength(120) name!: string;
 
-  @ApiProperty({ required: false, description: 'baileys | cloud | bot — defaults per provider' })
+  @ApiProperty({ required: false, description: 'baileys | cloud | bot | http — defaults per provider' })
   @IsOptional() @IsString() @MaxLength(40) transport?: string;
 
   @ApiProperty({ required: false, type: Object })
   @IsOptional() @IsObject() config?: Record<string, unknown>;
+
+  @ApiProperty({
+    required: false,
+    type: Object,
+    description: 'Plaintext gateway credentials, referenced as {{secret.<name>}}. Encrypted at rest; never returned.',
+  })
+  @IsOptional() @IsObject() secrets?: Record<string, string>;
+}
+
+export class UpdateChannelDto {
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(120) name?: string;
+
+  @ApiProperty({ required: false, type: Object })
+  @IsOptional() @IsObject() config?: Record<string, unknown>;
+
+  @ApiProperty({ required: false, type: Object, description: 'Omit to keep the stored credentials unchanged.' })
+  @IsOptional() @IsObject() secrets?: Record<string, string>;
+}
+
+export class SetConsentDto {
+  @ApiProperty({ description: 'Raw destination; normalized to E.164 for sms/whatsapp before storing.' })
+  @IsString() @MinLength(3) @MaxLength(64) address!: string;
+
+  @ApiProperty({ enum: ['all', 'sms', 'whatsapp', 'telegram', 'internal'], required: false, default: 'all' })
+  @IsOptional() @IsIn(['all', 'sms', 'whatsapp', 'telegram', 'internal'])
+  channel?: 'all' | 'sms' | 'whatsapp' | 'telegram' | 'internal';
+
+  @ApiProperty({ enum: ['opted_in', 'opted_out'] })
+  @IsIn(['opted_in', 'opted_out']) status!: 'opted_in' | 'opted_out';
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MaxLength(300) reason?: string;
+
+  @ApiProperty({ required: false, description: 'contact | partner | user | student_guardian' })
+  @IsOptional() @IsString() @MaxLength(40) subjectType?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MaxLength(64) subjectId?: string;
+}
+
+export class PreviewSmsDto {
+  @ApiProperty()
+  @IsString() @MinLength(1) @MaxLength(8000) body!: string;
+
+  @ApiProperty({ required: false, description: 'Apply the channel transliteration rules before counting.' })
+  @IsOptional() @IsBoolean() transliterate?: boolean;
 }
 
 export class DisconnectChannelDto {
   @ApiProperty({ required: false, default: false, description: 'true = full logout (purges the linked-device session).' })
   @IsOptional() @IsBoolean() logout?: boolean;
+}
+
+/* ── Broadcasts ─────────────────────────────────────────────────────────── */
+
+export class AudienceSelectorDto {
+  @ApiProperty({ description: 'all | class | grade | section | stream | campus | house | residence | students | staff | department' })
+  @IsString() @MaxLength(24) scope!: string;
+
+  @ApiProperty({ required: false, type: [String], description: 'Class/grade/... ids, or literal house / residence values.' })
+  @IsOptional() @IsArray() @IsString({ each: true }) ids?: string[];
+
+  @ApiProperty({ required: false, enum: ['guardians', 'students', 'both'], default: 'guardians' })
+  @IsOptional() @IsIn(['guardians', 'students', 'both']) recipients?: 'guardians' | 'students' | 'both';
+
+  @ApiProperty({ required: false, default: true, description: 'One message per family rather than one per guardian on file.' })
+  @IsOptional() @IsBoolean() primaryGuardianOnly?: boolean;
+
+  @ApiProperty({ required: false, default: false })
+  @IsOptional() @IsBoolean() statementRecipientsOnly?: boolean;
+
+  @ApiProperty({ required: false, type: [String], default: ['active'] })
+  @IsOptional() @IsArray() @IsString({ each: true }) studentStatus?: string[];
+
+  @ApiProperty({ required: false, type: [String], description: 'teaching | non_teaching | admin | support' })
+  @IsOptional() @IsArray() @IsString({ each: true }) staffCategory?: string[];
+
+  @ApiProperty({
+    required: false,
+    enum: ['per_recipient', 'per_student'],
+    default: 'per_recipient',
+    description: 'per_student sends one message per child, so {{student.name}} means something.',
+  })
+  @IsOptional() @IsIn(['per_recipient', 'per_student']) dedupe?: 'per_recipient' | 'per_student';
+}
+
+export class PreviewAudienceDto {
+  @ApiProperty({ type: AudienceSelectorDto })
+  @IsObject() audience!: Record<string, unknown>;
+
+  @ApiProperty({ required: false, description: 'Counted for the segment/cost estimate.' })
+  @IsOptional() @IsString() @MaxLength(8000) body?: string;
+
+  @ApiProperty({ required: false, type: Object, description: 'ChannelPolicy, or a shorthand array like ["whatsapp","sms"].' })
+  @IsOptional() channelPolicy?: unknown;
+}
+
+export class CreateBroadcastDto {
+  @ApiProperty({ required: false, description: 'Operator-facing label. Never sent to recipients.' })
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+
+  @ApiProperty({ description: 'Body, with {{student.name}} / {{recipient.name}} placeholders.' })
+  @IsString() @MinLength(1) @MaxLength(8000) body!: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MaxLength(120) templateKey?: string;
+
+  @ApiProperty({ type: AudienceSelectorDto })
+  @IsObject() audience!: Record<string, unknown>;
+
+  @ApiProperty({ required: false, type: Object, description: 'Ordered transports with fallback. Defaults to WhatsApp → SMS → in-app.' })
+  @IsOptional() channelPolicy?: unknown;
+
+  @ApiProperty({ required: false, description: 'ISO timestamp. Omit to send as soon as it is submitted.' })
+  @IsOptional() @IsString() scheduledAt?: string;
+}
+
+export class UpdateBroadcastDto {
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MaxLength(200) title?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(8000) body?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() @MaxLength(120) templateKey?: string;
+
+  @ApiProperty({ required: false, type: AudienceSelectorDto })
+  @IsOptional() @IsObject() audience?: Record<string, unknown>;
+
+  @ApiProperty({ required: false, type: Object })
+  @IsOptional() channelPolicy?: unknown;
+
+  @ApiProperty({ required: false })
+  @IsOptional() @IsString() scheduledAt?: string;
+}
+
+export class SubmitBroadcastDto {
+  @ApiProperty({ required: false, description: 'Overrides the stored schedule. Omit to send now.' })
+  @IsOptional() @IsString() scheduledAt?: string;
+}
+
+export class CancelBroadcastDto {
+  @ApiProperty({ required: false, description: 'Recorded on every stopped recipient row and in the audit log.' })
+  @IsOptional() @IsString() @MaxLength(300) reason?: string;
 }

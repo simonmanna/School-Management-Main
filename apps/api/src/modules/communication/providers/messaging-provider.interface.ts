@@ -10,7 +10,7 @@
  * words "warm-up" or "daily cap" — those live inside a provider's SendPolicy.
  */
 
-export type ProviderId = 'internal' | 'whatsapp' | 'telegram';
+export type ProviderId = 'internal' | 'whatsapp' | 'telegram' | 'sms';
 
 export interface ProviderCapabilities {
   readonly outbound: boolean;

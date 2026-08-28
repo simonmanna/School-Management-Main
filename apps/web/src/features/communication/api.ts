@@ -172,6 +172,9 @@ export interface CommunicationChannel {
   leaseHeartbeatAt: string | null;
   dailySentCount: number;
   providerEnabled: boolean;
+  /** Non-secret config. `secretsEnc` is stripped server-side and `webhookSecret`
+   *  comes back masked, so this is safe to hold in the browser. */
+  config?: Record<string, unknown>;
   health: { status: string; ownedByThisProcess: boolean } | null;
 }
 

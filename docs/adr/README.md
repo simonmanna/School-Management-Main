@@ -19,5 +19,8 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [011](./ADR-011-vertical-extension-contract.md) | Vertical Extension Contract | Accepted |
 | [012](./ADR-012-table-management.md) | Table Management | Accepted |
 | [013](./ADR-013-school-fee-economic-events.md) | School Fee Economic Events | Accepted |
+| [014](./ADR-014-lms-moodle-architecture.md) | LMS (Moodle-Shaped) Architecture | Accepted |
+| [015](./ADR-015-configurable-admission-workflow.md) | Configurable Admission Workflow | Accepted |
+| [016](./ADR-016-messaging-broadcasts-and-transports.md) | Messaging: Multi-Transport Delivery, Consent and Broadcasts | Accepted |
 
 Template: **Context → Decision → Consequences → Alternatives considered.**

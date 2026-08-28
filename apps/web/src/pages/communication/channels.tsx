@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Plug, PlugZap, Plus, Radio, RefreshCw, Trash2, X } from 'lucide-react';
+import { Plug, PlugZap, Plus, Radio, RefreshCw, Settings2, Trash2, X } from 'lucide-react';
 import {
   useChannels,
   useConnectChannel,
@@ -9,6 +9,7 @@ import {
   type CommunicationChannel,
 } from '@/features/communication/api';
 import { useChannelStatusStream, type ChannelStatusEvent } from '@/features/communication/sse';
+import { SmsGatewayForm } from './sms-gateway-form';
 
 const STATUS_COLOR: Record<string, string> = {
   connected: 'bg-green-500',
@@ -34,6 +35,10 @@ export default function CommunicationChannelsPage() {
 
   const [form, setForm] = useState({ providerId: 'whatsapp', name: '', config: '' });
   const [qr, setQr] = useState<{ channelId: string; png?: string; status: string } | null>(null);
+  /** Which SMS channel's gateway form is expanded. Only one at a time — the form
+   *  holds unsaved credential input, and two open copies invite pasting a key
+   *  into the wrong channel. */
+  const [configuring, setConfiguring] = useState<string | null>(null);
 
   const onStatus = useCallback(
     (e: ChannelStatusEvent) => {
@@ -90,6 +95,7 @@ export default function CommunicationChannelsPage() {
           <select className="input" value={form.providerId} onChange={(e) => setForm({ ...form, providerId: e.target.value })}>
             <option value="whatsapp">WhatsApp</option>
             <option value="telegram">Telegram</option>
+            <option value="sms">SMS</option>
           </select>
           <input
             className="input"
@@ -105,7 +111,9 @@ export default function CommunicationChannelsPage() {
             placeholder={
               form.providerId === 'telegram'
                 ? 'Config JSON (optional): {"botToken":"...","webhookSecret":"..."}'
-                : 'Config JSON (Cloud transport): {"phoneNumberId":"...","accessToken":"..."}'
+                : form.providerId === 'sms'
+                  ? 'Leave blank — add the channel, then configure the gateway below.'
+                  : 'Config JSON (Cloud transport): {"phoneNumberId":"...","accessToken":"..."}'
             }
             value={form.config}
             onChange={(e) => setForm({ ...form, config: e.target.value })}
@@ -116,7 +124,8 @@ export default function CommunicationChannelsPage() {
       {/* List */}
       <ul className="space-y-2">
         {channels.map((c) => (
-          <li key={c.id} className="flex items-center justify-between rounded-lg border bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+          <li key={c.id} className="rounded-lg border bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className={`h-2.5 w-2.5 rounded-full ${STATUS_COLOR[c.status] ?? 'bg-gray-400'}`} />
               <div>
@@ -147,15 +156,29 @@ export default function CommunicationChannelsPage() {
                   <PlugZap className="h-4 w-4" /> Connect
                 </button>
               )}
+              {c.providerId === 'sms' && (
+                <button
+                  className="btn-secondary inline-flex items-center gap-1"
+                  onClick={() => setConfiguring(configuring === c.id ? null : c.id)}
+                >
+                  <Settings2 className="h-4 w-4" /> Gateway
+                </button>
+              )}
               <button className="text-red-500 hover:text-red-700" onClick={() => del.mutate(c.id)} title="Remove">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
+          </div>
+          {c.providerId === 'sms' && configuring === c.id && (
+            <div className="mt-3">
+              <SmsGatewayForm channelId={c.id} initialConfig={c.config} />
+            </div>
+          )}
           </li>
         ))}
         {channels.length === 0 && (
           <li className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-gray-400 dark:border-gray-700">
-            No channels yet. Add a WhatsApp or Telegram channel above.
+            No channels yet. Add a WhatsApp, Telegram or SMS channel above.
           </li>
         )}
       </ul>

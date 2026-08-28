@@ -326,6 +326,9 @@ export const ORG_SCOPED = new Set<string>([
   'MessageTemplate',
   'CommunicationRule',
   'CommunicationDispatch',
+  'MessagingConsent',
+  'MessageBroadcast',
+  'BroadcastRecipient',
   // School vertical (P0.4). Kept in schema declaration order so the list can be
   // diffed against the schema block by eye; `tenancy-registration.spec.ts`
   // proves it mechanically.

@@ -10132,6 +10132,25 @@ model MessageDelivery {
   deliveredAt                 DateTime?
   readAt                      DateTime?
   failedAt                    DateTime?
+  /// Billable units this send consumed (SMS segments; 1 for every other
+  /// transport). Written at send time from the provider's own accounting so a
+  /// broadcast's cost can be summed without re-encoding every body.
+  segments                    Int?
+  /// Cost in micro-units of the channel's billing currency (1_000_000 = 1 unit).
+  /// Integer micros, never a float — money never round-trips through binary FP.
+  costMicros                  BigInt?
+  /// Fallback chain (P4): the ordered transports still to try if THIS attempt
+  /// ends terminally failed. Consumed one step at a time — the escalated
+  /// delivery carries the remainder — so a chain can never loop.
+  fallbackPolicy              Json?
+  /// The delivery this one escalated from. Makes the chain readable in the
+  /// report ("WhatsApp failed → delivered by SMS") instead of looking like two
+  /// unrelated attempts.
+  fallbackOfDeliveryId        String?
+  /// Set when this delivery belongs to a broadcast. Denormalised so the delivery
+  /// report is one indexed group-by rather than a join through Message.
+  broadcastId                 String?
+  broadcastRecipientId        String?
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
 
@@ -10143,6 +10162,8 @@ model MessageDelivery {
   @@index([channelId, status, nextAttemptAt])
   @@index([organizationId, messageId])
   @@index([providerId, externalMessageId])
+  @@index([broadcastId, status])
+  @@index([broadcastRecipientId])
 }
 
 /// Provider-specific metadata sidecar. Keeps the core Message clean. `rawMetadata`
@@ -10249,6 +10270,167 @@ model CommunicationDispatch {
 }
 
 
+/// Per-address messaging consent. The single suppression list every provider is
+/// checked against immediately before send, so an opt-out cannot be defeated by
+/// choosing a different code path (broadcast, rule engine, manual reply).
+///
+/// Keyed by NORMALIZED address, not by person: a parent who replies STOP from a
+/// phone must stop receiving on that phone even before we know which Contact it
+/// belongs to. `subjectType`/`subjectId` are a best-effort backlink for the UI,
+/// never the matching key.
+///
+/// `channel='all'` suppresses every transport; a channel-specific row overrides
+/// it, so "opted out of SMS, still on WhatsApp" is expressible. Absence of a row
+/// means NOT suppressed — this is an opt-OUT ledger for transactional school
+/// messaging, not a double-opt-in marketing list.
+model MessagingConsent {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// all | sms | whatsapp | telegram | internal.
+  channel        String   @default("all")
+  /// Normalized destination (E.164 for SMS/WhatsApp, chat_id for Telegram).
+  address        String
+  /// opted_in | opted_out.
+  status         String   @default("opted_out")
+  /// inbound_keyword | admin | import | api | bounce.
+  source         String   @default("inbound_keyword")
+  /// Free text shown in the audit UI ("replied STOP", "hard bounce x3").
+  reason         String?
+  /// Best-effort backlink: contact | partner | user | student_guardian.
+  subjectType    String?
+  subjectId      String?
+  effectiveAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+
+  @@unique([organizationId, channel, address])
+  @@index([organizationId, address])
+  @@index([organizationId, status, channel])
+}
+
+
+/// A one-to-many send: "fee reminder to every P5 parent".
+///
+/// The audience is stored as a SELECTOR, not as a resolved contact list, and is
+/// re-resolved when the send actually runs. A list frozen at compose time keeps
+/// mailing the student who withdrew last week and silently skips the one who
+/// enrolled this morning — and a broadcast scheduled for Monday 6am is composed
+/// on Friday.
+///
+/// Counters are denormalised because the delivery report is opened while a send
+/// is draining: counting 4,000 MessageDelivery rows on every poll is the kind of
+/// query that is fine in a demo and melts a live term-opening announcement.
+/// They are advisory (rolled up by the worker); MessageDelivery stays the truth.
+model MessageBroadcast {
+  id             String  @id @default(uuid())
+  organizationId String
+  /// Operator-facing label. Not sent to anyone.
+  title          String?
+  /// The body as composed, BEFORE per-recipient placeholder rendering.
+  body           String
+  /// Optional MessageTemplate.key this was composed from (provenance only —
+  /// `body` is authoritative, so editing the template later cannot rewrite
+  /// history).
+  templateKey    String?
+  /// AudienceSelector, verbatim. See audience/audience-selector.ts.
+  audience       Json
+  /// ChannelPolicy: ordered transports + whether to escalate on failure.
+  /// See outbound/channel-policy.ts.
+  channelPolicy  Json    @default("{}")
+  /// draft | scheduled | materializing | sending | completed | cancelled | failed.
+  status         String  @default("draft")
+  /// Null = send immediately on submit.
+  scheduledAt    DateTime?
+  materializedAt DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  cancelledBy    String?
+
+  /// Advisory progress counters (see the note above).
+  totalRecipients  Int    @default(0)
+  queuedCount      Int    @default(0)
+  sentCount        Int    @default(0)
+  deliveredCount   Int    @default(0)
+  failedCount      Int    @default(0)
+  suppressedCount  Int    @default(0)
+  unreachableCount Int    @default(0)
+  /// Estimated at materialization from the composed body; the real per-send
+  /// figures land on MessageDelivery.segments as each message goes out.
+  estimatedSegments Int   @default(0)
+  costMicros       BigInt @default(0)
+
+  /// Single-writer claim for materialization, same pattern as the outbox worker.
+  claimToken String?
+  claimedAt  DateTime?
+  lastError  String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipients BroadcastRecipient[]
+
+  @@index([organizationId, status, scheduledAt])
+  @@index([organizationId, createdAt])
+  @@index([status, scheduledAt])
+}
+
+/// One resolved person in a broadcast — the row the delivery report is built on.
+///
+/// Kept separate from MessageDelivery because they answer different questions:
+/// this says "the school intended to reach this parent about this child", and
+/// survives even when NO delivery was ever created (suppressed by an opt-out,
+/// or no phone number on file). Collapsing the two would make an unreachable
+/// parent invisible, which is the exact failure the report exists to surface.
+model BroadcastRecipient {
+  id             String @id @default(uuid())
+  organizationId String
+  broadcastId    String
+  /// guardian | student | staff.
+  kind           String
+  /// contact | student_profile | staff_profile.
+  subjectType    String
+  subjectId      String
+  displayName    String
+  /// Normalized destination (E.164), or null when only reachable in-app.
+  address        String?
+  /// Login account for the internal transport, where the person has one.
+  userId         String?
+  /// Template context: the child this row is about.
+  studentProfileId String?
+  studentName      String?
+  className        String?
+  /// father | mother | guardian | ... — lets a template open with the right form
+  /// of address without a second lookup at render time.
+  relationship     String?
+
+  /// `<address|user:id>|<studentProfileId>` — the materialization idempotency
+  /// key. Explicit rather than a partial unique index, because Postgres does not
+  /// enforce uniqueness across NULLs and studentProfileId is nullable for staff.
+  dedupeKey String
+
+  /// pending | queued | sent | delivered | failed | suppressed | unreachable | cancelled.
+  status String @default("pending")
+  /// Provider that actually carried it (after any fallback escalation).
+  providerId String?
+  messageId  String?
+  deliveryId String?
+  /// Why this person got nothing: opted_out | no_address | no_channel.
+  suppressionReason String?
+  lastError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  broadcast MessageBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, dedupeKey])
+  @@index([organizationId, broadcastId, status])
+  @@index([broadcastId, status])
+  @@index([messageId])
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHOOL VERTICAL (ported from school-management-feature, P0.2/3)

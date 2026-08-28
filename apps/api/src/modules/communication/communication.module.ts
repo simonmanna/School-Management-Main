@@ -26,6 +26,15 @@ import { BaileysProvider } from './providers/whatsapp/baileys/baileys.provider';
 import { WhatsAppCloudProvider } from './providers/whatsapp/whatsapp-cloud.provider';
 import { TelegramProvider } from './providers/telegram/telegram.provider';
 import { TelegramWebhookController } from './providers/telegram/telegram-webhook.controller';
+import { HttpSmsProvider } from './providers/sms/http-sms.provider';
+import { SmsWebhookController } from './providers/sms/sms-webhook.controller';
+import { ConsentService } from './consent/consent.service';
+import { AudienceResolverService } from './audience/audience-resolver.service';
+import { OutboundFanoutService } from './outbound/outbound-fanout.service';
+import { BroadcastService } from './broadcast/broadcast.service';
+import { BroadcastMaterializerService } from './broadcast/broadcast-materializer.service';
+import { BroadcastWorker } from './broadcast/broadcast.worker';
+import { BroadcastController } from './broadcast/broadcast.controller';
 
 /**
  * Communication platform — transport-independent messaging + provider adapters.
@@ -40,7 +49,7 @@ import { TelegramWebhookController } from './providers/telegram/telegram-webhook
  * inner flags — no change to conversations/messages/dispatcher.
  */
 @Module({
-  controllers: [CommunicationController, TelegramWebhookController],
+  controllers: [CommunicationController, TelegramWebhookController, SmsWebhookController, BroadcastController],
   providers: [
     ConversationService,
     MessageService,
@@ -67,8 +76,17 @@ import { TelegramWebhookController } from './providers/telegram/telegram-webhook
     BaileysProvider,
     WhatsAppCloudProvider,
     TelegramProvider,
+    // Phase 5 — SMS (one config-driven adapter for every gateway) + consent.
+    HttpSmsProvider,
+    ConsentService,
+    // Phase 6 — school audiences, broadcasts and transport fallback chains.
+    AudienceResolverService,
+    OutboundFanoutService,
+    BroadcastService,
+    BroadcastMaterializerService,
+    BroadcastWorker,
   ],
-  exports: [ConversationService, MessageService, ConversationAccessService],
+  exports: [ConversationService, MessageService, ConversationAccessService, ConsentService, AudienceResolverService],
 })
 export class CommunicationModule implements OnModuleInit {
   constructor(private readonly registry: ModuleRegistry) {}

@@ -24,14 +24,20 @@ import { MessageService } from './message.service';
 import { CommunicationStreamService } from './communication-stream.service';
 import { CommunicationConfigService } from './rules/communication-config.service';
 import { ChannelService } from './channel.service';
+import { ConsentService } from './consent/consent.service';
+import { countSegments, transliterateToGsm7 } from './providers/sms/sms-segments';
+import { normalizeE164 } from './providers/sms/sms-gateway.config';
 import {
   CreateChannelDto,
   CreateConversationDto,
   DisconnectChannelDto,
   MarkReadDto,
+  PreviewSmsDto,
   ResolveContextDto,
   SendMessageDto,
+  SetConsentDto,
   SetEnabledDto,
+  UpdateChannelDto,
   UpsertRuleDto,
   UpsertTemplateDto,
 } from './dto/communication.dto';
@@ -54,6 +60,7 @@ export class CommunicationController {
     private readonly stream: CommunicationStreamService,
     private readonly config: CommunicationConfigService,
     private readonly channels: ChannelService,
+    private readonly consent: ConsentService,
   ) {}
 
   /* ── SSE (static) ─────────────────────────────────────────────────────── */
@@ -182,6 +189,12 @@ export class CommunicationController {
     return this.channels.create(dto);
   }
 
+  @Patch('channels/:id')
+  @RequirePermissions(PERMISSIONS.communication.channelManage)
+  updateChannel(@Param('id') id: string, @Body() dto: UpdateChannelDto) {
+    return this.channels.update(id, dto);
+  }
+
   @Get('channels/:id/pairing')
   @RequirePermissions(PERMISSIONS.communication.channelRead)
   pairingState(@Param('id') id: string) {
@@ -204,5 +217,51 @@ export class CommunicationController {
   @RequirePermissions(PERMISSIONS.communication.channelManage)
   removeChannel(@Param('id') id: string) {
     return this.channels.remove(id);
+  }
+
+  /* ── Consent / suppression list ───────────────────────────────────────── */
+
+  /**
+   * Gated on channelManage, not conversationRead: the list is a register of
+   * parents' phone numbers plus the fact that they asked to be left alone. That
+   * is a narrower audience than "anyone who can read the inbox".
+   */
+  @Get('consent')
+  @RequirePermissions(PERMISSIONS.communication.channelManage)
+  listConsent(
+    @Query('channel') channel?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.consent.list({ channel, status, search, limit: limit ? Number(limit) : undefined });
+  }
+
+  @Post('consent')
+  @RequirePermissions(PERMISSIONS.communication.channelManage)
+  setConsent(@Body() dto: SetConsentDto) {
+    const channel = dto.channel ?? 'all';
+    // Normalize phone-shaped addresses so an admin override lands on the SAME key
+    // the dispatcher will look up. '0772 123456' and '+256772123456' must not
+    // become two rows, one of which silently does nothing.
+    const address =
+      channel === 'sms' || channel === 'whatsapp'
+        ? normalizeE164(dto.address, process.env.SMS_DEFAULT_COUNTRY_CODE)
+        : dto.address.trim();
+    return this.consent.setFromRequest({ ...dto, channel, address });
+  }
+
+  /* ── SMS composer helpers ─────────────────────────────────────────────── */
+
+  /**
+   * Segment/encoding preview. Exists so the composer can show the true cost of a
+   * body BEFORE a broadcast: one pasted curly quote flips 400 messages from
+   * GSM-7 to UCS-2 and more than doubles the bill, which is invisible otherwise.
+   */
+  @Post('sms/preview')
+  @RequirePermissions(PERMISSIONS.communication.messageSend)
+  previewSms(@Body() dto: PreviewSmsDto) {
+    const text = dto.transliterate ? transliterateToGsm7(dto.body) : dto.body;
+    return { ...countSegments(text), body: text, transliterated: text !== dto.body };
   }
 }

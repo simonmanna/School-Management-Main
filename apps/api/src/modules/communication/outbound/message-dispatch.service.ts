@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { EVENTS } from '@erp/shared';
@@ -8,6 +8,9 @@ import { NotificationsService } from '../../../kernel/notifications/notification
 import { ProviderRegistryService } from '../providers/provider-registry.service';
 import { ProviderSendError, type OutboundMessage } from '../providers/messaging-provider.interface';
 import { DeliveryStatusService } from '../inbound/delivery-status.service';
+import { ConsentService } from '../consent/consent.service';
+import { OutboundFanoutService } from './outbound-fanout.service';
+import type { ChannelPolicyStep } from './channel-policy';
 
 /** Retry backoff by attempt number (attempt 1 = index 0). ±20% jitter applied. */
 const BACKOFF_MS = [0, 30_000, 120_000, 600_000, 3_600_000, 21_600_000];
@@ -48,6 +51,12 @@ export class MessageDispatchService {
     private readonly providers: ProviderRegistryService,
     private readonly deliveryStatus: DeliveryStatusService,
     private readonly notifications: NotificationsService,
+    private readonly consent: ConsentService,
+    // Circular by nature: the fan-out enqueues deliveries, and a failed delivery
+    // asks the fan-out for the next transport. Broken with forwardRef rather than
+    // by duplicating the channel-selection logic in two places.
+    @Inject(forwardRef(() => OutboundFanoutService))
+    private readonly fanout: OutboundFanoutService,
   ) {}
 
   static idempotencyKey(providerId: string, channelId: string, messageId: string, recipientAddress: string): string {
@@ -119,6 +128,25 @@ export class MessageDispatchService {
       return;
     }
 
+    // CONSENT GATE. Checked here — the one point every outbound send funnels
+    // through — rather than at each producer, so a new feature inherits opt-out
+    // handling and cannot forget it. Checked at SEND time, not enqueue time,
+    // because a parent may reply STOP after a broadcast is queued but before it
+    // drains; the last word before the message leaves must win.
+    //
+    // Terminal `cancelled`, never `failed`: an opt-out is a correct outcome, not
+    // an error. It must not retry, must not alert the sender, and must read as
+    // "suppressed" in the delivery report.
+    const suppression = await this.consent.isSuppressed(d.organizationId, d.providerId, d.recipientAddress);
+    if (suppression.suppressed) {
+      await this.cancel(
+        deliveryId,
+        'opted_out',
+        `Recipient opted out of ${suppression.scope === 'all' ? 'all messaging' : suppression.scope} messages.`,
+      );
+      return;
+    }
+
     const msg = await this.prisma.raw.message.findUnique({ where: { id: d.messageId }, select: { body: true } });
     const outbound: OutboundMessage = {
       organizationId: d.organizationId,
@@ -160,6 +188,24 @@ export class MessageDispatchService {
       // Unknown error → retryable, unambiguous.
       await this.retryOrFail(deliveryId, d.attempts, d.maxAttempts, 'unknown', String(err), false);
     }
+  }
+
+  /**
+   * Terminal, non-error stop. Distinct from `fail`: no retry, no failure event,
+   * no "could not be delivered" notification to the sender — nothing went wrong.
+   */
+  private async cancel(deliveryId: string, errorCode: string, reason: string): Promise<void> {
+    await this.prisma.raw.messageDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: 'cancelled',
+        errorCode,
+        lastError: reason.slice(0, 500),
+        claimToken: null,
+        claimedAt: null,
+      },
+    });
+    this.logger.log(`delivery ${deliveryId} cancelled: ${errorCode}`);
   }
 
   private async defer(deliveryId: string, deferUntil: Date, reason: string): Promise<void> {
@@ -220,7 +266,16 @@ export class MessageDispatchService {
         lastError: lastError.slice(0, 500),
         ambiguous,
       },
-      select: { organizationId: true, messageId: true, providerId: true, recipientUserId: true },
+      select: {
+        organizationId: true,
+        messageId: true,
+        providerId: true,
+        recipientUserId: true,
+        recipientAddress: true,
+        fallbackPolicy: true,
+        broadcastId: true,
+        broadcastRecipientId: true,
+      },
     });
     await this.outbox.publish(undefined, EVENTS.CommunicationMessageFailed, {
       organizationId: d.organizationId,
@@ -229,6 +284,18 @@ export class MessageDispatchService {
       providerId: d.providerId,
       status: 'failed',
     });
+
+    // FALLBACK ESCALATION. A terminal failure on one transport is exactly when
+    // the next one should be tried — a parent whose WhatsApp number is dead
+    // still has a handset. Deliberately NOT reached from `cancel()`: an opt-out
+    // must never be "retried" on another channel.
+    //
+    // An ambiguous failure is excluded too. We could not tell whether the first
+    // transport delivered, so escalating risks telling the parent twice; the
+    // delivery is left visibly ambiguous for a human to judge instead.
+    const escalated = ambiguous ? null : await this.tryEscalate(deliveryId, d);
+    if (escalated) return;
+
     // Tell the sender their message could not be delivered (in-app only).
     const sender = await this.prisma.raw.message.findFirst({
       where: { id: d.messageId },
@@ -246,6 +313,65 @@ export class MessageDispatchService {
           payload: { dedupeKey: `comm.delivery.failed:${deliveryId}`, deliveryId, href: '/communication' },
         })
         .catch(() => undefined);
+    }
+  }
+
+  /**
+   * Hand the failed delivery's remaining policy steps to the fan-out. Returns
+   * true when a replacement delivery was queued, in which case the sender is NOT
+   * told the message failed — from their point of view it is still in flight.
+   */
+  private async tryEscalate(
+    deliveryId: string,
+    d: {
+      organizationId: string;
+      messageId: string;
+      recipientAddress: string;
+      recipientUserId: string | null;
+      fallbackPolicy: unknown;
+      broadcastId: string | null;
+      broadcastRecipientId: string | null;
+    },
+  ): Promise<boolean> {
+    const steps = Array.isArray(d.fallbackPolicy) ? (d.fallbackPolicy as ChannelPolicyStep[]) : [];
+    if (steps.length === 0) return false;
+
+    const message = await this.prisma.raw.message.findUnique({
+      where: { id: d.messageId },
+      select: { body: true },
+    });
+    if (!message) return false;
+
+    // The failed row's address is only meaningful for its own transport (a user
+    // id for internal, a phone elsewhere), so both are offered to the next step
+    // and `stepCanAddress` decides which ones are usable.
+    const recipient = {
+      address: d.recipientAddress.startsWith('+') ? d.recipientAddress : null,
+      userId: d.recipientUserId,
+    };
+
+    try {
+      const next = await this.fanout.escalate({
+        organizationId: d.organizationId,
+        failedDeliveryId: deliveryId,
+        messageId: d.messageId,
+        body: message.body,
+        recipient,
+        remainingSteps: steps,
+        broadcastId: d.broadcastId,
+        broadcastRecipientId: d.broadcastRecipientId,
+      });
+      if (!next) return false;
+      if (d.broadcastRecipientId) {
+        await this.prisma.raw.broadcastRecipient.update({
+          where: { id: d.broadcastRecipientId },
+          data: { status: 'queued', providerId: next.providerId, deliveryId: next.deliveryId, lastError: null },
+        });
+      }
+      return true;
+    } catch (err) {
+      this.logger.warn(`escalation of delivery ${deliveryId} failed: ${String(err)}`);
+      return false;
     }
   }
 }

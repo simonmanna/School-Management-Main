@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventOutboxService } from '../../../kernel/events/event-outbox.service';
 import { CommunicationStreamService } from '../communication-stream.service';
 import { MessageService } from '../message.service';
+import { ConsentService, type ConsentChannel } from '../consent/consent.service';
 
 export interface InboundMessageInput {
   organizationId: string;
@@ -46,6 +47,7 @@ export class InboundMessageService {
     private readonly tenant: TenantContextService,
     private readonly outbox: EventOutboxService,
     private readonly stream: CommunicationStreamService,
+    private readonly consent: ConsentService,
   ) {}
 
   /** E.164-ish normalization: keep a leading +, strip everything non-digit. */
@@ -58,6 +60,18 @@ export class InboundMessageService {
 
   async ingest(input: InboundMessageInput): Promise<{ messageId: string; deduped: boolean } | null> {
     const orgId = input.organizationId;
+
+    // 0. Opt-out keywords. STOP is honoured on every transport, not just SMS —
+    //    a parent who replies STOP on WhatsApp has said the same thing. The SMS
+    //    webhook applies this itself BEFORE calling ingest (so an opt-out
+    //    survives an ingest failure); the upsert is idempotent, so running it
+    //    again here would be harmless, but skipping the duplicate keeps the
+    //    provenance log honest about which path recorded it.
+    if (input.providerId !== 'sms' && input.senderAddress) {
+      await this.consent
+        .applyInboundKeyword(orgId, input.providerId as ConsentChannel, input.senderAddress, input.body)
+        .catch((e) => this.logger.warn(`consent keyword handling failed: ${String(e)}`));
+    }
 
     // 1. Resolve (or create) the external identity. Never auto-create a Partner —
     //    an unknown sender is a first-class unresolved identity.
