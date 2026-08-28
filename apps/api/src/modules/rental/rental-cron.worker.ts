@@ -33,7 +33,12 @@ export class RentalCronWorker {
       where: { deletedAt: null },
     });
     for (const org of orgs) {
-      await this.runForOrg(org.id).catch((err) =>
+      // Every query in runForOrg hits org-scoped tables, so the whole body must
+      // run inside a tenant scope — otherwise the tenant-scoped Prisma client
+      // throws "No tenant context". Mirrors the reservation-worker idiom.
+      await this.tenant.run({ organizationId: org.id }, async () => {
+        await this.runForOrg(org.id);
+      }).catch((err) =>
         this.logger.error(`rental housekeeping failed for org ${org.id}: ${String(err)}`),
       );
     }
@@ -51,7 +56,7 @@ export class RentalCronWorker {
     });
     for (const r of expired) {
       try {
-        this.tenant.run({ organizationId: orgId }, () => this.reservations.cancel(r.id));
+        await this.reservations.cancel(r.id);
       } catch (err) {
         this.logger.warn(`reservation ${r.id} expiry failed: ${String(err)}`);
       }
@@ -69,20 +74,18 @@ export class RentalCronWorker {
     });
     for (const a of abandoned) {
       try {
-        this.tenant.run({ organizationId: orgId }, async () => {
-          const deposit = await this.prisma.client.rentalDeposit.findFirst({
-            where: { organizationId: orgId, agreementId: a.id },
-          });
-          if (!deposit) return;
-          const available =
-            Number(deposit.totalCollected) -
-            Number(deposit.totalApplied) -
-            Number(deposit.totalRefunded) -
-            Number(deposit.totalForfeited);
-          if (available > 0) {
-            await this.deposit.forfeit({ agreementId: a.id, amount: available, note: 'Auto-forfeit after 14 days' });
-          }
+        const deposit = await this.prisma.client.rentalDeposit.findFirst({
+          where: { organizationId: orgId, agreementId: a.id },
         });
+        if (!deposit) continue;
+        const available =
+          Number(deposit.totalCollected) -
+          Number(deposit.totalApplied) -
+          Number(deposit.totalRefunded) -
+          Number(deposit.totalForfeited);
+        if (available > 0) {
+          await this.deposit.forfeit({ agreementId: a.id, amount: available, note: 'Auto-forfeit after 14 days' });
+        }
       } catch (err) {
         this.logger.warn(`deposit forfeit for ${a.id} failed: ${String(err)}`);
       }

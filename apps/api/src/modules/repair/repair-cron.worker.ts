@@ -31,7 +31,12 @@ export class RepairCronWorker {
       where: { deletedAt: null },
     });
     for (const org of orgs) {
-      await this.runForOrg(org.id).catch((err) =>
+      // Every query in runForOrg hits org-scoped tables, so the whole body must
+      // run inside a tenant scope — otherwise the tenant-scoped Prisma client
+      // throws "No tenant context". Mirrors the reservation-worker idiom.
+      await this.tenant.run({ organizationId: org.id }, async () => {
+        await this.runForOrg(org.id);
+      }).catch((err) =>
         this.logger.error(`repair housekeeping failed for org ${org.id}: ${String(err)}`),
       );
     }

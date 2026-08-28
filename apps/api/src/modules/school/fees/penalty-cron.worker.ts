@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { BillingService } from './billing.service';
 
 /**
@@ -18,9 +19,9 @@ import { BillingService } from './billing.service';
  *   - Default: every 24h.
  *   - Override via `PENALTY_RUN_INTERVAL_HOURS` (e.g. `12` for twice daily).
  *
- * KNOWN (P2A): `tick()` walks every org but does not establish a tenant context
- * per org before calling BillingService, and BillingService bypasses
- * PaymentService. Both are hardened in P2A; the port keeps the fork behaviour.
+ * KNOWN: scheduled via a self-managed setInterval (runtime-configurable cadence
+ * via PENALTY_RUN_INTERVAL_HOURS), not a kernel @Cron. Each org's work is run
+ * inside an explicit tenant scope so BillingService sees only that org's data.
  */
 @Injectable()
 export class PenaltyCronWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -32,6 +33,7 @@ export class PenaltyCronWorker implements OnApplicationBootstrap, OnModuleDestro
   constructor(
     private readonly billing: BillingService,
     private readonly prisma: PrismaService,
+    private readonly tenant: TenantContextService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -87,21 +89,26 @@ export class PenaltyCronWorker implements OnApplicationBootstrap, OnModuleDestro
     // via the tenancy extension — it scopes correctly because we run the
     // transaction with the tenant context explicitly set.
     for (const org of orgs) {
-      const activeSchedules = await this.prisma.client.feeSchedule.findMany({
-        where: { organizationId: org.id },
-        select: { id: true },
-      });
-      for (const sched of activeSchedules) {
-        try {
-          const run = await this.billing.generatePenaltyRun(sched.id);
-          schedulesProcessed++;
-          penaltiesCreated += Array.isArray((run as any).createdInvoices)
-            ? (run as any).createdInvoices.length
-            : 0;
-        } catch (e: any) {
-          this.logger.error(`Penalty run failed for schedule ${sched.id}: ${e?.message ?? e}`);
+      // Every FeeSchedule query and the BillingService call below hit
+      // org-scoped tables, so each org's work must run inside a tenant scope —
+      // otherwise the tenant-scoped Prisma client throws "No tenant context".
+      await this.tenant.run({ organizationId: org.id }, async () => {
+        const activeSchedules = await this.prisma.client.feeSchedule.findMany({
+          where: { organizationId: org.id },
+          select: { id: true },
+        });
+        for (const sched of activeSchedules) {
+          try {
+            const run = await this.billing.generatePenaltyRun(sched.id);
+            schedulesProcessed++;
+            penaltiesCreated += Array.isArray((run as any).createdInvoices)
+              ? (run as any).createdInvoices.length
+              : 0;
+          } catch (e: any) {
+            this.logger.error(`Penalty run failed for schedule ${sched.id}: ${e?.message ?? e}`);
+          }
         }
-      }
+      });
     }
 
     return {
