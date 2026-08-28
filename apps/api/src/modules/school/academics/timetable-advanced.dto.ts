@@ -55,3 +55,16 @@ export class GenerateTimetableDto {
   @IsArray() @IsOptional() subjectTeachers?: { subjectId: string; teacherPartnerId: string }[];
   @IsOptional() @IsInt() @Min(1) maxPerDay?: number;
 }
+
+/**
+ * Book a substitute for one timetable slot over a date window (Phase 7).
+ * Recorded as a dated `TimetableOverride` — never by editing the base grid,
+ * which is a recurring weekly pattern with no dates of its own.
+ */
+export class AssignSubstituteDto {
+  @IsString() @IsNotEmpty() timetableSlotId!: string;
+  @IsString() @IsNotEmpty() substituteTeacherId!: string;
+  @IsString() @IsNotEmpty() effectiveFrom!: string;
+  @IsString() @IsNotEmpty() effectiveTo!: string;
+  @IsOptional() @IsString() reason?: string;
+}

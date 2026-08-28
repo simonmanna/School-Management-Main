@@ -7,6 +7,8 @@ import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../kernel/tenancy/tenant-context.service';
 import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
+import { dec } from '../../kernel/common/money';
+import { HrLifecycleService } from './hr-lifecycle.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,6 +27,7 @@ export class HrOrgService {
     private readonly tenant: TenantContextService,
     private readonly seq: SequenceService,
     private readonly audit: AuditService,
+    private readonly lifecycle: HrLifecycleService,
   ) {}
 
   // ── Departments ──────────────────────────────────────────────────────────
@@ -262,7 +265,8 @@ export class HrOrgService {
       throw new BadRequestException(`Invalid employmentType: ${dto.employmentType}`);
     if (dto.payFrequency && !PAY_FREQUENCIES.includes(dto.payFrequency))
       throw new BadRequestException(`Invalid payFrequency: ${dto.payFrequency}`);
-    return this.prisma.client.hrEmployee.create({
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const created = await tx.hrEmployee.create({
       data: {
         organizationId: orgId,
         employeeCode,
@@ -297,7 +301,46 @@ export class HrOrgService {
         notes: dto.notes ?? null,
         createdBy: userId,
       },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrEmployee',
+        entityId: created.id,
+        action: 'create',
+        newValues: this.auditableEmployee(created),
+      });
+      return created;
     });
+  }
+
+  /**
+   * Sensitive employee fields, redacted for the audit trail. Bank and tax
+   * identifiers are recorded as "changed"/last-4 rather than in the clear —
+   * an audit log is queryable by a wider audience than the HR record itself.
+   */
+  private auditableEmployee(e: any) {
+    const tail = (v: string | null | undefined) =>
+      v ? `****${String(v).slice(-4)}` : null;
+    return {
+      employeeCode: e.employeeCode,
+      firstName: e.firstName,
+      lastName: e.lastName,
+      email: e.email,
+      employmentType: e.employmentType,
+      departmentId: e.departmentId,
+      positionId: e.positionId,
+      supervisorId: e.supervisorId,
+      baseSalary: e.baseSalary ? String(e.baseSalary) : null,
+      payFrequency: e.payFrequency,
+      hourlyRate: e.hourlyRate ? String(e.hourlyRate) : null,
+      bankName: e.bankName,
+      bankAccountNumber: tail(e.bankAccountNumber),
+      mobileMoneyNumber: tail(e.mobileMoneyNumber),
+      taxNumber: tail(e.taxNumber),
+      pensionNumber: tail(e.pensionNumber),
+      socialSecurityNumber: tail(e.socialSecurityNumber),
+      isActive: e.isActive,
+      userId: e.userId,
+    };
   }
 
   async updateEmployee(id: string, dto: any) {
@@ -315,7 +358,10 @@ export class HrOrgService {
       'employmentType', 'departmentId', 'positionId', 'supervisorId', 'baseSalary',
       'payFrequency', 'hourlyRate', 'bankName', 'bankAccountName', 'bankAccountNumber',
       'mobileMoneyProvider', 'mobileMoneyNumber', 'taxNumber', 'pensionNumber',
-      'socialSecurityNumber', 'isActive', 'notes', 'userId',
+      'socialSecurityNumber', 'isActive', 'notes',
+      // `userId` is deliberately NOT here. Re-pointing an employee at a
+      // different login is an identity change, not a profile edit — it goes
+      // through `linkUser()`, which is separately permissioned and audited.
     ];
     for (const f of fields) {
       if (dto[f] !== undefined) data[f] = dto[f];
@@ -324,7 +370,80 @@ export class HrOrgService {
       if (dto[f] !== undefined) data[f] = dto[f] ? new Date(dto[f]) : null;
     }
     data.updatedBy = userId;
-    return this.prisma.client.hrEmployee.update({ where: { id }, data });
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const updated = await tx.hrEmployee.update({ where: { id }, data });
+
+      // Salary history. `HrSalaryChange` / `HrEmploymentAction` were never
+      // written — `recordSalaryChange` existed with no callers, so editing
+      // `baseSalary` left no trace anywhere. Pay history is a compliance
+      // record, not a nice-to-have.
+      const prev = dec(row.baseSalary ?? 0);
+      const next = dec(updated.baseSalary ?? 0);
+      if (!prev.equals(next)) {
+        await this.lifecycle.recordSalaryChange(
+          tx,
+          id,
+          prev,
+          next,
+          dto.salaryChangeReason ?? 'Updated via employee edit',
+          userId,
+        );
+      }
+
+      await this.audit.recordInTx(tx, {
+        entity: 'HrEmployee',
+        entityId: id,
+        action: 'update',
+        oldValues: this.auditableEmployee(row),
+        newValues: this.auditableEmployee(updated),
+      });
+      return updated;
+    });
+  }
+
+  /**
+   * Bind an employee to a login account, or clear the binding.
+   *
+   * Kept off `updateEmployee` on purpose: `HrEmployee.userId` is what employee
+   * self-service resolves on, so whoever can set it can point their own login
+   * at another employee's payroll record. Pass `userId: null` to unlink.
+   */
+  async linkUser(id: string, newUserId: string | null) {
+    const orgId = this.tenant.organizationId;
+    const actorId = this.tenant.userId;
+    const row = await this.prisma.client.hrEmployee.findFirst({ where: { id, organizationId: orgId } });
+    if (!row) throw new NotFoundException('Employee not found');
+
+    if (newUserId) {
+      const user = await this.prisma.client.user.findFirst({
+        where: { id: newUserId, organizationId: orgId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!user) throw new BadRequestException('User not found in this organization');
+      const taken = await this.prisma.client.hrEmployee.findFirst({
+        where: { userId: newUserId, organizationId: orgId, deletedAt: null, NOT: { id } },
+        select: { id: true, employeeCode: true },
+      });
+      if (taken)
+        throw new BadRequestException(
+          `That login is already linked to employee ${taken.employeeCode}`,
+        );
+    }
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const updated = await tx.hrEmployee.update({
+        where: { id },
+        data: { userId: newUserId, updatedBy: actorId },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrEmployee',
+        entityId: id,
+        action: newUserId ? 'assign' : 'unassign',
+        oldValues: { userId: row.userId },
+        newValues: { userId: newUserId },
+      });
+      return updated;
+    });
   }
 
   async deleteEmployee(id: string) {
@@ -332,9 +451,18 @@ export class HrOrgService {
     const userId = this.tenant.userId;
     const row = await this.prisma.client.hrEmployee.findFirst({ where: { id, organizationId: orgId } });
     if (!row) throw new NotFoundException('Employee not found');
-    return this.prisma.client.hrEmployee.update({
-      where: { id },
-      data: { deletedAt: new Date(), isActive: false, updatedBy: userId },
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const deleted = await tx.hrEmployee.update({
+        where: { id },
+        data: { deletedAt: new Date(), isActive: false, updatedBy: userId },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrEmployee',
+        entityId: id,
+        action: 'delete',
+        oldValues: this.auditableEmployee(row),
+      });
+      return deleted;
     });
   }
 

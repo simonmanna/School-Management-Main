@@ -5,6 +5,7 @@ import {
   TimetableService,
 } from './academics.service';
 import { TimetableAdvancedService } from './timetable-advanced.service';
+import { TeacherCoverService } from './teacher-cover.service';
 import {
   CompetencyService,
   TopicService,
@@ -40,6 +41,7 @@ import {
     TeacherAssignmentService,
     TimetableService,
     TimetableAdvancedService,
+    TeacherCoverService,
     CompetencyService,
     TopicService,
     UnitService,
@@ -50,6 +52,7 @@ import {
     TeacherAssignmentService,
     TimetableService,
     TimetableAdvancedService,
+    TeacherCoverService,
     CompetencyService,
     TopicService,
     UnitService,

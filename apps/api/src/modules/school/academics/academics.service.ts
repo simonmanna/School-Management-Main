@@ -324,6 +324,34 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
         where: base({ teacherPartnerId: slot.teacherPartnerId, periodId: { in: periodIds } }),
       });
       if (teacherClash) conflicts.push(`Teacher double-booked (slot ${teacherClash.id})`);
+
+      // Phase 7: a teacher already COVERING another class in this period is
+      // just as unavailable as one teaching their own. `substituteTeacherId`
+      // was excluded from conflict detection entirely, so cover could be
+      // stacked on top of a teacher's existing commitments.
+      const coverClash = await this.prisma.client.timetableSlot.findFirst({
+        where: base({ substituteTeacherId: slot.teacherPartnerId, periodId: { in: periodIds } }),
+      });
+      if (coverClash) conflicts.push(`Teacher is already covering another class (slot ${coverClash.id})`);
+    }
+
+    // The proposed SUBSTITUTE must be free too.
+    if (slot.substituteTeacherId) {
+      const subOwn = await this.prisma.client.timetableSlot.findFirst({
+        where: base({ teacherPartnerId: slot.substituteTeacherId, periodId: { in: periodIds } }),
+      });
+      if (subOwn) conflicts.push(`Substitute teaches their own class at this time (slot ${subOwn.id})`);
+
+      const subCover = await this.prisma.client.timetableSlot.findFirst({
+        where: base({ substituteTeacherId: slot.substituteTeacherId, periodId: { in: periodIds } }),
+      });
+      if (subCover) conflicts.push(`Substitute is already covering another class (slot ${subCover.id})`);
+
+      const subUnavailable = await this.prisma.client.teacherAvailability.findFirst({
+        where: { teacherPartnerId: slot.substituteTeacherId, dayOfWeek: slot.dayOfWeek,
+          periodId: { in: periodIds }, status: 'unavailable' } as any,
+      });
+      if (subUnavailable) conflicts.push('Substitute is unavailable at this period');
     }
 
     // Room: prefer managed teachingRoomId, fall back to free-text room label.
@@ -407,6 +435,27 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
         where: { classId: dto.classId, sectionId: dto.sectionId ?? null },
       });
       const created = [];
+      // Phase 7: bulkUpsert skipped conflict detection entirely, so importing a
+      // grid could double-book a teacher that the single-slot path would have
+      // rejected. The class-level clash is inherent (we just wiped this class's
+      // slots and rebuild them in order), so only cross-class conflicts —
+      // teacher, cover and room — are reported here.
+      const blocking: string[] = [];
+      for (const slot of dto.slots) {
+        const conflicts = await this.detectConflicts({
+          ...(slot as any),
+          classId: dto.classId,
+          sectionId: dto.sectionId ?? null,
+        });
+        const crossClass = conflicts.filter((c) => !c.startsWith('Class already has a lesson'));
+        if (crossClass.length > 0) {
+          blocking.push(`${slot.dayOfWeek}/${slot.periodId}: ${crossClass.join('; ')}`);
+        }
+      }
+      if (blocking.length > 0) {
+        throw new BadRequestException(`Timetable conflicts: ${blocking.join(' | ')}`);
+      }
+
       for (const slot of dto.slots) {
         const courseOfferingId = await this.resolveCourseOffering(tx, {
           classId: dto.classId,

@@ -2845,20 +2845,27 @@ export function usePeriods() {
 
 /* ───────────────────────── Staff / Campuses (foundation) ───────────────────────── */
 
+/**
+ * A school-side staff roster row.
+ *
+ * Schema-truth: `StaffProfile` has NO firstName/lastName/gender/designation/
+ * dateOfJoining/qualification — those were declared here but never existed, so
+ * the UI rendered empty columns and fell through to the employee number for
+ * every Name cell. The person's identity lives on the linked `Partner`;
+ * qualifications and job title live on the HR record.
+ */
 export interface StaffMember {
   id: string;
   employeeNo: string;
   staffCategory: string;
-  firstName?: string | null;
-  lastName?: string | null;
-  gender?: string | null;
-  designation?: string | null;
+  joinDate?: string | null;
+  contractType?: string | null;
   department?: { id: string; name: string } | null;
   position?: { id: string; name: string } | null;
-  dateOfJoining?: string | null;
-  qualification?: string | null;
+  campus?: { id: string; name: string } | null;
   status?: string;
-  partner?: { name?: string; email?: string; phone?: string } | null;
+  partnerId?: string;
+  partner?: { id?: string; name?: string; email?: string | null; phone?: string | null } | null;
 }
 
 export function useStaff(params: { page?: number; pageSize?: number } = {}) {
@@ -5958,5 +5965,43 @@ export function useSaveBoardMark(assessmentId?: string) {
   return useMutation({
     mutationFn: async (dto: { studentProfileId: string; marks: number | null; participation?: string }) =>
       (await api.post(`${S}/assessment-board/${assessmentId}/mark`, dto)).data,
+  });
+}
+
+/* ── Teacher cover (Phase 7) ─────────────────────────────────────────────── */
+
+export interface AffectedLesson {
+  id: string;
+  dayOfWeek: number;
+  subject?: { id: string; name: string; code?: string | null } | null;
+  schoolClass?: { id: string; name: string } | null;
+  section?: { id: string; name: string } | null;
+  period?: { id: string; name: string; startTime?: string; endTime?: string } | null;
+  teacherPartnerId?: string | null;
+  substituteTeacherId?: string | null;
+}
+
+/** Lessons a teacher's absence leaves uncovered between two dates. */
+export function useAffectedLessons(teacherPartnerId?: string, from?: string, to?: string) {
+  return useQuery({
+    enabled: !!teacherPartnerId && !!from && !!to,
+    queryKey: ['school', 'cover', 'affected', teacherPartnerId, from, to],
+    queryFn: async () =>
+      (await api.get<AffectedLesson[]>(`${S}/timetable/cover/affected/${teacherPartnerId}`, { params: { from, to } })).data,
+  });
+}
+
+/** Book a substitute for one slot over a date window. Clash-checked server-side. */
+export function useAssignSubstitute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      timetableSlotId: string;
+      substituteTeacherId: string;
+      effectiveFrom: string;
+      effectiveTo: string;
+      reason?: string;
+    }) => (await api.post(`${S}/timetable/cover/assign`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'cover'] }),
   });
 }

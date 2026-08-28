@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 
 @Injectable()
 export class TimetableAdvancedService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenant: TenantContextService,
+  ) {}
 
   /* ── Teaching rooms ──────────────────────────────────────────────────── */
   listRooms() {
@@ -113,9 +117,55 @@ export class TimetableAdvancedService {
       orderBy: { effectiveFrom: 'asc' },
     });
   }
-  createOverride(dto: any) {
+  /**
+   * A dated timetable override (cover, room move, one-off swap).
+   *
+   * Phase 7: this did NO clash checking at all, so an override could put a
+   * teacher in two classes at once — the very thing `detectConflicts` exists to
+   * prevent on the base grid.
+   */
+  async createOverride(dto: any) {
+    const organizationId = this.tenant.organizationId;
+    const effectiveFrom = new Date(dto.effectiveFrom);
+    const effectiveTo = new Date(dto.effectiveTo);
+    if (effectiveTo < effectiveFrom) {
+      throw new BadRequestException('effectiveTo must be on or after effectiveFrom');
+    }
+
+    if (dto.teacherPartnerId) {
+      // Already teaching this period on the base timetable, for another class?
+      const ownLesson = await (this.prisma.client as any).timetableSlot.findFirst({
+        where: {
+          organizationId,
+          teacherPartnerId: dto.teacherPartnerId,
+          dayOfWeek: dto.dayOfWeek,
+          periodId: dto.periodId,
+          NOT: { classId: dto.classId },
+        },
+      });
+      if (ownLesson) {
+        throw new BadRequestException('That teacher already teaches another class in this period');
+      }
+
+      // Already covering elsewhere in an overlapping window?
+      const overlapping = await (this.prisma.client as any).timetableOverride.findFirst({
+        where: {
+          organizationId,
+          teacherPartnerId: dto.teacherPartnerId,
+          dayOfWeek: dto.dayOfWeek,
+          periodId: dto.periodId,
+          effectiveFrom: { lte: effectiveTo },
+          effectiveTo: { gte: effectiveFrom },
+          NOT: { classId: dto.classId },
+        },
+      });
+      if (overlapping) {
+        throw new BadRequestException('That teacher is already covering another class in this window');
+      }
+    }
+
     return (this.prisma.client as any).timetableOverride.create({
-      data: { ...dto, effectiveFrom: new Date(dto.effectiveFrom), effectiveTo: new Date(dto.effectiveTo) } as any,
+      data: { ...dto, effectiveFrom, effectiveTo } as any,
     });
   }
   removeOverride(id: string) {

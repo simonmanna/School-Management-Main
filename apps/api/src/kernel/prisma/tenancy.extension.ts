@@ -304,6 +304,10 @@ export const ORG_SCOPED = new Set<string>([
   'HrTrainingEnrollment',
   'HrStatutoryConfig',
   'HrEmployeeAuditTrail',
+  'HrSkill',
+  'HrEmployeeSkill',
+  'HrExperience',
+  'HrEmployeeDocument',
   // Communication platform — every model carries a non-null organizationId.
   // Omitting any one is a cross-tenant leak (someone reads another org's
   // messages by id), not a bug. The Baileys session manager + dispatch worker
@@ -708,6 +712,10 @@ export const SOFT_DELETE = new Set<string>([
   'HrTraining',
   'HrTrainingEnrollment',
   'HrStatutoryConfig',
+  'HrSkill',
+  'HrEmployeeSkill',
+  'HrExperience',
+  'HrEmployeeDocument',
   // NOTE: HrSalaryChange / HrEmploymentAction / HrEmployeeAuditTrail are
   // append-only ledgers (no deletedAt) — they stay in ORG_SCOPED only.
   // Communication — Conversation + Message carry deletedAt (soft delete). The

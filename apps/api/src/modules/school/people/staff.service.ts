@@ -18,10 +18,16 @@ import type { CreateStaffDto, UpdateStaffDto } from './dto.types';
 export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, UpdateStaffDto> {
   protected readonly entityName = 'StaffProfile';
   protected readonly searchFields: string[] = ['employeeNo'];
+  /**
+   * `partner` carries the person's name/email/phone — `StaffProfile` itself has
+   * none of them. Omitting it was the root cause of the staff list rendering
+   * the employee number in the Name column for every row.
+   */
   protected readonly defaultInclude = {
     department: true,
     position: true,
     campus: true,
+    partner: { select: { id: true, name: true, email: true, phone: true } },
   };
 
   constructor(
@@ -65,7 +71,10 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
           joinDate: new Date(dto.joinDate),
           contractType: dto.contractType ?? 'permanent',
           contractEndDate: dto.contractEndDate ? new Date(dto.contractEndDate) : null,
-          compensation: (dto.compensation as any) ?? {},
+          // `compensation` is deprecated (Phase 2): HrEmployee.baseSalary is the
+          // system of record for pay. Two salary stores is a live hazard, so
+          // new rows are created empty and the field is no longer written.
+          compensation: {},
           staffCategory: dto.staffCategory ?? 'teaching',
           customFields: dto.customFields ?? {},
         },
@@ -129,7 +138,8 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
         'joinDate',
         'contractType',
         'contractEndDate',
-        'compensation',
+        // 'compensation' deliberately omitted — see create(). Pay changes go
+        // through HrEmployee, which records salary history and audits them.
         'staffCategory',
         'customFields',
       ] as const) {

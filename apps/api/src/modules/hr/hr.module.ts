@@ -14,6 +14,8 @@ import { HrLifecycleService } from './hr-lifecycle.service';
 import { HrRecruitmentService } from './hr-recruitment.service';
 import { HrTrainingService } from './hr-training.service';
 import { HrAlertsSubscriber } from './hr-alerts.subscriber';
+import { HrPeopleService } from './hr-people.service';
+import { HrReconciliationService } from './hr-reconciliation.service';
 
 /**
  * Workforce Management (HR) — attendance, timesheets, leave and payroll.
@@ -37,6 +39,8 @@ import { HrAlertsSubscriber } from './hr-alerts.subscriber';
     HrRecruitmentService,
     HrTrainingService,
     HrAlertsSubscriber,
+    HrPeopleService,
+    HrReconciliationService,
   ],
   exports: [HrPayrollService, HrAttendanceService],
 })

@@ -3,14 +3,20 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { TimetableAdvancedService } from './timetable-advanced.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { TeacherCoverService } from './teacher-cover.service';
 import {
   CreateTeachingRoomDto, UpdateTeachingRoomDto, UpsertTeacherAvailabilityDto,
-  SetRotationDto, CreateTimetableOverrideDto, GenerateTimetableDto,
+  SetRotationDto, CreateTimetableOverrideDto, GenerateTimetableDto, AssignSubstituteDto,
 } from './timetable-advanced.dto';
 
 @Controller('school/timetable')
 export class TimetableAdvancedController {
-  constructor(private readonly svc: TimetableAdvancedService) {}
+  constructor(
+    private readonly svc: TimetableAdvancedService,
+    private readonly identity: EmployeeIdentityService,
+    private readonly cover: TeacherCoverService,
+  ) {}
 
   /* Special schedules: exam/event calendar events overlapping a date range. */
   @Get('special')
@@ -45,10 +51,34 @@ export class TimetableAdvancedController {
   /* Teacher availability */
   @Get('availability/teacher/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.read)
-  availability(@Param('teacherPartnerId') id: string) { return this.svc.availabilityForTeacher(id); }
+  async availability(@Param('teacherPartnerId') id: string) {
+    await this.identity.assertIsTeacherOrAdmin(id, PERMISSIONS.school.manageFoundation);
+    return this.svc.availabilityForTeacher(id);
+  }
   @Post('availability')
   @RequirePermissions(PERMISSIONS.school.manageFoundation)
   setAvailability(@Body() dto: UpsertTeacherAvailabilityDto) { return this.svc.setAvailability(dto); }
+
+  /* Teacher cover (Phase 7) — what an absence breaks, and who covers it. */
+
+  /** Lessons a teacher's absence leaves uncovered in a date window. */
+  @Get('cover/affected/:teacherPartnerId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  async affectedLessons(
+    @Param('teacherPartnerId') id: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    await this.identity.assertIsTeacherOrAdmin(id, PERMISSIONS.school.manageFoundation);
+    return this.cover.affectedLessons(id, new Date(from), new Date(to));
+  }
+
+  /** Book a substitute for one slot over a date window. Clash-checked. */
+  @Post('cover/assign')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  assignSubstitute(@Body() dto: AssignSubstituteDto) {
+    return this.cover.assignSubstitute(dto);
+  }
 
   /* Rotation */
   @Get('rotation/:classId')

@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 
 import { TenantContextService } from './tenancy/tenant-context.service';
 import { PortalIdentityService } from './auth/portal-identity.service';
+import { EmployeeIdentityService } from './auth/employee-identity.service';
 import { PrismaService } from './prisma/prisma.service';
 import { EventBus } from './events/event-bus';
 import { EventOutboxService } from './events/event-outbox.service';
@@ -78,6 +79,7 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
   providers: [
     TenantContextService,
     PortalIdentityService,
+    EmployeeIdentityService,
     PrismaService,
     EventBus,
     EventOutboxService,
@@ -108,6 +110,7 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
   ],
   exports: [
     PortalIdentityService,
+    EmployeeIdentityService,
     TenantContextService,
     PrismaService,
     EventBus,

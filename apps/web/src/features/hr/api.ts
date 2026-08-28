@@ -1421,3 +1421,235 @@ export function useHrSelfProfile() {
 export function useHrTeam() {
   return useQuery({ queryKey: ['hr', 'team'], queryFn: async () => (await api.get('/hr/team')).data });
 }
+
+// ── Skills, experience & personnel documents (Phase 1) ──────────────────────
+
+export interface HrSkill {
+  id: string;
+  code: string;
+  name: string;
+  category: string | null;
+  isActive: boolean;
+}
+
+export interface HrEmployeeSkill {
+  id: string;
+  employeeId: string;
+  skillId: string;
+  proficiency: 'beginner' | 'intermediate' | 'advanced' | 'expert';
+  yearsExperience: number | null;
+  verified: boolean;
+  verifiedById: string | null;
+  verifiedAt: string | null;
+  notes: string | null;
+  skill?: HrSkill;
+}
+
+export interface HrExperience {
+  id: string;
+  employeeId: string;
+  employer: string;
+  title: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  description: string | null;
+  referenceName: string | null;
+  referenceContact: string | null;
+  documentId: string | null;
+}
+
+export interface HrEmployeeDocument {
+  id: string;
+  employeeId: string;
+  category: string;
+  type: string | null;
+  title: string;
+  fileId: string;
+  expiresAt: string | null;
+  verified: boolean;
+  createdAt: string;
+  file?: { id: string; filename: string; contentType: string; byteSize: number; createdAt: string };
+}
+
+// Skill catalogue
+export function useHrSkills(params: { search?: string; category?: string } = {}) {
+  return useQuery({ queryKey: ['hr', 'skills', params], queryFn: async () => (await api.get('/hr/skills', { params })).data });
+}
+export function useCreateHrSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/skills', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'skills'] }) });
+}
+export function useUpdateHrSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/skills/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'skills'] }) });
+}
+export function useDeleteHrSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/skills/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'skills'] }) });
+}
+export function useHrEmployeesBySkill(skillId?: string, minProficiency?: string) {
+  return useQuery({
+    enabled: !!skillId,
+    queryKey: ['hr', 'skills', skillId, 'employees', minProficiency],
+    queryFn: async () => (await api.get(`/hr/skills/${skillId}/employees`, { params: { minProficiency } })).data,
+  });
+}
+
+// Employee <-> skill links
+export function useHrEmployeeSkills(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'employee-skills', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/skills`)).data });
+}
+export function useAddHrEmployeeSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/employee-skills', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'employee-skills'] }) });
+}
+export function useUpdateHrEmployeeSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/employee-skills/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'employee-skills'] }) });
+}
+export function useVerifyHrEmployeeSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, verified }: { id: string; verified: boolean }) => (await api.post(`/hr/employee-skills/${id}/verify`, { verified })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'employee-skills'] }) });
+}
+export function useRemoveHrEmployeeSkill() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/employee-skills/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'employee-skills'] }) });
+}
+
+// Experience
+export function useHrExperience(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'experience', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/experience`)).data });
+}
+export function useAddHrExperience() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/experience', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'experience'] }) });
+}
+export function useUpdateHrExperience() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/experience/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'experience'] }) });
+}
+export function useRemoveHrExperience() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/experience/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'experience'] }) });
+}
+
+// Personnel documents
+export function useHrDocuments(employeeId?: string) {
+  return useQuery({ enabled: !!employeeId, queryKey: ['hr', 'documents', employeeId], queryFn: async () => (await api.get(`/hr/employees/${employeeId}/documents`)).data });
+}
+export function useUploadHrDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, meta }: { file: File; meta: Record<string, string> }) => {
+      const form = new FormData();
+      form.append('file', file);
+      for (const [k, v] of Object.entries(meta)) if (v != null && v !== '') form.append(k, v);
+      return (await api.post('/hr/documents/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'documents'] }),
+  });
+}
+export function useUpdateHrDocument() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/documents/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'documents'] }) });
+}
+export function useVerifyHrDocument() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, verified }: { id: string; verified: boolean }) => (await api.post(`/hr/documents/${id}/verify`, { verified })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'documents'] }) });
+}
+export function useDeleteHrDocument() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`/hr/documents/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'documents'] }) });
+}
+/** Request a signed download URL for the document's underlying file. */
+export async function fetchHrDocumentDownloadUrl(id: string): Promise<string> {
+  const res = (await api.post(`/hr/documents/${id}/download`)).data;
+  return res.url as string;
+}
+
+// Update endpoints for qualifications / certifications (Phase 1)
+export function useUpdateHrQualification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/qualifications/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'qualifications'] }) });
+}
+export function useUpdateHrCertification() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/certifications/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'certifications'] }) });
+}
+
+// ── Reconciliation: school roster <-> HR record (Phase 2) ───────────────────
+
+export interface HrReconciliation {
+  counts: { linked: number; hrOnly: number; schoolOnly: number; employees: number; staffProfiles: number };
+  linked: Array<{ employee: any; staffProfile: any }>;
+  hrOnly: any[];
+  schoolOnly: any[];
+}
+
+export function useHrReconciliation() {
+  return useQuery({
+    queryKey: ['hr', 'reconciliation'],
+    queryFn: async () => (await api.get<HrReconciliation>('/hr/reconciliation')).data,
+  });
+}
+export function useHrLinkStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ employeeId, staffProfileId }: { employeeId: string; staffProfileId: string }) =>
+      (await api.post(`/hr/reconciliation/employees/${employeeId}/link`, { staffProfileId })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr'] }),
+  });
+}
+export function useHrUnlinkStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (employeeId: string) =>
+      (await api.post(`/hr/reconciliation/employees/${employeeId}/unlink`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr'] }),
+  });
+}
+export function useHrCreateEmployeeFromStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post('/hr/reconciliation/create-employee', dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr'] }),
+  });
+}
+export function useHrCreateStaffFromEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post('/hr/reconciliation/create-staff', dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr'] }),
+  });
+}
+
+// ── Staff self-identity (Phase 3) ───────────────────────────────────────────
+
+export interface MyStaffIdentity {
+  userId: string;
+  hrEmployeeId: string | null;
+  partnerId: string | null;
+  staffProfileId: string | null;
+}
+
+/**
+ * Who the signed-in user is, as staff. `staffProfileId` is what every
+ * teacher-scoped school endpoint keys on — the UI must send THIS, not a value
+ * picked from a dropdown, or the server rejects the request as someone else's.
+ */
+export function useMyStaffIdentity() {
+  return useQuery({
+    queryKey: ['hr', 'me', 'identity'],
+    queryFn: async () => (await api.get<MyStaffIdentity>('/hr/me/identity')).data,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+}
+
+/** The signed-in employee's own payslips. */
+export function useMyPayslips() {
+  return useQuery({
+    queryKey: ['hr', 'self', 'payslips'],
+    queryFn: async () => (await api.get('/hr/self/payslips')).data,
+  });
+}

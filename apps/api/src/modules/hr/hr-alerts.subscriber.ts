@@ -11,8 +11,14 @@ import { TenantContextService } from '../../kernel/tenancy/tenant-context.servic
  *
  * Runs on demand via `runAlerts()` (exposed as POST /hr/alerts/run from the
  * controller). It is idempotent per (kind, employee, day) via the dedupe key in
- * NotificationsService. Queries are scoped per org directly (not via the tenant
- * context) so a single sweep can cover every organization.
+ * NotificationsService.
+ *
+ * A multi-org sweep runs each org inside its OWN tenant context. Passing
+ * `organizationId` in the `where` is not enough: the tenancy extension
+ * OVERWRITES that key with the caller's org (`tenancy.extension.ts` →
+ * `scopeArgs`), so a naive loop silently re-queries the caller's own org once
+ * per organization. `prisma.raw` is used to enumerate orgs because the
+ * extended client cannot see outside the current tenant.
  */
 @Injectable()
 export class HrAlertsSubscriber implements OnModuleInit {
@@ -31,13 +37,18 @@ export class HrAlertsSubscriber implements OnModuleInit {
 
   async runAlerts(orgId?: string) {
     const ids = orgId ? [orgId] : await this.allOrgIds();
+    const actorId = this.tenant.store?.userId;
     let fired = 0;
-    for (const id of ids) fired += await this.sweepOrg(id);
-    return { fired };
+    for (const id of ids) {
+      fired += await this.tenant.run({ organizationId: id, userId: actorId }, () =>
+        this.sweepOrg(id),
+      );
+    }
+    return { fired, organizations: ids.length };
   }
 
   private async allOrgIds(): Promise<string[]> {
-    const rows = await this.prisma.client.organization.findMany({ select: { id: true } });
+    const rows = await this.prisma.raw.organization.findMany({ select: { id: true } });
     return rows.map((r: any) => r.id);
   }
 

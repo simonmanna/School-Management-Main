@@ -3,6 +3,8 @@ import { ChevronRight } from 'lucide-react';
 import { useHrEmployee } from '@/features/hr/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { SkillsTab, ExperienceTab, DocumentsTab, QualificationsTab, CertificationsTab } from './employee-detail-tabs';
 
 const fmt = (n: number | string | null) =>
   n === null || n === undefined ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`;
@@ -76,6 +78,17 @@ export function HrEmployeeDetailPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="overview" className="mt-2">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
+          <TabsTrigger value="experience">Experience</TabsTrigger>
+          <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
+          <TabsTrigger value="certifications">Certifications</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Employment & pay */}
         <Card>
@@ -183,6 +196,14 @@ export function HrEmployeeDetailPage() {
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
+
+        <TabsContent value="skills" className="mt-4"><SkillsTab employeeId={emp.id} /></TabsContent>
+        <TabsContent value="experience" className="mt-4"><ExperienceTab employeeId={emp.id} /></TabsContent>
+        <TabsContent value="qualifications" className="mt-4"><QualificationsTab employeeId={emp.id} /></TabsContent>
+        <TabsContent value="certifications" className="mt-4"><CertificationsTab employeeId={emp.id} /></TabsContent>
+        <TabsContent value="documents" className="mt-4"><DocumentsTab employeeId={emp.id} /></TabsContent>
+      </Tabs>
     </div>
   );
 }

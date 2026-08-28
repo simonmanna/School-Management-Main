@@ -83,7 +83,7 @@ log('capacity set for S3 East / S3 West');
 
 // ── 3. Applications ─────────────────────────────────────────────────────────────
 // Each: [firstName, lastName, classId, gender, dob, source, draft?]
-type AppSpec = { first: string; last: string; cls: string; gender: string; dob: string; source: string; draft?: boolean; guardians: { first: string; last: string; rel: string; phone: string }[] };
+type AppSpec = { first: string; last: string; cls: string; gender: string; dob: string; source: string; draft?: boolean; guardians: { firstName: string; lastName?: string; relationship: string; phone: string }[] };
 const APPS: AppSpec[] = [
   { first: 'Amina', last: 'Nakato', cls: clsEast.id, gender: 'female', dob: '2011-03-12', source: 'website',
     guardians: [{ firstName: 'Grace', lastName: 'Nakato', relationship: 'mother', phone: '+256771000101' }] },

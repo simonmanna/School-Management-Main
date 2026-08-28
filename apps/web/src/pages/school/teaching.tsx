@@ -5,6 +5,9 @@ import {
   FileSpreadsheet, GraduationCap, Send, Undo2,
 } from 'lucide-react';
 import { useStaff, useTeacherOverview } from '@/features/school/api';
+import { useMyStaffIdentity } from '@/features/hr/api';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,9 +28,17 @@ export function SchoolTeachingPage() {
     () => (staff?.data ?? []).filter((s) => (s as any).staffCategory !== 'non_teaching'),
     [staff],
   );
+  // Who AM I? The server resolves this from the session; teacher-scoped
+  // endpoints reject any other id unless the caller is an admin.
+  const { data: me } = useMyStaffIdentity();
+  const canPickAnyTeacher = useAuthStore((s) => s.hasPermission(PERMISSIONS.school.manageStaff));
+
   const [teacherId, setTeacherId] = useStickyState('teaching.teacherId');
-  // Default to the first teacher so the screen is populated on arrival.
-  const activeTeacher = teacherId || teachers[0]?.id || '';
+  // A teacher always sees THEIR OWN workspace. Only an admin may look at
+  // someone else's, and only then does the picker appear.
+  const activeTeacher = canPickAnyTeacher
+    ? teacherId || me?.staffProfileId || teachers[0]?.id || ''
+    : me?.staffProfileId || '';
   const { data: overview, isLoading } = useTeacherOverview(activeTeacher || undefined);
 
   const totalToMark = overview?.needsMarking.reduce((n, m) => n + m.count, 0) ?? 0;
@@ -39,16 +50,26 @@ export function SchoolTeachingPage() {
           <h1 className="text-xl font-semibold">My Teaching</h1>
           <p className="text-sm text-muted-foreground">Everything waiting on you, in one place.</p>
         </div>
-        <div className="min-w-[220px]">
-          <Picker
-            label="Teacher"
-            value={activeTeacher}
-            onChange={setTeacherId}
-            options={teachers.map((t) => ({ value: t.id, label: t.partner?.name ?? (t as any).employeeNo ?? t.id }))}
-            className=""
-          />
-        </div>
+        {canPickAnyTeacher && (
+          <div className="min-w-[220px]">
+            <Picker
+              label="Teacher"
+              value={activeTeacher}
+              onChange={setTeacherId}
+              options={teachers.map((t) => ({ value: t.id, label: t.partner?.name ?? (t as any).employeeNo ?? t.id }))}
+              className=""
+            />
+          </div>
+        )}
       </div>
+
+      {!activeTeacher && !canPickAnyTeacher && (
+        <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+          Your login is not linked to a staff record yet, so there is no teaching
+          workspace to show. An administrator can link it under
+          Human Resource &rarr; Record Reconciliation.
+        </div>
+      )}
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
 

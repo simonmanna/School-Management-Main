@@ -193,6 +193,12 @@ export const EVENTS = {
   SchoolStudentPromoted: 'school.student.promoted',
   SchoolStaffCreated: 'school.staff.created',
   SchoolStaffStatusChanged: 'school.staff.status.changed',
+  // HR → school. Approved leave is published so the timetable can project it
+  // into TeacherAvailability and flag/cover the affected lessons. The event bus
+  // is how HR reaches the school vertical: neither may import the other
+  // (ADR-011), and this keeps that boundary intact.
+  HrLeaveApproved: 'hr.leave.approved',
+  HrLeaveCancelled: 'hr.leave.cancelled',
   // Admissions
   SchoolAdmissionSubmitted: 'school.admission.submitted',
   SchoolAdmissionUnderReview: 'school.admission.under_review',
@@ -581,6 +587,24 @@ export interface DomainEventMap {
     staffProfileId: string;
     fromStatus: string;
     toStatus: string;
+  };
+  'hr.leave.approved': {
+    organizationId: string;
+    leaveRequestId: string;
+    employeeId: string;
+    /** Resolved through the Partner bridge; null when the employee is unbridged. */
+    staffProfileId: string | null;
+    startDate: string;
+    endDate: string;
+    leaveTypeName?: string;
+  };
+  'hr.leave.cancelled': {
+    organizationId: string;
+    leaveRequestId: string;
+    employeeId: string;
+    staffProfileId: string | null;
+    startDate: string;
+    endDate: string;
   };
   'school.admission.submitted': {
     organizationId: string;

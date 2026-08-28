@@ -133,11 +133,43 @@ export class EnrolmentService {
       n++;
     }
     // Team teachers become editingteacher automatically.
+    //
+    // `LmsRoleAssignment.userId` must be a platform `User.id` — that is what
+    // the capability guard builds its principal from. This previously passed
+    // `CourseOfferingTeacher.teacherPartnerId`, which is a `StaffProfile.id`,
+    // so every auto-granted teacher role pointed at an id no principal could
+    // ever match. Teachers were silently locked out of their own courses and
+    // only got in via the coarse-permission fallback in
+    // `CapabilityService.fromPermissions()`.
+    //
+    // Resolve StaffProfile → Partner → HrEmployee → User. A teacher whose login
+    // is not linked yet is skipped rather than assigned a broken role; the HR
+    // reconciliation screen is where that gets fixed.
     const teachers = await this.prisma.client.courseOfferingTeacher.findMany({ where: { organizationId: this.org, courseOfferingId } });
     for (const t of teachers) {
-      await this.roles.assignAtCourse({ courseOfferingId, roleShortname: 'editingteacher', userId: t.teacherPartnerId, sourceComponent: 'enrol_roster' });
+      const userId = await this.resolveTeacherUserId(t.teacherPartnerId);
+      if (!userId) continue;
+      await this.roles.assignAtCourse({ courseOfferingId, roleShortname: 'editingteacher', userId, sourceComponent: 'enrol_roster' });
     }
     await this.events.log({ eventName: 'core_enrol.roster_synced', component: 'core_enrol', action: 'updated', target: 'course', courseOfferingId, other: { enrolled: n } });
     return { enrolled: n };
+  }
+
+  /**
+   * `StaffProfile.id` → the platform `User.id` for that person, via the
+   * Partner bridge. Returns null when the staff member has no HR record or no
+   * linked login.
+   */
+  private async resolveTeacherUserId(staffProfileId: string): Promise<string | null> {
+    const profile = await this.prisma.client.staffProfile.findFirst({
+      where: { id: staffProfileId, organizationId: this.org, deletedAt: null },
+      select: { partnerId: true },
+    });
+    if (!profile?.partnerId) return null;
+    const employee = await this.prisma.client.hrEmployee.findFirst({
+      where: { organizationId: this.org, partnerId: profile.partnerId, deletedAt: null },
+      select: { userId: true },
+    });
+    return employee?.userId ?? null;
   }
 }

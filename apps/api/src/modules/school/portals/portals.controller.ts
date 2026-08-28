@@ -5,6 +5,7 @@ import { PortalsService } from './portals.service';
 import { MobileMoneyService } from '../fees/mobile-money.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 
 @Controller('school/portals')
 export class PortalsController {
@@ -15,6 +16,7 @@ export class PortalsController {
     private readonly momo: MobileMoneyService,
     private readonly finance: SchoolFinanceQueryService,
     private readonly portalIdentity: PortalIdentityService,
+    private readonly employeeIdentity: EmployeeIdentityService,
   ) {}
 
   /**
@@ -31,6 +33,20 @@ export class PortalsController {
     if (!(await this.portalIdentity.canAccessStudent(studentProfileId))) {
       throw new ForbiddenException('Not permitted to view this student');
     }
+  }
+
+  /**
+   * Ownership check for per-TEACHER routes.
+   *
+   * `school.teacherPortal` / `school.read` are coarse: they say "this account
+   * may use the teacher workspace", not "this account IS that teacher". These
+   * routes took the id straight from the URL, so any authenticated holder of
+   * the coarse permission could read another teacher's classes, lesson plans
+   * and workload by editing the id. Admins with the explicit management
+   * permission are still allowed through.
+   */
+  private assertIsTeacherOrAdmin(teacherPartnerId: string, adminPermission: string): Promise<void> {
+    return this.employeeIdentity.assertIsTeacherOrAdmin(teacherPartnerId, adminPermission);
   }
 
   /** Same check for a list of ids; every one must be permitted. */
@@ -112,14 +128,16 @@ export class PortalsController {
 
   @Get('teacher/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.teacherPortal)
-  teacherDashboard(@Param('teacherPartnerId') id: string) {
+  async teacherDashboard(@Param('teacherPartnerId') id: string) {
+    await this.assertIsTeacherOrAdmin(id, PERMISSIONS.school.manageStaff);
     return this.portals.teacherDashboard(id);
   }
 
   /** The teacher workspace (P5) — aggregated "what needs doing" for one teacher. */
   @Get('teaching/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.read)
-  teachingOverview(@Param('teacherPartnerId') id: string) {
+  async teachingOverview(@Param('teacherPartnerId') id: string) {
+    await this.assertIsTeacherOrAdmin(id, PERMISSIONS.school.manageStaff);
     return this.portals.teacherOverview(id);
   }
 }

@@ -9,7 +9,8 @@ import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
 import { PostingService } from '../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../accounting/posting/account-determination.service';
-import { dec, ZERO } from '../../kernel/common/money';
+import { dec, sum, ZERO } from '../../kernel/common/money';
+import { Prisma } from '@prisma/client';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -210,8 +211,19 @@ export class HrLifecycleService {
     });
   }
 
-  /** Records a salary change + an employment action, reusing the same transaction. */
-  async recordSalaryChange(tx: any, employeeId: string, prev: number, next: number, reason: string, changedById?: string) {
+  /**
+   * Records a salary change + an employment action, reusing the same
+   * transaction. Called from `HrOrgService.updateEmployee` whenever
+   * `baseSalary` actually changes.
+   */
+  async recordSalaryChange(
+    tx: any,
+    employeeId: string,
+    prev: Prisma.Decimal.Value,
+    next: Prisma.Decimal.Value,
+    reason: string,
+    changedById?: string,
+  ) {
     const orgId = this.tenant.organizationId;
     await tx.hrSalaryChange.create({
       data: {
@@ -408,36 +420,40 @@ export class HrLifecycleService {
     });
     if (!emp) throw new NotFoundException('Employee not found');
 
-    const base = this.num(emp.baseSalary);
+    // Decimal end to end — this is a money calculation that posts to the GL
+    // (FINANCIAL_INVARIANTS.md §"Money precision").
+    const base = dec(emp.baseSalary ?? 0);
+    const dailyRate = base.dividedBy(30);
     // Prorated salary for days worked in the final month (assume 30-day month).
     const ld = new Date(lastDay);
-    const salaryDue = dec((base / 30) * ld.getDate());
+    const salaryDue = dailyRate.times(ld.getDate());
 
     // Leave payout: remaining leave days × daily pay (gross daily).
-    let leaveDays = 0;
+    let leaveDays = ZERO;
     for (const b of emp.leaveBalances) {
-      leaveDays += Math.max(0, this.num(b.accruedDays) + this.num(b.adjustedDays) - this.num(b.usedDays));
+      const remaining = dec(b.accruedDays).plus(dec(b.adjustedDays)).minus(dec(b.usedDays));
+      if (remaining.greaterThan(ZERO)) leaveDays = leaveDays.plus(remaining);
     }
-    const leavePayout = dec((base / 30) * leaveDays);
+    const leavePayout = dailyRate.times(leaveDays);
 
     // Outstanding loan + advance balances.
-    let loanOutstanding = ZERO;
-    for (const l of emp.loans) loanOutstanding = dec(this.num(loanOutstanding) + this.num(l.balance));
-    let advanceOutstanding = ZERO;
-    for (const a of emp.salaryAdvances) advanceOutstanding = dec(this.num(advanceOutstanding) + this.num(a.balance));
+    const loanOutstanding = sum(emp.loans.map((l: any) => dec(l.balance)));
+    const advanceOutstanding = sum(emp.salaryAdvances.map((a: any) => dec(a.balance)));
 
-    const netSettlement = this.num(salaryDue) + this.num(leavePayout) - this.num(loanOutstanding) - this.num(advanceOutstanding);
+    const grossDue = salaryDue.plus(leavePayout);
+    const recovered = loanOutstanding.plus(advanceOutstanding);
+    const netSettlement = grossDue.minus(recovered);
 
     if (!post) {
       return {
         employeeId,
         salaryDue,
         leavePayout,
-        leaveDays,
+        leaveDays: leaveDays.toNumber(),
         loanOutstanding,
         advanceOutstanding,
         netSettlement,
-        postable: this.num(netSettlement) > 0,
+        postable: netSettlement.greaterThan(ZERO),
       };
     }
 
@@ -464,29 +480,63 @@ export class HrLifecycleService {
           createdBy: userId,
         },
       });
-      if (this.num(netSettlement) > 0) {
-        const [salaryExpense, netPayPayable] = await Promise.all([
+      if (grossDue.greaterThan(ZERO)) {
+        const [salaryExpense, netPayPayable, loanReceivable, advanceReceivable] = await Promise.all([
           this.accounts.mapped('salary_expense', tx),
           this.accounts.mapped('net_pay_payable', tx),
+          this.accounts.mapped('employee_loan_receivable', tx),
+          this.accounts.mapped('employee_advance_receivable', tx),
         ]);
+        // The entry MUST balance: debit the full gross, then credit the net
+        // payable AND the receivables the settlement clears. Crediting only
+        // the net left the entry short by (loans + advances), so any employee
+        // leaving with an outstanding loan failed to post at all.
+        const lines: any[] = [
+          { accountId: salaryExpense, debit: grossDue, description: 'Salary + leave payout' },
+        ];
+        if (netSettlement.greaterThan(ZERO))
+          lines.push({ accountId: netPayPayable, credit: netSettlement, description: 'Net final settlement payable' });
+        if (loanOutstanding.greaterThan(ZERO))
+          lines.push({ accountId: loanReceivable, credit: loanOutstanding, description: 'Loan balance recovered' });
+        if (advanceOutstanding.greaterThan(ZERO))
+          lines.push({ accountId: advanceReceivable, credit: advanceOutstanding, description: 'Advance balance recovered' });
+        // A settlement that nets negative (recovery exceeds the payout) leaves
+        // the employee owing the school — booked back to the expense account
+        // so the entry balances rather than silently failing.
+        if (netSettlement.lessThan(ZERO))
+          lines.push({ accountId: salaryExpense, debit: netSettlement.abs(), description: 'Net recoverable from employee' });
+
         const journal = await this.posting.post(
           {
             journalCode: 'GEN',
-            date: new Date(),
+            // Dated to the last working day — the period the settlement belongs
+            // to — not the day the button was clicked.
+            date: ld,
             description: `Final settlement — ${emp.firstName} ${emp.lastName ?? ''} (${emp.employeeCode})`,
             sourceType: 'hr_settlement',
             sourceId: off.id,
             postingType: 'primary',
             postingKey: `hr_settlement:${off.id}`,
-            lines: [
-              { accountId: salaryExpense, debit: this.num(salaryDue) + this.num(leavePayout), description: 'Salary + leave payout' },
-              { accountId: netPayPayable, credit: netSettlement, description: 'Net final settlement payable' },
-            ],
+            lines,
           },
           tx,
         );
         await tx.hrOffboarding.update({ where: { id: off.id }, data: { journalEntryId: journal.id } });
       }
+      await this.audit.recordInTx(tx, {
+        entity: 'HrOffboarding',
+        entityId: off.id,
+        action: 'post',
+        newValues: {
+          employeeId,
+          lastWorkingDay: ld,
+          salaryDue: salaryDue.toString(),
+          leavePayout: leavePayout.toString(),
+          loanOutstanding: loanOutstanding.toString(),
+          advanceOutstanding: advanceOutstanding.toString(),
+          netSettlement: netSettlement.toString(),
+        },
+      });
       return tx.hrOffboarding.findUnique({ where: { id: off.id } });
     });
   }

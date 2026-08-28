@@ -70,29 +70,40 @@ export class LmsRolesService {
     if (!dto.userId && !dto.studentProfileId) throw new BadRequestException('userId or studentProfileId required');
     const role = await this.roleByShortname(dto.roleShortname);
     const ctx = await this.contexts.ensureCourseContext(dto.courseOfferingId);
-    // Prisma 6 requires every column of a compound-unique constraint to be present
-    // and non-null in the `where` of an upsert — it rejects both `null` AND a missing
-    // key. So pad a null nullable FK with a sentinel for the lookup key (the real,
-    // possibly-null value is still written in `create`/`update`).
-    const NONE = '__none__';
-    const whereKey = {
-      contextId: ctx.id,
-      roleId: role.id,
-      userId: dto.userId ?? NONE,
-      studentProfileId: dto.studentProfileId ?? NONE,
-    };
-    const assignment = await this.prisma.client.lmsRoleAssignment.upsert({
-      where: { contextId_roleId_userId_studentProfileId: whereKey as any },
-      create: {
+    // Deliberately find-then-write rather than `upsert`.
+    //
+    // Exactly one principal column is populated, so the other is NULL. An
+    // upsert on `@@unique([contextId, roleId, userId, studentProfileId])`
+    // cannot express that: Prisma rejects a null in a compound-unique `where`,
+    // and the previous workaround padded the LOOKUP with a '__none__' sentinel
+    // while `create` still wrote a real NULL — so the where never matched what
+    // was stored and EVERY call inserted another row. Roster sync duplicated
+    // every teacher and student assignment on each run. Postgres does not
+    // catch it either: a UNIQUE index treats NULLs as distinct.
+    const existing = await this.prisma.client.lmsRoleAssignment.findFirst({
+      where: {
         organizationId: this.org,
         contextId: ctx.id,
         roleId: role.id,
-        userId: dto.userId,
-        studentProfileId: dto.studentProfileId,
-        sourceComponent: dto.sourceComponent ?? 'manual',
+        userId: dto.userId ?? null,
+        studentProfileId: dto.studentProfileId ?? null,
       },
-      update: { sourceComponent: dto.sourceComponent ?? 'manual' },
     });
+    const assignment = existing
+      ? await this.prisma.client.lmsRoleAssignment.update({
+          where: { id: existing.id },
+          data: { sourceComponent: dto.sourceComponent ?? 'manual' },
+        })
+      : await this.prisma.client.lmsRoleAssignment.create({
+          data: {
+            organizationId: this.org,
+            contextId: ctx.id,
+            roleId: role.id,
+            userId: dto.userId ?? null,
+            studentProfileId: dto.studentProfileId ?? null,
+            sourceComponent: dto.sourceComponent ?? 'manual',
+          },
+        });
     this.caps.bust();
     return assignment;
   }

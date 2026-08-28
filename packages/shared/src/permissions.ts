@@ -640,7 +640,20 @@ export const PERMISSIONS = {
   //      leave, payroll, payslips, advances, loans, tax tables, reviews ----
   hr: {
     read: 'hr:read',
+    /**
+     * Employee self-service: read YOUR OWN HR record only.
+     * `hr:read` grants read of every employee's data, so it is the wrong gate
+     * for a teacher checking their own payslip.
+     */
+    self: 'hr:self',
     employee: 'hr:employee',
+    /**
+     * Bind an HrEmployee to a login (`POST /hr/employees/:id/link-user`).
+     * Split from `hr:employee` because `HrEmployee.userId` is what employee
+     * self-service resolves on — whoever can set it can point a login at
+     * someone else's payroll record.
+     */
+    employeeIdentity: 'hr:employee_identity',
     attendance: 'hr:attendance',
     shift: 'hr:shift',
     timesheet: 'hr:timesheet',
@@ -660,6 +673,12 @@ export const PERMISSIONS = {
     training: 'hr:training',
     offboarding: 'hr:offboarding',
     audit: 'hr:audit',
+    /** Skills catalogue + per-employee skill links (Phase 1). */
+    skill: 'hr:skill',
+    /** Prior-employment history (Phase 1). */
+    experience: 'hr:experience',
+    /** Personnel documents — CV, ID scans, contract copies (Phase 1). */
+    document: 'hr:document',
   },
   // ---- Communication platform — messaging + channels ----
   // NB: read/write/send are CAPABILITIES. Per-conversation ACCESS is enforced

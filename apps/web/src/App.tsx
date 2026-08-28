@@ -116,6 +116,7 @@ import { SchoolStreamsPage } from '@/pages/school/streams';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
 import { SchoolTeachingLoadPage } from '@/pages/school/teaching-load';
+import { SchoolTeacherCoverPage } from '@/pages/school/teacher-cover';
 import { SchoolCalendarPage } from '@/pages/school/calendar';
 import { SchoolEventsPage } from '@/pages/school/events';
 import { SchoolPoliciesPage } from '@/pages/school/policies';
@@ -262,6 +263,7 @@ import { HrRecruitmentPage } from '@/pages/hr/HrRecruitmentPage';
 import { HrQualificationsPage } from '@/pages/hr/HrQualificationsPage';
 import { HrTrainingPage } from '@/pages/hr/HrTrainingPage';
 import { HrOffboardingPage } from '@/pages/hr/HrOffboardingPage';
+import { HrReconciliationPage } from '@/pages/hr/HrReconciliationPage';
 import { HrPayrollPreviewPage } from '@/pages/hr/HrPayrollPreviewPage';
 import { HrMyPage } from '@/pages/hr/HrMyPage';
 import { StockLedgerPage } from '@/pages/inventory/StockLedgerPage';
@@ -465,6 +467,7 @@ export function App() {
           <Route path="/hr/qualifications" element={<HrQualificationsPage />} />
           <Route path="/hr/training" element={<HrTrainingPage />} />
           <Route path="/hr/offboarding" element={<HrOffboardingPage />} />
+          <Route path="/hr/reconciliation" element={<HrReconciliationPage />} />
           <Route path="/hr/payroll/preview" element={<HrPayrollPreviewPage />} />
           <Route path="/hr/my" element={<HrMyPage />} />
           <Route path="/inventory/ledger" element={<StockLedgerPage />} />
@@ -547,6 +550,7 @@ export function App() {
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
           <Route path="/school/teaching-load" element={<SchoolTeachingLoadPage />} />
+          <Route path="/school/teacher-cover" element={<SchoolTeacherCoverPage />} />
           <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
           <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />
           <Route path="/school/timetable/events" element={<SchoolEventsPage />} />

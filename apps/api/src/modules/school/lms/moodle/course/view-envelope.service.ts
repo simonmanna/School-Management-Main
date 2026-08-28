@@ -183,16 +183,37 @@ export class ViewEnvelopeService {
     );
   }
 
-  /** Display names for staff principals (teachers on a course, graders). */
+  /**
+   * Display names for staff principals (teachers on a course, graders).
+   *
+   * Ids here are platform `User.id`s. Historic `LmsRoleAssignment` rows carry
+   * a `StaffProfile.id` instead (roster sync used to write the wrong id), so
+   * anything the User table cannot explain is resolved through the staff
+   * profile as a fallback rather than rendering blank.
+   */
   async userNames(userIds: string[]): Promise<Map<string, string>> {
     if (userIds.length === 0) return new Map();
-    const rows = await this.prisma.client.user.findMany({
+    const out = new Map<string, string>();
+
+    const users = await this.prisma.client.user.findMany({
       where: { id: { in: userIds }, organizationId: this.org },
       select: { id: true, firstName: true, lastName: true, email: true },
     });
-    return new Map(
-      rows.map((r) => [r.id, [r.firstName, r.lastName].filter(Boolean).join(' ') || r.email]),
-    );
+    for (const r of users) {
+      out.set(r.id, [r.firstName, r.lastName].filter(Boolean).join(' ') || r.email);
+    }
+
+    const unresolved = userIds.filter((id) => !out.has(id));
+    if (unresolved.length > 0) {
+      const profiles = await this.prisma.client.staffProfile.findMany({
+        where: { id: { in: unresolved }, organizationId: this.org },
+        select: { id: true, employeeNo: true, partner: { select: { name: true } } },
+      });
+      for (const p of profiles) {
+        out.set(p.id, p.partner?.name ?? p.employeeNo);
+      }
+    }
+    return out;
   }
 
   // ── internals ──

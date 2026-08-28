@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { RequireOwnerOrPermission } from '../../../kernel/auth/guards/require-owner-or-permission.decorator';
@@ -82,7 +83,10 @@ export class CurriculumController {
 
 @Controller('school/teacher-assignments')
 export class TeacherAssignmentController {
-  constructor(private readonly service: TeacherAssignmentService) {}
+  constructor(
+    private readonly service: TeacherAssignmentService,
+    private readonly identity: EmployeeIdentityService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -90,9 +94,11 @@ export class TeacherAssignmentController {
     return this.service.list(q);
   }
 
+  /** A colleague's teaching load is not public: admin, or the teacher themselves. */
   @Get('by-teacher/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.read)
-  byTeacher(@Param('teacherPartnerId') id: string) {
+  async byTeacher(@Param('teacherPartnerId') id: string) {
+    await this.identity.assertIsTeacherOrAdmin(id, PERMISSIONS.school.manageStaff);
     return this.service.byTeacher(id);
   }
 
@@ -130,7 +136,10 @@ export class TeacherAssignmentController {
 
 @Controller('school/timetable')
 export class TimetableController {
-  constructor(private readonly service: TimetableService) {}
+  constructor(
+    private readonly service: TimetableService,
+    private readonly identity: EmployeeIdentityService,
+  ) {}
 
   @Get('class/:classId')
   @RequirePermissions(PERMISSIONS.school.read)
@@ -172,7 +181,8 @@ export class TimetableController {
 
   @Get('teacher/:teacherPartnerId')
   @RequirePermissions(PERMISSIONS.school.read)
-  gridForTeacher(@Param('teacherPartnerId') teacherPartnerId: string, @Query('cycle') cycle?: string) {
+  async gridForTeacher(@Param('teacherPartnerId') teacherPartnerId: string, @Query('cycle') cycle?: string) {
+    await this.identity.assertIsTeacherOrAdmin(teacherPartnerId, PERMISSIONS.school.manageFoundation);
     return this.service.gridForTeacher(teacherPartnerId, cycle);
   }
 

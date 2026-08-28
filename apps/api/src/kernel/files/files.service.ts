@@ -10,10 +10,14 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
  * F.5 — File storage abstraction.
  *
  * Two drivers:
- *   - 'local' (default in dev): files written under STORAGE_LOCAL_DIR with
- *     random keys. Suitable for single-node deployments and CI.
- *   - 's3' (placeholder): the S3 driver stub writes to a configurable prefix.
- *     Plug an actual S3 SDK when moving to production.
+ *   - 'local' (default, and the only working driver): files written under
+ *     STORAGE_LOCAL_DIR with random keys. Suitable for single-node
+ *     deployments and CI. The host must provide persistent, backed-up disk.
+ *   - 's3': NOT IMPLEMENTED. Selecting it throws at construction so the app
+ *     refuses to boot. It previously accepted uploads, returned a valid file
+ *     id, and discarded the bytes with only a `logger.warn` — silent,
+ *     permanent data loss for anything uploaded (CVs, contracts, ID scans).
+ *     Wire a real S3 SDK before re-enabling.
  *
  * Public download is via short-lived signed URLs (`/files/:id/download?token=…`).
  * Default TTL: 15 minutes.
@@ -41,11 +45,16 @@ export class FilesService {
     private readonly tenant: TenantContextService,
   ) {
     this.driver = (process.env.STORAGE_DRIVER as 'local' | 's3') ?? 'local';
+    if (this.driver !== 'local') {
+      // Fail fast at boot rather than eat bytes at runtime.
+      throw new Error(
+        `STORAGE_DRIVER="${this.driver}" is not implemented — only "local" persists file bytes. ` +
+          'Set STORAGE_DRIVER=local, or implement the driver before enabling it.',
+      );
+    }
     this.localDir = resolve(process.env.STORAGE_LOCAL_DIR ?? './var/uploads');
     this.signingSecret = process.env.JWT_ACCESS_SECRET ?? 'dev-signing-secret';
-    if (this.driver === 'local') {
-      void mkdir(this.localDir, { recursive: true }).catch(() => undefined);
-    }
+    void mkdir(this.localDir, { recursive: true }).catch(() => undefined);
   }
 
   async upload(input: FileUploadInput): Promise<{ id: string; storageKey: string }> {
@@ -61,19 +70,16 @@ export class FilesService {
     const key = `${orgId}/${new Date().toISOString().slice(0, 10)}/${randomBytes(16).toString('hex')}${ext}`;
     const checksum = createHash('sha256').update(input.buffer).digest('hex');
 
-    if (this.driver === 'local') {
-      const fullPath = join(this.localDir, key);
-      await mkdir(dirname(fullPath), { recursive: true });
-      await new Promise<void>((res, rej) => {
-        const ws = createWriteStream(fullPath);
-        ws.on('error', rej);
-        ws.on('finish', () => res());
-        ws.end(input.buffer);
-      });
-    } else {
-      // S3 driver stub — implement when production storage is wired.
-      this.logger.warn('S3 storage driver is a stub; file metadata saved but bytes discarded');
-    }
+    // Only 'local' reaches here — the constructor rejects any other driver, so
+    // the bytes are always written before the File row is created.
+    const fullPath = join(this.localDir, key);
+    await mkdir(dirname(fullPath), { recursive: true });
+    await new Promise<void>((res, rej) => {
+      const ws = createWriteStream(fullPath);
+      ws.on('error', rej);
+      ws.on('finish', () => res());
+      ws.end(input.buffer);
+    });
 
     let file;
     try {

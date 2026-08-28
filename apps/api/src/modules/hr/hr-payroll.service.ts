@@ -7,7 +7,7 @@ import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../kernel/tenancy/tenant-context.service';
 import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
-import { dec, ZERO } from '../../kernel/common/money';
+import { dec, sum, ZERO, type Money } from '../../kernel/common/money';
 import { PostingService } from '../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../accounting/posting/account-determination.service';
 
@@ -25,6 +25,13 @@ const BANK_PAYMENT_STATUSES = ['DRAFT', 'GENERATED', 'SENT', 'PAID'];
 
 const MONTHLY_HOURS = 173.33;
 const MONTHS_PER_YEAR = 12;
+/** Overtime is paid at 1.5× the hourly rate. */
+const OVERTIME_MULTIPLIER = 1.5;
+/**
+ * Interactive-transaction budget for `approveRun`. Prisma's default is 5s,
+ * which a real payroll (hundreds of payslips + GL posting) blows through.
+ */
+const APPROVE_TX_TIMEOUT_MS = 120_000;
 
 /**
  * HrPayrollService — the payroll engine: components, tax tables, periods,
@@ -252,17 +259,56 @@ export class HrPayrollService {
     });
   }
 
-  /** Progressive tax computation: sum (bracket ∩ income) × rate. */
-  private computeProgressive(income: number, brackets: Array<{ fromAmount: any; toAmount: any; rate: any }>): number {
-    let tax = 0;
+  /**
+   * Progressive tax computation: sum (bracket ∩ income) × rate.
+   *
+   * Decimal end to end (FINANCIAL_INVARIANTS.md §"Money precision"). A float
+   * here lands in `HrPayrollItem.taxAmount`, then in the GL control total,
+   * where `PostingService.applyRounding` silently absorbs residuals ≤ 0.01
+   * into a rounding account — so the drift would post with no error signal.
+   *
+   * NOTE `HrTaxBracket.rate` is a FRACTION (0.3 = 30%), unlike
+   * `HrPayrollComponent.rate` which is a percentage (30 = 30%). Seeds must
+   * follow that convention. A null `toAmount` means "and above".
+   */
+  private computeProgressive(
+    income: Money,
+    brackets: Array<{ fromAmount: any; toAmount: any; rate: any }>,
+  ): Money {
+    let tax = ZERO;
     for (const b of brackets) {
-      const from = Number(b.fromAmount);
-      const to = b.toAmount === null || b.toAmount === undefined ? Infinity : Number(b.toAmount);
-      const low = Math.max(from, 0);
-      const high = Math.min(to, income);
-      if (high > low) tax += (high - low) * Number(b.rate);
+      const from = dec(b.fromAmount);
+      const low = from.greaterThan(ZERO) ? from : ZERO;
+      const to = b.toAmount === null || b.toAmount === undefined ? null : dec(b.toAmount);
+      const high = to !== null && to.lessThan(income) ? to : income;
+      if (high.greaterThan(low)) tax = tax.plus(high.minus(low).times(dec(b.rate)));
     }
     return tax;
+  }
+
+  /**
+   * Resolve one payroll component to money. PERCENTAGE components are a
+   * percentage (30 = 30%) of `earningsBase` (base + overtime); FIXED
+   * components use `amount` as-is.
+   */
+  private componentAmount(
+    c: { calcMethod: string; rate: any; amount: any },
+    earningsBase: Money,
+  ): Money {
+    return c.calcMethod === 'PERCENTAGE'
+      ? earningsBase.times(dec(c.rate ?? 0)).dividedBy(100)
+      : dec(c.amount ?? 0);
+  }
+
+  /**
+   * A loan/advance installment is min(planned, outstanding balance, what is
+   * left of net pay). Capping at `available` is what keeps net pay from going
+   * negative, which would unbalance the payroll journal.
+   */
+  private cappedInstallment(planned: Money, balance: Money, available: Money): Money {
+    let v = planned.lessThan(balance) ? planned : balance;
+    if (v.greaterThan(available)) v = available;
+    return v.greaterThan(ZERO) ? v : ZERO;
   }
 
   /** Active tax table of a type for the run's period. */
@@ -477,8 +523,8 @@ export class HrPayrollService {
       for (const emp of employees) {
         // 1. Base salary / hourly earnings.
         const payFreq = emp.payFrequency ?? 'MONTHLY';
-        const baseSalary = emp.baseSalary ? Number(emp.baseSalary) : 0;
-        const hourlyRate = emp.hourlyRate ? Number(emp.hourlyRate) : 0;
+        const baseSalary = emp.baseSalary ? dec(emp.baseSalary) : ZERO;
+        const hourlyRate = emp.hourlyRate ? dec(emp.hourlyRate) : ZERO;
 
         // Attendance for the period (worked + overtime minutes).
         const attAgg = await tx.hrAttendance.aggregate({
@@ -493,34 +539,35 @@ export class HrPayrollService {
         const workedMin = attAgg._sum.workedMinutes ?? 0;
         const overtimeMin = attAgg._sum.overtimeMinutes ?? 0;
 
-        let baseAmount = 0;
-        if (payFreq === 'HOURLY') {
-          const rate = hourlyRate || baseSalary / MONTHLY_HOURS;
-          baseAmount = (workedMin / 60) * rate;
-        } else {
-          baseAmount = baseSalary;
-        }
-        const overtimeHours = overtimeMin / 60;
-        const otRate = hourlyRate || baseSalary / MONTHLY_HOURS;
-        const overtimePay = overtimeHours * otRate * 1.5;
+        // Falls back to a derived hourly rate when none is stored, matching
+        // the previous `hourlyRate || baseSalary / MONTHLY_HOURS` behaviour.
+        const derivedHourly = hourlyRate.greaterThan(ZERO)
+          ? hourlyRate
+          : baseSalary.dividedBy(dec(MONTHLY_HOURS));
+        const baseAmount =
+          payFreq === 'HOURLY'
+            ? dec(workedMin).dividedBy(60).times(derivedHourly)
+            : baseSalary;
+        const overtimeHours = dec(overtimeMin).dividedBy(60);
+        const overtimePay = overtimeHours
+          .times(derivedHourly)
+          .times(dec(OVERTIME_MULTIPLIER));
+        const earningsBase = baseAmount.plus(overtimePay);
 
         // 2. Allowances (recurring components + per-item allowance lines).
         const components = await this.resolveComponents(tx, orgId, emp);
         const allowanceLines: any[] = [];
-        let allowancesTotal = 0;
+        let allowancesTotal = ZERO;
         for (const c of components) {
           if (c.componentType !== 'ALLOWANCE' || !c.isRecurring) continue;
           if (c.appliesTo && !this.componentApplies(c.appliesTo, emp)) continue;
-          const amount =
-            c.calcMethod === 'PERCENTAGE'
-              ? (baseAmount + overtimePay) * (Number(c.rate) / 100)
-              : Number(c.amount ?? 0);
-          if (amount <= 0) continue;
-          allowancesTotal += amount;
+          const amount = this.componentAmount(c, earningsBase);
+          if (!amount.greaterThan(ZERO)) continue;
+          allowancesTotal = allowancesTotal.plus(amount);
           allowanceLines.push({
             organizationId: orgId,
             name: c.name,
-            amount: dec(amount),
+            amount,
             isTaxable: c.isTaxable,
             createdBy: userId,
           });
@@ -528,47 +575,44 @@ export class HrPayrollService {
 
         // 3. Recurring deductions (pension/SSF/insurance are config components).
         const deductionLines: any[] = [];
-        const d = { tax: 0, pension: 0, ssf: 0, insurance: 0, other: 0 };
+        const d = { pension: ZERO, ssf: ZERO, insurance: ZERO, other: ZERO };
         for (const c of components) {
           if (c.componentType !== 'DEDUCTION' || !c.isRecurring) continue;
           if (c.appliesTo && !this.componentApplies(c.appliesTo, emp)) continue;
-          const amount =
-            c.calcMethod === 'PERCENTAGE'
-              ? (baseAmount + overtimePay) * (Number(c.rate) / 100)
-              : Number(c.amount ?? 0);
-          if (amount <= 0) continue;
+          const amount = this.componentAmount(c, earningsBase);
+          if (!amount.greaterThan(ZERO)) continue;
           const codeUp = (c.code ?? '').toUpperCase();
-          if (codeUp.includes('PENSION')) d.pension += amount;
-          else if (codeUp.includes('SSF') || codeUp.includes('SOCIAL')) d.ssf += amount;
-          else if (codeUp.includes('INSURANCE')) d.insurance += amount;
-          else d.other += amount;
+          if (codeUp.includes('PENSION')) d.pension = d.pension.plus(amount);
+          else if (codeUp.includes('SSF') || codeUp.includes('SOCIAL')) d.ssf = d.ssf.plus(amount);
+          else if (codeUp.includes('INSURANCE')) d.insurance = d.insurance.plus(amount);
+          else d.other = d.other.plus(amount);
           deductionLines.push({
             organizationId: orgId,
             name: c.name,
-            amount: dec(amount),
+            amount,
             isTaxable: c.isTaxable,
             createdBy: userId,
           });
         }
 
         // 4. Gross (before loan/advance installments are capped).
-        const gross = baseAmount + overtimePay + allowancesTotal;
+        const gross = earningsBase.plus(allowancesTotal);
 
         // 5. Tax (PAYE on taxable gross minus pension/SSF, progressive —
-        // brackets are annual, so annualize then divide back to monthly).
-        const taxableGross = Math.max(
-          0,
-          gross - d.pension - d.ssf,
-        );
+        // brackets are ANNUAL, so annualize then divide back to monthly).
+        const taxableRaw = gross.minus(d.pension).minus(d.ssf);
+        const taxableGross = taxableRaw.greaterThan(ZERO) ? taxableRaw : ZERO;
         const tax = payeTable
-          ? this.computeProgressive(taxableGross * MONTHS_PER_YEAR, payeTable.brackets) /
-            MONTHS_PER_YEAR
-          : 0;
-        if (tax > 0)
+          ? this.computeProgressive(
+              taxableGross.times(MONTHS_PER_YEAR),
+              payeTable.brackets,
+            ).dividedBy(MONTHS_PER_YEAR)
+          : ZERO;
+        if (tax.greaterThan(ZERO))
           deductionLines.push({
             organizationId: orgId,
             name: 'PAYE Tax',
-            amount: dec(tax),
+            amount: tax,
             isTaxable: false,
             createdBy: userId,
           });
@@ -576,69 +620,81 @@ export class HrPayrollService {
         // 6. Loan + advance installments — capped so net pay never goes
         //    negative (keeps the GL journal balanced). Statutory deductions
         //    get priority; the remainder is split loans → advances.
-        const statutoryDeductions =
-          tax + d.pension + d.ssf + d.insurance + d.other;
-        let availableForInstallments = Math.max(0, gross - statutoryDeductions);
-        let loanDeduction = 0;
-        let advanceDeduction = 0;
+        const statutoryDeductions = sum([tax, d.pension, d.ssf, d.insurance, d.other]);
+        const availableRaw = gross.minus(statutoryDeductions);
+        let availableForInstallments = availableRaw.greaterThan(ZERO) ? availableRaw : ZERO;
+        let loanDeduction = ZERO;
+        let advanceDeduction = ZERO;
         for (const loan of loans) {
-          if (loan.employeeId !== emp.id || Number(loan.balance) <= 0) continue;
-          if (availableForInstallments <= 0) break;
-          const planned = Math.min(Number(loan.installmentAmount), Number(loan.balance));
-          const installment = Math.min(planned, availableForInstallments);
-          loanDeduction += installment;
-          availableForInstallments -= installment;
+          if (loan.employeeId !== emp.id || !dec(loan.balance).greaterThan(ZERO)) continue;
+          if (!availableForInstallments.greaterThan(ZERO)) break;
+          const installment = this.cappedInstallment(
+            dec(loan.installmentAmount),
+            dec(loan.balance),
+            availableForInstallments,
+          );
+          loanDeduction = loanDeduction.plus(installment);
+          availableForInstallments = availableForInstallments.minus(installment);
           deductionLines.push({
             organizationId: orgId,
             name: `Loan ${loan.loanCode}`,
-            amount: dec(installment),
+            amount: installment,
             isTaxable: false,
             createdBy: userId,
           });
         }
         for (const adv of advances) {
-          if (adv.employeeId !== emp.id || Number(adv.balance) <= 0) continue;
-          if (availableForInstallments <= 0) break;
-          const planned = Math.min(Number(adv.monthlyDeduction), Number(adv.balance));
-          const installment = Math.min(planned, availableForInstallments);
-          advanceDeduction += installment;
-          availableForInstallments -= installment;
+          if (adv.employeeId !== emp.id || !dec(adv.balance).greaterThan(ZERO)) continue;
+          if (!availableForInstallments.greaterThan(ZERO)) break;
+          const installment = this.cappedInstallment(
+            dec(adv.monthlyDeduction),
+            dec(adv.balance),
+            availableForInstallments,
+          );
+          advanceDeduction = advanceDeduction.plus(installment);
+          availableForInstallments = availableForInstallments.minus(installment);
           deductionLines.push({
             organizationId: orgId,
             name: `Advance ${adv.advanceCode}`,
-            amount: dec(installment),
+            amount: installment,
             isTaxable: false,
             createdBy: userId,
           });
         }
 
-        const totalDeductions =
-          statutoryDeductions + loanDeduction + advanceDeduction;
-        const netPay = gross - totalDeductions;
+        const totalDeductions = statutoryDeductions
+          .plus(loanDeduction)
+          .plus(advanceDeduction);
+        const netPay = gross.minus(totalDeductions);
 
         const item = await tx.hrPayrollItem.create({
           data: {
             organizationId: orgId,
             runId: id,
             employeeId: emp.id,
-            baseSalary: dec(baseAmount),
-            hourlyRate: dec(hourlyRate),
+            baseSalary: baseAmount,
+            hourlyRate: derivedHourly,
             regularHours: Math.round(workedMin / 60),
-            overtimeHours: Math.round(overtimeHours * 100) / 100,
-            overtimePay: dec(overtimePay),
-            allowancesTotal: dec(allowancesTotal),
+            // `overtimeHours` is an Int column, so it is a rounded DISPLAY
+            // value. `overtimePay` above is computed from exact minutes and is
+            // unaffected. (The previous `Math.round(h * 100) / 100` produced a
+            // fractional value that Prisma rejects for an Int field — latent
+            // because attendance overtime is currently always zero.)
+            overtimeHours: overtimeHours.toDecimalPlaces(0).toNumber(),
+            overtimePay,
+            allowancesTotal,
             commissionAmount: ZERO,
             bonusAmount: ZERO,
-            grossPay: dec(gross),
-            taxAmount: dec(tax),
-            pensionAmount: dec(d.pension),
-            socialSecurityAmount: dec(d.ssf),
-            loanDeduction: dec(loanDeduction),
-            advanceDeduction: dec(advanceDeduction),
-            insuranceAmount: dec(d.insurance),
-            otherDeductions: dec(d.other),
-            totalDeductions: dec(totalDeductions),
-            netPay: dec(netPay),
+            grossPay: gross,
+            taxAmount: tax,
+            pensionAmount: d.pension,
+            socialSecurityAmount: d.ssf,
+            loanDeduction,
+            advanceDeduction,
+            insuranceAmount: d.insurance,
+            otherDeductions: d.other,
+            totalDeductions,
+            netPay,
             absenceDays: ZERO,
             createdBy: userId,
           },
@@ -653,16 +709,16 @@ export class HrPayrollService {
       }
 
       // Run totals.
-      const grossSum = items.reduce((s: number, i: any) => s + Number(i.grossPay), 0);
-      const dedSum = items.reduce((s: number, i: any) => s + Number(i.totalDeductions), 0);
-      const netSum = items.reduce((s: number, i: any) => s + Number(i.netPay), 0);
+      const grossSum = sum(items.map((i: any) => dec(i.grossPay)));
+      const dedSum = sum(items.map((i: any) => dec(i.totalDeductions)));
+      const netSum = sum(items.map((i: any) => dec(i.netPay)));
       const run2 = await tx.hrPayrollRun.update({
         where: { id },
         data: {
           status: 'CALCULATED',
-          totalGross: dec(grossSum),
-          totalDeductions: dec(dedSum),
-          totalNet: dec(netSum),
+          totalGross: grossSum,
+          totalDeductions: dedSum,
+          totalNet: netSum,
           processedById: userId,
           processedAt: new Date(),
           updatedBy: userId,
@@ -684,8 +740,23 @@ export class HrPayrollService {
       const periodFull = await tx.hrPayrollPeriod.findUnique({
         where: { id: run2.periodId },
       });
+
+      await this.audit.recordInTx(tx, {
+        entity: 'HrPayrollRun',
+        entityId: id,
+        action: 'update',
+        newValues: {
+          event: 'calculate',
+          status: 'CALCULATED',
+          employees: items.length,
+          totalGross: grossSum.toString(),
+          totalDeductions: dedSum.toString(),
+          totalNet: netSum.toString(),
+        },
+      });
+
       return { ...run2, period: periodFull, items: itemsFull, bankPayments: [] };
-    });
+    }, { timeout: APPROVE_TX_TIMEOUT_MS, maxWait: 10_000 });
   }
 
   private componentApplies(appliesTo: string, emp: any): boolean {
@@ -707,7 +778,7 @@ export class HrPayrollService {
         period: true,
         items: {
           include: {
-            employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, bankName: true, bankAccountName: true, bankAccountNumber: true, mobileMoneyProvider: true, mobileMoneyNumber: true } },
+            employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, partnerId: true, bankName: true, bankAccountName: true, bankAccountNumber: true, mobileMoneyProvider: true, mobileMoneyNumber: true } },
             allowances: true,
             deductions: true,
           },
@@ -720,20 +791,27 @@ export class HrPayrollService {
     if (run.items.length === 0) throw new BadRequestException('Run has no items — calculate first');
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      // 1. Payslips for every item.
-      for (const item of run.items) {
-        const payslipNumber = await this.seq.next('hr_payslip', { prefix: 'PS-', padding: 6 }, tx);
-        await tx.hrPayslip.create({
-          data: {
-            organizationId: orgId,
-            payslipNumber,
-            itemId: item.id,
-            status: 'ISSUED',
-            issuedAt: new Date(),
-            createdBy: userId,
-          },
-        });
-      }
+      // 1. Payslips for every item — numbers allocated in ONE round trip and
+      //    inserted in ONE statement. Per-item `seq.next()` + `create()` cost
+      //    2N round trips, which exceeds the transaction budget at real
+      //    headcount.
+      const issuedAt = new Date();
+      const payslipNumbers = await this.seq.nextBatch(
+        'hr_payslip',
+        run.items.length,
+        { prefix: 'PS-', padding: 6 },
+        tx,
+      );
+      await tx.hrPayslip.createMany({
+        data: run.items.map((item: any, idx: number) => ({
+          organizationId: orgId,
+          payslipNumber: payslipNumbers[idx],
+          itemId: item.id,
+          status: 'ISSUED',
+          issuedAt,
+          createdBy: userId,
+        })),
+      });
 
       // 2. GL posting — one journal per run.
       const [salaryExpense, netPayPayable, payePayable, pensionPayable, ssfPayable, insurancePayable, loanReceivable, advanceReceivable] =
@@ -748,41 +826,85 @@ export class HrPayrollService {
           this.accounts.mapped('employee_advance_receivable', tx),
         ]);
 
+      // Control totals are Decimal sums of the stored item amounts, so the
+      // journal ties to the payslips EXACTLY. A float here would leave a
+      // residual that `PostingService.applyRounding` silently books to a
+      // rounding account instead of failing.
+      const totalOf = (field: string) =>
+        sum(run.items.map((i: any) => dec((i as any)[field])));
       const totals = {
-        gross: run.items.reduce((s: number, i: any) => s + Number(i.grossPay), 0),
-        net: run.items.reduce((s: number, i: any) => s + Number(i.netPay), 0),
-        tax: run.items.reduce((s: number, i: any) => s + Number(i.taxAmount), 0),
-        pension: run.items.reduce((s: number, i: any) => s + Number(i.pensionAmount), 0),
-        ssf: run.items.reduce((s: number, i: any) => s + Number(i.socialSecurityAmount), 0),
-        insurance: run.items.reduce((s: number, i: any) => s + Number(i.insuranceAmount), 0),
-        loans: run.items.reduce((s: number, i: any) => s + Number(i.loanDeduction), 0),
-        advances: run.items.reduce((s: number, i: any) => s + Number(i.advanceDeduction), 0),
-        other: run.items.reduce((s: number, i: any) => s + Number(i.otherDeductions), 0),
+        gross: totalOf('grossPay'),
+        net: totalOf('netPay'),
+        tax: totalOf('taxAmount'),
+        pension: totalOf('pensionAmount'),
+        ssf: totalOf('socialSecurityAmount'),
+        insurance: totalOf('insuranceAmount'),
+        loans: totalOf('loanDeduction'),
+        advances: totalOf('advanceDeduction'),
+        other: totalOf('otherDeductions'),
       };
       const lines: any[] = [
-        { accountId: salaryExpense, debit: dec(totals.gross), description: 'Salaries & wages' },
+        { accountId: salaryExpense, debit: totals.gross, description: 'Salaries & wages' },
       ];
-      if (totals.net > 0)
-        lines.push({ accountId: netPayPayable, credit: dec(totals.net), description: 'Net pay payable' });
-      if (totals.tax > 0)
-        lines.push({ accountId: payePayable, credit: dec(totals.tax), description: 'PAYE tax payable' });
-      if (totals.pension > 0)
-        lines.push({ accountId: pensionPayable, credit: dec(totals.pension), description: 'Pension payable' });
-      if (totals.ssf > 0)
-        lines.push({ accountId: ssfPayable, credit: dec(totals.ssf), description: 'Social security payable' });
-      if (totals.insurance > 0)
-        lines.push({ accountId: insurancePayable, credit: dec(totals.insurance), description: 'Insurance payable' });
-      if (totals.loans > 0)
-        lines.push({ accountId: loanReceivable, credit: dec(totals.loans), description: 'Employee loan installments' });
-      if (totals.advances > 0)
-        lines.push({ accountId: advanceReceivable, credit: dec(totals.advances), description: 'Employee advance installments' });
-      if (totals.other > 0)
-        lines.push({ accountId: salaryExpense, credit: dec(totals.other), description: 'Other deductions contra' });
+      const credit = (amount: Money, accountId: string, description: string) => {
+        if (amount.greaterThan(ZERO)) lines.push({ accountId, credit: amount, description });
+      };
+      // Per-employee GL subledger (Phase 5).
+      //
+      // Amounts owed to (or recoverable from) a PERSON get one line each,
+      // carrying that person's `partnerId` — the same dimension school fees use
+      // (FINANCIAL_INVARIANTS.md §"per-partner subledger"). Without it the
+      // ledger could only say "we owe payroll 40m", never "we owe Sara 1.2m",
+      // so net pay could not be reconciled or aged per employee.
+      //
+      // Amounts owed to an INSTITUTION (PAYE, pension, SSF, insurer) stay
+      // aggregated — those creditors are not the employees.
+      //
+      // `partnerId` is undefined for an employee not yet bridged to a Partner;
+      // the line still posts, it just carries no subledger dimension. A payroll
+      // run must never fail because reconciliation is incomplete.
+      const perEmployee = (
+        field: string,
+        accountId: string,
+        kind: 'credit' | 'debit',
+        label: string,
+      ) => {
+        for (const item of run.items as any[]) {
+          const amount = dec(item[field]);
+          if (!amount.greaterThan(ZERO)) continue;
+          const who = `${item.employee?.firstName ?? ''} ${item.employee?.lastName ?? ''}`.trim()
+            || item.employee?.employeeCode
+            || 'employee';
+          lines.push({
+            accountId,
+            [kind]: amount,
+            partnerId: item.employee?.partnerId ?? undefined,
+            description: `${label} — ${who}`,
+          });
+        }
+      };
+
+      perEmployee('netPay', netPayPayable, 'credit', 'Net pay payable');
+      credit(totals.tax, payePayable, 'PAYE tax payable');
+      credit(totals.pension, pensionPayable, 'Pension payable');
+      credit(totals.ssf, ssfPayable, 'Social security payable');
+      credit(totals.insurance, insurancePayable, 'Insurance payable');
+      perEmployee('loanDeduction', loanReceivable, 'credit', 'Loan installment');
+      perEmployee('advanceDeduction', advanceReceivable, 'credit', 'Advance installment');
+      // NOTE: "other" deductions have no mapped payable account, so they are
+      // credited back against salary expense. That balances the entry but
+      // understates the expense and creates no liability — correct for a
+      // reimbursement, wrong for something owed onward (e.g. union dues).
+      // Needs an `other_deductions_payable` mapping to model properly.
+      credit(totals.other, salaryExpense, 'Other deductions contra');
 
       const journal = await this.posting.post(
         {
           journalCode: 'GEN',
-          date: new Date(),
+          // The expense belongs to the PERIOD, not to the day someone clicked
+          // approve. Using `new Date()` books a June run into July and fails
+          // outright when the current period is closed.
+          date: run.period.endDate,
           description: `Payroll ${run.runNumber} — ${run.period.periodCode}`,
           sourceType: 'payroll_run',
           sourceId: run.id,
@@ -799,15 +921,16 @@ export class HrPayrollService {
       });
       for (const loan of loans) {
         const item = run.items.find((i: any) => i.employeeId === loan.employeeId);
-        const installment = item ? Number(item.loanDeduction) : 0;
-        if (installment > 0) {
-          const newBalance = Math.max(0, Number(loan.balance) - installment);
+        const installment = item ? dec(item.loanDeduction) : ZERO;
+        if (installment.greaterThan(ZERO)) {
+          const raw = dec(loan.balance).minus(installment);
+          const newBalance = raw.greaterThan(ZERO) ? raw : ZERO;
           await tx.hrEmployeeLoan.update({
             where: { id: loan.id },
             data: {
-              balance: dec(newBalance),
+              balance: newBalance,
               installmentsPaid: loan.installmentsPaid + 1,
-              status: newBalance <= 0 ? 'PAID' : loan.status,
+              status: newBalance.isZero() ? 'PAID' : loan.status,
               updatedBy: userId,
             },
           });
@@ -822,14 +945,15 @@ export class HrPayrollService {
       });
       for (const adv of advances) {
         const item = run.items.find((i: any) => i.employeeId === adv.employeeId);
-        const installment = item ? Number(item.advanceDeduction) : 0;
-        if (installment > 0) {
-          const newBalance = Math.max(0, Number(adv.balance) - installment);
+        const installment = item ? dec(item.advanceDeduction) : ZERO;
+        if (installment.greaterThan(ZERO)) {
+          const raw = dec(adv.balance).minus(installment);
+          const newBalance = raw.greaterThan(ZERO) ? raw : ZERO;
           await tx.hrSalaryAdvance.update({
             where: { id: adv.id },
             data: {
-              balance: dec(newBalance),
-              status: newBalance <= 0 ? 'SETTLED' : adv.status,
+              balance: newBalance,
+              status: newBalance.isZero() ? 'SETTLED' : adv.status,
               updatedBy: userId,
             },
           });
@@ -845,6 +969,24 @@ export class HrPayrollService {
           updatedBy: userId,
         },
       });
+
+      // ADR-006: `recordInTx` THROWS on failure so the whole approval rolls
+      // back. Approving payroll moves money — it must never post unaudited.
+      await this.audit.recordInTx(tx, {
+        entity: 'HrPayrollRun',
+        entityId: id,
+        action: 'approve',
+        oldValues: { status: run.status },
+        newValues: {
+          status: 'APPROVED',
+          journalEntryId: journal.id,
+          journalDate: run.period.endDate,
+          employees: run.items.length,
+          totalGross: totals.gross.toString(),
+          totalNet: totals.net.toString(),
+        },
+      });
+
       // Re-read through the SAME transaction so the response carries the new
       // status, journal id and generated payslips.
       const itemsFull = await tx.hrPayrollItem.findMany({
@@ -865,7 +1007,7 @@ export class HrPayrollService {
         include: { lines: true },
       });
       return { ...run2, period: periodFull, items: itemsFull, bankPayments };
-    });
+    }, { timeout: APPROVE_TX_TIMEOUT_MS, maxWait: 10_000 });
   }
 
   /** Reverse an approved run (posting reversal + status). */
@@ -897,7 +1039,7 @@ export class HrPayrollService {
           tx,
         );
       }
-      return tx.hrPayrollRun.update({
+      const reversed = await tx.hrPayrollRun.update({
         where: { id },
         data: {
           status: 'REVERSED',
@@ -906,6 +1048,14 @@ export class HrPayrollService {
           updatedBy: userId,
         },
       });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrPayrollRun',
+        entityId: id,
+        action: 'reverse',
+        oldValues: { status: run.status, journalEntryId: run.journalEntryId, glPosted: true },
+        newValues: { status: 'REVERSED', glPosted: false, reason: dto.reason ?? null },
+      });
+      return reversed;
     });
   }
 

@@ -3,6 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { LessonPlanningService } from './lesson-planning.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import {
   AddCourseOfferingTeacherDto,
   CreateCourseOfferingDto,
@@ -17,7 +18,10 @@ import {
 
 @Controller('school/lp')
 export class LessonPlanningController {
-  constructor(private readonly svc: LessonPlanningService) {}
+  constructor(
+    private readonly svc: LessonPlanningService,
+    private readonly identity: EmployeeIdentityService,
+  ) {}
 
   // ── CourseOffering ──
   @Post('course-offerings')
@@ -131,7 +135,8 @@ export class LessonPlanningController {
   // ── Dashboards / coverage ──
   @Get('teacher-dashboard')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
-  dashboard(@Query('teacherPartnerId') teacherPartnerId: string) {
+  async dashboard(@Query('teacherPartnerId') teacherPartnerId: string) {
+    await this.identity.assertIsTeacherOrAdmin(teacherPartnerId, PERMISSIONS.school.manageLessonPlans);
     return this.svc.teacherDashboard(teacherPartnerId);
   }
 

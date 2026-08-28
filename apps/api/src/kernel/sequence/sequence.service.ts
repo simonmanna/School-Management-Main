@@ -142,6 +142,32 @@ export class SequenceService implements OnApplicationBootstrap {
     return `${options.prefix ?? ''}${String(reserved).padStart(padding, '0')}`;
   }
 
+  /**
+   * Allocate `count` consecutive numbers for `key` in ONE round trip.
+   *
+   * `next()` costs a query per number, which is fine for a single document but
+   * not for a bulk write — a 300-payslip payroll run would spend 300 serial
+   * round trips inside an interactive transaction and blow its time budget.
+   * Postgres sequences are non-transactional, so a rollback leaves a gap and
+   * never a duplicate — the same guarantee `next()` documents.
+   */
+  async nextBatch(key: string, count: number, options: SequenceOptions = {}, tx?: any): Promise<string[]> {
+    if (count <= 0) return [];
+    const organizationId = this.tenant.organizationId;
+    const client = tx ?? this.prisma.client;
+
+    await this.ensure(organizationId, key);
+
+    const seqName = this.seqName(organizationId, key);
+    const rows = (await client.$queryRawUnsafe(
+      `SELECT nextval('"${seqName}"') AS nextval FROM generate_series(1, ${Math.floor(count)})`,
+    )) as Array<{ nextval: string | number }>;
+    const padding = options.padding ?? DEFAULT_PADDING;
+    return rows.map(
+      (r) => `${options.prefix ?? ''}${String(Number(r.nextval)).padStart(padding, '0')}`,
+    );
+  }
+
   /** Idempotent per (org, key). Safe under concurrent calls. */
   private async ensure(organizationId: string, key: string): Promise<void> {
     const seqName = this.seqName(organizationId, key);

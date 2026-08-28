@@ -654,6 +654,8 @@ model Partner {
   // scalar; these formalize it so `include: { partner: true }` works.
   schoolStudent    StudentProfile?       @relation("StudentPartner")
   schoolStaff      StaffProfile?         @relation("StaffPartner")
+  /// Phase 2: the HR employment record for this person, when HR is enabled.
+  hrEmployee       HrEmployee?           @relation("HrEmployeePartner")
   sponsorships     Sponsorship[]
   frontDeskLogs    FrontDeskLog[]
 
@@ -4201,6 +4203,16 @@ model File {
   applicationDocuments ApplicationDocument[] @relation("applicationDocuments")
   schoolDocs           SchoolDoc[]           @relation("schoolDocFile")
   schoolDocSignatures  SchoolDoc[]           @relation("schoolDocSignature")
+
+  // HR (Phase 1): personnel documents + typed-credential scans route through
+  // the same File vault. Bare `documentId String?` columns became real FKs.
+  hrEmployeeDocuments  HrEmployeeDocument[]  @relation("HrEmployeeDocumentFile")
+  hrExperienceDocs     HrExperience[]        @relation("HrExperienceDoc")
+  hrQualificationDocs  HrQualification[]     @relation("HrQualificationDoc")
+  hrCertificationDocs  HrCertification[]     @relation("HrCertificationDoc")
+  hrContractDocs       HrContract[]          @relation("HrContractDoc")
+  hrSalaryChangeDocs   HrSalaryChange[]      @relation("HrSalaryChangeDoc")
+  hrApplicantDocs      HrApplicant[]         @relation("HrApplicantDoc")
 
   @@index([organizationId, ownerType, ownerId])
   @@index([organizationId, createdAt])
@@ -8730,6 +8742,13 @@ model HrEmployee {
   organizationId       String
   employeeCode         String
   userId               String?          @unique
+  /// Phase 2 bridge: the master-data Partner this employee IS (ADR-008).
+  /// `StaffProfile.partnerId` already points at the same Partner, so the
+  /// school-side profile and the HR employment record are joined through it
+  /// without a second FK. Nullable: an org may run HR without the school
+  /// vertical, and reconciliation is a human-in-the-loop screen, never a
+  /// fuzzy match in a migration.
+  partnerId            String?          @unique
   firstName            String
   lastName             String?
   email                String?
@@ -8764,6 +8783,7 @@ model HrEmployee {
   updatedBy            String?
   deletedAt            DateTime?
 
+  partner            Partner?              @relation("HrEmployeePartner", fields: [partnerId], references: [id])
   department         HrDepartment?         @relation(fields: [departmentId], references: [id])
   position           HrPosition?           @relation(fields: [positionId], references: [id])
   supervisor         HrEmployee?           @relation("HrSupervisor", fields: [supervisorId], references: [id])
@@ -8790,6 +8810,9 @@ model HrEmployee {
   certifications     HrCertification[]
   trainingEnrollments HrTrainingEnrollment[]
   auditTrail         HrEmployeeAuditTrail[]
+  skills             HrEmployeeSkill[]
+  experiences        HrExperience[]
+  documents          HrEmployeeDocument[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, deletedAt])
@@ -9437,6 +9460,7 @@ model HrSalaryChange {
   createdBy     String?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
+  document File?      @relation("HrSalaryChangeDoc", fields: [documentId], references: [id])
 
   @@index([organizationId, employeeId])
 }
@@ -9479,6 +9503,7 @@ model HrContract {
   deletedAt     DateTime?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
+  document File?      @relation("HrContractDoc", fields: [documentId], references: [id])
 
   @@unique([organizationId, contractNumber])
   @@index([organizationId, employeeId, deletedAt])
@@ -9578,6 +9603,7 @@ model HrApplicant {
   vacancy   HrVacancy    @relation(fields: [vacancyId], references: [id])
   interviews HrInterview[]
   employee  HrEmployee?  @relation("HiredApplicant", fields: [hiredEmployeeId], references: [id])
+  document  File?        @relation("HrApplicantDoc", fields: [documentId], references: [id])
 
   @@index([organizationId, vacancyId, deletedAt])
 }
@@ -9610,10 +9636,13 @@ model HrQualification {
   certificateNumber String?
   documentId     String?
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   createdBy      String?
+  updatedBy      String?
   deletedAt      DateTime?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
+  document File?      @relation("HrQualificationDoc", fields: [documentId], references: [id])
 
   @@index([organizationId, employeeId, deletedAt])
 }
@@ -9629,10 +9658,13 @@ model HrCertification {
   documentId     String?
   status         String   @default("active") // active|expired
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   createdBy      String?
+  updatedBy      String?
   deletedAt      DateTime?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
+  document File?      @relation("HrCertificationDoc", fields: [documentId], references: [id])
 
   @@index([organizationId, employeeId, deletedAt])
 }
@@ -9714,6 +9746,108 @@ model HrEmployeeAuditTrail {
   employee HrEmployee @relation(fields: [employeeId], references: [id])
 
   @@index([organizationId, employeeId])
+}
+
+// ── HR skills, experience & personnel documents (Phase 1) ────────────────────
+
+/// Org-level skill catalogue. `HrEmployeeSkill` links employees to these, so a
+/// cover-finder can ask "who can teach Physics" without free-text matching.
+model HrSkill {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  category       String? // subject|language|technical|soft|other
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  employeeSkills HrEmployeeSkill[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, deletedAt])
+}
+
+/// A skill held by an employee, with self-rated proficiency and optional
+/// admin verification.
+model HrEmployeeSkill {
+  id              String    @id @default(uuid())
+  organizationId  String
+  employeeId      String
+  skillId         String
+  proficiency     String    @default("intermediate") // beginner|intermediate|advanced|expert
+  yearsExperience Decimal?  @db.Decimal(5, 2)
+  verified        Boolean   @default(false)
+  verifiedById    String?
+  verifiedAt      DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  createdBy       String?
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+  skill    HrSkill    @relation(fields: [skillId], references: [id])
+
+  @@unique([organizationId, employeeId, skillId])
+  @@index([organizationId, employeeId, deletedAt])
+  @@index([organizationId, skillId])
+}
+
+/// Prior employment history for an employee.
+model HrExperience {
+  id               String    @id @default(uuid())
+  organizationId   String
+  employeeId       String
+  employer         String
+  title            String?
+  startDate        DateTime?
+  endDate          DateTime?
+  description      String?
+  referenceName    String?
+  referenceContact String?
+  documentId       String?
+  createdAt        DateTime  @default(now())
+  createdBy        String?
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+  document File?      @relation("HrExperienceDoc", fields: [documentId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+}
+
+/// Free-standing personnel documents (CV, ID scan, contract copy, ...). Bytes
+/// live in the platform File vault via `fileId` — no second store (G3). Typed
+/// credentials keep their own row (HrQualification/HrCertification); this holds
+/// everything else.
+model HrEmployeeDocument {
+  id             String    @id @default(uuid())
+  organizationId String
+  employeeId     String
+  category       String    @default("other") // cv|id|contract|certificate|reference|medical|other
+  type           String?
+  title          String
+  fileId         String
+  expiresAt      DateTime?
+  verified       Boolean   @default(false)
+  verifiedById   String?
+  verifiedAt     DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  createdBy      String?
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  employee HrEmployee @relation(fields: [employeeId], references: [id])
+  file     File       @relation("HrEmployeeDocumentFile", fields: [fileId], references: [id])
+
+  @@index([organizationId, employeeId, deletedAt])
+  @@index([organizationId, expiresAt])
 }
 
 // =============================================================================
@@ -10113,6 +10247,8 @@ model CommunicationDispatch {
   @@unique([organizationId, dedupeKey])
   @@index([organizationId, ruleId, createdAt])
 }
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHOOL VERTICAL (ported from school-management-feature, P0.2/3)
@@ -10782,6 +10918,7 @@ model StaffProfile {
   lessonPlans        LessonPlan[]
   homeworks          HomeworkAssignment[]
   timetableSlots     TimetableSlot[]
+  substituteSlots    TimetableSlot[]      @relation("TimetableSlotSubstitute")
 
   @@unique([organizationId, employeeNo])
   @@index([organizationId])
@@ -12183,6 +12320,9 @@ model TimetableSlot {
   subject     Subject       @relation(fields: [subjectId], references: [id])
   campus      Campus?       @relation(fields: [campusId], references: [id])
   teacher     StaffProfile? @relation(fields: [teacherPartnerId], references: [id])
+  /// Phase 7: cover teacher. Was a bare String with no FK, no index and no
+  /// clash checking, so it could name a deleted or nonexistent teacher.
+  substitute  StaffProfile? @relation("TimetableSlotSubstitute", fields: [substituteTeacherId], references: [id])
   campusId    String?
 
   @@index([organizationId])

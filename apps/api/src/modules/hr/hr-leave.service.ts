@@ -8,10 +8,22 @@ import { TenantContextService } from '../../kernel/tenancy/tenant-context.servic
 import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
 import { HrAttendanceService } from './hr-attendance.service';
+import { dec, ZERO, type Money } from '../../kernel/common/money';
+import { EventOutboxService } from '../../kernel/events/event-outbox.service';
+import { EVENTS } from '@erp/shared';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const LEAVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
+
+/**
+ * Leave days are Decimal(10,2) (half-days are real). Decimal arithmetic only:
+ * `decimalBalance + jsNumber` STRING-CONCATENATES in JS — adjusting a balance
+ * of 5 by 2 produced "52", which Prisma then wrote as 52 days.
+ */
+function availableDays(b: { accruedDays: any; adjustedDays: any; usedDays: any }): Money {
+  return dec(b.accruedDays).plus(dec(b.adjustedDays)).minus(dec(b.usedDays));
+}
 
 function dayStart(d: Date | string): Date {
   const dt = typeof d === 'string' ? new Date(d) : d;
@@ -31,6 +43,7 @@ export class HrLeaveService {
     private readonly seq: SequenceService,
     private readonly audit: AuditService,
     private readonly attendance: HrAttendanceService,
+    private readonly outbox: EventOutboxService,
   ) {}
 
   // ── Leave types ──────────────────────────────────────────────────────────
@@ -160,14 +173,29 @@ export class HrLeaveService {
     const year = dto.year ?? new Date().getFullYear();
     return this.prisma.client.$transaction(async (tx: any) => {
       const balance = await this.ensureBalance(tx, dto.employeeId, dto.leaveTypeId, year);
-      const adjustedDays = dto.adjustedDays ?? 0;
-      return tx.hrLeaveBalance.update({
+      const delta = dec(dto.adjustedDays ?? 0);
+      const updated = await tx.hrLeaveBalance.update({
         where: { id: balance.id },
         data: {
-          adjustedDays: balance.adjustedDays + adjustedDays,
+          adjustedDays: dec(balance.adjustedDays).plus(delta),
           createdBy: userId,
         },
       });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrLeaveBalance',
+        entityId: balance.id,
+        action: 'adjust',
+        oldValues: { adjustedDays: String(balance.adjustedDays) },
+        newValues: {
+          adjustedDays: String(updated.adjustedDays),
+          delta: delta.toString(),
+          employeeId: dto.employeeId,
+          leaveTypeId: dto.leaveTypeId,
+          year,
+          notes: dto.notes ?? null,
+        },
+      });
+      return updated;
     });
   }
 
@@ -208,8 +236,8 @@ export class HrLeaveService {
     const requestCode = await this.seq.next('hr_leave_request', { prefix: 'LV-', padding: 6 });
     return this.prisma.client.$transaction(async (tx: any) => {
       const balance = await this.ensureBalance(tx, dto.employeeId, dto.leaveTypeId, startDate.getFullYear());
-      const available = Number(balance.accruedDays) + Number(balance.adjustedDays) - Number(balance.usedDays);
-      if (dto.checkBalance !== false && available < days) {
+      const available = availableDays(balance);
+      if (dto.checkBalance !== false && available.lessThan(days)) {
         throw new BadRequestException(
           `Insufficient leave balance: ${available} day(s) available, ${days} requested`,
         );
@@ -242,8 +270,8 @@ export class HrLeaveService {
       throw new BadRequestException('Only PENDING requests can be approved');
     return this.prisma.client.$transaction(async (tx: any) => {
       const balance = await this.ensureBalance(tx, row.employeeId, row.leaveTypeId, row.startDate.getFullYear());
-      const available = Number(balance.accruedDays) + Number(balance.adjustedDays) - Number(balance.usedDays);
-      if (available < Number(row.days)) {
+      const available = availableDays(balance);
+      if (available.lessThan(dec(row.days))) {
         throw new BadRequestException(
           `Insufficient balance: ${available} day(s) available, ${row.days} on request`,
         );
@@ -260,7 +288,7 @@ export class HrLeaveService {
       });
       await tx.hrLeaveBalance.update({
         where: { id: balance.id },
-        data: { usedDays: Number(balance.usedDays) + Number(row.days) },
+        data: { usedDays: dec(balance.usedDays).plus(dec(row.days)) },
       });
       // Stamp each covered day as ON_LEAVE in attendance.
       const cursor = new Date(row.startDate);
@@ -269,6 +297,33 @@ export class HrLeaveService {
         await this.attendance.markLeaveDay(tx, row.employeeId, cursor, row.requestCode);
         cursor.setDate(cursor.getDate() + 1);
       }
+      // Published INSIDE the transaction (EventOutboxService, not EventBus):
+      // approved leave is a recorded fact the timetable acts on, so it must not
+      // survive a rollback. The school vertical subscribes to project it into
+      // TeacherAvailability — HR must not import school code (ADR-011).
+      await this.outbox.publish(tx, EVENTS.HrLeaveApproved, {
+        organizationId: orgId,
+        leaveRequestId: id,
+        employeeId: row.employeeId,
+        staffProfileId: await this.staffProfileIdFor(tx, row.employeeId),
+        startDate: new Date(row.startDate).toISOString(),
+        endDate: new Date(row.endDate).toISOString(),
+      });
+
+      await this.audit.recordInTx(tx, {
+        entity: 'HrLeaveRequest',
+        entityId: id,
+        action: 'approve',
+        oldValues: { status: row.status },
+        newValues: {
+          status: 'APPROVED',
+          employeeId: row.employeeId,
+          leaveTypeId: row.leaveTypeId,
+          days: String(row.days),
+          startDate: row.startDate,
+          endDate: row.endDate,
+        },
+      });
       return updated;
     });
   }
@@ -282,13 +337,23 @@ export class HrLeaveService {
     if (!row) throw new NotFoundException('Leave request not found');
     if (row.status !== 'PENDING')
       throw new BadRequestException('Only PENDING requests can be rejected');
-    return this.prisma.client.hrLeaveRequest.update({
-      where: { id },
-      data: {
-        status: 'REJECTED',
-        notes: dto.reason ? `${row.notes ?? ''}\nRejected: ${dto.reason}`.trim() : row.notes,
-        updatedBy: userId,
-      },
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const updated = await tx.hrLeaveRequest.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          notes: dto.reason ? `${row.notes ?? ''}\nRejected: ${dto.reason}`.trim() : row.notes,
+          updatedBy: userId,
+        },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrLeaveRequest',
+        entityId: id,
+        action: 'reject',
+        oldValues: { status: row.status },
+        newValues: { status: 'REJECTED', reason: dto.reason ?? null },
+      });
+      return updated;
     });
   }
 
@@ -310,11 +375,51 @@ export class HrLeaveService {
         const balance = await this.ensureBalance(tx, row.employeeId, row.leaveTypeId, row.startDate.getFullYear());
         await tx.hrLeaveBalance.update({
           where: { id: balance.id },
-          data: { usedDays: Math.max(0, Number(balance.usedDays) - Number(row.days)) },
+          data: { usedDays: (() => {
+            const back = dec(balance.usedDays).minus(dec(row.days));
+            return back.greaterThan(ZERO) ? back : ZERO;
+          })() },
         });
       }
+      if (row.status === 'APPROVED') {
+        // Only a previously-approved request had a timetable effect to undo.
+        await this.outbox.publish(tx, EVENTS.HrLeaveCancelled, {
+          organizationId: orgId,
+          leaveRequestId: id,
+          employeeId: row.employeeId,
+          staffProfileId: await this.staffProfileIdFor(tx, row.employeeId),
+          startDate: new Date(row.startDate).toISOString(),
+          endDate: new Date(row.endDate).toISOString(),
+        });
+      }
+
+      await this.audit.recordInTx(tx, {
+        entity: 'HrLeaveRequest',
+        entityId: id,
+        action: 'cancel',
+        oldValues: { status: row.status, days: String(row.days) },
+        newValues: { status: 'CANCELLED', balanceRestored: row.status === 'APPROVED' },
+      });
       return updated;
     });
+  }
+
+  /**
+   * The school-side staff profile for an HR employee, via the Partner bridge.
+   * Null when the employee is not bridged — the subscriber then has nothing to
+   * project, which is correct rather than an error.
+   */
+  private async staffProfileIdFor(tx: any, employeeId: string): Promise<string | null> {
+    const employee = await tx.hrEmployee.findFirst({
+      where: { id: employeeId },
+      select: { partnerId: true },
+    });
+    if (!employee?.partnerId) return null;
+    const profile = await tx.staffProfile.findFirst({
+      where: { partnerId: employee.partnerId, deletedAt: null },
+      select: { id: true },
+    });
+    return profile?.id ?? null;
   }
 
   // ── Holidays ─────────────────────────────────────────────────────────────

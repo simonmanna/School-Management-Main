@@ -61,6 +61,20 @@ export class HrTrainingService {
     });
   }
 
+  async updateQualification(id: string, dto: any) {
+    const orgId = await this.orgId();
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrQualification.findFirst({ where: { id, organizationId: orgId } });
+    if (!row) throw new NotFoundException('Qualification not found');
+    if (dto.type && !QUAL_TYPES.includes(dto.type)) throw new BadRequestException(`Invalid qualification type: ${dto.type}`);
+    const data: any = { updatedBy: userId };
+    for (const f of ['type', 'title', 'institution', 'certificateNumber', 'documentId'] as const) {
+      if (dto[f] !== undefined) data[f] = dto[f];
+    }
+    if (dto.graduatedAt !== undefined) data.graduatedAt = dto.graduatedAt ? new Date(dto.graduatedAt) : null;
+    return this.prisma.client.hrQualification.update({ where: { id }, data });
+  }
+
   async deleteQualification(id: string) {
     const orgId = await this.orgId();
     const userId = this.tenant.userId;
@@ -125,6 +139,26 @@ export class HrTrainingService {
     if (!row) throw new NotFoundException('Certification not found');
     const status = row.expiryDate && new Date(row.expiryDate) < new Date() ? 'expired' : 'active';
     return this.prisma.client.hrCertification.update({ where: { id }, data: { status } });
+  }
+
+  async updateCertification(id: string, dto: any) {
+    const orgId = await this.orgId();
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrCertification.findFirst({ where: { id, organizationId: orgId } });
+    if (!row) throw new NotFoundException('Certification not found');
+    const data: any = { updatedBy: userId };
+    for (const f of ['name', 'issuer', 'documentId'] as const) {
+      if (dto[f] !== undefined) data[f] = dto[f];
+    }
+    if (dto.issuedAt !== undefined) data.issuedAt = dto.issuedAt ? new Date(dto.issuedAt) : null;
+    if (dto.expiryDate !== undefined) {
+      const expiry = dto.expiryDate ? new Date(dto.expiryDate) : null;
+      data.expiryDate = expiry;
+      // Keep the derived status honest whenever the expiry moves.
+      if (dto.status === undefined) data.status = expiry && expiry < new Date() ? 'expired' : 'active';
+    }
+    if (dto.status !== undefined) data.status = dto.status;
+    return this.prisma.client.hrCertification.update({ where: { id }, data });
   }
 
   async deleteCertification(id: string) {
