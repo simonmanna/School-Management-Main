@@ -186,7 +186,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Front Desk & CRM',
     icon: Users,
     items: [
-      { to: '/school/front-desk', label: 'Front Desk', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/front-desk', label: 'Visitors', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/applications', label: 'Applications', icon: ClipboardList, permission: PERMISSIONS.school.manageFoundation },
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
     ],

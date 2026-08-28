@@ -6,6 +6,7 @@ import {
   useStudentDocuments, useStudentMedical, useUpsertStudentMedical,
   useStudentLibrary, useStudentMeals, useStudentTransport, useStudentActivities,
   useCreateGuardian, useUpdateGuardian, useDeleteGuardian, useUpdateStudent,
+  useAcademicYears, useClasses, useAdmissionCycles, useNationalities,
   type FeeStatement, type Guardian,
 } from '@/features/school/api';
 import { useUpdatePartner } from '@/features/partners/api';
@@ -17,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Archive, Users, CalendarCheck } from 'lucide-react';
+import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Users, CalendarCheck, Save } from 'lucide-react';
 import { notify } from '@/lib/notify';
 
 const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
@@ -31,6 +32,9 @@ const STATUS_META: Record<string, string> = {
   withdrawn: 'bg-rose-100 text-rose-700',
   alumni: 'bg-slate-100 text-slate-700',
 };
+
+const RELIGIONS = ['Christian', 'Muslim', 'Hindu', 'Traditional', 'Other'];
+const ENTRY_STATUSES = ['New entrant', 'Transfer', 'Re-admission', 'Returning'];
 
 export function SchoolStudent360Page() {
   const { id } = useParams<{ id: string }>();
@@ -53,17 +57,28 @@ export function SchoolStudent360Page() {
   const [photoOpen, setPhotoOpen] = useState(false);
   const [photoPreview, setPhotoPreview] = useState('');
   const [photoBusy, setPhotoBusy] = useState(false);
-  const [bioOpen, setBioOpen] = useState(false);
-  const [archiving, setArchiving] = useState(false);
 
-  // Bio-edit local state
-  const [name, setName] = useState('');
+  // Editable "Student Information" form — mirrors the application form.
+  const { data: years } = useAcademicYears();
+  const { data: cycles } = useAdmissionCycles();
+  const { data: nationalities } = useNationalities();
+  const { data: classes } = useClasses();
+
+  const [fName, setFName] = useState('');
+  const [lName, setLName] = useState('');
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [admissionCycleId, setAdmissionCycleId] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
   const [nationality, setNationality] = useState('');
-  const [religion, setReligion] = useState('');
-  const [house, setHouse] = useState('');
+  const [entryStatus, setEntryStatus] = useState('');
   const [residenceType, setResidenceType] = useState('');
+  const [address, setAddress] = useState('');
+  const [currentClassId, setCurrentClassId] = useState('');
+  const [religion, setReligion] = useState('');
+  const [nin, setNin] = useState('');
+  const [learnerId, setLearnerId] = useState('');
+  const [schoolPayCode, setSchoolPayCode] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bioBusy, setBioBusy] = useState(false);
@@ -71,18 +86,32 @@ export function SchoolStudent360Page() {
   const cf = ((student as any)?.customFields ?? {}) as any;
   const photo = (student?.partner as any)?.customFields?.photoUrl as string | undefined;
 
-  const openBio = () => {
-    setName(student?.partner?.name ?? '');
-    setDateOfBirth((cf.dateOfBirth ?? student?.dateOfBirth ?? '').toString().slice(0, 10));
-    setGender(student?.gender ?? '');
-    setNationality((student as any)?.nationality ?? '');
-    setReligion((student as any)?.religion ?? '');
-    setHouse(cf.house ?? '');
-    setResidenceType(student?.residenceType ?? '');
-    setEmail(student?.partner?.email ?? '');
-    setPhone(student?.partner?.phone ?? '');
-    setBioOpen(true);
-  };
+  // Populate the form from the loaded student record.
+  useEffect(() => {
+    if (!student) return;
+    const s = student as any;
+    const p = student.partner ?? ({} as any);
+    const fullName = p.name ?? '';
+    const idx = fullName.lastIndexOf(' ');
+    setFName(idx >= 0 ? fullName.slice(0, idx) : fullName);
+    setLName(idx >= 0 ? fullName.slice(idx + 1) : '');
+    setAcademicYearId(cf.academicYearId ?? '');
+    setAdmissionCycleId(cf.admissionCycleId ?? '');
+    setDateOfBirth((student.dateOfBirth ?? '').toString().slice(0, 10));
+    setGender(student.gender ?? '');
+    setNationality(s.nationality ?? '');
+    setEntryStatus(cf.entryStatus ?? '');
+    setResidenceType(student.residenceType ?? '');
+    setAddress(cf.address ?? '');
+    setCurrentClassId(student.currentClassId ?? '');
+    setReligion(s.religion ?? '');
+
+    setNin(cf.nin ?? '');
+    setLearnerId(cf.learnerId ?? '');
+    setSchoolPayCode(cf.schoolPayCode ?? '');
+    setEmail(p.email ?? '');
+    setPhone(p.phone ?? '');
+  }, [student]);
 
   const onPhotoFile = (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -112,13 +141,37 @@ export function SchoolStudent360Page() {
     }
   };
 
-  const saveBio = async () => {
+  const saveInfo = async () => {
     if (!student) return;
+    if (!fName.trim() || !lName.trim()) {
+      notify.error('First name and last name are required');
+      return;
+    }
     setBioBusy(true);
     try {
+      const name = `${fName.trim()} ${lName.trim()}`.trim();
+      const mergedCf = {
+        ...cf,
+        academicYearId: academicYearId || undefined,
+        admissionCycleId: admissionCycleId || undefined,
+        entryStatus: entryStatus || undefined,
+        address: address || undefined,
+        nin: nin || undefined,
+        learnerId: learnerId || undefined,
+        schoolPayCode: schoolPayCode || undefined,
+      };
       await updateStudent.mutateAsync({
         id: student.id,
-        dto: { dateOfBirth, gender, nationality, religion, house, residenceType } as any,
+        dto: {
+          name,
+          dateOfBirth: dateOfBirth || undefined,
+          gender: (gender || undefined) as any,
+          nationality: nationality || undefined,
+          religion: religion || undefined,
+          residenceType: (residenceType || undefined) as any,
+          currentClassId: currentClassId || undefined,
+          customFields: mergedCf,
+        } as any,
       });
       if (student.partnerId) {
         await updatePartner.mutateAsync({
@@ -127,27 +180,11 @@ export function SchoolStudent360Page() {
         });
       }
       qc.invalidateQueries({ queryKey: ['school', 'student', id] });
-      notify.success('Bio data updated');
-      setBioOpen(false);
+      notify.success('Student information updated');
     } catch {
       notify.error('Update failed');
     } finally {
       setBioBusy(false);
-    }
-  };
-
-  const archive = async () => {
-    if (!student) return;
-    if (!confirm(`Archive ${student.partner?.name}? This sets the student to withdrawn.`)) return;
-    setArchiving(true);
-    try {
-      await updateStudent.mutateAsync({ id: student.id, dto: { status: 'withdrawn', reason: 'Archived from profile' } });
-      qc.invalidateQueries({ queryKey: ['school', 'student', id] });
-      notify.success('Student archived');
-    } catch {
-      notify.error('Archive failed');
-    } finally {
-      setArchiving(false);
     }
   };
 
@@ -216,42 +253,136 @@ export function SchoolStudent360Page() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        {/* ───────────────────────── Profile ───────────────────────── */}
+        {/* ───────────────────────── Profile (editable Student Information) ───────────────────────── */}
         <TabsContent value="profile" className="pt-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            {/* Left column — Academic information */}
-            <SectionCard title="Academic Information">
+          <div className="space-y-4">
+            {/* Student Information — editable, mirrors the application form */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="flex items-center gap-2 text-base text-primary"><User className="h-4 w-4" /> Student Information</CardTitle>
+                <Button size="sm" onClick={saveInfo} disabled={bioBusy || !fName.trim() || !lName.trim()}>
+                  <Save className="mr-1 h-4 w-4" /> {bioBusy ? 'Saving…' : 'Save changes'}
+                </Button>
+              </CardHeader>
+              <CardContent className="p-5">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                  <EditField label="Academic year" required full>
+                    <Select value={academicYearId} onValueChange={setAcademicYearId}>
+                      <SelectTrigger><SelectValue placeholder="Choose a year" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">No year / choose later</SelectItem>
+                        {(years?.data ?? []).map((y: any) => <SelectItem key={y.id} value={y.id}>{y.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Admission cycle" full>
+                    <Select value={admissionCycleId} onValueChange={setAdmissionCycleId}>
+                      <SelectTrigger><SelectValue placeholder="No cycle / choose later" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">No cycle / choose later</SelectItem>
+                        {(cycles ?? []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}{c.status === 'closed' ? ' (closed)' : ''}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="First name" required>
+                    <Input value={fName} onChange={(e) => setFName(e.target.value)} placeholder="E.g. Isabelle" />
+                  </EditField>
+                  <EditField label="Last name" required>
+                    <Input value={lName} onChange={(e) => setLName(e.target.value)} placeholder="E.g. Atweoki" />
+                  </EditField>
+                  <EditField label="Admission date" required>
+                    <Input type="date" value={(student?.enrollmentDate ?? '').toString().slice(0, 10)} readOnly disabled />
+                  </EditField>
+                  <EditField label="Date of birth" required>
+                    <Input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                  </EditField>
+                  <EditField label="Gender" required>
+                    <Select value={gender} onValueChange={setGender}>
+                      <SelectTrigger><SelectValue placeholder="Choose a gender" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Choose a gender</SelectItem>
+                        <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="female">Female</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Nationality" required>
+                    <Select value={nationality} onValueChange={setNationality}>
+                      <SelectTrigger><SelectValue placeholder="Choose a nationality" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">{nationalities?.length ? 'Choose a nationality' : 'No nationalities configured'}</SelectItem>
+                        {(nationalities ?? []).filter((n: any) => n.isActive).map((n: any) => <SelectItem key={n.name} value={n.name}>{n.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Entry status" required>
+                    <Select value={entryStatus} onValueChange={setEntryStatus}>
+                      <SelectTrigger><SelectValue placeholder="Choose entry status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Choose entry status</SelectItem>
+                        {ENTRY_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Residential status" required>
+                    <Select value={residenceType} onValueChange={setResidenceType}>
+                      <SelectTrigger><SelectValue placeholder="Choose residential status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Choose residential status</SelectItem>
+                        <SelectItem value="day">Day</SelectItem>
+                        <SelectItem value="boarder">Boarder</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Home address" full>
+                    <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="E.g. Plot 5, Kampala Road" />
+                  </EditField>
+                  <EditField label="Select a class" required>
+                    <Select value={currentClassId} onValueChange={setCurrentClassId}>
+                      <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Choose a class</SelectItem>
+                        {(classes?.data ?? []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="Religion">
+                    <Select value={religion} onValueChange={setReligion}>
+                      <SelectTrigger><SelectValue placeholder="Choose a religion" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Choose a religion</SelectItem>
+                        {RELIGIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
+                  <EditField label="National Identification Number">
+                    <Input value={nin} onChange={(e) => setNin(e.target.value)} placeholder="E.g. CM973535343" />
+                  </EditField>
+                  <EditField label="Learner's Identification Number">
+                    <Input value={learnerId} onChange={(e) => setLearnerId(e.target.value)} placeholder="Enter learner's identification number" />
+                  </EditField>
+                  <EditField label="School pay code" full>
+                    <Input value={schoolPayCode} onChange={(e) => setSchoolPayCode(e.target.value)} placeholder="Enter student's school pay code" />
+                  </EditField>
+                  <EditField label="Email">
+                    <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@email.com" />
+                  </EditField>
+                  <EditField label="Phone">
+                    <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+256…" />
+                  </EditField>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Read-only identities / status */}
+            <SectionCard title="System Information">
               <Field label="Registration no." value={student.partner?.code ?? '—'} />
               <Field label="Admission no." value={student.admissionNo} />
-              <Field label="Class" value={student.currentClass?.name ?? '—'} />
               <Field label="Section" value={student.currentSectionId ? student.currentSectionId.slice(0, 6) : '—'} />
               <Field label="House" value={cf.house ?? '—'} />
-              <Field label="Residential status" value={student.residenceType ?? '—'} />
-              <Field label="Entry status" value={student.status} />
-              <Field label="Admission date" value={fmtDate(student.enrollmentDate)} />
-              <Field label="School payment code" value={student.partner?.code ?? '—'} />
+              <Field label="Entry status (current)" value={student.status} />
             </SectionCard>
-
-            {/* Right column — Bio data + guardians */}
-            <div className="space-y-4">
-              <SectionCard
-                title="Student Bio Data"
-                actions={
-                  <>
-                    <Button size="sm" variant="ghost" className="text-emerald-600" onClick={openBio}><Pencil className="mr-1 h-4 w-4" />Edit</Button>
-                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={archive} disabled={archiving}><Archive className="mr-1 h-4 w-4" />Archive</Button>
-                  </>
-                }
-              >
-                <Field label="Full name" value={student.partner?.name} />
-                <Field label="Date of birth" value={cf.dateOfBirth ?? student.dateOfBirth ?? '—'} />
-                <Field label="Gender" value={student.gender ?? '—'} />
-                <Field label="Religion" value={(student as any).religion ?? '—'} />
-                <Field label="Nationality" value={(student as any).nationality ?? '—'} />
-                <Field label="Email" value={student.partner?.email ?? '—'} />
-                <Field label="Phone" value={student.partner?.phone ?? '—'} />
-              </SectionCard>
-            </div>
           </div>
         </TabsContent>
 
@@ -316,57 +447,20 @@ export function SchoolStudent360Page() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Bio Data dialog */}
-      <Dialog open={bioOpen} onOpenChange={setBioOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit student bio data</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Full name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Date of birth</Label><Input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} /></div>
-              <div><Label>Gender</Label>
-                <Select value={gender} onValueChange={setGender}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="male">Male</SelectItem>
-                    <SelectItem value="female">Female</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Nationality</Label><Input value={nationality} onChange={(e) => setNationality(e.target.value)} /></div>
-              <div><Label>Religion</Label><Input value={religion} onChange={(e) => setReligion(e.target.value)} /></div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>House</Label><Input value={house} onChange={(e) => setHouse(e.target.value)} /></div>
-              <div><Label>Residence</Label>
-                <Select value={residenceType} onValueChange={setResidenceType}>
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="day">Day</SelectItem>
-                    <SelectItem value="boarder">Boarder</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Email</Label><Input value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-              <div><Label>Phone</Label><Input value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
-            <Button onClick={saveBio} disabled={bioBusy || !name.trim()}>{bioBusy ? 'Saving…' : 'Save changes'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
 
 /* ───────────────────────── Shared blocks ───────────────────────── */
+
+function EditField({ label, required, full, children }: { label: string; required?: boolean; full?: boolean; children: ReactNode }) {
+  return (
+    <div className={full ? 'md:col-span-4 space-y-1' : 'space-y-1'}>
+      <Label className="text-xs">{label}{required && <span className="text-rose-500"> *</span>}</Label>
+      {children}
+    </div>
+  );
+}
 
 function SectionCard({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
   return (

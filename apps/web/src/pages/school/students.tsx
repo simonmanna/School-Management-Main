@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, GraduationCap, UserPlus, X } from 'lucide-react';
 import {
   useStudents,
@@ -31,6 +31,7 @@ const STATUS_META: Record<StudentStatus, string> = {
 const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
 
 export function SchoolStudentsPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
@@ -51,19 +52,6 @@ export function SchoolStudentsPage() {
   const openCreate = () => {
     setEditing(null);
     setForm({ enrollmentDate: new Date().toISOString().slice(0, 10) });
-    setOpen(true);
-  };
-  const openEdit = (s: Student) => {
-    setEditing(s);
-    setForm({
-      name: s.partner?.name ?? '',
-      admissionNo: s.admissionNo,
-      email: s.partner?.email ?? '',
-      phone: s.partner?.phone ?? '',
-      gender: s.gender ?? '',
-      currentClassId: s.currentClassId ?? '',
-      residenceType: s.residenceType ?? '',
-    });
     setOpen(true);
   };
 
@@ -154,7 +142,7 @@ export function SchoolStudentsPage() {
                     <Badge className={STATUS_META[s.status]}>{s.status}</Badge>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(s)}>Edit</Button>
+                    <Button variant="ghost" size="sm" onClick={() => navigate(`/school/students/${s.id}`)}>Edit</Button>
                     <Link to={`/school/students/${s.id}`}><Button variant="ghost" size="sm">View</Button></Link>
                   </td>
                 </tr>
