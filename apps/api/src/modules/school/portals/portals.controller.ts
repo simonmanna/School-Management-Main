@@ -1,10 +1,12 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res, StreamableFile } from '@nestjs/common';
+import type { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { ScopedToStudent } from '../../../kernel/auth/guards/scoped-to-student.decorator';
 import { PortalsService } from './portals.service';
+import { PortalDocumentsService } from './portal-documents.service';
 import { MobileMoneyService } from '../fees/mobile-money.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
-import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 
 @Controller('school/portals')
@@ -15,25 +17,9 @@ export class PortalsController {
     // lets it take the money. Both delegate; the portal owns no money logic.
     private readonly momo: MobileMoneyService,
     private readonly finance: SchoolFinanceQueryService,
-    private readonly portalIdentity: PortalIdentityService,
+    private readonly documents: PortalDocumentsService,
     private readonly employeeIdentity: EmployeeIdentityService,
   ) {}
-
-  /**
-   * Ownership check for every per-student portal route.
-   *
-   * `school.parentPortal` / `school.studentPortal` are COARSE permissions: they say
-   * "this account may use the portal", not "this account may see THIS pupil". Until
-   * portal identity existed there was no way to express the second, so these routes
-   * took the id from the URL and served whoever asked — the docstring on the
-   * pay-quote route asserted an ownership rule the code never implemented. Staff
-   * pass through and remain governed by their own school permissions.
-   */
-  private async assertMaySee(studentProfileId: string): Promise<void> {
-    if (!(await this.portalIdentity.canAccessStudent(studentProfileId))) {
-      throw new ForbiddenException('Not permitted to view this student');
-    }
-  }
 
   /**
    * Ownership check for per-TEACHER routes.
@@ -44,25 +30,43 @@ export class PortalsController {
    * the coarse permission could read another teacher's classes, lesson plans
    * and workload by editing the id. Admins with the explicit management
    * permission are still allowed through.
+   *
+   * The per-STUDENT equivalent used to live here too, as a private method. It is
+   * now `@ScopedToStudent`, so the rule applies wherever it is declared instead
+   * of only where someone remembered to call it.
    */
   private assertIsTeacherOrAdmin(teacherPartnerId: string, adminPermission: string): Promise<void> {
     return this.employeeIdentity.assertIsTeacherOrAdmin(teacherPartnerId, adminPermission);
   }
 
-  /** Same check for a list of ids; every one must be permitted. */
-  private async assertMaySeeAll(ids: string[]): Promise<void> {
-    const allowed = await this.portalIdentity.filterAccessibleStudents(ids);
-    if (allowed.length !== ids.length) {
-      throw new ForbiddenException('Not permitted to view one or more of these students');
-    }
+  /**
+   * Who am I, and whose data may I open?
+   *
+   * Gated on `school:portal:self` — a grant that authorizes nothing except asking
+   * this question. Every portal role holds it, which matters because the app must
+   * resolve who it is talking to before it can decide which workspace to open,
+   * and `PermissionsGuard` ANDs its requirements, so the three workspace grants
+   * below cannot be OR-ed together here.
+   *
+   * It is deliberately NOT `school:read`. Around 300 routes across the school
+   * vertical are gated on that grant alone — the full pupil register, every
+   * family's fee balance, the gradebook, the marks workspace — so using it to
+   * make this one route work would have opened all of them to any portal token.
+   *
+   * The answer is derived from the token, so a caller with no portal identity
+   * gets an empty result rather than somebody else's.
+   */
+  @Get('me')
+  @RequirePermissions(PERMISSIONS.school.portalSelf)
+  me() {
+    return this.portals.myContext();
   }
 
   @Get('parent/:studentProfileIds')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
-  async parentDashboard(@Param('studentProfileIds') ids: string) {
-    const list = ids.split(',').filter(Boolean);
-    await this.assertMaySeeAll(list);
-    return this.portals.parentDashboard(list);
+  @ScopedToStudent('studentProfileIds')
+  parentDashboard(@Param('studentProfileIds') ids: string) {
+    return this.portals.parentDashboard(ids.split(',').filter(Boolean));
   }
 
   /* ── Parent self-service payment ── */
@@ -74,8 +78,8 @@ export class PortalsController {
    */
   @Get('parent/:studentProfileId/pay-quote')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
   async payQuote(@Param('studentProfileId') studentProfileId: string) {
-    await this.assertMaySee(studentProfileId);
     const [quote, availability] = await Promise.all([
       this.momo.quoteFor(studentProfileId),
       Promise.resolve(this.momo.availability()),
@@ -90,11 +94,11 @@ export class PortalsController {
    */
   @Post('parent/:studentProfileId/pay')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
-  async pay(
+  @ScopedToStudent('studentProfileId')
+  pay(
     @Param('studentProfileId') studentProfileId: string,
     @Body() dto: { provider: 'mtn' | 'airtel'; amount: number; phone: string },
   ) {
-    await this.assertMaySee(studentProfileId);
     return this.momo.requestPayment(dto?.provider, {
       studentProfileId,
       amount: dto?.amount,
@@ -106,23 +110,81 @@ export class PortalsController {
   /** Progress of the parent's own payment attempts. */
   @Get('parent/:studentProfileId/payments')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
-  async payments(@Param('studentProfileId') studentProfileId: string) {
-    await this.assertMaySee(studentProfileId);
+  @ScopedToStudent('studentProfileId')
+  payments(@Param('studentProfileId') studentProfileId: string) {
     return this.momo.listRequests({ studentProfileId, limit: 20 });
   }
 
   /** "Why do I owe this?" — the same explainer the bursar sees. */
   @Get('parent/:studentProfileId/explain')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
-  async explain(@Param('studentProfileId') studentProfileId: string) {
-    await this.assertMaySee(studentProfileId);
+  @ScopedToStudent('studentProfileId')
+  explain(@Param('studentProfileId') studentProfileId: string) {
     return this.finance.explainBalance(studentProfileId);
+  }
+
+  /**
+   * What is owed, split by whether it is due yet.
+   *
+   * A single "outstanding" figure makes a family paying by instalments look
+   * exactly like a family that has not paid at all. The split is computed in the
+   * finance service beside the balance it must agree with — never here, and never
+   * in the browser.
+   */
+  @Get('parent/:studentProfileId/outstanding')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  outstanding(@Param('studentProfileId') studentProfileId: string) {
+    return this.finance.outstandingBreakdown(studentProfileId);
+  }
+
+  /**
+   * The family's own fee statement — the same `termStatement` the bursar prints,
+   * so the two cannot disagree.
+   */
+  @Get('parent/:studentProfileId/statement')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  statement(@Param('studentProfileId') studentProfileId: string) {
+    return this.finance.termStatement(studentProfileId);
+  }
+
+  /* ── Documents a family may download ── */
+
+  /** Report cards released to this pupil's family. Published ones only. */
+  @Get('student/:studentProfileId/report-cards')
+  @RequirePermissions(PERMISSIONS.school.studentPortal)
+  @ScopedToStudent('studentProfileId')
+  reportCards(@Param('studentProfileId') studentProfileId: string) {
+    return this.documents.publishedReportCards(studentProfileId);
+  }
+
+  /**
+   * One report card as a PDF.
+   *
+   * The pupil is NOT in this URL — a report-card id is — so `@ScopedToStudent`
+   * cannot help. Ownership is resolved from the card itself inside the service,
+   * which also refuses anything the school has not published.
+   */
+  @Get('report-cards/:reportCardId/pdf')
+  @RequirePermissions(PERMISSIONS.school.studentPortal)
+  async reportCardPdf(
+    @Param('reportCardId') reportCardId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { buffer, filename } = await this.documents.reportCardPdf(reportCardId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+    return new StreamableFile(buffer);
   }
 
   @Get('student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.studentPortal)
-  async studentDashboard(@Param('studentProfileId') id: string) {
-    await this.assertMaySee(id);
+  @ScopedToStudent('studentProfileId')
+  studentDashboard(@Param('studentProfileId') id: string) {
     return this.portals.studentDashboard(id);
   }
 

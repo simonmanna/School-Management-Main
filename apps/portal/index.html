@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>School Portal</title>
+    <script>
+      // Follow the phone's own light/dark setting, before first paint so there
+      // is no white flash on a device set to dark. Tailwind is configured
+      // `darkMode: ['class']`, so something has to apply the class; there is no
+      // in-app theme picker on purpose — the admin app has one because staff sit
+      // with it all day, a portal is open for a minute and should just match the
+      // device.
+      (function () {
+        try {
+          var dark = window.matchMedia('(prefers-color-scheme: dark)');
+          var apply = function (on) { document.documentElement.classList.toggle('dark', on); };
+          apply(dark.matches);
+          dark.addEventListener('change', function (e) { apply(e.matches); });
+        } catch (e) { /* very old browser: stay light */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

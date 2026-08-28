@@ -204,7 +204,7 @@ export class OrganizationsService {
 
   private async seedAdminRoleAndMappings(orgId: string) {
     // Seed permissions catalog (global).
-    const { ALL_PERMISSIONS } = await import('@erp/shared');
+    const { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS } = await import('@erp/shared');
     for (const k of ALL_PERMISSIONS) {
       // Most keys are `resource:action`, but the POS block uses `resource.action`
       // (e.g. 'partners.view'). Splitting on ':' alone left `action` undefined and
@@ -241,6 +241,20 @@ export class OrganizationsService {
         permissions: ALL_PERMISSIONS as unknown as string[],
       },
     });
+    // Portal roles. `PortalAccountService.invite()` connects Student/Parent by
+    // subject type, so an org without these can mint portal logins that hold no
+    // authority at all and 403 on every route they were created to reach.
+    for (const preset of PORTAL_ROLE_PRESETS) {
+      await this.prisma.raw.role.create({
+        data: {
+          organizationId: orgId,
+          name: preset.name,
+          description: preset.description,
+          isSystem: true,
+          permissions: preset.permissions as unknown as string[],
+        },
+      });
+    }
     // Seed UOM categories + units (factor engine) and tax defaults.
     await seedUomCategories(this.prisma.raw, orgId);
     await this.prisma.raw.tax.create({

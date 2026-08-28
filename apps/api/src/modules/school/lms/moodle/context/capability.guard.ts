@@ -9,8 +9,8 @@ import { CapabilitySource, LMS_CAPABILITY_KEY, LMS_CAPABILITY_SOURCE_KEY } from 
 /**
  * Enforces the LMS capability declared by @RequireCapability. Resolves the target
  * course context from the request per the declared source, then defers to
- * CapabilityService. Staff principals use tenant.userId; student-portal principals
- * may pass studentProfileId on the request auth.
+ * CapabilityService. Staff principals use tenant.userId; a student-portal caller is
+ * resolved from the `portal` claim on their verified access token.
  */
 @Injectable()
 export class LmsCapabilityGuard implements CanActivate {
@@ -27,14 +27,26 @@ export class LmsCapabilityGuard implements CanActivate {
     if (!capability) return true; // route opts out of the fine gate
 
     const source = this.reflector.get<CapabilitySource>(LMS_CAPABILITY_SOURCE_KEY, exec.getHandler()) ?? 'courseParam';
-    const req = exec.switchToHttp().getRequest<{ params?: Record<string, string>; body?: Record<string, unknown>; auth?: { studentProfileId?: string } }>();
+    const req = exec
+      .switchToHttp()
+      .getRequest<{
+        params?: Record<string, string>;
+        body?: Record<string, unknown>;
+        auth?: { portal?: { kind?: string; studentProfileId?: string } };
+      }>();
 
     const courseOfferingId = await this.resolveCourse(source, req);
     if (!courseOfferingId) throw new ForbiddenException('Could not resolve course context for capability check');
 
-    const principal: Principal = req.auth?.studentProfileId
-      ? { studentProfileId: req.auth.studentProfileId }
-      : { userId: this.tenant.userId };
+    // The subject lives on the verified token's portal claim (`main.ts` sets
+    // `req.auth = effective`), NOT at the top level. Reading `auth.studentProfileId`
+    // always saw `undefined`, so every pupil was capability-checked as a plain user
+    // with no LmsRoleAssignment and refused entry to their own courses.
+    const claim = req.auth?.portal;
+    const principal: Principal =
+      claim?.kind === 'student' && claim.studentProfileId
+        ? { studentProfileId: claim.studentProfileId }
+        : { userId: this.tenant.userId };
 
     const ok = await this.caps.canAtCourse(principal, capability, courseOfferingId);
     if (!ok) throw new ForbiddenException(`Missing LMS capability: ${capability}`);

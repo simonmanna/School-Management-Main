@@ -48,9 +48,22 @@ export class LessonPlanningController {
     return this.svc.addTeacher(id, dto.teacherPartnerId, dto.role);
   }
 
-  // ── LessonPlan ──
+  /* ── LessonPlan ──
+   *
+   * Create, update and submit are gated on `school:lessonplans:own`, not the
+   * departmental `:write`. That is what lets a teacher prepare next week's lesson
+   * from home without also being able to rewrite a colleague's. The grant alone
+   * decides nothing — `LessonPlanningService.assertMayWritePlan` resolves the
+   * caller to their StaffProfile and compares it to the plan's owner, letting the
+   * departmental grant through unchanged. Review stays on `:approve`: nobody
+   * approves their own plan.
+   *
+   * The Administrator role carries every permission, so this does not lock out
+   * existing staff — but a hand-built custom role holding only `:write` would
+   * need `:own` adding.
+   */
   @Post('lesson-plans')
-  @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
+  @RequirePermissions(PERMISSIONS.school.ownLessonPlans)
   create(@Body() dto: CreateLessonPlanDto) {
     return this.svc.createLessonPlan(dto);
   }
@@ -73,13 +86,13 @@ export class LessonPlanningController {
   }
 
   @Put('lesson-plans/:id')
-  @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
+  @RequirePermissions(PERMISSIONS.school.ownLessonPlans)
   update(@Param('id') id: string, @Body() dto: UpdateLessonPlanDto) {
     return this.svc.updateLessonPlan(id, dto);
   }
 
   @Post('lesson-plans/:id/submit')
-  @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
+  @RequirePermissions(PERMISSIONS.school.ownLessonPlans)
   submit(@Param('id') id: string, @Body() dto: SubmitLessonPlanDto) {
     return this.svc.submitLessonPlan(id, dto);
   }

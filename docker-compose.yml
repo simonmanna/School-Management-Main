@@ -85,6 +85,27 @@ services:
     ports:
       - "5173:80"
 
+  # The student / guardian / teacher portal.
+  #
+  # A separate image from `web` because it is a separate app for a separate
+  # audience: a guardian on mobile data must not download the back-office ERP to
+  # check a fee balance. VITE_ORG_CODE is baked in so the login form can ask for
+  # an email and a password and nothing else.
+  portal:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.portal
+      args:
+        VITE_API_URL: ${PORTAL_API_URL:-http://localhost:3000}
+        VITE_ORG_CODE: ${PORTAL_ORG_CODE:-DEMO}
+        VITE_SCHOOL_NAME: ${PORTAL_SCHOOL_NAME:-School Portal}
+    container_name: school-portal
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5175:80"
+
   adminer:
     image: adminer:latest
     container_name: cafe-pos-adminer
@@ -92,10 +113,37 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Bound to loopback, not 0.0.0.0. This is an unauthenticated database console;
+    # on a host with a public IP the previous mapping published it to the internet.
+    # Reach it through an SSH tunnel or Tailscale.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+
+  # TLS for a public deployment. Off by default — start it with:
+  #   docker compose --profile public up -d
+  # Requires SCHOOL_DOMAIN and ACME_EMAIL, and DNS already pointing here.
+  caddy:
+    image: caddy:2-alpine
+    container_name: school-caddy
+    restart: unless-stopped
+    profiles: ["public"]
+    depends_on:
+      - api
+      - portal
+    environment:
+      SCHOOL_DOMAIN: ${SCHOOL_DOMAIN:?set SCHOOL_DOMAIN in .env, e.g. school.ac.ug}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env for certificate expiry notices}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
 
 volumes:
   pgdata:
   redisdata:
   uploads:
+  caddydata:
+  caddyconfig:

@@ -258,6 +258,44 @@ describeDb('integration: school fees integrity (invariants)', () => {
     expect(await glBalance(arAccountId)).toBe(arBefore - 50_000);
   });
 
+  /**
+   * The portal must never contradict the bursar.
+   *
+   * A guardian and a bursar looking at the same pupil on the same afternoon have
+   * to see the same number. That is only true because every portal surface reads
+   * `SchoolFinanceQueryService` rather than deriving its own figure — the moment
+   * one of them computes "invoice total minus payments" in the browser, waivers
+   * and credits start being counted as money paid and a bursary family is told
+   * they paid a third of a million shillings they never paid.
+   *
+   * These are the four figures a parent can actually reach, checked against the
+   * one balance the office works from.
+   */
+  it('every portal-facing figure agrees with the bursar’s balance', async () => {
+    const canonical = await asTenant(() => finance.studentBalance(studentProfileId));
+
+    const [explain, statement, outstanding] = await Promise.all([
+      asTenant(() => finance.explainBalance(studentProfileId)),   // "why do I owe this?"
+      asTenant(() => finance.termStatement(studentProfileId)),    // the statement screen
+      asTenant(() => finance.outstandingBreakdown(studentProfileId)), // the due/overdue split
+    ]);
+
+    expect(explain.summary.outstanding).toBe(canonical.balance);
+    expect(explain.summary.billed).toBe(canonical.billed);
+    // `paid` is money RECEIVED. Waived value has its own line and must never be
+    // folded in here, which is the whole reason these are separate fields.
+    expect(explain.summary.paid).toBe(canonical.collected);
+    expect(explain.summary.waived).toBe(canonical.waived);
+
+    expect(statement.balance.balance).toBe(canonical.balance);
+    expect(statement.balance.collected).toBe(canonical.collected);
+
+    expect(outstanding.outstanding).toBe(canonical.balance);
+    // The split is an apportionment of the same debt, not a second opinion on it.
+    const split = outstanding.overdue + outstanding.dueLater + outstanding.undated;
+    expect(Math.abs(split - canonical.balance)).toBeLessThanOrEqual(0.01);
+  });
+
   it('AR subledger reconciles to the GL AR control account (zero variance)', async () => {
     const recon = await asTenant(() => finance.reconcileCurrentArToGl());
     expect(Math.abs(recon.variance)).toBeLessThanOrEqual(0.01);

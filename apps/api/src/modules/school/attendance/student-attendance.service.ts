@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
-import { EVENTS } from '@erp/shared';
+import { EVENTS, PERMISSIONS } from '@erp/shared';
 import type { BulkMarkAttendanceDto, CorrectAttendanceDto } from './dto.types';
 import { AttendanceStatusConfigService } from './attendance-status-config.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 
 /**
  * StudentAttendanceService — bulk-mark a class's daily attendance in one tx.
@@ -18,9 +19,51 @@ export class StudentAttendanceService {
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
     private readonly statusConfig: AttendanceStatusConfigService,
+    private readonly employeeIdentity: EmployeeIdentityService,
   ) {}
 
+  /**
+   * May this caller take THIS class's register?
+   *
+   * `school:attendance:write` is org-wide: hold it and you may mark any class in
+   * the school. That is right for a deputy head walking the corridors and wrong
+   * for a teacher marking their own register from home, which is what the portal
+   * now lets them do. A caller who holds the broad grant passes straight through;
+   * anyone else must actually teach the class.
+   *
+   * Teaching is read from `TeacherAssignment` and, failing that, the timetable —
+   * a cover teacher standing in for an absent colleague appears in the second but
+   * not the first, and refusing them would stop the register being taken at all.
+   *
+   * `teacherPartnerId` holds a `StaffProfile.id` on both tables, despite the name.
+   */
+  private async assertMayMarkClass(classId: string | null | undefined): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.includes(PERMISSIONS.school.takeAttendance) || perms.includes('*')) return;
+
+    const staffProfileId = await this.employeeIdentity.staffProfileIdForCaller();
+    if (!staffProfileId || !classId) {
+      throw new ForbiddenException('You may only take the register for a class you teach');
+    }
+
+    const organizationId = this.tenant.organizationId;
+    const [assigned, timetabled] = await Promise.all([
+      this.prisma.client.teacherAssignment.findFirst({
+        where: { organizationId, teacherPartnerId: staffProfileId, classId },
+        select: { id: true },
+      }),
+      this.prisma.client.timetableSlot.findFirst({
+        where: { organizationId, teacherPartnerId: staffProfileId, classId },
+        select: { id: true },
+      }),
+    ]);
+    if (!assigned && !timetabled) {
+      throw new ForbiddenException('You may only take the register for a class you teach');
+    }
+  }
+
   async mark(dto: BulkMarkAttendanceDto) {
+    await this.assertMayMarkClass(dto.classId);
     const organizationId = this.tenant.organizationId;
     const date = new Date(dto.date);
     const periodId = dto.periodId ?? null;
@@ -93,6 +136,10 @@ export class StudentAttendanceService {
     const organizationId = this.tenant.organizationId;
     const existing = await this.prisma.client.studentAttendance.findFirst({ where: { id, organizationId } });
     if (!existing) throw new NotFoundException(`Attendance ${id} not found`);
+    // Same rule as marking, resolved from the stored row rather than the request:
+    // a teacher may fix their own register, and only their own. Every correction
+    // is audit-logged either way.
+    await this.assertMayMarkClass(existing.classId);
     const updated = await this.prisma.client.studentAttendance.update({
       where: { id },
       data: {

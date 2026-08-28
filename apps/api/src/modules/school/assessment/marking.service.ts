@@ -1,11 +1,12 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { StudentAssessment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
-import { EVENTS } from '@erp/shared';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { computeEffective } from './assessment-math';
 import type { AppendAdjustmentDto, MarkingApprovalDto, RecordMarkDto, SetParticipationDto } from './dto.types';
 
@@ -28,7 +29,40 @@ export class MarkingService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
+    private readonly employeeIdentity: EmployeeIdentityService,
   ) {}
+
+  /**
+   * May this caller write marks for this assessment?
+   *
+   * `school:grades:write` is the org-wide entry grant — a data-entry clerk typing
+   * up a whole exam holds it and needs it. A teacher marking their own papers
+   * from home holds `school:grades:own` instead, which is only meaningful if
+   * something checks whose assessment it is. `Assessment.teacherPartnerId` holds
+   * a `StaffProfile.id`, which is what `isSelfTeacher` compares against.
+   *
+   * An assessment with no teacher recorded stays office-only: an owner-scoped
+   * caller cannot claim an unowned paper by being first to mark it.
+   *
+   * This is entry, never approval. `approveGrades` is a separate grant on a
+   * separate route, so a teacher still cannot approve their own marks.
+   */
+  private async assertMayMarkAssessment(assessmentId: string | null | undefined): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.includes(PERMISSIONS.school.enterGrades) || perms.includes('*')) return;
+
+    if (!assessmentId) throw new ForbiddenException('You may only mark your own assessments');
+    const assessment = await this.prisma.client.assessment.findFirst({
+      where: { id: assessmentId, organizationId: this.tenant.organizationId },
+      select: { teacherPartnerId: true },
+    });
+    if (
+      !assessment?.teacherPartnerId ||
+      !(await this.employeeIdentity.isSelfTeacher(assessment.teacherPartnerId))
+    ) {
+      throw new ForbiddenException('You may only mark your own assessments');
+    }
+  }
 
   /**
    * Recompute a StudentAssessment's derived scores from its marks + adjustments.
@@ -258,6 +292,9 @@ export class MarkingService {
 
   /** Set a student's participation (present/absent/exempt/…) on an assessment. */
   async setParticipation(dto: SetParticipationDto) {
+    // Marking a pupil absent from a paper changes what their result means, so it
+    // is held to the same ownership rule as entering the mark itself.
+    await this.assertMayMarkAssessment(dto.assessmentId);
     return this.prisma.client.$transaction(async (tx: any) => {
       const row = await this.ensureRow(tx, dto.assessmentId, dto.studentProfileId, {
         classId: dto.classId,
@@ -284,6 +321,14 @@ export class MarkingService {
    * can revise their own round, then recomputes the derived scores.
    */
   async recordMark(dto: RecordMarkDto) {
+    // Resolved before the transaction opens: an authorization failure should not
+    // hold a write lock on the marking ledgers while it is decided.
+    const owner = await this.prisma.client.studentAssessment.findFirst({
+      where: { id: dto.studentAssessmentId },
+      select: { assessmentId: true },
+    });
+    await this.assertMayMarkAssessment(owner?.assessmentId);
+
     return this.prisma.client.$transaction(async (tx: any) => {
       const sa = await tx.studentAssessment.findFirst({ where: { id: dto.studentAssessmentId } });
       if (!sa) throw new NotFoundException(`StudentAssessment ${dto.studentAssessmentId} not found`);
@@ -377,6 +422,13 @@ export class MarkingService {
   async markingApproval(dto: MarkingApprovalDto) {
     const organizationId = this.tenant.organizationId;
     const actorId = this.tenant.userId ?? null;
+    // Submitting is the marker's own act and follows the marker's rule. Approve
+    // and reject are gated at the controller on `school:grades:approve`, which no
+    // teacher role holds — the segregation of duty is that separation, not this
+    // check, and this must not be read as authorising it.
+    if (dto.action === 'submit' || dto.action === 'resubmit') {
+      await this.assertMayMarkAssessment(dto.assessmentId);
+    }
     return this.prisma.client.$transaction(async (tx: any) => {
       const rows = await tx.studentAssessment.findMany({ where: { assessmentId: dto.assessmentId } });
       if (rows.length === 0) throw new NotFoundException(`No student assessments for assessment ${dto.assessmentId}`);

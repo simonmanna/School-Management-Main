@@ -51,6 +51,10 @@ describe('D1 · the parent portal reports received money, not forgiven money', (
     const service = new PortalsService(
       prisma as any,
       { organizationId: 'org_test' } as any,
+      // Identity resolvers: this suite exercises the fee arithmetic, not who may
+      // see it. Ownership is covered by the portal-identity specs.
+      { principal: () => ({ kind: 'staff', userId: 'u_1' }), accessibleStudents: jest.fn().mockResolvedValue([]) } as any,
+      { forUser: jest.fn().mockResolvedValue(null) } as any,
       { catalogByCode: jest.fn().mockResolvedValue({}) } as any,
       finance as any,
     );

@@ -47,6 +47,10 @@ function makeService(sa: Record<string, unknown>, entries: Row[] = [], adjustmen
     { organizationId: 'org_1', userId: 'user_1' } as any,
     { record: jest.fn(), recordInTx: jest.fn() } as any,
     { publish: jest.fn() } as any,
+    // Ownership resolver. This suite exercises the recompute kernel, not who is
+    // allowed to run it; assessment ownership is covered by the marking-ownership
+    // spec.
+    { isSelfTeacher: jest.fn().mockResolvedValue(false) } as any,
   );
   // Silence the intentional warn — its presence is asserted via the created row.
   jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);

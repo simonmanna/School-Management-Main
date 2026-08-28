@@ -1,0 +1,43 @@
+# TLS termination for a public deployment.
+#
+# Caddy rather than more nginx: it obtains and renews Let's Encrypt certificates
+# on its own. The nginx inside each web container keeps doing what it is good at
+# — serving the SPA and setting per-app headers — and Caddy sits in front holding
+# the certificates. Nothing else changes.
+#
+# Point all three names at this host's public IP first. Caddy cannot issue a
+# certificate for a name that does not resolve to it, and will retry noisily
+# until it does.
+#
+# Substitute the real hostnames, then:
+#   docker compose --profile public up -d
+
+{
+	# The address Let's Encrypt uses to warn about expiry problems.
+	email {$ACME_EMAIL}
+}
+
+# The family-facing portal. This is the only name that genuinely must be public.
+portal.{$SCHOOL_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy portal:80
+}
+
+# The API. Public because the portal is a browser app on another origin and
+# calls it directly.
+api.{$SCHOOL_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy api:3000
+}
+
+# The back-office ERP.
+#
+# Consider NOT exposing this at all. Staff can reach it over Tailscale (see
+# DEPLOYMENT.md), which removes a public login page for the application that can
+# see every family's data, every mark and the whole ledger. If you do publish it,
+# the block below is enough; if you do not, delete it and leave the container
+# reachable only on the internal docker network.
+admin.{$SCHOOL_DOMAIN} {
+	encode gzip zstd
+	reverse_proxy web:80
+}

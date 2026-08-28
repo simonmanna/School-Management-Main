@@ -420,6 +420,22 @@ export const PERMISSIONS = {
     // so a teacher portal session can edit only its own rows without the broad write grant.
     ownLessonPlans: 'school:lessonplans:own',
     ownTimetable: 'school:timetable:own',
+    /**
+     * Take the register for a class you actually teach.
+     *
+     * `school:attendance:write` is org-wide — right for a deputy head, wrong for
+     * a teacher marking from home, because it lets them mark any class in the
+     * school. This grant carries no authority on its own: the handler resolves
+     * the caller to their StaffProfile and checks TeacherAssignment/the timetable.
+     */
+    ownAttendance: 'school:attendance:own',
+    /**
+     * Enter marks for an assessment that is yours.
+     *
+     * Same split as attendance, for the same reason. `approveGrades` is
+     * deliberately NOT paired with it: whoever enters a mark must not approve it.
+     */
+    ownGrades: 'school:grades:own',
     manageQuestionBank: 'school:questionbank:write',
     authorCbt: 'school:cbt:author',
     takeCbt: 'school:cbt:take',
@@ -475,6 +491,21 @@ export const PERMISSIONS = {
     parentPortal: 'school:portal:parent',
     studentPortal: 'school:portal:student',
     teacherPortal: 'school:portal:teacher',
+    /**
+     * "This account may ask the API who it is."
+     *
+     * The narrowest possible grant, and the reason portal roles do not carry
+     * `school:read`. Around 300 routes across the school vertical are gated on
+     * `school:read` alone — the full pupil register, every family's fee balance,
+     * the gradebook and the marks workspace among them — so handing it to a
+     * guardian to make two self-service routes work would have opened all of
+     * them to anyone holding a valid portal token and a URL.
+     *
+     * Routes accepting this grant MUST derive their subject from the token
+     * (`PortalIdentityService` / `EmployeeIdentityService`) and never from
+     * request input. It carries no authority of its own.
+     */
+    portalSelf: 'school:portal:self',
     // Invite / revoke portal logins for students and guardians. Registrar-level:
     // it mints credentials that can see a family's grades and fee balance.
     managePortalAccounts: 'school:portal:accounts:write',
@@ -712,3 +743,92 @@ function flattenPermissions(input: unknown): string[] {
   return [];
 }
 export const ALL_PERMISSIONS: string[] = flattenPermissions(PERMISSIONS);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Portal role presets
+ *
+ * Until these existed, `PortalAccountService.invite()` created a User with no
+ * roles at all and no seed anywhere minted a role holding `school:portal:*`.
+ * An invited guardian could accept their invite, log in successfully, and then
+ * receive a 403 from every route — the portal had users but no authority.
+ *
+ * Defined here rather than in a seed file because three callers need the same
+ * definition: `prisma/seed.ts` (fresh install), `OrganizationsService`
+ * (each new tenant) and the one-shot backfill for orgs that already exist.
+ *
+ * `school:read` is deliberately included. Several self-scoped routes the portal
+ * genuinely needs — `school/lms/my/*` above all — gate on it, and the per-subject
+ * check that actually protects one family from another lives in
+ * `PortalIdentityService`, not in the permission string. Widening this list is
+ * therefore not the same risk as widening the routes; adding a grant here that
+ * unlocks an org-wide WRITE would be.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface RolePreset {
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
+export const PORTAL_ROLE_PRESETS: readonly RolePreset[] = [
+  {
+    name: 'Student',
+    description: 'Portal access for a pupil — their own timetable, results, attendance and courses.',
+    permissions: [
+      PERMISSIONS.school.studentPortal,
+      PERMISSIONS.school.portalSelf,
+      PERMISSIONS.school.lmsRead,
+      PERMISSIONS.school.submitAssignments,
+    ],
+  },
+  {
+    name: 'Parent',
+    description: "Portal access for a guardian — their own children's fees, attendance and results.",
+    permissions: [
+      PERMISSIONS.school.parentPortal,
+      // A guardian legitimately needs the PUPIL view of their own child —
+      // timetable, results, attendance. These portal grants say which workspace
+      // an account may open, not which pupil it may open it for; that second
+      // question is answered by @ScopedToStudent against the token's portal
+      // claim, so granting this does not widen who a parent can see.
+      PERMISSIONS.school.studentPortal,
+      PERMISSIONS.school.portalSelf,
+      PERMISSIONS.school.lmsRead,
+    ],
+  },
+  {
+    name: 'Teacher',
+    description: 'Teacher workspace — own classes, registers, marks and lesson plans, from anywhere.',
+    permissions: [
+      PERMISSIONS.school.teacherPortal,
+      PERMISSIONS.school.portalSelf,
+      // Unlike the family roles, a teacher DOES hold `school:read`. They need the
+      // register, the class lists, the timetable and the subject tree, and those
+      // reads are scattered across the vertical rather than mirrored behind
+      // self-scoped routes. It is a real widening — `school:read` also reaches
+      // fee balances and the gradebook — and it is the reason a Teacher role
+      // should be granted deliberately by an administrator rather than minted by
+      // an invite the way Student and Parent are.
+      PERMISSIONS.school.read,
+      PERMISSIONS.school.lmsRead,
+      // Owner-scoped, not the org-wide `takeAttendance` / `enterGrades`. A teacher
+      // working from home must be able to mark THEIR register and THEIR papers,
+      // and nothing else; the org-wide grants would let them mark any class in
+      // the school. The handlers resolve ownership — the grant alone decides
+      // nothing.
+      PERMISSIONS.school.ownAttendance,
+      // Marks ENTRY only. `approveGrades` stays with admins — a teacher must not
+      // be able to approve their own marks (the A0 segregation-of-duty split).
+      PERMISSIONS.school.ownGrades,
+      PERMISSIONS.school.ownLessonPlans,
+      PERMISSIONS.school.ownTimetable,
+      PERMISSIONS.hr.self,
+    ],
+  },
+] as const;
+
+/** The portal role a `PortalIdentity.subjectType` should be granted on invite. */
+export const PORTAL_ROLE_BY_SUBJECT: Readonly<Record<'student' | 'guardian', string>> = {
+  student: 'Student',
+  guardian: 'Parent',
+};

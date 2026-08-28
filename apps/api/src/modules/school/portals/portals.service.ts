@@ -1,8 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
+
+/** What the portal app needs on boot to know who it is talking to. */
+export interface PortalContext {
+  kind: 'student' | 'guardian' | 'staff';
+  students: Array<{
+    studentProfileId: string;
+    name: string;
+    admissionNo: string | null;
+    classId: string | null;
+    className: string | null;
+  }>;
+  teacher: { staffProfileId: string; partnerId: string | null; name: string } | null;
+  defaultLanding: 'student' | 'parent' | 'teacher' | null;
+}
 
 /**
  * PortalsService — composes existing services to build role-specific dashboards.
@@ -18,11 +34,78 @@ export class PortalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly portalIdentity: PortalIdentityService,
+    private readonly employeeIdentity: EmployeeIdentityService,
     private readonly statusConfig: AttendanceStatusConfigService,
     // D1: the ONE canonical fee calculation. The portal must not compute a
     // balance of its own, or it will disagree with the bursar.
     private readonly finance: SchoolFinanceQueryService,
   ) {}
+
+  /**
+   * Who is calling, and what may they open — resolved entirely from the verified
+   * token.
+   *
+   * Every other portal route makes the caller name their own subject in the URL,
+   * which means the client has to learn its own `studentProfileId` from somewhere
+   * before it can ask its first question. This is that somewhere. It is the single
+   * call the portal app makes on boot; everything after it keys off the result.
+   *
+   * Nothing here reads request input, so there is no id for a caller to edit.
+   */
+  async myContext(): Promise<PortalContext> {
+    const principal = this.portalIdentity.principal();
+    const studentIds = await this.portalIdentity.accessibleStudents();
+    const students = await this.describeStudents(studentIds);
+
+    // A staff account may also be a teacher; a guardian never is. Only look when
+    // it could matter, so a parent's boot costs one query, not two.
+    const employee = principal.kind === 'staff' ? await this.employeeIdentity.forUser() : null;
+    let teacher: PortalContext['teacher'] = null;
+    if (employee?.staffProfileId) {
+      const partner = employee.partnerId
+        ? await this.prisma.client.partner.findFirst({
+            where: { id: employee.partnerId },
+            select: { name: true },
+          })
+        : null;
+      teacher = {
+        staffProfileId: employee.staffProfileId,
+        partnerId: employee.partnerId,
+        name: partner?.name ?? 'Teacher',
+      };
+    }
+
+    const defaultLanding: PortalContext['defaultLanding'] =
+      principal.kind === 'student' ? 'student'
+      : principal.kind === 'guardian' ? 'parent'
+      : teacher ? 'teacher'
+      : null;
+
+    return { kind: principal.kind, students, teacher, defaultLanding };
+  }
+
+  /** Names and classes for a set of pupils, for pickers and headers. */
+  private async describeStudents(ids: string[]): Promise<PortalContext['students']> {
+    if (ids.length === 0) return [];
+    const rows = await this.prisma.client.studentProfile.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: {
+        id: true,
+        admissionNo: true,
+        currentClassId: true,
+        partner: { select: { name: true } },
+        currentClass: { select: { name: true } },
+      },
+    });
+    return rows.map((r) => ({
+      studentProfileId: r.id,
+      name: r.partner?.name ?? r.admissionNo ?? 'Student',
+      admissionNo: r.admissionNo ?? null,
+      classId: r.currentClassId ?? null,
+      className: r.currentClass?.name ?? null,
+    }));
+  }
 
   /**
    * Parent portal — given a parent's contact id (from auth context in production),
@@ -363,13 +446,61 @@ export class PortalsService {
     return slots;
   }
 
+  /**
+   * Recent marks, from the assessment spine and only once approved.
+   *
+   * Two bugs in one, both of which reached a family's screen:
+   *
+   * 1. This read the legacy `GradeEntry` table while `publishedResults()` below
+   *    reads the `StudentAssessment` spine. The spine is the primary mark store
+   *    (`MARKS_SOURCE`); `GradeEntry` is now written only as a mirror. Two
+   *    sources on one dashboard eventually disagree, and the parent is the one
+   *    who notices.
+   *
+   * 2. It applied no approval filter at all, so a mark that had been entered but
+   *    not yet approved — or had been rejected and sent back — was shown to the
+   *    pupil and their guardian as if it were their result. `approvalStatus` is
+   *    the school's decision that a mark may leave the staffroom, and it is not
+   *    optional on a family-facing surface.
+   *
+   * `effectiveScore` rather than `originalScore`: adjustments are part of the
+   * mark, and showing the pre-adjustment figure would contradict the report card.
+   */
   private async recentGrades(studentProfileId: string) {
-    return this.prisma.client.gradeEntry.findMany({
-      where: { studentProfileId },
-      orderBy: { enteredAt: 'desc' },
+    const rows = await this.prisma.client.studentAssessment.findMany({
+      where: {
+        studentProfileId,
+        deletedAt: null,
+        approvalStatus: 'approved',
+        effectiveScore: { not: null },
+      },
+      orderBy: { updatedAt: 'desc' },
       take: 10,
-      include: { examSchedule: { include: { subject: true, exam: true } } },
+      include: { assessment: true },
     });
+    if (rows.length === 0) return [];
+
+    // `Assessment.subjectId` is a plain column, not a Prisma relation, so the
+    // names come back in one extra query rather than a join.
+    const subjectIds = [...new Set(rows.map((r) => r.assessment?.subjectId).filter(Boolean) as string[])];
+    const subjects = subjectIds.length
+      ? await this.prisma.client.subject.findMany({
+          where: { id: { in: subjectIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+
+    return rows.map((r) => ({
+      id: r.id,
+      score: r.effectiveScore != null ? String(r.effectiveScore) : null,
+      maxScore: String(r.maxScore),
+      percentage: r.percentage != null ? String(r.percentage) : null,
+      termId: r.termId,
+      recordedAt: r.approvedAt ?? r.updatedAt,
+      subject: r.assessment ? { name: subjectName.get(r.assessment.subjectId) ?? 'Subject' } : null,
+      assessment: r.assessment ? { id: r.assessment.id, title: r.assessment.title } : null,
+    }));
   }
 
   private async studentAssignments(studentProfileId: string) {

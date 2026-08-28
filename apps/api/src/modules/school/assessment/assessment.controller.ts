@@ -185,13 +185,21 @@ export class MarkingController {
   }
 
   @Post('participation')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.ownGrades)
   participation(@Body() dto: SetParticipationDto) {
     return this.service.setParticipation(dto);
   }
 
+  /**
+   * Enter one mark.
+   *
+   * Gated on the owner-scoped `school:grades:own`, so a teacher can mark their
+   * own papers from home. `MarkingService` lets the org-wide
+   * `school:grades:write` through unchanged and holds everyone else to the
+   * assessments they own. Approval remains a separate grant on a separate route.
+   */
   @Post('mark')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.ownGrades)
   mark(@Body() dto: RecordMarkDto) {
     return this.service.recordMark(dto);
   }
@@ -204,7 +212,7 @@ export class MarkingController {
 
   /** Marker submits their marks for approval. */
   @Post('submit')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.ownGrades)
   submit(@Body() dto: { assessmentId: string }) {
     return this.service.markingApproval({ assessmentId: dto.assessmentId, action: 'submit' });
   }

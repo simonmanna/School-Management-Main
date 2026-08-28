@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PORTAL_ROLE_BY_SUBJECT, PORTAL_ROLE_PRESETS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { OneTimeTokenService } from '../../../kernel/auth/one-time-token.service';
@@ -27,6 +28,11 @@ export interface InvitePortalAccountDto {
  * unusable password: the account only becomes usable when the invitee accepts
  * their one-time invite and sets a password of their own. That way a registrar
  * never handles, chooses or sees an end user's password.
+ *
+ * It also carries a ROLE. Identity answers "which pupil is this?"; it does not
+ * grant the authority to read anything. Invites used to create a user with no
+ * roles at all, so an invited guardian accepted, signed in, and was refused by
+ * every route — a portal with users and no access.
  */
 @Injectable()
 export class PortalAccountService {
@@ -67,6 +73,8 @@ export class PortalAccountService {
       );
     }
 
+    const roleId = await this.ensurePortalRole(dto.subjectType);
+
     const user =
       existing ??
       (await this.prisma.client.user.create({
@@ -80,8 +88,18 @@ export class PortalAccountService {
           firstName: dto.firstName ?? subject.firstName ?? 'Portal',
           lastName: dto.lastName ?? subject.lastName ?? 'User',
           isActive: false,
+          roles: { connect: [{ id: roleId }] },
         },
       }));
+
+    // Re-invites hit the `existing` branch above and skip the create, so connect
+    // separately as well. `connect` on a many-to-many is idempotent.
+    if (existing) {
+      await this.prisma.client.user.update({
+        where: { id: user.id },
+        data: { roles: { connect: [{ id: roleId }] } },
+      });
+    }
 
     await this.linkIdentity(user.id, dto);
 
@@ -91,6 +109,11 @@ export class PortalAccountService {
       organizationId: this.org,
       payload: { portal: true, subjectType: dto.subjectType },
     });
+
+    // The invite used to carry a bare code and no destination, which left the
+    // parent to work out for themselves where they were supposed to type it.
+    const portalUrl = (process.env.PORTAL_URL ?? '').replace(/\/$/, '');
+    const acceptUrl = `${portalUrl}/accept-invite?token=${encodeURIComponent(inviteToken)}`;
 
     await this.notifications
       .send({
@@ -102,9 +125,13 @@ export class PortalAccountService {
         body:
           `Hello ${dto.firstName ?? subject.firstName ?? ''},\n\n` +
           `An account has been created for you on the school portal. ` +
-          `Use the code below to choose a password. It expires in 7 days.\n\n` +
-          `Invite code: ${inviteToken}\n`,
-        payload: { inviteToken },
+          `Open the link below to choose a password. It expires in 7 days.\n\n` +
+          `${acceptUrl}\n\n` +
+          // The bare code stays as a fallback: plenty of mail clients truncate or
+          // rewrite links, and a parent who cannot open one still needs a way in.
+          `If that link does not open, go to ${portalUrl || 'the school portal'} ` +
+          `and enter this code:\n${inviteToken}\n`,
+        payload: { inviteToken, acceptUrl },
       })
       .catch(() => undefined); // delivery failure must not roll back provisioning
 
@@ -148,6 +175,55 @@ export class PortalAccountService {
   }
 
   // ── internals ──
+
+  /**
+   * The role id for this subject type, creating it if the tenant has none.
+   *
+   * Created on demand rather than assumed: `OrganizationsService` seeds these for
+   * every NEW tenant, but orgs that existed before portal roles did would
+   * otherwise mint authority-less accounts forever. Doing it here means the first
+   * invite backfills the org, and there is no ordering dependency on a migration.
+   *
+   * Exactly once, under concurrency. A registrar bulk-inviting a class of forty
+   * fires forty invites at the same tenant, and a find-then-create would let
+   * several of them race past the read and all try to create. `Role` carries
+   * `@@unique([organizationId, name])`, so the database is the arbiter: an upsert
+   * settles the common case, and a loser that still trips the constraint (Prisma
+   * upsert is not atomic against a concurrent insert) re-reads the winner's row
+   * rather than failing an invite. Either way one role exists, and its permission
+   * list always comes from `PORTAL_ROLE_PRESETS` — never a hand-written copy that
+   * can drift from the seeded one.
+   */
+  private async ensurePortalRole(subjectType: 'student' | 'guardian'): Promise<string> {
+    const roleName = PORTAL_ROLE_BY_SUBJECT[subjectType];
+    const preset = PORTAL_ROLE_PRESETS.find((r) => r.name === roleName);
+    if (!preset) throw new BadRequestException(`No portal role preset named ${roleName}`);
+
+    const where = { organizationId_name: { organizationId: this.org, name: preset.name } };
+    const create = {
+      organizationId: this.org,
+      name: preset.name,
+      description: preset.description,
+      isSystem: true,
+      permissions: preset.permissions as unknown as string[],
+    };
+
+    try {
+      // `update: {}` on purpose. An administrator may have deliberately tuned
+      // this tenant's Parent role; an invite must not quietly reset their edits
+      // back to the preset.
+      const role = await this.prisma.client.role.upsert({ where, update: {}, create, select: { id: true } });
+      return role.id;
+    } catch (e) {
+      if ((e as { code?: string })?.code !== 'P2002') throw e;
+      const winner = await this.prisma.client.role.findFirst({
+        where: { organizationId: this.org, name: preset.name },
+        select: { id: true },
+      });
+      if (!winner) throw e;
+      return winner.id;
+    }
+  }
 
   private assertSubjectShape(dto: InvitePortalAccountDto): void {
     if (dto.subjectType === 'student' && !dto.studentProfileId) {

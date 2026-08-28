@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -112,7 +112,7 @@ export class OneTimeTokenService {
   /** Apply a reset token + new password. Returns ok on success. */
   async applyReset(raw: string, newPassword: string) {
     const consumed = await this.consume(raw, 'password_reset');
-    if (!consumed) throw new Error('Invalid or expired reset token');
+    if (!consumed) throw new BadRequestException('Invalid or expired reset token');
     const hash = await this.password.hash(newPassword);
     await this.prisma.raw.user.update({
       where: { id: consumed.userId! },
@@ -147,7 +147,7 @@ export class OneTimeTokenService {
    */
   async acceptInvite(raw: string, newPassword: string): Promise<{ ok: true; userId: string; organizationId: string }> {
     const consumed = await this.consume(raw, 'invite');
-    if (!consumed) throw new Error('Invalid or expired invite');
+    if (!consumed) throw new BadRequestException('Invalid or expired invite');
     const hash = await this.password.hash(newPassword);
     await this.prisma.raw.user.update({
       where: { id: consumed.userId },

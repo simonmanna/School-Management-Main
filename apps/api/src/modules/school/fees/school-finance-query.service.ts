@@ -1171,6 +1171,85 @@ export class SchoolFinanceQueryService {
    */
   static readonly DEFAULT_CLEARANCE_PERCENT = 100;
 
+  /**
+   * Outstanding, split by whether it is actually due yet.
+   *
+   * "You owe UGX 650,000" and "UGX 250,000 of that was due three weeks ago" are
+   * different statements, and a portal that shows only the first makes a family
+   * on an instalment plan look like a defaulter. The split lives here, next to
+   * the balance it must agree with, rather than in the portal: a frontend that
+   * subtracts payments from invoices to derive its own figures is exactly how a
+   * portal comes to contradict the bursar's statement.
+   *
+   * `outstanding` is the canonical balance, untouched. The overdue and not-yet-due
+   * halves are apportioned from open invoice residuals, so they sum to the
+   * invoiced portion of the debt — an opening balance carried forward from a
+   * previous year has no invoice and therefore no due date, and is reported
+   * separately rather than silently counted as overdue.
+   */
+  async outstandingBreakdown(
+    studentProfileId: string,
+    asOf: Date = new Date(),
+  ): Promise<{
+    studentProfileId: string;
+    outstanding: number;
+    overdue: number;
+    dueLater: number;
+    undated: number;
+    nextDueDate: string | null;
+    overdueInvoiceCount: number;
+  }> {
+    const organizationId = this.tenant.organizationId;
+    const balance = await this.studentBalance(studentProfileId);
+
+    const invoices = await this.prisma.client.schoolFeeInvoice.findMany({
+      where: { organizationId, studentProfileId, status: { notIn: ['cancelled', 'voided', 'draft'] } },
+      select: { documentId: true, dueDate: true },
+    });
+    const docs = invoices.length
+      ? await this.prisma.client.document.findMany({
+          where: { id: { in: invoices.map((i) => i.documentId) } },
+          select: { id: true, amountResidual: true },
+        })
+      : [];
+    const residualById = new Map(docs.map((d) => [d.id, Number(d.amountResidual ?? 0)]));
+
+    let overdue = 0;
+    let dueLater = 0;
+    let overdueInvoiceCount = 0;
+    let nextDue: Date | null = null;
+
+    for (const inv of invoices) {
+      const residual = residualById.get(inv.documentId) ?? 0;
+      if (residual <= 0) continue;
+      if (inv.dueDate && inv.dueDate <= asOf) {
+        overdue += residual;
+        overdueInvoiceCount += 1;
+      } else if (inv.dueDate) {
+        dueLater += residual;
+        if (!nextDue || inv.dueDate < nextDue) nextDue = inv.dueDate;
+      } else {
+        // No due date recorded. Counted as neither — claiming it is overdue would
+        // be an accusation the data does not support.
+        dueLater += 0;
+      }
+    }
+
+    const round = (n: number) => Number(n.toFixed(2));
+    const dated = round(overdue + dueLater);
+    const undated = round(Math.max(0, balance.balance - dated));
+
+    return {
+      studentProfileId,
+      outstanding: balance.balance,
+      overdue: round(overdue),
+      dueLater: round(dueLater),
+      undated,
+      nextDueDate: nextDue ? nextDue.toISOString() : null,
+      overdueInvoiceCount,
+    };
+  }
+
   async feeClearance(
     studentProfileId: string,
     opts: { thresholdPercent?: number } = {},

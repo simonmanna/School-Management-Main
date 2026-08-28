@@ -4,6 +4,7 @@ import type { CourseOffering, LessonPlan } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 
 const LP_WORKFLOW: Record<string, string[]> = {
   draft: ['submitted', 'archived'],
@@ -19,10 +20,31 @@ export class LessonPlanningService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
+    private readonly employeeIdentity: EmployeeIdentityService,
   ) {}
 
   private get org() {
     return this.tenant.organizationId;
+  }
+
+  /**
+   * May this caller write THIS plan?
+   *
+   * `school:lessonplans:write` is the departmental grant: hold it and you may
+   * edit anybody's plan. A teacher working from home holds only
+   * `school:lessonplans:own`, which is meaningless unless something checks who
+   * owns the row — and until now nothing did, on any route. The plan's
+   * `teacherPartnerId` holds a `StaffProfile.id` despite the name, which is what
+   * `isSelfTeacher` compares against.
+   *
+   * A plan with no teacher recorded is treated as departmental: an owner-only
+   * caller cannot claim it by being the first to edit it.
+   */
+  private async assertMayWritePlan(teacherPartnerId: string | null | undefined): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.includes(PERMISSIONS.school.manageLessonPlans) || perms.includes('*')) return;
+    if (teacherPartnerId && (await this.employeeIdentity.isSelfTeacher(teacherPartnerId))) return;
+    throw new ForbiddenException('You may only edit your own lesson plans');
   }
 
   // ───────────── CourseOffering ─────────────
@@ -145,6 +167,8 @@ export class LessonPlanningService {
   }
 
   async createLessonPlan(dto: any) {
+    // A teacher may create a plan for themselves, not for a colleague.
+    await this.assertMayWritePlan(dto.teacherPartnerId);
     const org = this.org;
     const lp = await this.prisma.client.lessonPlan.create({
       data: {
@@ -262,6 +286,7 @@ export class LessonPlanningService {
   /** Optimistic-concurrency guarded update. Rejects stale writes (409). */
   async updateLessonPlan(id: string, dto: any) {
     const lp = await this.getLessonPlan(id);
+    await this.assertMayWritePlan(lp.teacherPartnerId);
     if (lp.version !== dto.version) {
       throw new BadRequestException(`Stale update: expected version ${lp.version}, got ${dto.version}`);
     }
@@ -293,6 +318,7 @@ export class LessonPlanningService {
 
   async submitLessonPlan(id: string, dto: { version: number }) {
     const lp = await this.getLessonPlan(id);
+    await this.assertMayWritePlan(lp.teacherPartnerId);
     if (lp.version !== dto.version) throw new BadRequestException(`Stale update: expected version ${lp.version}`);
     if (!['draft', 'needs_revision'].includes(lp.workflowStatus)) {
       throw new BadRequestException(`Cannot submit a plan in status '${lp.workflowStatus}'`);

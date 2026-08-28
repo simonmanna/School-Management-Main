@@ -48,8 +48,16 @@ export class StudentAttendanceController {
 
   /* ── Attendance recording / read ── */
 
+  /**
+   * Take a register.
+   *
+   * Gated on the owner-scoped `school:attendance:own`, so a teacher can mark
+   * their own class from home. The org-wide `school:attendance:write` is checked
+   * inside `StudentAttendanceService.mark`, which lets a deputy head mark any
+   * class and holds everyone else to the classes they actually teach.
+   */
   @Post('mark')
-  @RequirePermissions(PERMISSIONS.school.takeAttendance)
+  @RequirePermissions(PERMISSIONS.school.ownAttendance)
   mark(@Body() dto: BulkMarkAttendanceDto) {
     return this.attendance.mark(dto);
   }
@@ -88,9 +96,9 @@ export class StudentAttendanceController {
     return this.attendance.report(classId, startDate, endDate);
   }
 
-  /** Pattendance correction (audit-logged). */
+  /** Attendance correction (audit-logged). Own class only, unless org-wide. */
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.takeAttendance)
+  @RequirePermissions(PERMISSIONS.school.ownAttendance)
   correct(@Param('id') id: string, @Body() dto: CorrectAttendanceDto) {
     return this.attendance.correct(id, dto);
   }

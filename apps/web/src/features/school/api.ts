@@ -1943,6 +1943,169 @@ export function useParentPayments(studentProfileId?: string) {
   });
 }
 
+/* ───────────────────── Portal accounts (registrar provisioning) ─────────────────────
+ *
+ * The endpoints behind these have existed since the PortalIdentity migration and
+ * had no caller anywhere in the web app — so there was no way to create a portal
+ * login at all, and the portal had no users. Gated on `school:portal:accounts:write`,
+ * deliberately separate from the portal permissions themselves: being able to USE
+ * the parent portal must not imply being able to MINT accounts that see other
+ * families.
+ */
+
+export interface PortalAccount {
+  id: string;
+  userId: string;
+  subjectType: 'student' | 'guardian';
+  studentProfileId: string | null;
+  guardianContactId: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  user?: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string | null;
+    /** False until the invite is accepted — an unaccepted invite is not a login. */
+    isActive: boolean;
+    lastLoginAt: string | null;
+  } | null;
+}
+
+export interface InvitePortalAccountInput {
+  subjectType: 'student' | 'guardian';
+  /** Required iff subjectType === 'student'. */
+  studentProfileId?: string;
+  /** Required iff subjectType === 'guardian'. FK to Contact. */
+  guardianContactId?: string;
+  /** Where the invite is sent. Becomes the login identifier. */
+  email: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+export interface InvitePortalAccountResult {
+  userId: string;
+  /** Empty when the account was already linked — nothing new was sent. */
+  inviteToken: string;
+  expiresInDays: number;
+}
+
+export function usePortalAccounts(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'portal-accounts', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<PortalAccount[]>(`${S}/portal-accounts/student/${studentProfileId}`)).data,
+  });
+}
+
+export function useInvitePortalAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: InvitePortalAccountInput) =>
+      (await api.post<InvitePortalAccountResult>(`${S}/portal-accounts/invite`, dto)).data,
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ['school', 'portal-accounts', v.studentProfileId] }),
+  });
+}
+
+export function useRevokePortalAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { portalIdentityId: string; studentProfileId?: string }) =>
+      (await api.delete<{ ok: true }>(`${S}/portal-accounts/${dto.portalIdentityId}`)).data,
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ['school', 'portal-accounts', v.studentProfileId] }),
+  });
+}
+
+export interface BulkInviteOutcome {
+  studentProfileId: string;
+  studentName: string;
+  guardianName: string;
+  email: string | null;
+  status: 'invited' | 'already-linked' | 'no-email' | 'failed';
+  detail?: string;
+}
+
+/**
+ * Invite every guardian in a class, one term-start action instead of forty.
+ *
+ * Fanned out on the client rather than added as a bulk endpoint: it composes
+ * two routes that already exist and already enforce their own permissions, and
+ * a server-side loop would need its own partial-failure reporting to say the
+ * same thing this returns. Guardians with no email on file are reported, never
+ * skipped silently — an unreported skip is a family that never hears from the
+ * school and nobody notices.
+ */
+export function useBulkInviteGuardians() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { classId: string }): Promise<BulkInviteOutcome[]> => {
+      const roster = (await api.get<RosterStudent[]>(`${S}/students/by-class/${dto.classId}`)).data;
+      const results: BulkInviteOutcome[] = [];
+
+      for (const student of roster) {
+        const studentName = student.partner?.name ?? student.admissionNo;
+        let guardians: Guardian[] = [];
+        try {
+          guardians = (await api.get<Guardian[]>(`${S}/guardians/by-student/${student.id}`)).data;
+        } catch {
+          results.push({
+            studentProfileId: student.id,
+            studentName,
+            guardianName: '—',
+            email: null,
+            status: 'failed',
+            detail: 'could not read guardians',
+          });
+          continue;
+        }
+
+        for (const g of guardians) {
+          const name = [g.contact?.firstName, g.contact?.lastName].filter(Boolean).join(' ') || 'Guardian';
+          const email = g.contact?.email?.trim() || null;
+          if (!email) {
+            results.push({ studentProfileId: student.id, studentName, guardianName: name, email: null, status: 'no-email' });
+            continue;
+          }
+          try {
+            const res = await api.post<InvitePortalAccountResult>(`${S}/portal-accounts/invite`, {
+              subjectType: 'guardian',
+              guardianContactId: g.guardianContactId,
+              email,
+              firstName: g.contact?.firstName,
+              lastName: g.contact?.lastName ?? undefined,
+            });
+            results.push({
+              studentProfileId: student.id,
+              studentName,
+              guardianName: name,
+              email,
+              // An empty token means the account was already linked, so nothing
+              // was sent. Saying "invited" there would promise an email that
+              // never arrives.
+              status: res.data.inviteToken ? 'invited' : 'already-linked',
+            });
+          } catch (e: any) {
+            results.push({
+              studentProfileId: student.id,
+              studentName,
+              guardianName: name,
+              email,
+              status: 'failed',
+              detail: e?.response?.data?.message ?? 'invite failed',
+            });
+          }
+        }
+      }
+      return results;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'portal-accounts'] }),
+  });
+}
+
 /* ── D3 · per-pupil fee overrides ── */
 
 export interface StudentFeeAssignment {

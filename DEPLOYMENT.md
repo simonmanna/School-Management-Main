@@ -47,7 +47,13 @@ Read `deployment/2026-08-r1/README.md` before running it. That release drops
 columns holding live accounting data and requires a backfill, a mapping-report
 sign-off, and an offline-sync drain gate. `update-pos.ps1` cannot do it.
 
+> **The family portal has its own guide.** Students, guardians and teachers sign
+> in to `apps/portal`, a separate app from the back office, and it is the one that
+> has to face the public internet. See **`docs/PORTAL_DEPLOYMENT.md`** for TLS,
+> CORS, SMTP, the Tailscale option for staff, and how the registrar issues logins.
+
 Browse:
+- Portal: http://localhost:5175  (families + teachers)
 - App:    http://localhost:5173
 - API:    http://localhost:3000/api/v1
 - Docs:   http://localhost:3000/api/docs

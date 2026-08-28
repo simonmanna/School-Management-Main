@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────────────────────────────────
+   School portal — design tokens
+
+   Deliberately not the admin app's palette. The two are different products for
+   different people: one is a back-office terminal used all day by staff who know
+   it, the other is opened for ninety seconds by a parent who may never have used
+   it before. Teal reads as "school" rather than "till", and the type scale runs
+   larger because the median device here is a phone in one hand.
+   ────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background: 180 20% 99%;
+    --foreground: 200 25% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 200 25% 12%;
+
+    --primary: 175 77% 26%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 174 42% 94%;
+    --secondary-foreground: 175 60% 18%;
+
+    --muted: 180 16% 96%;
+    --muted-foreground: 200 12% 42%;
+
+    --accent: 32 95% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 62% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 185 20% 88%;
+    --input: 185 20% 88%;
+    --ring: 175 77% 32%;
+
+    --radius: 0.875rem;
+  }
+
+  .dark {
+    --background: 200 30% 8%;
+    --foreground: 180 15% 96%;
+    --card: 200 28% 11%;
+    --card-foreground: 180 15% 96%;
+
+    --primary: 173 65% 45%;
+    --primary-foreground: 200 30% 8%;
+
+    --secondary: 195 25% 18%;
+    --secondary-foreground: 180 15% 96%;
+
+    --muted: 195 25% 16%;
+    --muted-foreground: 190 12% 65%;
+
+    --accent: 32 92% 55%;
+    --accent-foreground: 200 30% 8%;
+
+    --destructive: 0 66% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 52% 46%;
+    --success-foreground: 200 30% 8%;
+
+    --border: 195 22% 22%;
+    --input: 195 22% 22%;
+    --ring: 173 65% 45%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    /* A portal opened on a phone should not rubber-band horizontally when a
+       table is wider than the screen; the table scrolls, the page does not. */
+    overflow-x: hidden;
+  }
+
+  /* Tap targets. Anything a thumb has to hit gets a real minimum size — the
+     admin app can rely on a mouse, this cannot. */
+  button,
+  [role='button'],
+  a.tap {
+    min-height: 2.75rem;
+  }
+}

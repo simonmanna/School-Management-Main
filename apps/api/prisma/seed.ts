@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { ALL_PERMISSIONS, type ProductType } from '@erp/shared';
+import { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, type ProductType } from '@erp/shared';
 import { seedUomCategories } from '../src/modules/core/product/uom-seed';
 import { seedAccountingCore } from '../src/modules/accounting/coa/coa-seeder';
 import { seedDmsRegistry, wireDmsRoleKeys } from '../src/modules/documents/dms.seed-registry';
@@ -68,6 +68,23 @@ async function main(): Promise<void> {
       permissions: ALL_PERMISSIONS,
     },
   });
+
+  // --- Portal roles (student / parent / teacher) ----------------------------
+  // Upserted, not created: re-running the seed on an org that already has them
+  // must refresh the permission list rather than fail on the unique constraint.
+  for (const preset of PORTAL_ROLE_PRESETS) {
+    await prisma.role.upsert({
+      where: { organizationId_name: { organizationId: org.id, name: preset.name } },
+      update: { permissions: preset.permissions },
+      create: {
+        organizationId: org.id,
+        name: preset.name,
+        description: preset.description,
+        isSystem: true,
+        permissions: preset.permissions,
+      },
+    });
+  }
 
   // --- Default table zones (dining areas) -----------------------------------
   // Config master: PosTable.zone keys must resolve for a fresh org. Kept in

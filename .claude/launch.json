@@ -17,6 +17,21 @@
       "autoPort": false
     },
     {
+      "name": "portal-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@erp/portal",
+        "exec",
+        "vite",
+        "--port",
+        "5198",
+        "--strictPort"
+      ],
+      "port": 5198,
+      "autoPort": false
+    },
+    {
       "name": "api-dev",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
