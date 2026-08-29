@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { ScopedToStudent } from '../../../kernel/auth/guards/scoped-to-student.decorator';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 
 /**
@@ -14,12 +15,14 @@ export class SchoolFinanceQueryController {
 
   @Get('students/:id/balance')
   @RequirePermissions(PERMISSIONS.school.read)
+  @ScopedToStudent('id')
   balance(@Param('id') id: string) {
     return this.finance.studentBalance(id);
   }
 
   @Get('students/:id/ledger')
   @RequirePermissions(PERMISSIONS.school.read)
+  @ScopedToStudent('id')
   ledger(@Param('id') id: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.finance.studentLedger(id, { from, to });
   }

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { ScopedToStudent } from '../../../kernel/auth/guards/scoped-to-student.decorator';
 import { MedicalRecordService } from './medical-record.service';
 import { StudentDocumentService } from './student-document.service';
 import { CreateStudentDocumentDto, UpsertMedicalRecordDto } from './dto.types';
@@ -11,6 +12,7 @@ export class MedicalRecordController {
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
+  @ScopedToStudent('studentProfileId')
   get(@Param('studentProfileId') id: string) {
     return this.service.get(id);
   }
@@ -28,6 +30,7 @@ export class StudentDocumentController {
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
+  @ScopedToStudent('studentProfileId')
   list(@Param('studentProfileId') id: string) {
     return this.service.listByStudent(id);
   }

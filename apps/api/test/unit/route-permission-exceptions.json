@@ -1,0 +1,495 @@
+{
+  "kernel/approvals/approvals.controller.ts": [
+    {
+      "cls": "ApprovalsController",
+      "method": "decide",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ApprovalsController",
+      "method": "findOne",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ApprovalsController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ApprovalsController",
+      "method": "request",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "kernel/audit/audit-log.controller.ts": [
+    {
+      "cls": "AuditLogController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "kernel/auth/auth.controller.ts": [
+    {
+      "cls": "AuthController",
+      "method": "change",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "disable",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "enroll",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "me",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "revoke",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "sessions",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AuthController",
+      "method": "verifyEnroll",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/accounting/reporting/accounting-reporting.controller.ts": [
+    {
+      "cls": "AccountingReportingController",
+      "method": "accountLedger",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "balanceSheetDetailed",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "balanceSheetReport",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "cashFlowReport",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "generalLedger",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "profitAndLoss",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "rebuildSnapshots",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "tieout",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "AccountingReportingController",
+      "method": "trialBalance",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/accounting/reporting/export.controller.ts": [
+    {
+      "cls": "ExportController",
+      "method": "arAgingCsv",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExportController",
+      "method": "invoicePdf",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExportController",
+      "method": "trialBalanceCsv",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/accounting/reporting/reports-dashboard.controller.ts": [
+    {
+      "cls": "ReportsDashboardController",
+      "method": "activity",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ReportsDashboardController",
+      "method": "kpi",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/core/organizations.controller.ts": [
+    {
+      "cls": "OrganizationsController",
+      "method": "deactivate",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "OrganizationsController",
+      "method": "invite",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "OrganizationsController",
+      "method": "listUsers",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "OrganizationsController",
+      "method": "me",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "OrganizationsController",
+      "method": "setMyBranch",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "OrganizationsController",
+      "method": "updateSettings",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/documents/document-actions.controller.ts": [
+    {
+      "cls": "DocumentActionsController",
+      "method": "run",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/documents/documents.controller.ts": [
+    {
+      "cls": "DocumentsController",
+      "method": "activateTemplate",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "addSource",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "attach",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "createRelation",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "createTemplate",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "deleteRelation",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "detail",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "listAttachments",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "listRelations",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "listSources",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "listTemplates",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "patch",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "preview",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "printDoc",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "relationChain",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "removeAttachment",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "removeSource",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DocumentsController",
+      "method": "timeline",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/expenses/expense-categories.controller.ts": [
+    {
+      "cls": "ExpenseCategoriesController",
+      "method": "create",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpenseCategoriesController",
+      "method": "findOne",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpenseCategoriesController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpenseCategoriesController",
+      "method": "remove",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpenseCategoriesController",
+      "method": "update",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/expenses/expenses.controller.ts": [
+    {
+      "cls": "ExpensesController",
+      "method": "accounts",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "approve",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "audit",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "create",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "findOne",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "pay",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "reject",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "remove",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "stats",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "suppliers",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "update",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "ExpensesController",
+      "method": "voidExpense",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/pos/digital-menu-public.controller.ts": [
+    {
+      "cls": "DigitalMenuPublicController",
+      "method": "catalog",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DigitalMenuPublicController",
+      "method": "placeOrder",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "DigitalMenuPublicController",
+      "method": "track",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/pos/pos-menu.controller.ts": [
+    {
+      "cls": "PosMenuController",
+      "method": "available",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "PosMenuController",
+      "method": "getOne",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "PosMenuController",
+      "method": "list",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "PosMenuController",
+      "method": "listCategories",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ],
+  "modules/task/task.controller.ts": [
+    {
+      "cls": "TaskController",
+      "method": "addComment",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "create",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "createAutoRule",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "createLabel",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "createTemplate",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "dashboard",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "findAll",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "findOne",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "listAutoRules",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "listLabels",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "listTemplates",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "remove",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "reorder",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "toggleChecklist",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "update",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    },
+    {
+      "cls": "TaskController",
+      "method": "verify",
+      "reason": "GAP \u2014 undecorated at build; tracked by route-permission-coverage ledger until explicitly gated (Phase 4 wave)"
+    }
+  ]
+}

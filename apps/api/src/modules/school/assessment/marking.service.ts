@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { computeEffective } from './assessment-math';
 import type { AppendAdjustmentDto, MarkingApprovalDto, RecordMarkDto, SetParticipationDto } from './dto.types';
@@ -30,6 +31,7 @@ export class MarkingService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly employeeIdentity: EmployeeIdentityService,
+    private readonly dataScope: DataScopeService,
   ) {}
 
   /**
@@ -56,12 +58,14 @@ export class MarkingService {
       where: { id: assessmentId, organizationId: this.tenant.organizationId },
       select: { teacherPartnerId: true },
     });
-    if (
-      !assessment?.teacherPartnerId ||
-      !(await this.employeeIdentity.isSelfTeacher(assessment.teacherPartnerId))
-    ) {
+    if (!assessment?.teacherPartnerId) {
       throw new ForbiddenException('You may only mark your own assessments');
     }
+    // Single ownership implementation: DataScopeService asserts the caller owns
+    // (is) this teacher record. A teacher with `school:grades:own` and the
+    // matching staff profile passes; an office clerk without the broad grant
+    // does not.
+    await this.dataScope.assertOwnsStaffRecord(assessment.teacherPartnerId);
   }
 
   /**

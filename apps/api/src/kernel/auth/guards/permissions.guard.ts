@@ -3,6 +3,8 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { NO_PERMISSION_REQUIRED_KEY } from '../decorators/no-permission-required.decorator';
 import type { AuthUser } from '../jwt-token.service';
 
 /**
@@ -30,6 +32,15 @@ export class PermissionsGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Explicit opt-outs take precedence: a route is either public, explicitly
+    // session-only (with a recorded reason), or gated by permissions.
+    if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()])) {
+      return true;
+    }
+    if (this.reflector.getAllAndOverride<string>(NO_PERMISSION_REQUIRED_KEY, [context.getHandler(), context.getClass()])) {
+      return true;
+    }
+
     const required = this.reflector.getAllAndOverride<string[]>(PERMISSIONS_KEY, [
       context.getHandler(),
       context.getClass(),

@@ -14,6 +14,7 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:school": "ts-node prisma/seed-school-demo.ts",
+    "authz:inventory": "ts-node ../../scripts/authz-inventory.ts",
     "backfill:inventory-gl": "ts-node src/scripts/backfill-inventory-gl.ts",
     "rls:setup-role": "ts-node scripts/setup-rls-role.ts",
     "test": "jest",

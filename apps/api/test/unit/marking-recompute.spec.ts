@@ -51,6 +51,8 @@ function makeService(sa: Record<string, unknown>, entries: Row[] = [], adjustmen
     // allowed to run it; assessment ownership is covered by the marking-ownership
     // spec.
     { isSelfTeacher: jest.fn().mockResolvedValue(false) } as any,
+    // DataScopeService mock (added when marking ownership moved to DataScopeService).
+    { assertOwnsStaffRecord: jest.fn().mockResolvedValue(undefined) } as any,
   );
   // Silence the intentional warn — its presence is asserted via the created row.
   jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);

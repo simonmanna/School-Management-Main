@@ -606,6 +606,17 @@ export const PERMISSIONS = {
     update: 'backup:update',
     run: 'backup:run',
   },
+  featureFlag: {
+    read: 'feature_flag:read',
+    write: 'feature_flag:write',
+  },
+  recurring: {
+    read: 'recurring:read',
+    write: 'recurring:write',
+  },
+  search: {
+    read: 'search:read',
+  },
   fixedAsset: {
     create: 'fixed_asset:create',
     read: 'fixed_asset:read',
@@ -768,6 +779,174 @@ export interface RolePreset {
   name: string;
   description: string;
   permissions: string[];
+  /** Data scope for staff persona presets (Phase 2). Portal presets omit it. */
+  dataScope?: RoleDataScope;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Permission metadata — makes the admin UI matrix legible.
+ *
+ * The catalog (431 keys) uses `resource:action` (and a few dot-notation keys
+ * from the POS frontend). `PERMISSION_META` supplies a human label + group +
+ * optional `risk` flag for the keys that matter (every `school:*`, every
+ * `hr:*`, and all approve/writeoff/delete/close/secrets keys); everything else
+ * falls back to `humaniseKey()` which splits on the LAST `:`/`.` and
+ * title-cases. Maintaining a hand-written entry per key would drift from the
+ * catalog; instead we DERIVE from `PERMISSIONS` and override the high-value
+ * ones. `risk: 'high'` marks segregation-of-duty keys an auditor must see.
+ *
+ * `buildPermissionCatalog()` returns the grouped `{ groups: [...] }` shape the
+ * catalog endpoint serves — and is unit-tested so the grouping logic cannot
+ * silently rot.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export type RoleDataScope = 'own' | 'class' | 'department' | 'school';
+
+/** Last-segment split that handles both `a:b:c` and `a.b.c` keys. */
+function splitKey(key: string): { resource: string; action: string } {
+  const sep = key.includes(':') ? ':' : '.';
+  const idx = key.lastIndexOf(sep);
+  return idx >= 0
+    ? { resource: key.slice(0, idx), action: key.slice(idx + 1) }
+    : { resource: key, action: key };
+}
+
+export function humaniseKey(key: string): string {
+  const { action } = splitKey(key);
+  return action
+    .split(/[_\-]/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+export interface PermissionMeta {
+  label: string;
+  description: string;
+  group: string;
+  subgroup?: string;
+  risk?: 'high';
+}
+
+/**
+ * Explicit metadata for the keys the admin UI must render correctly.
+ * Keyed by the full permission string. Order is irrelevant — lookup is by key.
+ */
+export const PERMISSION_META: Record<string, PermissionMeta> = {
+  // ── School: segregation-of-duty / money / secrets (all high-risk) ──────────
+  'school:grades:approve': { label: 'Approve grades', description: 'Sign off marks entered by teachers. Must not be held by whoever enters them.', group: 'School', subgroup: 'Assessment', risk: 'high' },
+  'school:results:approve': { label: 'Approve results', description: 'Approve a computed term/result set.', group: 'School', subgroup: 'Results', risk: 'high' },
+  'school:results:publish': { label: 'Publish results', description: 'Release results to pupils and parents.', group: 'School', subgroup: 'Results', risk: 'high' },
+  'school:results:amend': { label: 'Amend published results', description: 'Edit results after publication.', group: 'School', subgroup: 'Results', risk: 'high' },
+  'school:marks:moderate': { label: 'Moderate marks', description: 'Review/adjust marks before approval.', group: 'School', subgroup: 'Assessment', risk: 'high' },
+  'school:fees:waiver:approve': { label: 'Approve fee waiver', description: 'Approve a waiver of owed fees.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:fees:credit:approve': { label: 'Approve fee credit', description: 'Approve a fee credit (overpayment/refundable).', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:fees:refund:approve': { label: 'Approve fee refund', description: 'Approve a cash/material refund.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:fees:adjustment:approve': { label: 'Approve fee adjustment', description: 'Approve a correction to a fee invoice.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:fees:writeoff': { label: 'Write off fees', description: 'Forgive a fee debt entirely.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:fees:period:close': { label: 'Close fee period', description: 'Lock a billing period to further changes.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
+  'school:lessonplans:approve': { label: 'Approve lesson plans', description: 'Sign off lesson plans.', group: 'School', subgroup: 'Teaching', risk: 'high' },
+  'role:create': { label: 'Create role', description: 'Define a new role.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
+  'role:update': { label: 'Edit role', description: 'Change a role\'s permissions/scope.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
+  'role:delete': { label: 'Delete role', description: 'Remove a role.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
+  'user:create': { label: 'Create user', description: 'Provision a login.', group: 'Administration', subgroup: 'Users', risk: 'high' },
+  'user:update': { label: 'Edit user', description: 'Change a user\'s roles/account.', group: 'Administration', subgroup: 'Users', risk: 'high' },
+  'user:delete': { label: 'Delete user', description: 'Remove a login.', group: 'Administration', subgroup: 'Users', risk: 'high' },
+  'backup:run': { label: 'Run backup', description: 'Trigger a data export/backup.', group: 'Administration', subgroup: 'System', risk: 'high' },
+  'backup:update': { label: 'Manage backup config', description: 'Alter backup retention/location.', group: 'Administration', subgroup: 'System', risk: 'high' },
+  'school:portal:accounts:write': { label: 'Manage portal accounts', description: 'Invite/revoke family & pupil logins — mints credentials that see grades and balances.', group: 'School', subgroup: 'Portal', risk: 'high' },
+  'school:certificates:revoke': { label: 'Revoke certificates', description: 'Void an issued certificate.', group: 'School', subgroup: 'Certificates', risk: 'high' },
+
+  // ── School: read / workspace (low-risk scaffolding the UI groups together) ──
+  'school:read': { label: 'School read (org-wide)', description: 'Read any school record. Broad — grant deliberately.', group: 'School', subgroup: 'General' },
+  'school:portal:self': { label: 'Ask who am I', description: 'The narrowest grant: the account may ask the API its own identity.', group: 'School', subgroup: 'Portal' },
+  'school:students:write': { label: 'Manage students', description: 'CRUD pupil records.', group: 'School', subgroup: 'Students' },
+  'school:staff:write': { label: 'Manage staff', description: 'CRUD staff profiles.', group: 'School', subgroup: 'Staff' },
+  'school:admissions:write': { label: 'Manage admissions', description: 'CRUD admission applications.', group: 'School', subgroup: 'Admissions' },
+  'school:attendance:write': { label: 'Take attendance (org-wide)', description: 'Mark registers for any class. Use the own-scoped grant for teachers.', group: 'School', subgroup: 'Attendance' },
+  'school:attendance:own': { label: 'Take own-class attendance', description: 'Mark registers for classes you teach only.', group: 'School', subgroup: 'Attendance' },
+  'school:grades:write': { label: 'Enter grades', description: 'Enter marks. Approving is a separate grant.', group: 'School', subgroup: 'Assessment' },
+  'school:grades:own': { label: 'Enter own marks', description: 'Enter marks for your own assessments only.', group: 'School', subgroup: 'Assessment' },
+  'school:lessonplans:write': { label: 'Manage lesson plans', description: 'CRUD lesson plans (org-wide).', group: 'School', subgroup: 'Teaching' },
+  'school:lessonplans:own': { label: 'Manage own lesson plans', description: 'CRUD your own lesson plans only.', group: 'School', subgroup: 'Teaching' },
+  'school:timetable:own': { label: 'Manage own timetable', description: 'Edit your own timetable entries.', group: 'School', subgroup: 'Teaching' },
+  'school:fees:write': { label: 'Manage fee structures', description: 'Configure fee categories/structures/schedules.', group: 'School', subgroup: 'Fees & Finance' },
+  'school:fees:collect': { label: 'Collect payments', description: 'Record fee payments at the till/gate.', group: 'School', subgroup: 'Fees & Finance' },
+  'school:fees:refund': { label: 'Issue refund', description: 'Pay money back to a payer.', group: 'School', subgroup: 'Fees & Finance' },
+  'school:fees:reconcile': { label: 'Reconcile payments', description: 'Tie payments to the AR ledger.', group: 'School', subgroup: 'Fees & Finance' },
+  'school:analytics:read': { label: 'Read analytics', description: 'View school analytics dashboards.', group: 'School', subgroup: 'Analytics' },
+  'school:analytics:export': { label: 'Export analytics', description: 'Export analytics data.', group: 'School', subgroup: 'Analytics' },
+  'school:documents:read': { label: 'Read school documents', description: 'View school document store.', group: 'School', subgroup: 'Documents' },
+  'school:documents:write': { label: 'Manage school documents', description: 'Upload/edit the school document store.', group: 'School', subgroup: 'Documents' },
+  'school:transport:write': { label: 'Manage transport', description: 'Configure routes, fleet and trips.', group: 'School', subgroup: 'Transport' },
+  'school:transport:override': { label: 'Override transport rules', description: 'Bypass transport capacity/safety checks.', group: 'School', subgroup: 'Transport', risk: 'high' },
+  'school:hostel:write': { label: 'Manage hostel', description: 'Configure hostel allocations.', group: 'School', subgroup: 'Hostel' },
+  'school:meals:write': { label: 'Manage meals', description: 'Configure meal programs/menus.', group: 'School', subgroup: 'Meals' },
+  'school:library:write': { label: 'Manage library', description: 'CRUD the library catalogue.', group: 'School', subgroup: 'Library' },
+  'school:communicate': { label: 'Communicate', description: 'Send school communications.', group: 'School', subgroup: 'Communication' },
+  'school:certificates:issue': { label: 'Issue certificates', description: 'Generate certificates.', group: 'School', subgroup: 'Certificates' },
+
+  // ── HR (grouped, low/medium risk) ─────────────────────────────────────────
+  'hr:self': { label: 'Own HR record', description: 'Read your own HR/payslip record.', group: 'HR', subgroup: 'Self-service' },
+  'hr:read': { label: 'HR read (org-wide)', description: 'Read every employee\'s HR data.', group: 'HR', subgroup: 'General' },
+  'hr:employee': { label: 'Manage employees', description: 'CRUD employee records.', group: 'HR', subgroup: 'Employees' },
+  'hr:employee_identity': { label: 'Link employee to login', description: 'Bind an HrEmployee to a user account.', group: 'HR', subgroup: 'Employees', risk: 'high' },
+  'hr:payroll': { label: 'Manage payroll', description: 'Run/configure payroll.', group: 'HR', subgroup: 'Payroll' },
+  'hr:payslip': { label: 'Manage payslips', description: 'Issue/adjust payslips.', group: 'HR', subgroup: 'Payroll' },
+  'hr:audit': { label: 'HR audit', description: 'Read HR audit trails.', group: 'HR', subgroup: 'Compliance' },
+};
+
+/**
+ * Build the grouped permission catalog for the admin UI.
+ * Falls back to `humaniseKey` for any key without an explicit `PERMISSION_META`
+ * entry, so the matrix still renders the 290+ plain-CRUD keys correctly.
+ */
+export function buildPermissionCatalog(): {
+  groups: Array<{
+    group: string;
+    subgroups: Array<{
+      subgroup: string;
+      permissions: Array<{
+        key: string;
+        label: string;
+        description: string;
+        risk?: 'high';
+      }>;
+    }>;
+  }>;
+} {
+  const groups = new Map<string, Map<string, Array<{ key: string; label: string; description: string; risk?: 'high' }>>>();
+
+  for (const key of ALL_PERMISSIONS) {
+    const meta = PERMISSION_META[key];
+    const group = meta?.group ?? splitKey(key).resource;
+    const subgroup = meta?.subgroup ?? humaniseKey(key);
+    let subMap = groups.get(group);
+    if (!subMap) {
+      subMap = new Map();
+      groups.set(group, subMap);
+    }
+    let list = subMap.get(subgroup);
+    if (!list) {
+      list = [];
+      subMap.set(subgroup, list);
+    }
+    list.push({
+      key,
+      label: meta?.label ?? humaniseKey(key),
+      description: meta?.description ?? `${humaniseKey(key)} (${key})`,
+      ...(meta?.risk ? { risk: meta.risk } : {}),
+    });
+  }
+
+  return {
+    groups: [...groups.entries()].map(([group, subMap]) => ({
+      group,
+      subgroups: [...subMap.entries()].map(([subgroup, permissions]) => ({
+        subgroup,
+        permissions,
+      })),
+    })),
+  };
 }
 
 export const PORTAL_ROLE_PRESETS: readonly RolePreset[] = [
@@ -832,3 +1011,304 @@ export const PORTAL_ROLE_BY_SUBJECT: Readonly<Record<'student' | 'guardian', str
   student: 'Student',
   guardian: 'Parent',
 };
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * School staff persona presets.
+ *
+ * Like PORTAL_ROLE_PRESETS, the canonical recommended configuration lives here so
+ * seed.ts, OrganizationsService and the backfill share one definition. These are
+ * PLAIN EDITABLE ROLES (isSystem: false): once provisioned into a tenant they
+ * are the school's copy and must never be auto-overwritten by a later re-seed
+ * (seed.ts uses `update: {}` + carries `dataScope`). Later improvements to a
+ * preset are an explicit admin "update from preset" action, not a silent sync.
+ *
+ * `dataScope` is the "WHERE" dimension (see RoleDataScope / DataScopeService),
+ * independent of the permission "WHAT". Default `school` for staff; `class` for a
+ * Class Teacher so "teacher" means *their* class.
+ *
+ * SoD invariants enforced by role-presets.spec.ts:
+ *   - Bursar holds no fees:*:approve / writeoff / period:close
+ *   - Class Teacher holds no grades:approve / results:*
+ *   - Exams Officer holds no fees:*
+ *   - IT Admin holds no school:fees:* / school:grades:* / school:results:*
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
+  // ── Tier 1 — lean core (ship first) ────────────────────────────────────────
+  {
+    name: 'Head Teacher',
+    description: 'Approves relief (fee waivers/credits/refunds) but never collects; approves results.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:analytics:read',
+      'school:analytics:export',
+      'school:grades:approve',
+      'school:results:approve',
+      'school:results:publish',
+      'school:lessonplans:review',
+      'school:lessonplans:approve',
+      'school:marks:moderate',
+      'school:fees:waiver:approve',
+      'school:fees:credit:approve',
+      'school:fees:refund:approve',
+      'school:communicate',
+      'school:staff:write',
+      'school:documents:read',
+      'school:documents:write',
+      'school:certificates:issue',
+      'hr:self',
+      'approvals:decide',
+      'approvals:manage',
+      'audit_log:read',
+    ],
+  },
+  {
+    name: 'Bursar',
+    description: 'Collects, reconciles and refunds fees; never approves its own relief.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:fees:write',
+      'school:fees:collect',
+      'school:fees:reconcile',
+      'school:fees:refund',
+      'school:analytics:read',
+      'invoice:read',
+      'invoice:write',
+      'payment:read',
+      'payment:create',
+      'cash_session:read',
+      'cash_session:open',
+      'cash_session:close',
+      'cash_session:reconcile',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Registrar',
+    description: 'Admissions, enrolment and student records; no fee or grade authority.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:students:write',
+      'school:admissions:write',
+      'school:admissions:interview',
+      'school:admissions:offer',
+      'school:admissions:fee',
+      'school:admissions:workflow',
+      'school:foundation:write',
+      'school:portal:accounts:write',
+      'school:documents:read',
+      'school:documents:write',
+      'school:certificates:issue',
+      'school:communicate',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Exams Officer',
+    description: 'Manages assessments and results; no fee authority.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:exams:write',
+      'school:assessments:write',
+      'school:grades:write',
+      'school:results:compute',
+      'school:results:approve',
+      'school:results:publish',
+      'school:results:amend',
+      'school:marks:moderate',
+      'school:questionbank:write',
+      'school:cbt:author',
+      'school:cbt:proctor',
+      'school:certificates:issue',
+      'school:analytics:read',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Class Teacher',
+    description: 'Enters marks and takes registers for their own classes; never approves them.',
+    dataScope: 'class',
+    permissions: [
+      'school:read',
+      'school:attendance:own',
+      'school:attendance:status:write',
+      'school:grades:own',
+      'school:assignments:write',
+      'school:assignments:grade',
+      'school:lessonplans:own',
+      'school:timetable:own',
+      'school:courses:teach',
+      'school:lms:read',
+      'school:documents:read',
+      'school:communicate',
+      'school:portal:teacher',
+      'school:portal:self',
+      'hr:self',
+    ],
+  },
+
+  // ── Tier 2 — full set ───────────────────────────────────────────────────────
+  {
+    name: 'Deputy Head',
+    description: 'Curriculum, timetable and teaching oversight across the school.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:foundation:write',
+      'school:courses:write',
+      'school:lessonplans:review',
+      'school:lessonplans:approve',
+      'school:assessments:write',
+      'school:analytics:read',
+      'school:analytics:export',
+    ],
+  },
+  {
+    name: 'Subject Teacher',
+    description: 'Today\'s Teacher preset, rescoped from implicit to explicit `own`.',
+    dataScope: 'own',
+    permissions: [
+      'school:portal:self',
+      'school:portal:teacher',
+      'school:read',
+      'school:lms:read',
+      'school:attendance:own',
+      'school:grades:own',
+      'school:lessonplans:own',
+      'school:timetable:own',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'HR Officer',
+    description: 'Staff records and HR operations (no payroll approval, no HR audit).',
+    dataScope: 'school',
+    permissions: [
+      'hr:read',
+      'hr:employee',
+      'hr:employee_identity',
+      'hr:attendance',
+      'hr:shift',
+      'hr:timesheet',
+      'hr:leave',
+      'hr:holiday',
+      'hr:payroll',
+      'hr:payslip',
+      'hr:advance',
+      'hr:loan',
+      'hr:tax_table',
+      'hr:performance',
+      'hr:grade',
+      'hr:contract',
+      'hr:recruitment',
+      'hr:qualification',
+      'hr:training',
+      'hr:offboarding',
+      'hr:skill',
+      'hr:experience',
+      'hr:document',
+      'school:staff:write',
+      'user:read',
+    ],
+  },
+  {
+    name: 'Librarian',
+    description: 'Library catalogue and school documents.',
+    dataScope: 'school',
+    permissions: ['school:read', 'school:library:write', 'hr:self'],
+  },
+  {
+    name: 'Nurse',
+    description: 'Medical records and emergency contacts for pupils.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:students:write',
+      'school:documents:read',
+      'school:documents:write',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Transport Manager',
+    description: 'Routes, fleet and trips (no override).',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:transport:write',
+      'school:transport:read',
+      'school:transport:fleet',
+      'school:transport:crew',
+      'school:transport:enrollment',
+      'school:transport:dispatch',
+      'school:transport:boarding',
+      'school:transport:tracking',
+      'school:transport:incidents',
+      'school:transport:billing',
+      'school:transport:reports',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Hostel Warden',
+    description: 'Hostel allocations and attendance.',
+    dataScope: 'school',
+    permissions: ['school:read', 'school:hostel:write', 'hr:self'],
+  },
+  {
+    name: 'Catering',
+    description: 'Meals programs, kitchen and reports.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:meals:read',
+      'school:meals:write',
+      'school:meals:attendance',
+      'school:meals:kitchen',
+      'school:meals:reports',
+      'school:cafeteria:write',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'Front Desk',
+    description: 'Visitors, applications intake and communication.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:foundation:write',
+      'school:communicate',
+      'partner:read',
+      'hr:self',
+    ],
+  },
+  {
+    name: 'IT Admin',
+    description: 'System/role/user administration. No school finance or academic authority.',
+    dataScope: 'school',
+    permissions: [
+      'user:create',
+      'user:read',
+      'user:update',
+      'user:delete',
+      'role:create',
+      'role:read',
+      'role:update',
+      'role:delete',
+      'setting:read',
+      'setting:update',
+      'backup:read',
+      'backup:update',
+      'backup:run',
+      'feature_flag:read',
+      'feature_flag:write',
+      'webhooks:read',
+      'webhooks:write',
+      'organization:read',
+      'audit_log:read',
+    ],
+  },
+] as const;

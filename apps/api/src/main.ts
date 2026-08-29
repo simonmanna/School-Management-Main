@@ -160,11 +160,22 @@ async function bootstrap(): Promise<void> {
           try {
             const pos = jwt.verifyPos(String(posHeader));
             if (pos.organizationId === payload.organizationId) {
+              // The POS token narrows identity to the cashier who PINned in, but it
+              // must NOT grant authority the back-office JWT did not already hold.
+              // Previously it replaced `permissions` wholesale, letting a cashier's
+              // POS token (which carries only `pos:*`) widen or narrow the caller's
+              // grants arbitrarily. Now we keep the JWT permissions and overlay only
+              // the `pos:*` keys from the POS token, so the terminal can act within
+              // the cashier's POS scope without changing any other authority.
+              const jwtPerms = Array.isArray(payload.permissions) ? payload.permissions : [];
+              const posPerms = Array.isArray(pos.permissions) ? (pos.permissions as string[]) : [];
+              const merged = jwtPerms.filter((p) => !p.startsWith('pos:'));
+              for (const p of posPerms) if (p.startsWith('pos:')) merged.push(p);
               effective = {
                 sub: pos.sub,
                 organizationId: payload.organizationId,
                 email: pos.email,
-                permissions: pos.permissions,
+                permissions: merged,
               };
             }
             // org mismatch → ignore the POS token, fall back to the JWT identity.

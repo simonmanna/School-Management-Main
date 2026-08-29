@@ -204,7 +204,7 @@ export class OrganizationsService {
 
   private async seedAdminRoleAndMappings(orgId: string) {
     // Seed permissions catalog (global).
-    const { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS } = await import('@erp/shared');
+    const { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, SCHOOL_ROLE_PRESETS } = await import('@erp/shared');
     for (const k of ALL_PERMISSIONS) {
       // Most keys are `resource:action`, but the POS block uses `resource.action`
       // (e.g. 'partners.view'). Splitting on ':' alone left `action` undefined and
@@ -252,6 +252,25 @@ export class OrganizationsService {
           description: preset.description,
           isSystem: true,
           permissions: preset.permissions as unknown as string[],
+          dataScope: preset.dataScope ?? 'own',
+        },
+      });
+    }
+    // School staff persona presets (Tier 1 + Tier 2). Plain editable roles: an
+    // administrator may tune them, so the upsert uses `update: {}` — re-running
+    // bootstrap never stomps an edit. `dataScope` is carried so a Class Teacher
+    // is `class` and everyone else `school` from the moment they are provisioned.
+    for (const preset of SCHOOL_ROLE_PRESETS) {
+      await this.prisma.raw.role.upsert({
+        where: { organizationId_name: { organizationId: orgId, name: preset.name } },
+        update: {},
+        create: {
+          organizationId: orgId,
+          name: preset.name,
+          description: preset.description,
+          isSystem: false,
+          permissions: preset.permissions as unknown as string[],
+          dataScope: preset.dataScope ?? 'school',
         },
       });
     }

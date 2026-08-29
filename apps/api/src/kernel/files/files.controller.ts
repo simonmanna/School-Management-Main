@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiConsumes } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/jwt-token.service';
 import { FilesService } from './files.service';
@@ -27,6 +28,7 @@ export class FilesController {
   constructor(private readonly files: FilesService) {}
 
   @Post('upload')
+  @RequirePermissions('school:documents:write')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -59,6 +61,7 @@ export class FilesController {
   }
 
   @Get()
+  @RequirePermissions('school:documents:read')
   list(@CurrentUser() user: AuthUser, @Query('ownerType') ownerType: string, @Query('ownerId') ownerId: string) {
     return this.files.listForOwner(ownerType, ownerId);
   }
@@ -70,6 +73,7 @@ export class FilesController {
    * for another org's applicant documents.
    */
   @Post(':id/signed-url')
+  @RequirePermissions('school:documents:read')
   signedUrl(@Param('id') id: string) {
     return this.files.signDownloadForCaller(id);
   }
@@ -96,6 +100,7 @@ export class FilesController {
   }
 
   @Delete(':id')
+  @RequirePermissions('school:documents:write')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.files.remove(id).then(() => ({ ok: true }));
   }

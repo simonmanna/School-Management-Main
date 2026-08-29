@@ -454,6 +454,18 @@ model User {
   @@index([organizationId])
 }
 
+/// Data scope for a role. Answers "WHERE can this role act?" independently of
+/// "WHAT can it do?" (the permissions[] array). Ordered own < class <
+/// department < school; the widest scope across a user's roles wins. Default
+/// `school` means every existing role behaves exactly as today — adding this
+/// column is a no-op for live data. See DataScopeService.
+enum RoleDataScope {
+  own
+  class
+  department
+  school
+}
+
 model Role {
   id             String    @id @default(uuid())
   organizationId String
@@ -461,6 +473,7 @@ model Role {
   description    String?
   isSystem       Boolean   @default(false)
   permissions    String[]  @default([])
+  dataScope      RoleDataScope @default(school)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?

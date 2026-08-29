@@ -1,8 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { NoPermissionRequired } from '../auth/decorators/no-permission-required.decorator';
 import type { AuthUser } from '../auth/jwt-token.service';
 import { NotificationsService } from './notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -35,6 +36,7 @@ export class NotificationsController {
 
   /** List the current user's in-app notifications. */
   @Get()
+  @NoPermissionRequired('Notifications are scoped to the caller via CurrentUser.userId; no further grant needed.')
   async list(@CurrentUser() user: AuthUser, @Query() query: ListNotificationsDto) {
     const page = Math.max(1, Number(query.page ?? 1));
     const pageSize = Math.min(100, Math.max(1, Number(query.pageSize ?? 25)));
@@ -61,6 +63,7 @@ export class NotificationsController {
 
   /** Mark one notification as read. */
   @Patch(':id/read')
+  @NoPermissionRequired('Scoped to CurrentUser.userId; caller can only mark their own.')
   async markRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     await this.prisma.client.notification.updateMany({
       where: { id, userId: user.sub },
@@ -71,6 +74,7 @@ export class NotificationsController {
 
   /** Mark all as read. */
   @Post('read-all')
+  @NoPermissionRequired('Scoped to CurrentUser.userId; caller can only mark their own.')
   async markAllRead(@CurrentUser() user: AuthUser) {
     const r = await this.prisma.client.notification.updateMany({
       where: { userId: user.sub, status: { in: ['pending', 'sent'] } },
@@ -81,6 +85,7 @@ export class NotificationsController {
 
   /** Delete one of the current user's notifications. */
   @Delete(':id')
+  @NoPermissionRequired('Scoped to CurrentUser.userId; caller can only delete their own.')
   async remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     await this.prisma.client.notification.deleteMany({ where: { id, userId: user.sub } });
     return { ok: true };
@@ -88,6 +93,7 @@ export class NotificationsController {
 
   /** Per-channel, per-category opt-out. */
   @Get('preferences')
+  @NoPermissionRequired('Scoped to CurrentUser.userId; reader of the caller own prefs.')
   async prefs(@CurrentUser() user: AuthUser) {
     return this.prisma.client.notificationPreference.findMany({
       where: { userId: user.sub },
@@ -96,6 +102,7 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
+  @NoPermissionRequired('Scoped to CurrentUser.userId; writer of the caller own prefs.')
   async setPref(@CurrentUser() user: AuthUser, @Body() dto: UpdatePreferenceDto) {
     return this.prisma.client.notificationPreference.upsert({
       where: {
@@ -119,6 +126,7 @@ export class NotificationsController {
 
   /** Manual trigger for testing (admin only). */
   @Post('test')
+  @RequirePermissions('setting:update')
   async test(@CurrentUser() user: AuthUser) {
     return this.notifications.send({
       organizationId: user.organizationId,

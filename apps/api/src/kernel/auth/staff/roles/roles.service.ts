@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../../../audit/audit.service';
 import { EventBus } from '../../../events/event-bus';
 import { TenantContextService } from '../../../tenancy/tenant-context.service';
+import { DataScopeService } from '../../data-scope.service';
 import { ALL_PERMISSIONS, EVENTS } from '@erp/shared';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
@@ -30,6 +31,7 @@ export class RolesService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly tenant: TenantContextService,
+    private readonly dataScope: DataScopeService,
   ) {}
 
   async list(): Promise<Role[]> {
@@ -50,6 +52,23 @@ export class RolesService {
 
   async create(dto: CreateRoleDto): Promise<Role> {
     this.validatePermissions(dto.permissions);
+    // Privilege-escalation guard: an actor may only grant permissions they
+    // themselves hold, and only a scope no wider than their own. Administrator
+    // holds everything (incl. `*`) so this is a no-op for them; seed/provisioning
+    // paths bypass this method and are unaffected.
+    const actorPerms = this.tenant.permissions;
+    const missing = dto.permissions.filter((p) => !actorPerms.includes(p) && p !== '*');
+    if (missing.length > 0 && !actorPerms.includes('*')) {
+      throw new ForbiddenException(
+        `You cannot grant permissions you do not hold: ${missing.join(', ')}`,
+      );
+    }
+    if (dto.dataScope && !(await this.dataScope.canGrantScope(dto.dataScope))) {
+      throw new ForbiddenException(
+        `You cannot assign a data scope wider than your own (${dto.dataScope})`,
+      );
+    }
+
     const orgId = this.tenant.organizationId;
     if (!orgId) throw new ForbiddenException('Tenant context required');
 
@@ -66,13 +85,14 @@ export class RolesService {
           description: dto.description ?? null,
           permissions: dto.permissions,
           isSystem: dto.isSystem ?? false,
+          dataScope: dto.dataScope ?? 'school',
         },
       });
       await this.audit.recordInTx(tx, {
         entity: 'Role',
         entityId: created.id,
         action: 'create',
-        newValues: { id: created.id, name: created.name, permissions: created.permissions },
+        newValues: { id: created.id, name: created.name, permissions: created.permissions, dataScope: created.dataScope },
       });
       return created;
     });
@@ -84,6 +104,22 @@ export class RolesService {
     const current = await this.prisma.client.role.findFirst({ where: { id } });
     if (!current) throw new NotFoundException(`Role ${id} not found`);
     if (dto.permissions) this.validatePermissions(dto.permissions);
+
+    // Privilege-escalation guard (see create()).
+    if (dto.permissions) {
+      const actorPerms = this.tenant.permissions;
+      const missing = dto.permissions.filter((p) => !actorPerms.includes(p) && p !== '*');
+      if (missing.length > 0 && !actorPerms.includes('*')) {
+        throw new ForbiddenException(
+          `You cannot grant permissions you do not hold: ${missing.join(', ')}`,
+        );
+      }
+    }
+    if (dto.dataScope && !(await this.dataScope.canGrantScope(dto.dataScope))) {
+      throw new ForbiddenException(
+        `You cannot assign a data scope wider than your own (${dto.dataScope})`,
+      );
+    }
 
     if (dto.name && dto.name !== current.name) {
       const collision = await this.prisma.client.role.findFirst({
@@ -100,6 +136,7 @@ export class RolesService {
           name: dto.name ?? undefined,
           description: dto.description ?? undefined,
           permissions: dto.permissions ?? undefined,
+          dataScope: dto.dataScope ?? undefined,
         },
       });
       const after = await tx.role.findFirst({ where: { id } });
@@ -107,8 +144,18 @@ export class RolesService {
         entity: 'Role',
         entityId: id,
         action: 'update',
-        oldValues: { name: before.name, permissions: before.permissions, description: before.description },
-        newValues: { name: after!.name, permissions: after!.permissions, description: after!.description },
+        oldValues: {
+          name: before.name,
+          permissions: before.permissions,
+          description: before.description,
+          dataScope: before.dataScope,
+        },
+        newValues: {
+          name: after!.name,
+          permissions: after!.permissions,
+          description: after!.description,
+          dataScope: after!.dataScope,
+        },
       });
       return after!;
     });

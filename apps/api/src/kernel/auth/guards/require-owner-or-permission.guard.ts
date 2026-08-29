@@ -48,8 +48,10 @@ export class RequireOwnerOrPermissionGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     // `auth` is what the tenant middleware sets. (`tenant` never existed.)
     const perms: string[] = request.auth?.permissions ?? [];
-    if (perms.includes(permission) || perms.includes('*')) return true;
-
+    if (perms.includes(permission)) return true;
+    // No wildcard honouring: a bare `'*'` is not a catalog key and nothing grants
+    // it, so trusting it was an open door for any client that could set
+    // `request.auth.permissions`. Ownership is the only non-permission path.
     const resourceOwnerId: string | undefined =
       request.params?.[ownerField] ?? request.body?.[ownerField];
     if (!resourceOwnerId) {

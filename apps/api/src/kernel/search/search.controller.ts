@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { SearchService } from './search.service';
 
 @ApiTags('search')
@@ -10,6 +11,7 @@ export class SearchController {
 
   @Get()
   @ApiQuery({ name: 'q', required: true })
+  @RequirePermissions('search:read')
   async global(@Query('q') q: string) {
     if (!q || q.trim().length < 2) return { data: [] };
     const hits = await this.search.search(q);

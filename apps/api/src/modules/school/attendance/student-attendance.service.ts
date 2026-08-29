@@ -6,6 +6,7 @@ import { EVENTS, PERMISSIONS } from '@erp/shared';
 import type { BulkMarkAttendanceDto, CorrectAttendanceDto } from './dto.types';
 import { AttendanceStatusConfigService } from './attendance-status-config.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 
 /**
  * StudentAttendanceService — bulk-mark a class's daily attendance in one tx.
@@ -20,46 +21,21 @@ export class StudentAttendanceService {
     private readonly events: EventBus,
     private readonly statusConfig: AttendanceStatusConfigService,
     private readonly employeeIdentity: EmployeeIdentityService,
+    private readonly dataScope: DataScopeService,
   ) {}
 
   /**
    * May this caller take THIS class's register?
    *
-   * `school:attendance:write` is org-wide: hold it and you may mark any class in
-   * the school. That is right for a deputy head walking the corridors and wrong
-   * for a teacher marking their own register from home, which is what the portal
-   * now lets them do. A caller who holds the broad grant passes straight through;
-   * anyone else must actually teach the class.
-   *
-   * Teaching is read from `TeacherAssignment` and, failing that, the timetable —
-   * a cover teacher standing in for an absent colleague appears in the second but
-   * not the first, and refusing them would stop the register being taken at all.
-   *
-   * `teacherPartnerId` holds a `StaffProfile.id` on both tables, despite the name.
+   * `school:attendance:write` (org-wide) passes straight through. Otherwise the
+   * caller must be within scope for this class — resolved by DataScopeService
+   * (the single authority), which uses `TeacherAssignment` + the timetable so a
+   * cover teacher standing in for an absent colleague is not locked out.
    */
   private async assertMayMarkClass(classId: string | null | undefined): Promise<void> {
     const perms: string[] = this.tenant.store?.permissions ?? [];
     if (perms.includes(PERMISSIONS.school.takeAttendance) || perms.includes('*')) return;
-
-    const staffProfileId = await this.employeeIdentity.staffProfileIdForCaller();
-    if (!staffProfileId || !classId) {
-      throw new ForbiddenException('You may only take the register for a class you teach');
-    }
-
-    const organizationId = this.tenant.organizationId;
-    const [assigned, timetabled] = await Promise.all([
-      this.prisma.client.teacherAssignment.findFirst({
-        where: { organizationId, teacherPartnerId: staffProfileId, classId },
-        select: { id: true },
-      }),
-      this.prisma.client.timetableSlot.findFirst({
-        where: { organizationId, teacherPartnerId: staffProfileId, classId },
-        select: { id: true },
-      }),
-    ]);
-    if (!assigned && !timetabled) {
-      throw new ForbiddenException('You may only take the register for a class you teach');
-    }
+    await this.dataScope.assertMayTouchClass(classId ?? undefined);
   }
 
   async mark(dto: BulkMarkAttendanceDto) {
