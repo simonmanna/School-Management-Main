@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, ExternalLink } from 'lucide-react';
+import { Search, ExternalLink, User, Pencil } from 'lucide-react';
 import { useStaff, useDepartments, type StaffMember } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +88,7 @@ export function SchoolStaffPage() {
                   <th className="px-4 py-2 font-medium">Status</th>
                   <th className="px-4 py-2 font-medium">Joined</th>
                   <th className="px-4 py-2 font-medium">HR</th>
+                  <th className="px-4 py-2 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -130,6 +131,16 @@ export function SchoolStaffPage() {
                       >
                         Open <ExternalLink className="h-3 w-3" />
                       </Link>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link to={`/school/staff/${s.id}`} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="View profile">
+                          <User className="h-3 w-3" /> View
+                        </Link>
+                        <Link to={`/school/staff/${s.id}/edit`} className="inline-flex items-center gap-1 text-xs text-primary hover:underline" title="Edit staff">
+                          <Pencil className="h-3 w-3" /> Edit
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

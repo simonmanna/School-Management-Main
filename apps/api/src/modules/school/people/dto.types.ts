@@ -68,6 +68,7 @@ export class UpdateStudentDto {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsString() studentCategoryId?: string;
   // New editable profile fields (stored on StudentProfile.customFields).
   @IsOptional() @IsString() middleName?: string;
   @IsOptional() @IsString() preferredName?: string;

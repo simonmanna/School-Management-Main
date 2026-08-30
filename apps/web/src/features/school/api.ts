@@ -271,6 +271,7 @@ export interface AdmissionApplication {
   residenceType?: string | null;
   entryStatus?: string | null;
   address?: string | null;
+  studentCategoryId?: string | null;
   customFields?: Record<string, unknown>;
   createdAt: string;
   academicYear?: { id: string; name: string } | null;
@@ -339,6 +340,7 @@ export interface CreateAdmissionInput {
   residenceType?: 'day' | 'boarder';
   entryStatus?: string;
   address?: string;
+  studentCategoryId?: string;
   asDraft?: boolean;
   guardians?: AdmissionGuardianInput[];
   customFields?: Record<string, unknown>;
@@ -359,6 +361,7 @@ export interface UpdateAdmissionInput {
   residenceType?: 'day' | 'boarder';
   entryStatus?: string;
   address?: string;
+  studentCategoryId?: string;
   customFields?: Record<string, unknown>;
 }
 
@@ -869,6 +872,54 @@ export function useUpdateNationality() {
     mutationFn: async ({ id, ...dto }: { id: string; name?: string; isActive?: boolean }) =>
       (await api.patch<Nationality>(`${S}/admissions/nationalities/${id}`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'nationalities'] }),
+  });
+}
+
+// ── Student Categories (org-scoped master data) ──────────────────────────────
+export interface StudentCategory {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useStudentCategories() {
+  return useQuery({
+    queryKey: ['school', 'studentCategories'],
+    queryFn: async (): Promise<StudentCategory[]> => {
+      // The API returns a paginated envelope `{ data, meta }`; unwrap it.
+      // Also tolerate a stale persisted cache entry that still holds the
+      // envelope (PersistQueryClientProvider) or a raw array, so consumers
+      // (student-categories / student-360 / application-form) never receive an
+      // object where they expect an array.
+      const body = (await api.get<unknown>(`${S}/student-categories`)).data;
+      if (Array.isArray(body)) return body as StudentCategory[];
+      if (body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)) {
+        return (body as { data: StudentCategory[] }).data;
+      }
+      return [];
+    },
+  });
+}
+
+export function useCreateStudentCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; description?: string }) =>
+      (await api.post<StudentCategory>(`${S}/student-categories`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'studentCategories'] }),
+  });
+}
+
+export function useUpdateStudentCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...dto }: { id: string; name?: string; description?: string; isActive?: boolean }) =>
+      (await api.patch<StudentCategory>(`${S}/student-categories/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'studentCategories'] }),
   });
 }
 
@@ -3031,6 +3082,14 @@ export interface StaffMember {
   partner?: { id?: string; name?: string; email?: string | null; phone?: string | null } | null;
 }
 
+export function useStaffById(id: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'staff', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<StaffMember>(`${S}/staff/${id}`)).data,
+  });
+}
+
 export function useStaff(params: { page?: number; pageSize?: number } = {}) {
   return useQuery({
     queryKey: ['school', 'staff', params],
@@ -3051,6 +3110,29 @@ export function useDepartments() {
   return useQuery({
     queryKey: ['school', 'departments'],
     queryFn: async () => (await api.get<Paginated<{ id: string; name: string; code?: string }>>(`${S}/departments`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function usePositions() {
+  return useQuery({
+    queryKey: ['school', 'positions'],
+    queryFn: async () => (await api.get<Paginated<{ id: string; name: string; code?: string }>>(`${S}/positions`, { params: { pageSize: 100 } })).data,
+  });
+}
+
+export function useUpdateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`${S}/staff/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'staff'] }),
+  });
+}
+
+export function useCreateStaff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: any) => (await api.post(`${S}/staff`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'staff'] }),
   });
 }
 
@@ -4731,6 +4813,9 @@ export interface Book {
   category: string;
   shelfLocation?: string | null;
   totalCopies: number;
+  availableCopies?: number;
+  borrowedCopies?: number;
+  product?: { id: string; name: string; code: string; type: string } | null;
 }
 export interface BookCopy {
   id: string;
@@ -4738,6 +4823,7 @@ export interface BookCopy {
   copyNumber: string;
   status: string;
   condition: string;
+  book?: Book;
 }
 export interface Borrowing {
   id: string;
@@ -4748,8 +4834,18 @@ export interface Borrowing {
   returnedAt?: string | null;
   status: string;
   fineAmount?: number | null;
-  book?: { id: string; author?: string | null; isbn?: string | null } | null;
-  bookCopy?: { id: string; copyNumber: string } | null;
+  bookCopy?: BookCopy;
+  studentProfile?: { id: string; partner?: { name: string } | null; admissionNo?: string } | null;
+  book?: Book;
+}
+export interface StudentLibraryInfo {
+  id: string;
+  partner?: { name: string } | null;
+  admissionNo: string;
+  currentClass?: { name: string } | null;
+  borrowingCount?: number;
+  overdueCount?: number;
+  totalFines?: number;
 }
 
 export function useBooks() {
@@ -4776,6 +4872,95 @@ export function useBorrowBook() {
 export function useReturnBook() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async (id: string) => (await api.post<Borrowing>(`${S}/library/borrowings/${id}/return`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'borrowings'] }) });
+}
+
+// ── Additional library hooks ─────────────────────────
+
+export interface BookDetail extends Book {
+  availableCopies?: number;
+  borrowedCopies?: number;
+  copies?: BookCopy[];
+}
+
+export function useBook(id: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'library', 'book', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<BookDetail>(`${S}/library/books/${id}`)).data,
+  });
+}
+
+export function useUpdateBook() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch<Book>(`${S}/library/books/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'books'] }) });
+}
+
+export function useDeleteBook() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`${S}/library/books/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'books'] }) });
+}
+
+export interface BookCopyDetail extends BookCopy {
+  book?: Book;
+}
+
+export function useBookCopy(id: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'library', 'copy', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<BookCopyDetail>(`${S}/library/copies/${id}`)).data,
+  });
+}
+
+export function useUpdateBookCopy() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch<BookCopy>(`${S}/library/copies/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'copies'] }) });
+}
+
+export function useDeleteBookCopy() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`${S}/library/copies/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'library', 'copies'] }) });
+}
+
+export interface LibraryStats {
+  totalBooks: number;
+  totalCopies: number;
+  availableCopies: number;
+  borrowedCopies: number;
+  overdueCopies: number;
+  activeStudents: number;
+  totalBorrowings: number;
+  totalFines: number;
+  collectionValue: number;
+}
+
+export function useLibraryStats() {
+  return useQuery({
+    queryKey: ['school', 'library', 'stats'],
+    queryFn: async () => (await api.get<LibraryStats>(`${S}/library/stats`)).data,
+  });
+}
+
+export function useOverdueBooks() {
+  return useQuery({
+    queryKey: ['school', 'library', 'overdue'],
+    queryFn: async () => (await api.get<any[]>(`${S}/library/overdue`)).data,
+  });
+}
+
+export function usePopularBooks() {
+  return useQuery({
+    queryKey: ['school', 'library', 'popular'],
+    queryFn: async () => (await api.get<any[]>(`${S}/library/popular`)).data,
+  });
+}
+
+export function useBorrowingByStudent(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'library', 'borrowings', 'by-student', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<Borrowing[]>(`${S}/library/borrowings/by-student/${studentProfileId}`)).data,
+  });
 }
 
 /* ───────────────────────── Budgeting (Fees & School Finance) ───────────────────────── */
@@ -4830,6 +5015,110 @@ export function useCreateFrontDeskLog() {
 export function useCheckoutFrontDeskLog() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async ({ id, notes }: { id: string; notes?: string }) => (await api.patch<FrontDeskLog>(`${S}/front-desk/${id}/checkout`, { notes })).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'front-desk'] }) });
+}
+
+/* ───────────────────────── Phone Calls ───────────────────────── */
+const PC = `${S}/phone-calls`;
+
+export type CallDirection = 'inbound' | 'outbound';
+export type CallStatus = 'completed' | 'missed' | 'voicemail' | 'scheduled' | 'cancelled';
+
+export interface PhoneCall {
+  id: string;
+  partnerId?: string | null;
+  direction: CallDirection;
+  contactName: string;
+  phone: string;
+  subject?: string | null;
+  outcome?: string | null;
+  notes?: string | null;
+  durationSec?: number | null;
+  status: CallStatus;
+  callAt: string;
+  partner?: { id: string; name: string } | null;
+}
+
+export function usePhoneCalls(filters?: { direction?: CallDirection; status?: CallStatus; partnerId?: string; fromDate?: string; toDate?: string }) {
+  return useQuery({
+    queryKey: ['school', 'phone-calls', filters ?? 'all'],
+    queryFn: async () => (await api.get<PhoneCall[]>(PC, { params: filters })).data,
+  });
+}
+
+export function usePhoneCall(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'phone-call', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<PhoneCall>(`${PC}/${id}`)).data,
+  });
+}
+
+export function useCreatePhoneCall() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { partnerId?: string; direction: CallDirection; contactName: string; phone: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus }) => (await api.post<PhoneCall>(PC, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
+}
+
+export function useUpdatePhoneCall() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; direction?: CallDirection; contactName?: string; phone?: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus }) => (await api.put<PhoneCall>(`${PC}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
+}
+
+export function useDeletePhoneCall() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`${PC}/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
+}
+
+/* ───────────────────────── Complaints ───────────────────────── */
+const CP = `${S}/complaints`;
+
+export type ComplaintCategory = 'academic' | 'behavior' | 'facilities' | 'staff_conduct' | 'communication' | 'fees' | 'transport' | 'meals' | 'safety' | 'other';
+export type ComplaintStatus = 'open' | 'in_progress' | 'awaiting_response' | 'resolved' | 'closed' | 'escalated';
+export type ComplaintPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export interface Complaint {
+  id: string;
+  partnerId?: string | null;
+  category: ComplaintCategory;
+  subject: string;
+  description: string;
+  status: ComplaintStatus;
+  priority: ComplaintPriority;
+  assignedToId?: string | null;
+  resolution?: string | null;
+  resolvedAt?: string | null;
+  receivedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useComplaints(filters?: { category?: ComplaintCategory; status?: ComplaintStatus; priority?: ComplaintPriority; partnerId?: string; assignedToId?: string; fromDate?: string; toDate?: string }) {
+  return useQuery({
+    queryKey: ['school', 'complaints', filters ?? 'all'],
+    queryFn: async () => (await api.get<Complaint[]>(CP, { params: filters })).data,
+  });
+}
+
+export function useComplaint(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'complaint', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<Complaint>(`${CP}/${id}`)).data,
+  });
+}
+
+export function useCreateComplaint() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (dto: { partnerId?: string; category: ComplaintCategory; subject: string; description: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string }) => (await api.post<Complaint>(CP, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
+}
+
+export function useUpdateComplaint() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; category?: ComplaintCategory; subject?: string; description?: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string }) => (await api.put<Complaint>(`${CP}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
+}
+
+export function useDeleteComplaint() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (id: string) => (await api.delete(`${CP}/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
 }
 
 /* ───────────────────────── LMS (Lesson Planning + Basic LMS) ───────────────────────── */

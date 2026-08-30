@@ -191,3 +191,15 @@ export class UpdateStreamDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsInt() @Min(1) capacity?: number;
 }
+
+// ── StudentCategory ───────────────────────────────────────────────────────
+export class CreateStudentCategoryDto {
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() description?: string;
+}
+
+export class UpdateStudentCategoryDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}

@@ -57,6 +57,11 @@ export class BookMetadataController {
   @Post() @RequirePermissions(PERMISSIONS.school.manageLibrary) create(@Body() dto: CreateBookMetadataDto) { return this.service.create(dto); }
   @Patch(':id') @RequirePermissions(PERMISSIONS.school.manageLibrary) update(@Param('id') id: string, @Body() dto: UpdateBookMetadataDto) { return this.service.update(id, dto); }
   @Delete(':id') @HttpCode(204) @RequirePermissions(PERMISSIONS.school.manageLibrary) remove(@Param('id') id: string) { return this.service.remove(id); }
+
+  // Dashboard / Reports
+  @Get('stats') @RequirePermissions(PERMISSIONS.school.read) getStats() { return this.service.getStats(); }
+  @Get('overdue') @RequirePermissions(PERMISSIONS.school.read) getOverdue() { return this.service.getOverdue(); }
+  @Get('popular') @RequirePermissions(PERMISSIONS.school.read) getPopular() { return this.service.getPopular(); }
 }
 
 @Controller('school/library/copies')

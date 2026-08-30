@@ -206,6 +206,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         'religion',
         'residenceType',
         'house',
+        'studentCategoryId',
       ] as const) {
         if (dto[k] !== undefined) profileUpdates[k] = dto[k];
       }

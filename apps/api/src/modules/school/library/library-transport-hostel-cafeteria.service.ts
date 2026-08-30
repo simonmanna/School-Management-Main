@@ -44,8 +44,88 @@ export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBoo
   protected readonly entityName = 'BookMetadata';
   protected readonly searchFields = ['isbn'];
   protected readonly defaultOrderBy = { id: 'desc' } as Record<string, 'asc' | 'desc'>;
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenant: TenantContextService,
+  ) {
     super(prisma.client.bookMetadata as unknown as CrudDelegate);
+  }
+
+  /** Library dashboard statistics. */
+  async getStats() {
+    const orgId = this.tenant.organizationId;
+    const [totalBooks, totalCopies, availableCopies, borrowedCopies, overdueCopies, totalBorrowings, activeStudents, totalFines, collectionValue] = await Promise.all([
+      this.prisma.client.bookMetadata.count({ where: { organizationId: orgId } }),
+      this.prisma.client.bookCopy.count({ where: { organizationId: orgId } }),
+      this.prisma.client.bookCopy.count({ where: { organizationId: orgId, status: 'available' } }),
+      this.prisma.client.bookCopy.count({ where: { organizationId: orgId, status: 'borrowed' } }),
+      this.prisma.client.borrowing.count({ where: { organizationId: orgId, status: 'overdue' } }),
+      this.prisma.client.borrowing.count({ where: { organizationId: orgId } }),
+      this.prisma.client.studentProfile.count({ where: { organizationId: orgId, status: 'active' } }),
+      this.prisma.client.borrowing.aggregate({ where: { organizationId: orgId }, _sum: { fineAmount: true } }),
+      this.prisma.client.bookMetadata.aggregate({ where: { organizationId: orgId }, _sum: { totalCopies: true } }),
+    ]);
+    return {
+      totalBooks,
+      totalCopies,
+      availableCopies,
+      borrowedCopies,
+      overdueCopies,
+      totalBorrowings,
+      activeStudents,
+      totalFines: totalFines._sum.fineAmount?.toNumber() ?? 0,
+      collectionValue: collectionValue._sum.totalCopies ?? 0,
+    };
+  }
+
+  /** Overdue books with fine details. */
+  async getOverdue() {
+    const orgId = this.tenant.organizationId;
+    const overdue = await this.prisma.client.borrowing.findMany({
+      where: { organizationId: orgId, status: 'overdue' },
+      include: { book: true, bookCopy: true, studentProfile: { include: { partner: true } } },
+      orderBy: { dueAt: 'asc' },
+    });
+    return overdue.map((b: any) => {
+      const days = Math.ceil((new Date().getTime() - new Date(b.dueAt).getTime()) / (1000 * 60 * 60 * 24));
+      const fine = days * 200;
+      return {
+        id: b.id,
+        book: b.book,
+        bookCopy: b.bookCopy,
+        student: b.studentProfile,
+        studentProfileId: b.studentProfileId,
+        daysOverdue: days,
+        fineAmount: fine,
+        fineInvoiceId: b.fineInvoiceId,
+      };
+    });
+  }
+
+  /** Most popular books by borrow count. */
+  async getPopular() {
+    const orgId = this.tenant.organizationId;
+    const borrowings = await this.prisma.client.borrowing.groupBy({
+      by: ['bookMetadataId'],
+      where: { organizationId: orgId },
+      _count: { id: true },
+    });
+    const ids = borrowings.map((b) => b.bookMetadataId);
+    const books = await this.prisma.client.bookMetadata.findMany({ where: { id: { in: ids } } });
+    const countMap = new Map(borrowings.map((b) => [b.bookMetadataId, b._count.id]));
+    return books.map((book) => ({
+      bookMetadataId: book.id,
+      author: book.author,
+      isbn: book.isbn,
+      category: book.category,
+      borrowCount: countMap.get(book.id) ?? 0,
+      uniqueStudents: 0, // Could be computed if needed
+    })).sort((a, b) => b.borrowCount - a.borrowCount);
+  }
+
+  /** Total borrowings count. */
+  async getTotalBorrowings() {
+    return this.prisma.client.borrowing.count({ where: { organizationId: this.tenant.organizationId } });
   }
 }
 
