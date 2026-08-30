@@ -19,6 +19,39 @@ export class AnalyticsService {
     return { resultSetId, resultSetRevision: rs.revision, termId: rs.termId };
   }
 
+  /**
+   * Attach pupil and subject names to rows that carry only ids.
+   *
+   * Analytics answers "who is at risk" and "whose coursework and exam disagree".
+   * Returning bare ids made the screens print the first six characters of a
+   * UUID under a column headed "Student", which is not an answer anyone can act
+   * on. One bounded lookup per call.
+   */
+  private async withNames<T extends { studentProfileId: string; subjectId?: string }>(rows: T[]): Promise<Array<T & { studentName: string | null; admissionNo: string | null; subjectName?: string | null }>> {
+    if (rows.length === 0) return [] as any;
+    const studentIds = [...new Set(rows.map((r) => r.studentProfileId))];
+    const subjectIds = [...new Set(rows.map((r) => r.subjectId).filter(Boolean) as string[])];
+
+    const [profiles, subjects] = await Promise.all([
+      this.prisma.client.studentProfile.findMany({ where: { id: { in: studentIds } }, include: { partner: true } }),
+      subjectIds.length
+        ? this.prisma.client.subject.findMany({ where: { id: { in: subjectIds } }, select: { id: true, name: true } })
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+    ]);
+    const pById = new Map(profiles.map((p: any) => [p.id, p]));
+    const sById = new Map(subjects.map((x: any) => [x.id, x.name as string]));
+
+    return rows.map((r) => {
+      const p: any = pById.get(r.studentProfileId);
+      return {
+        ...r,
+        studentName: (p?.partner?.name as string | undefined) ?? null,
+        admissionNo: (p?.admissionNo as string | undefined) ?? null,
+        ...(r.subjectId ? { subjectName: sById.get(r.subjectId) ?? null } : {}),
+      };
+    });
+  }
+
   private num(v: Prisma.Decimal | number | null): number {
     return v == null ? 0 : Number(v);
   }
@@ -91,7 +124,7 @@ export class AnalyticsService {
       .map((r: any) => ({ studentProfileId: r.studentProfileId, subjectId: r.subjectId, caScore: this.num(r.caScore), examScore: this.num(r.examScore), gap: Math.abs(this.num(r.caScore) - this.num(r.examScore)) }))
       .filter((r) => r.gap > threshold)
       .sort((a, b) => b.gap - a.gap);
-    return { ...meta, threshold, flagged };
+    return { ...meta, threshold, flagged: await this.withNames(flagged) };
   }
 
   // ── Predictive ─────────────────────────────────────────────────────────────
@@ -111,7 +144,7 @@ export class AnalyticsService {
         register.push({ studentProfileId: t.studentProfileId, meanPercent: this.num(t.meanPercent), failingSubjects: failing.length, reasons });
       }
     }
-    return { ...meta, passMark, register: register.sort((a, b) => a.meanPercent - b.meanPercent) };
+    return { ...meta, passMark, register: await this.withNames(register.sort((a, b) => a.meanPercent - b.meanPercent)) };
   }
 
   // ── Operational ────────────────────────────────────────────────────────────

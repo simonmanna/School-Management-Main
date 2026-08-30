@@ -19,12 +19,12 @@ export function SchoolAssessmentOpsPage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Rosters, Rubrics & Assignments</h1>
-        <p className="text-sm text-muted-foreground">A2: enrollment-independent cohorts (capture → freeze), rubric bank, and assignment evidence with roster fan-out.</p>
+        <h1 className="text-xl font-semibold">Class lists, rubrics & assignments</h1>
+        <p className="text-sm text-muted-foreground">Fix the list of pupils a term’s results are worked out against, keep marking rubrics, and set assignments for a whole class.</p>
       </div>
       <Tabs defaultValue="rosters">
         <TabsList>
-          <TabsTrigger value="rosters">Rosters</TabsTrigger>
+          <TabsTrigger value="rosters">Class lists</TabsTrigger>
           <TabsTrigger value="rubrics">Rubrics</TabsTrigger>
           <TabsTrigger value="assign">Assignments</TabsTrigger>
         </TabsList>
@@ -36,7 +36,7 @@ export function SchoolAssessmentOpsPage() {
   );
 }
 
-/* ── Rosters ── */
+/* ── Class lists ── */
 function RostersTab() {
   const { data: terms } = useTerms();
   const { data: classes } = useClasses();
@@ -66,8 +66,8 @@ function RostersTab() {
           ))}
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
           <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class (scope)…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-          <Input placeholder="Roster name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => { await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined }); setName(''); notify.success('Roster captured'); }}> <Plus className="h-4 w-4" /> Capture cohort</Button>
+          <Input placeholder="Name this class list" value={name} onChange={(e) => setName(e.target.value)} />
+          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => { await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined }); setName(''); notify.success('Class list saved', { description: 'Lock it before working out results, so the list cannot change underneath them.' }); }}> <Plus className="h-4 w-4" /> Save class list</Button>
         </CardContent>
       </Card>
 

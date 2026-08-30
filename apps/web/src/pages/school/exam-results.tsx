@@ -4,7 +4,7 @@ import {
   AlertTriangle, ArrowLeft, CheckCircle2, Download, FileText, Lock, Printer, Unlock,
 } from 'lucide-react';
 import {
-  useAcademicYears, useTerms, useStreams, useWorkspaceExams, useExamCoverage,
+  useAcademicYears, useTerms, useClassSubdivisions, useWorkspaceExams, useExamCoverage,
   useResultGrid, useLockMarks, type ResultGrid,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -49,8 +49,7 @@ export function SchoolExamResultsPage() {
   const examClasses = useMemo(() => (coverage?.classes ?? []).filter((c) => c.applied), [coverage]);
   useDefaulted(classId, setClassId, examClasses[0]?.classId);
 
-  const { data: streams } = useStreams(classId || undefined);
-  const streamList = (streams?.data ?? []).filter((s) => !classId || s.classId === classId);
+  const { data: streamList } = useClassSubdivisions(classId || undefined);
 
   const { data: grid, isLoading, refetch } = useResultGrid({
     examId: examId || undefined,

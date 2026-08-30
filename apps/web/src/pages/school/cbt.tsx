@@ -20,7 +20,7 @@ export function SchoolCbtPage() {
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Computer-Based Testing</h1>
-        <p className="text-sm text-muted-foreground">A5: versioned question bank, papers (fixed / random blueprint), server-authoritative attempts with offline-sync & auto-marking.</p>
+        <p className="text-sm text-muted-foreground">Question bank, papers built from it, and pupil attempts marked automatically.</p>
       </div>
       <Tabs defaultValue="bank">
         <TabsList>

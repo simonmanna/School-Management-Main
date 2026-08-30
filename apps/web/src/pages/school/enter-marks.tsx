@@ -5,7 +5,7 @@ import {
   FileSpreadsheet, Loader2, Lock, Search, Unlock,
 } from 'lucide-react';
 import {
-  useAcademicYears, useTerms, useStreams, useClassSubjects,
+  useAcademicYears, useTerms, useClassSubdivisions, useClassSubjects,
   useWorkspaceExams, useMarkSheet, useSaveMark, useLockMarks, useExamCoverage,
   type MarkSheetStudent,
 } from '@/features/school/api';
@@ -14,9 +14,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
+import { enqueue } from '@/features/school/offline-queue';
 import {
   EmptyState, Picker, Progress, WorkflowSteps, selectClass, useDefaulted, useStickyState,
 } from './_components/exam-workflow';
+import { OfflineBanner } from './_components/offline-banner';
+import { ContextBar } from './_components/context-bar';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 const NON_SCORING = ['absent', 'exempt', 'excused', 'malpractice'];
@@ -68,8 +71,7 @@ export function SchoolEnterMarksPage() {
   }, [examClasses, classId, subjects]);
   useDefaulted(subjectId, setSubjectId, paperSubjects[0]?.id);
 
-  const { data: streams } = useStreams(classId || undefined);
-  const streamList = (streams?.data ?? []).filter((s) => !classId || s.classId === classId);
+  const { data: streamList } = useClassSubdivisions(classId || undefined);
 
   const sheetParams = {
     examId: examId || undefined,
@@ -161,7 +163,27 @@ export function SchoolEnterMarksPage() {
     } catch (e: any) {
       setStates((st) => ({ ...st, [id]: 'error' }));
       const status = e?.response?.status;
-      if (status === 409) {
+      if (!status || status >= 500) {
+        // No server. Keep the mark on the device rather than making the teacher
+        // remember which cells did not save.
+        await enqueue({
+          key: `mark:${examId}:${classId}:${subjectId}:${id}`,
+          kind: 'mark',
+          endpoint: '/school/marks/entry',
+          payload: {
+            examId, classId, subjectId,
+            studentProfileId: id,
+            marks: isClear ? null : num,
+            participation: part ?? participation[id] ?? 'present',
+            maxMarks,
+          },
+          label: `${s.name}'s mark`,
+        });
+        setStates((st) => ({ ...st, [id]: 'saved' }));
+        notify.warning('Saved on this device — no connection', {
+          description: 'Marks will be sent automatically when the server is reachable.',
+        });
+      } else if (status === 409) {
         // Someone else edited this paper. Refetching is the fix, and saying so
         // is far more useful than repeating the server's version numbers.
         notify.error(`${s.name}'s mark was changed by someone else`, {
@@ -227,9 +249,19 @@ export function SchoolEnterMarksPage() {
         <p className="text-sm text-muted-foreground">
           Pick the paper, then type each mark and press Enter. Marks save themselves.
         </p>
+        <div className="mt-2">
+          <ContextBar
+            year={yearList.find((y) => y.id === yearId)?.name}
+            term={termList.find((t) => t.id === termId)?.name}
+            className={sheet?.class?.name}
+            stream={streamList.find((x) => x.id === streamId)?.name}
+            subject={sheet?.subject?.name}
+          />
+        </div>
       </div>
 
       <WorkflowSteps current={3} />
+      <OfflineBanner />
 
       <Card>
         <CardContent className="flex flex-wrap gap-3 pt-4">

@@ -33,7 +33,7 @@ export function SchoolExamOpsPage() {
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Exam Operations</h1>
-        <p className="text-sm text-muted-foreground">A4: venues, candidate registration, seat allocation & clash detection, invigilators, and question papers.</p>
+        <p className="text-sm text-muted-foreground">Exam rooms, who sits which paper, seating and clashes, invigilators, and question papers.</p>
       </div>
       <Tabs defaultValue="seating">
         <TabsList>

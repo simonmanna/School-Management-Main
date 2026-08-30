@@ -4135,10 +4135,12 @@ export function useAssessmentTransition() {
 
 /* ── A1 Marking (SoD: enter vs approve) ────────────────────────────────────── */
 
-// Shape returned by GET /marking/by-assessment/:id (raw StudentAssessment rows).
-// NOTE: the API does NOT return studentName — the UI maps it from useClassRoster().
+// Shape returned by GET /marking/by-assessment/:id. The endpoint now attaches
+// the pupil's name and admission number and sorts by name, so a marking screen
+// no longer has to join a roster call to know whose mark it is showing.
 export interface MarkRow {
   id: string; studentProfileId: string; classId?: string | null;
+  admissionNo?: string | null;
   participation: string;
   maxScore?: number | null; originalScore?: number | null; effectiveScore?: number | null; percentage?: number | null;
   status: string; approvalStatus?: string; version?: number;
@@ -4599,8 +4601,8 @@ export interface Overview { resultSetId: string; resultSetRevision: number; term
 export interface GradeDist { resultSetId: string; resultSetRevision: number; termId: string; distribution: Array<{ grade: string; count: number }> }
 export interface SubjectPerf { resultSetId: string; subjects: Array<{ subjectId: string; count: number; mean: number; median: number; passRate: number }> }
 export interface ClassPerf { resultSetId: string; studentCount: number; meanPercent: number; passRate: number; eligibleRate: number }
-export interface CaExamDiv { resultSetId: string; threshold: number; flagged: Array<{ studentProfileId: string; subjectId: string; caScore: number; examScore: number; gap: number }> }
-export interface AtRisk { resultSetId: string; passMark: number; register: Array<{ studentProfileId: string; meanPercent: number; failingSubjects: number; reasons: string[] }> }
+export interface CaExamDiv { resultSetId: string; threshold: number; flagged: Array<{ studentProfileId: string; studentName: string | null; admissionNo: string | null; subjectId: string; subjectName: string | null; caScore: number; examScore: number; gap: number }> }
+export interface AtRisk { resultSetId: string; passMark: number; register: Array<{ studentProfileId: string; studentName: string | null; admissionNo: string | null; meanPercent: number; failingSubjects: number; reasons: string[] }> }
 export interface StudentTrend { studentProfileId: string; points: Array<{ termId: string; resultSetRevision: number; meanPercent: number; gpa: number; classRank?: number | null }> }
 export interface AssignmentMetrics { classId: string; termId: string; totalAssigned: number; submissionRate: number; gradedRate: number; missingRate: number }
 export interface ExamAttendance { examId: string; total: number; byStatus: Record<string, number>; attendanceRate: number; absenceRate: number }
@@ -5991,6 +5993,38 @@ export function useLockMarks() {
 }
 
 export interface Stream { id: string; classId: string; name: string; capacity: number }
+/**
+ * The subdivisions of a class, as a school means them — "P4 West".
+ *
+ * The schema carries two models for one idea: `Section` and `Stream`. Only
+ * Section reaches attendance, the class teacher, rosters and homework; only
+ * Stream reached the mark screens. So whichever a school picked, half the
+ * system could not see its streams.
+ *
+ * Section is the one that goes everywhere, so it is what the UI creates and
+ * filters on, under the word a Ugandan school actually uses. Existing `Stream`
+ * rows keep working — the server matches either column — and are listed here
+ * too so a school that already created them is not stranded.
+ */
+export function useClassSubdivisions(classId?: string) {
+  const sections = useSections();
+  const streams = useStreams(classId);
+  const fromSections = (sections.data?.data ?? []).filter((x) => !classId || x.classId === classId);
+  const fromStreams = (streams.data?.data ?? []).filter((x) => !classId || x.classId === classId);
+  const seen = new Set(fromSections.map((x) => x.name.toLowerCase()));
+  return {
+    isLoading: sections.isLoading || streams.isLoading,
+    data: [
+      ...fromSections.map((x) => ({ id: x.id, name: x.name, classId: x.classId })),
+      // A Stream whose name already exists as a Section would be a duplicate
+      // row for the same "West" — show it once.
+      ...fromStreams
+        .filter((x) => !seen.has(x.name.toLowerCase()))
+        .map((x) => ({ id: x.id, name: x.name, classId: x.classId })),
+    ],
+  };
+}
+
 export function useStreams(classId?: string) {
   return useQuery({
     queryKey: ['school', 'streams', classId ?? 'all'],

@@ -3,7 +3,7 @@ import {
   AlertTriangle, Check, Loader2, Lock, Plus, SlidersHorizontal, Trash2, Unlock,
 } from 'lucide-react';
 import {
-  useAcademicYears, useTerms, useClasses, useStreams,
+  useAcademicYears, useTerms, useClasses, useClassSubdivisions,
   useGradebookSheet, useGradebookCell, useCreateGradebookColumn,
   useDeleteGradebookColumn, useLockGradebookColumn, usePolicyComponents,
   type GradebookColumn, type GradebookStudent,
@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { notify } from '@/lib/notify';
 import { EmptyState, Picker, selectClass, useDefaulted, useStickyState } from './_components/exam-workflow';
+import { ContextBar } from './_components/context-bar';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 const NON_SCORING = ['absent', 'exempt', 'excused', 'malpractice'];
@@ -45,8 +46,7 @@ export function SchoolGradebookPage() {
   useDefaulted(termId, setTermId, termList.find((t) => t.isCurrent)?.id ?? termList[0]?.id);
   useDefaulted(classId, setClassId, classes?.data?.[0]?.id);
 
-  const { data: streams } = useStreams(classId || undefined);
-  const streamList = (streams?.data ?? []).filter((s) => !classId || s.classId === classId);
+  const { data: streamList } = useClassSubdivisions(classId || undefined);
 
   const { data: sheet, isLoading, refetch } = useGradebookSheet({
     classId: classId || undefined,
@@ -135,6 +135,15 @@ export function SchoolGradebookPage() {
           <p className="text-sm text-muted-foreground">
             Every assessment for a class, with the weighted term total — the same number that reaches the report card.
           </p>
+          <div className="mt-2">
+            <ContextBar
+              year={yearList.find((y) => y.id === yearId)?.name}
+              term={termList.find((t) => t.id === termId)?.name}
+              className={(classes?.data ?? []).find((c) => c.id === classId)?.name}
+              stream={streamList.find((x) => x.id === streamId)?.name}
+              subject={sheet?.subject?.name}
+            />
+          </div>
         </div>
         {sheet?.subject && (
           <Button onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add column</Button>

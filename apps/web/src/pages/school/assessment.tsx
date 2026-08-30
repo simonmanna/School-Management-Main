@@ -20,14 +20,14 @@ export function SchoolAssessmentPage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Assessment & Marks</h1>
-        <p className="text-sm text-muted-foreground">A0→A1: policies, components, assessment instances, and segregation-of-duties marking.</p>
+        <h1 className="text-xl font-semibold">Assessment setup</h1>
+        <p className="text-sm text-muted-foreground">How each subject’s mark is made up — coursework, tests and exam weightings — and who may enter and approve marks.</p>
       </div>
       <Tabs defaultValue="policy">
         <TabsList>
           <TabsTrigger value="policy">Policy & weights</TabsTrigger>
           <TabsTrigger value="assess">Assessments</TabsTrigger>
-          <TabsTrigger value="mark">Marks (SoD)</TabsTrigger>
+          <TabsTrigger value="mark">Marks</TabsTrigger>
         </TabsList>
         <TabsContent value="policy" className="pt-4"><PolicyTab /></TabsContent>
         <TabsContent value="assess" className="pt-4"><AssessTab/></TabsContent>
@@ -147,7 +147,7 @@ function AssessTab() {
   );
 }
 
-/* ── Marks with SoD ── */
+/* ── Marks ── */
 function MarkTab() {
   const { data: terms } = useTerms();
   const { data: classes } = useClasses();
@@ -186,7 +186,7 @@ function MarkTab() {
         <select className={sel + ' w-40'} value={termId} onChange={(e) => { setTermId(e.target.value); setAssessmentId(''); }}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
         <select className={sel + ' w-40'} value={classId} onChange={(e) => { setClassId(e.target.value); setAssessmentId(''); }}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <select className={sel + ' w-64'} value={assessmentId} onChange={(e) => setAssessmentId(e.target.value)}><option value="">Assessment…</option>{(assessments ?? []).map((a) => <option key={a.id} value={a.id}>{a.title} · {a.status}</option>)}</select>
-        {assessmentId && <Badge variant="secondary">Enter: school:grades:write · Approve: school:grades:approve (SoD)</Badge>}
+        {assessmentId && <Badge variant="secondary">Marks must be approved by someone other than whoever entered them</Badge>}
       </div>
       {assessmentId && (
         <Card>
@@ -200,11 +200,11 @@ function MarkTab() {
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Student ID</th><th className="px-4 py-2">Participation</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Status</th></tr></thead>
+              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Pupil</th><th className="px-4 py-2">Participation</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Status</th></tr></thead>
               <tbody>
                 {(marks ?? []).map((m) => (
                   <tr key={m.id} className="border-b last:border-0">
-                    <td className="px-4 py-2 font-mono text-xs">{m.id.slice(0, 8)}</td>
+                    <td className="px-4 py-2">{m.studentName ?? m.admissionNo ?? '—'}</td>
                     <td className="px-4 py-2">{m.participation}</td>
                     <td className="px-4 py-2">
                       <Input type="number" className="h-8 w-24" value={vals[m.id] ?? ''} onChange={(e) => setVals({ ...vals, [m.id]: e.target.value })} />
@@ -212,7 +212,7 @@ function MarkTab() {
                     <td className="px-4 py-2"><Badge variant="secondary">{m.status}</Badge></td>
                   </tr>
                 ))}
-                {(marks ?? []).length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">No marksheet yet — its cohort is derived from the assessment's roster.</td></tr>}
+                {(marks ?? []).length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">No mark sheet yet — it is built from the class list attached to this assessment.</td></tr>}
               </tbody>
             </table>
           </CardContent>
@@ -225,7 +225,7 @@ function MarkTab() {
             <CardContent className="flex flex-wrap items-end gap-2">
               <select className={sel + ' w-56'} value={modSa} onChange={(e) => setModSa(e.target.value)}>
                 <option value="">Student…</option>
-                {(marks ?? []).map((m) => <option key={m.id} value={m.id}>{m.id.slice(0, 8)} · {m.participation}</option>)}
+                {(marks ?? []).map((m) => <option key={m.id} value={m.id}>{m.studentName ?? m.admissionNo ?? 'Pupil'} · {m.participation}</option>)}
               </select>
               <select className={sel} value={modKind} onChange={(e) => setModKind(e.target.value)}>
                 {['moderation', 'scaling', 'late_penalty', 'special_consideration', 'correction'].map((k) => <option key={k} value={k}>{k.replace('_', ' ')}</option>)}

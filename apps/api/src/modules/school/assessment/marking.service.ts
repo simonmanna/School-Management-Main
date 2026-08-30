@@ -501,12 +501,37 @@ export class MarkingService {
     });
   }
 
+  /**
+   * The marks for one assessment, with the pupil's name attached.
+   *
+   * The name used to be left off, and the client was expected to join it from a
+   * roster call — which the marking screen never did, so it listed a column
+   * headed "Student" containing the first eight characters of a row id. Ordering
+   * by name rather than by id also puts the sheet in register order.
+   */
   async byAssessment(assessmentId: string) {
-    return this.prisma.client.studentAssessment.findMany({
+    const rows = await this.prisma.client.studentAssessment.findMany({
       where: { assessmentId },
       include: { markEntries: true, adjustments: { orderBy: { sequence: 'asc' } } },
-      orderBy: { studentProfileId: 'asc' },
     });
+    if (rows.length === 0) return rows;
+
+    const profiles = await this.prisma.client.studentProfile.findMany({
+      where: { id: { in: rows.map((r) => r.studentProfileId) } },
+      include: { partner: true },
+    });
+    const byId = new Map(profiles.map((p: any) => [p.id, p]));
+
+    return rows
+      .map((r) => {
+        const p: any = byId.get(r.studentProfileId);
+        return {
+          ...r,
+          studentName: (p?.partner?.name as string | undefined) ?? null,
+          admissionNo: (p?.admissionNo as string | undefined) ?? null,
+        };
+      })
+      .sort((a, b) => (a.studentName ?? '').localeCompare(b.studentName ?? ''));
   }
 
   async byStudent(studentProfileId: string, termId?: string) {

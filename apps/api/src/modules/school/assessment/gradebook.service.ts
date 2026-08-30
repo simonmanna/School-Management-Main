@@ -397,8 +397,20 @@ export class GradebookService {
 
   private async studentsOfClass(classId: string, streamId?: string) {
     const students = await this.prisma.client.studentProfile.findMany({
-      where: { currentClassId: classId, status: 'active', ...(streamId ? { currentStreamId: streamId } : {}) },
-      include: { partner: true, currentStream: true },
+      where: {
+        currentClassId: classId,
+        status: 'active',
+        // The subdivision a school calls a "stream" can be stored as either a
+        // Section or a Stream row: the schema has both, attendance/class-teacher/
+        // rosters only ever hang off Section, and the mark screens only ever
+        // filtered on Stream — so whichever a school picked, half the system
+        // could not see its P4 West. Matching either column makes both work
+        // while Section becomes the one the UI creates.
+        ...(streamId
+          ? { OR: [{ currentSectionId: streamId }, { currentStreamId: streamId }] }
+          : {}),
+      },
+      include: { partner: true, currentStream: true, currentSection: true },
     });
     return students
       .map((s) => ({

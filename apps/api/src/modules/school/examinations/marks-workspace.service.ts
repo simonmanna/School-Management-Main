@@ -690,17 +690,28 @@ export class MarksWorkspaceService {
       where: {
         currentClassId: classId,
         status: 'active',
-        ...(streamId ? { currentStreamId: streamId } : {}),
+        // The subdivision a school calls a "stream" can be stored as either a
+        // Section or a Stream row: the schema has both, attendance/class-teacher/
+        // rosters only ever hang off Section, and the mark screens only ever
+        // filtered on Stream — so whichever a school picked, half the system
+        // could not see its P4 West. Matching either column makes both work
+        // while Section becomes the one the UI creates.
+        ...(streamId
+          ? { OR: [{ currentSectionId: streamId }, { currentStreamId: streamId }] }
+          : {}),
       },
-      include: { partner: true, currentStream: true },
+      include: { partner: true, currentStream: true, currentSection: true },
     });
     return students
       .map((s) => ({
         studentProfileId: s.id,
         name: s.partner?.name ?? s.admissionNo,
         admissionNo: s.admissionNo,
-        streamId: s.currentStreamId,
-        streamName: s.currentStream?.name ?? null,
+        // Report whichever subdivision the pupil actually sits in, so the sheet
+        // labels "P4 West" the same way whether the school stored West as a
+        // Section or a Stream.
+        streamId: s.currentStreamId ?? s.currentSectionId,
+        streamName: s.currentStream?.name ?? s.currentSection?.name ?? null,
         sectionId: s.currentSectionId,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));

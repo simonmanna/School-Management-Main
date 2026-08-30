@@ -4,8 +4,8 @@ import { api } from '@/lib/api';
 export function SchoolSectionsPage() {
   return (
     <SimpleCrud
-      title="Sections"
-      subtitle="Sections within a class (e.g. A, B)."
+      title="Streams"
+      subtitle="The streams within a class — P4 West, P4 East. Attendance, class teachers and mark sheets all hang off these."
       endpoint="sections"
       queryKey="sections"
       nameField="name"

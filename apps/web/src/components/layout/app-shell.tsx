@@ -251,8 +251,13 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/terms', label: 'Terms / Semesters', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/classes', label: 'Classes / Grades', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      // One concept, one nav item. "Streams" and "Sections" were two entries for
+      // the same thing a school calls a stream ("P4 West"), backed by two tables
+      // — and only Section reaches attendance, class teachers and rosters, so
+      // that is the one to create. The legacy Streams screen stays reachable for
+      // schools that already built streams there.
+      { to: '/school/management/sections', label: 'Streams (P4 West)', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/streams', label: 'Streams (legacy)', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/class-teacher', label: 'Class Teachers', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/teaching-load', label: 'Teaching Load', icon: Users, permission: PERMISSIONS.school.manageFoundation },

@@ -18,6 +18,7 @@
  * reaches it.
  */
 import { INestApplication, ValidationPipe, ExecutionContext } from '@nestjs/common';
+
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -35,6 +36,12 @@ const productionPipe = () =>
     transform: true,
     transformOptions: { enableImplicitConversion: true },
   });
+
+// Compiling a Nest module graph and walking every source file both take longer
+// than Jest's 5s default when the rest of the suite is running in parallel.
+// (The DB-backed specs get this from `_setup`; this one needs no database, so
+// it sets its own rather than importing that.)
+jest.setTimeout(120_000);
 
 class AllowAll {
   canActivate(_ctx: ExecutionContext) {

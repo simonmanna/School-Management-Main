@@ -24,17 +24,17 @@ export function SchoolAnalyticsPage() {
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Academic Analytics</h1>
-        <p className="text-sm text-muted-foreground">A7: descriptive / diagnostic / predictive / operational tiers, pinned to a published result-set revision.</p>
+        <p className="text-sm text-muted-foreground">Performance across the school, read from a released set of results.</p>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <select className={sel + ' w-44'} value={termId} onChange={(e) => { setTermId(e.target.value); setRosterId(''); setResultSetId(''); }}>
           <option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <select className={sel + ' w-56'} value={rosterId} onChange={(e) => setRosterId(e.target.value)}>
-          <option value="">Cohort (roster)…</option>{(rosters?.data ?? []).filter((r) => !termId || r.termId === termId).map((r) => <option key={r.id} value={r.id}>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`}</option>)}
+          <option value="">Class list…</option>{(rosters?.data ?? []).filter((r) => !termId || r.termId === termId).map((r) => <option key={r.id} value={r.id}>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`}</option>)}
         </select>
         <select className={sel + ' w-64'} value={resultSetId} onChange={(e) => setResultSetId(e.target.value)}>
-          <option value="">Result set (revision)…</option>{(sets ?? []).map((s) => <option key={s.id} value={s.id}>rev {s.revision} · {s.status}</option>)}
+          <option value="">Results version…</option>{(sets ?? []).map((s) => <option key={s.id} value={s.id}>rev {s.revision} · {s.status}</option>)}
         </select>
         <select className={sel + ' w-56'} value={examId} onChange={(e) => setExamId(e.target.value)}>
           <option value="">Exam (attendance)…</option>{(exams?.data ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -121,7 +121,7 @@ function CaExamTab({ resultSetId }: { resultSetId: string }) {
       <CardContent>
         {(data?.flagged ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No large CA/exam divergences.</p> :
           <table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Student</th><th className="px-2 py-1">Subject</th><th className="px-2 py-1">CA</th><th className="px-2 py-1">Exam</th><th className="px-2 py-1">Gap</th></tr></thead>
-            <tbody>{(data!.flagged ?? []).map((f, i) => <tr key={i} className="border-b last:border-0"><td className="px-2 py-1">{f.studentProfileId.slice(0,6)}</td><td className="px-2 py-1">{f.subjectId.slice(0,6)}</td><td className="px-2 py-1">{f.caScore}</td><td className="px-2 py-1">{f.examScore}</td><td className="px-2 py-1"><Badge variant="destructive">{f.gap}</Badge></td></tr>)}</tbody></table>}
+            <tbody>{(data!.flagged ?? []).map((f, i) => <tr key={i} className="border-b last:border-0"><td className="px-2 py-1">{f.studentName ?? f.admissionNo ?? '—'}</td><td className="px-2 py-1">{f.subjectName ?? '—'}</td><td className="px-2 py-1">{f.caScore}</td><td className="px-2 py-1">{f.examScore}</td><td className="px-2 py-1"><Badge variant="destructive">{f.gap}</Badge></td></tr>)}</tbody></table>}
       </CardContent>
     </Card>
   );
@@ -134,7 +134,7 @@ function AtRiskTab({ resultSetId }: { resultSetId: string }) {
       <CardContent>
         {(data?.register ?? []).length === 0 ? <p className="text-sm text-muted-foreground">No at-risk students.</p> :
           <table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Student</th><th className="px-2 py-1">Mean%</th><th className="px-2 py-1">Failing</th><th className="px-2 py-1">Rule(s)</th></tr></thead>
-            <tbody>{(data!.register ?? []).map((r, i) => <tr key={i} className="border-b last:border-0"><td className="px-2 py-1">{r.studentProfileId.slice(0,6)}</td><td className="px-2 py-1">{r.meanPercent}</td><td className="px-2 py-1">{r.failingSubjects}</td><td className="px-2 py-1">{r.reasons.map((x) => <Badge key={x} variant="outline" className="mr-1">{x}</Badge>)}</td></tr>)}</tbody></table>}
+            <tbody>{(data!.register ?? []).map((r, i) => <tr key={i} className="border-b last:border-0"><td className="px-2 py-1">{r.studentName ?? r.admissionNo ?? '—'}</td><td className="px-2 py-1">{r.meanPercent}</td><td className="px-2 py-1">{r.failingSubjects}</td><td className="px-2 py-1">{r.reasons.map((x) => <Badge key={x} variant="outline" className="mr-1">{x}</Badge>)}</td></tr>)}</tbody></table>}
       </CardContent>
     </Card>
   );

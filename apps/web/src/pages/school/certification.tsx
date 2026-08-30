@@ -24,7 +24,7 @@ export function SchoolCertificationPage() {
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Certification & Credentials</h1>
-        <p className="text-sm text-muted-foreground">A6: cumulative transcripts, UNEB external results, issued certificates (serial + verification code), and rate-limited public verify.</p>
+        <p className="text-sm text-muted-foreground">Transcripts, UNEB results, and issued certificates that anyone can verify by serial number.</p>
       </div>
       <div className="min-w-80 space-y-1">
         <Label className="text-xs">Student</Label>

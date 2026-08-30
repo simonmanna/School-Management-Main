@@ -4,8 +4,8 @@ import { api } from '@/lib/api';
 export function SchoolStreamsPage() {
   return (
     <SimpleCrud
-      title="Streams"
-      subtitle="Streams / tracks within a class (e.g. Science, Arts)."
+      title="Streams (legacy)"
+      subtitle="An older second subdivision, kept so existing data still works. New streams belong under Streams (P4 West) — those reach attendance and class teachers, these do not."
       endpoint="streams"
       queryKey="streams"
       nameField="name"

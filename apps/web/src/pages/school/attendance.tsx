@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
+import { enqueue } from '@/features/school/offline-queue';
+import { OfflineBanner } from './_components/offline-banner';
 
 const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
 
@@ -60,9 +62,10 @@ export function SchoolAttendancePage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Attendance Management</h1>
-        <p className="text-sm text-muted-foreground">Daily &amp; period attendance, corrections, parent alerts, and analytics.</p>
+        <h1 className="text-xl font-semibold">Attendance</h1>
+        <p className="text-sm text-muted-foreground">Take the daily or period register, fix mistakes, and alert parents.</p>
       </div>
+      <OfflineBanner />
       <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
         <TabsList>
           <TabsTrigger value="take">Take attendance</TabsTrigger>
@@ -110,11 +113,31 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
 
   const save = async () => {
     const entries = students.filter((s: any) => marks[s.id]).map((s: any) => ({ studentProfileId: s.id, status: marks[s.id].status, minutesLate: marks[s.id].minutesLate, earlyDepartureMinutes: marks[s.id].earlyDepartureMinutes, reason: marks[s.id].reason }));
-    if (entries.length === 0) return notify.error('Mark at least one student');
+    if (entries.length === 0) return notify.error('Mark at least one pupil');
+    const payload = { date, classId, periodId: periodId || undefined, entries };
     try {
-      await mark.mutateAsync({ date, classId, periodId: periodId || undefined, entries });
-      notify.success(`Saved · ${entries.length} student(s)${periodId ? ' (period)' : ''}`);
-    } catch { notify.error('Could not save attendance'); }
+      await mark.mutateAsync(payload);
+      notify.success(`Register saved · ${entries.length} pupil${entries.length === 1 ? '' : 's'}${periodId ? ' (period)' : ''}`);
+    } catch (e: any) {
+      // A register taken on a dropped connection is an hour of a teacher's day.
+      // Queue it and replay when the server is back rather than losing it; a
+      // 4xx is a real refusal and is reported instead.
+      const status = e?.response?.status;
+      if (!status || status >= 500) {
+        await enqueue({
+          key: `attendance:${classId}:${date}:${periodId || 'daily'}`,
+          kind: 'attendance',
+          endpoint: '/school/attendance/mark',
+          payload,
+          label: `Register · ${date}`,
+        });
+        notify.warning('Saved on this device — no connection', {
+          description: 'The register will be sent automatically when the server is reachable.',
+        });
+      } else {
+        notify.error(e?.response?.data?.message ?? 'Could not save the register');
+      }
+    }
   };
 
   const setAll = (status: AttendanceStatus) => setMarks(Object.fromEntries(students.map((s: any) => [s.id, { status }])));
