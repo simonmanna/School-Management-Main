@@ -40,6 +40,12 @@
     --input: 185 20% 88%;
     --ring: 175 77% 32%;
 
+    /* The public website's dark ground: the hero, the footer, the login panel.
+       Darker than `--primary` so white text clears AA on it at body size, which
+       primary teal does not. Defined once here rather than as a Tailwind colour
+       so the two apps keep sharing one token file. */
+    --brand-deep: 178 62% 13%;
+
     --radius: 0.875rem;
   }
 
@@ -70,6 +76,10 @@
     --border: 195 22% 22%;
     --input: 195 22% 22%;
     --ring: 173 65% 45%;
+
+    /* On a dark page the brand ground has to separate from `--background`
+       rather than sit on top of it as another near-black. */
+    --brand-deep: 190 40% 12%;
   }
 
   * {
@@ -89,5 +99,55 @@
   [role='button'],
   a.tap {
     min-height: 2.75rem;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Public website
+
+   Only the marketing pages use what follows. The signed-in workspaces stay
+   plain: a parent checking a balance does not need an entrance animation
+   between them and the number.
+   ────────────────────────────────────────────────────────────────────────── */
+@layer components {
+  /* Sections fade up as they arrive. `Reveal` adds `.reveal-in` once the element
+     has intersected.
+
+     The hidden start state is scoped to `.js`, which index.html sets before
+     first paint. Content that is invisible until JavaScript un-hides it is the
+     classic way a marketing page ends up blank in a reader mode, in a crawler,
+     or on a connection where one chunk failed — and this is the half of the app
+     strangers see. No `.js`, no animation, all the text. */
+  .js .reveal {
+    opacity: 0;
+    transform: translateY(12px);
+    transition:
+      opacity 600ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .js .reveal-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal,
+  .js .reveal-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  /* A public page has a scroll animation or two; someone who has asked their
+     operating system for less motion gets none of it. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

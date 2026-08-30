@@ -6,7 +6,9 @@ import {
   useStudentDocuments, useStudentMedical, useUpsertStudentMedical,
   useStudentLibrary, useStudentMeals, useStudentTransport, useStudentActivities,
   useCreateGuardian, useUpdateGuardian, useDeleteGuardian, useUpdateStudent,
-  useAcademicYears, useClasses, useAdmissionCycles, useNationalities,
+  useEnrollStudent, useSections, useSectionsForClass, useStudentEnrollments,
+  useAcademicYears, useClasses, useAdmissionCycles, useNationalities, useStudentCategories,
+  useTerms, useStudentResultSet,
   type FeeStatement, type Guardian,
 } from '@/features/school/api';
 import { useUpdatePartner } from '@/features/partners/api';
@@ -20,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Users, CalendarCheck, Save } from 'lucide-react';
 import { notify } from '@/lib/notify';
+import { formatClass } from '@/lib/utils';
 
 const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
 const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
@@ -51,6 +54,8 @@ export function SchoolStudent360Page() {
   const { data: transport } = useStudentTransport(id);
   const { data: activities } = useStudentActivities(id);
   const updateStudent = useUpdateStudent();
+  const { data: terms } = useTerms();
+  const { data: enrollments } = useStudentEnrollments(id);
   const updatePartner = useUpdatePartner();
 
   const [tab, setTab] = useState('profile');
@@ -62,6 +67,7 @@ export function SchoolStudent360Page() {
   const { data: years } = useAcademicYears();
   const { data: cycles } = useAdmissionCycles();
   const { data: nationalities } = useNationalities();
+  const { data: studentCategories } = useStudentCategories();
   const { data: classes } = useClasses();
 
   const [fName, setFName] = useState('');
@@ -73,8 +79,8 @@ export function SchoolStudent360Page() {
   const [nationality, setNationality] = useState('');
   const [entryStatus, setEntryStatus] = useState('');
   const [residenceType, setResidenceType] = useState('');
+  const [studentCategoryId, setStudentCategoryId] = useState('');
   const [address, setAddress] = useState('');
-  const [currentClassId, setCurrentClassId] = useState('');
   const [religion, setReligion] = useState('');
   const [nin, setNin] = useState('');
   const [learnerId, setLearnerId] = useState('');
@@ -82,6 +88,7 @@ export function SchoolStudent360Page() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bioBusy, setBioBusy] = useState(false);
+  const [placementOpen, setPlacementOpen] = useState(false);
 
   const cf = ((student as any)?.customFields ?? {}) as any;
   const photo = (student?.partner as any)?.customFields?.photoUrl as string | undefined;
@@ -102,8 +109,8 @@ export function SchoolStudent360Page() {
     setNationality(s.nationality ?? '');
     setEntryStatus(cf.entryStatus ?? '');
     setResidenceType(student.residenceType ?? '');
+    setStudentCategoryId(s.studentCategoryId ?? '');
     setAddress(cf.address ?? '');
-    setCurrentClassId(student.currentClassId ?? '');
     setReligion(s.religion ?? '');
 
     setNin(cf.nin ?? '');
@@ -141,6 +148,17 @@ export function SchoolStudent360Page() {
     }
   };
 
+  // Names, not ids. The pupil record used to print a six-character slice of the
+  // section UUID here, which told a head teacher nothing.
+  const allSections = useSections();
+  const sectionName = (sectionId?: string | null) =>
+    sectionId ? (allSections.data?.data ?? []).find((x: any) => x.id === sectionId)?.name ?? null : null;
+  const className = (classId?: string | null) =>
+    classId ? (classes?.data ?? []).find((c: any) => c.id === classId)?.name ?? null : null;
+  const placementLabel = student?.currentClassId
+    ? [className(student.currentClassId), sectionName(student.currentSectionId)].filter(Boolean).join(' — ')
+    : 'Not placed';
+
   const saveInfo = async () => {
     if (!student) return;
     if (!fName.trim() || !lName.trim()) {
@@ -169,7 +187,9 @@ export function SchoolStudent360Page() {
           nationality: nationality || undefined,
           religion: religion || undefined,
           residenceType: (residenceType || undefined) as any,
-          currentClassId: currentClassId || undefined,
+          studentCategoryId: studentCategoryId || undefined,
+          // Placement is deliberately absent: it moves through the placement
+          // dialog below, which writes an Enrollment. Sending it here is a 400.
           customFields: mergedCf,
         } as any,
       });
@@ -335,17 +355,31 @@ export function SchoolStudent360Page() {
                       </SelectContent>
                     </Select>
                   </EditField>
+                  <EditField label="Student category">
+                    <Select value={studentCategoryId} onValueChange={setStudentCategoryId}>
+                      <SelectTrigger><SelectValue placeholder={studentCategories?.length ? 'Choose a category' : 'No categories configured'} /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">No category</SelectItem>
+                        {(studentCategories ?? []).filter((c: any) => c.isActive).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                        {studentCategoryId && !(studentCategories ?? []).some((c: any) => c.id === studentCategoryId) && (
+                          <SelectItem value={studentCategoryId}>Previously selected</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </EditField>
                   <EditField label="Home address" full>
                     <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="E.g. Plot 5, Kampala Road" />
                   </EditField>
-                  <EditField label="Select a class" required>
-                    <Select value={currentClassId} onValueChange={setCurrentClassId}>
-                      <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">Choose a class</SelectItem>
-                        {(classes?.data ?? []).map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                  <EditField label="Class and stream">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">{placementLabel}</span>
+                      <Button size="sm" variant="outline" onClick={() => setPlacementOpen(true)}>
+                        {student.currentClassId ? 'Change placement' : 'Place in a class'}
+                      </Button>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Placement is recorded as an enrolment for a term, not edited here.
+                    </p>
                   </EditField>
                   <EditField label="Religion">
                     <Select value={religion} onValueChange={setReligion}>
@@ -379,7 +413,7 @@ export function SchoolStudent360Page() {
             <SectionCard title="System Information">
               <Field label="Registration no." value={student.partner?.code ?? '—'} />
               <Field label="Admission no." value={student.admissionNo} />
-              <Field label="Section" value={student.currentSectionId ? student.currentSectionId.slice(0, 6) : '—'} />
+              <Field label="Stream" value={sectionName(student.currentSectionId) ?? '—'} />
               <Field label="House" value={cf.house ?? '—'} />
               <Field label="Entry status (current)" value={student.status} />
             </SectionCard>
@@ -397,7 +431,7 @@ export function SchoolStudent360Page() {
 
         {/* ───────────────────────── Academic ───────────────────────── */}
         <TabsContent value="academic" className="space-y-4 pt-4">
-          <AcademicsTab portal={portal} />
+          <AcademicsTab studentId={student.id} portal={portal} />
           <AssessmentsTab portal={portal} />
           <LibraryTab rows={library} />
         </TabsContent>
@@ -429,6 +463,22 @@ export function SchoolStudent360Page() {
       </Tabs>
 
       {/* Change Photo dialog */}
+      <PlacementDialog
+        open={placementOpen}
+        onClose={() => setPlacementOpen(false)}
+        studentProfileId={student.id}
+        admissionNo={student.admissionNo}
+        currentClassId={student.currentClassId ?? null}
+        currentSectionId={student.currentSectionId ?? null}
+        classes={classes?.data ?? []}
+        terms={terms?.data ?? []}
+        enrollments={enrollments ?? []}
+        onDone={() => {
+          qc.invalidateQueries({ queryKey: ['school', 'student', id] });
+          qc.invalidateQueries({ queryKey: ['school', 'enrollments', id] });
+        }}
+      />
+
       <Dialog open={photoOpen} onOpenChange={setPhotoOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Change profile photo</DialogTitle></DialogHeader>
@@ -615,18 +665,95 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
 
 /* ───────────────────────── Academic / Attendance / etc ───────────────────────── */
 
-function AcademicsTab({ portal }: { portal?: any }) {
-  if (!portal?.publishedResults) return <Card><CardContent className="p-6"><Empty label="No published results yet — compute & publish a result set first." /></CardContent></Card>;
-  const r = portal.publishedResults;
+function AcademicsTab({ studentId, portal, student }: { studentId: string; portal?: any; student?: any }) {
+  const { data: terms } = useTerms();
+  const [termId, setTermId] = useState('');
+  const { data: result } = useStudentResultSet(studentId, termId || undefined);
+
+  // Default the term selector to the current academic term when it loads.
+  const termList = terms?.data ?? [];
+  const activeTermId = termList.find((t: any) => t.isCurrent)?.id ?? termList[0]?.id;
+  if (!termId && activeTermId) {
+    // setTermId during render is safe here because it's idempotent (only runs when empty).
+    queueMicrotask(() => setTermId(activeTermId));
+  }
+
+  const placement = student?.currentClass
+    ? formatClass({ className: student.currentClass.name, sectionName: student.currentSection?.name, streamName: student.currentStream?.name })
+    : null;
+
+  if (!portal?.publishedResults && !result) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="space-y-3">
+            {placement && (
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Current academic placement: </span>
+                <span className="font-medium">{placement}</span>
+              </div>
+            )}
+            <Empty label="No published results yet — compute & publish a result set first." />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const r = result ?? portal?.publishedResults;
+  const subjects = (result?.subjects ?? []).map((s: any) => ({
+    name: s.subjectName ?? s.subjectId?.slice(0, 6),
+    final: s.finalPercent != null ? Number(s.finalPercent) : null,
+    grade: s.grade ?? '—',
+  }));
+
   return (
-    <Card>
-      <CardHeader><CardTitle className="text-base">Published results — Term {r.termId?.slice(0, 6)}</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-3 gap-3 text-center">
-        <Stat label="Mean %" value={r.meanPercent != null ? Number(r.meanPercent).toFixed(1) : '—'} />
-        <Stat label="Class rank" value={r.classRank != null ? `#${r.classRank}` : '—'} />
-        <Stat label="Recommendation" value={r.promotionRecommendation ?? '—'} />
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      {placement && (
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">Current academic placement: </span>
+          <span className="font-medium">{placement}</span>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-base">Academic results</CardTitle>
+          <Select value={termId} onValueChange={setTermId}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Select term" /></SelectTrigger>
+            <SelectContent>
+              {termList.map((t: any) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <Stat label="Mean %" value={r?.meanPercent != null ? Number(r.meanPercent).toFixed(1) : (result?.students?.[0]?.meanPercent != null ? Number(result.students[0].meanPercent).toFixed(1) : '—')} />
+            <Stat label="Class rank" value={r?.classRank != null ? `#${r.classRank}` : (result?.students?.[0]?.classRank != null ? `#${result.students[0].classRank}` : '—')} />
+            <Stat label="Recommendation" value={r?.promotionRecommendation ?? (result?.students?.[0]?.promotionRecommendation ?? '—')} />
+          </div>
+
+          {subjects.length > 0 ? (
+            <table className="w-full text-sm">
+              <thead className="border-b text-left text-xs font-medium text-muted-foreground">
+                <tr><th className="px-2 py-1">Subject</th><th className="px-2 py-1 text-right">Final %</th><th className="px-2 py-1 text-center">Grade</th></tr>
+              </thead>
+              <tbody>
+                {subjects.map((s: any, i: number) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="px-2 py-1.5">{s.name}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums font-medium">{s.final != null ? `${s.final}%` : '—'}</td>
+                    <td className="px-2 py-1.5 text-center"><Badge variant="outline">{s.grade}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <Empty label="No subject results for this term yet." />
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -936,4 +1063,148 @@ function Empty({ label }: { label: string }) {
 }
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) {
   return <div className="rounded-md border p-2"><div className="text-xs text-muted-foreground">{label}</div><div className={`font-semibold ${tone === 'rose' ? 'text-rose-600' : tone === 'emerald' ? 'text-emerald-600' : ''}`}>{value}</div></div>;
+}
+
+/**
+ * Place a pupil in a class for a term.
+ *
+ * This replaces a plain class dropdown that wrote StudentProfile.currentClassId
+ * through the profile endpoint. That moved the mirror and nothing else: the
+ * pupil's record said P5 while every enrolment, register, mark sheet and result
+ * still said P4. Enrollment is the authoritative placement record, so the only
+ * way to move a pupil is to write one.
+ */
+function PlacementDialog({
+  open, onClose, studentProfileId, admissionNo, currentClassId, currentSectionId, classes, terms, enrollments, onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  studentProfileId: string;
+  admissionNo: string;
+  currentClassId: string | null;
+  currentSectionId: string | null;
+  classes: any[];
+  terms: any[];
+  enrollments: any[];
+  onDone: () => void;
+}) {
+  const enroll = useEnrollStudent();
+  const [classId, setClassId] = useState('');
+  const [sectionId, setSectionId] = useState('');
+  const [termId, setTermId] = useState('');
+  const [rollNumber, setRollNumber] = useState('');
+  const sections = useSectionsForClass(classId || undefined);
+
+  useEffect(() => {
+    if (!open) return;
+    setClassId(currentClassId ?? '');
+    setSectionId(currentSectionId ?? '');
+    // Default to the term the school is actually in, not whichever term the API
+    // happened to return first.
+    setTermId(terms.find((t: any) => t.isCurrent)?.id ?? terms[0]?.id ?? '');
+    setRollNumber(admissionNo ?? '');
+  }, [open, currentClassId, currentSectionId, terms, admissionNo]);
+
+  // A stream belongs to one class, so changing class invalidates the choice.
+  useEffect(() => {
+    if (sectionId && !sections.data.some((x: any) => x.id === sectionId)) setSectionId('');
+  }, [classId, sections.data, sectionId]);
+
+  const already = enrollments.find((e: any) => e.termId === termId && e.status === 'enrolled');
+  const termName = terms.find((t: any) => t.id === termId)?.name ?? 'this term';
+
+  const submit = async () => {
+    if (!classId || !termId || !rollNumber.trim()) {
+      notify.error('Class, term and roll number are required');
+      return;
+    }
+    try {
+      await enroll.mutateAsync({
+        studentProfileId,
+        classId,
+        sectionId: sectionId || undefined,
+        termId,
+        rollNumber: rollNumber.trim(),
+      });
+      const label = [classes.find((c: any) => c.id === classId)?.name, sections.data.find((x: any) => x.id === sectionId)?.name]
+        .filter(Boolean).join(' — ');
+      notify.success(`Placed in ${label} for ${termName}`);
+      onDone();
+      onClose();
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not place this pupil');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Place pupil in a class</DialogTitle></DialogHeader>
+        <div className="grid gap-3">
+          <div>
+            <Label>Term</Label>
+            <Select value={termId} onValueChange={setTermId}>
+              <SelectTrigger><SelectValue placeholder="Choose a term" /></SelectTrigger>
+              <SelectContent>
+                {terms.map((t: any) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Class</Label>
+            <Select value={classId} onValueChange={setClassId}>
+              <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
+              <SelectContent>
+                {classes.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Stream</Label>
+            <Select value={sectionId} onValueChange={setSectionId} disabled={!classId || sections.data.length === 0}>
+              <SelectTrigger>
+                <SelectValue placeholder={!classId ? 'Choose a class first' : sections.data.length ? 'Choose a stream' : 'This class has no streams'} />
+              </SelectTrigger>
+              <SelectContent>
+                {sections.data.map((x: any) => <SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Roll number</Label>
+            <Input value={rollNumber} onChange={(e) => setRollNumber(e.target.value)} placeholder="E.g. 12" />
+          </div>
+
+          {already && (
+            <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+              This pupil already has an enrolment for {termName}. A pupil can hold only one
+              placement per term — end the existing one before creating another.
+            </p>
+          )}
+
+          {enrollments.length > 0 && (
+            <div className="rounded border p-2">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Placement history</p>
+              <ul className="space-y-0.5 text-xs">
+                {enrollments.slice(0, 6).map((e: any) => (
+                  <li key={e.id} className="flex justify-between gap-2">
+                    <span>{e.schoolClass?.name ?? e.classId?.slice(0, 6)}{e.section?.name ? ` — ${e.section.name}` : ''}</span>
+                    <span className="text-muted-foreground">{e.term?.name ?? ''} · {e.status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
+          <Button onClick={submit} disabled={enroll.isPending || !!already}>
+            {enroll.isPending ? 'Placing…' : 'Place pupil'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

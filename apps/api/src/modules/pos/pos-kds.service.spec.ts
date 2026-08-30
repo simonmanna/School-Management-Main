@@ -26,7 +26,7 @@ describe('PosKdsService', () => {
 
   beforeEach(() => {
     tenant = { organizationId: orgId, userId: 'chef1' };
-    events = { publish: jest.fn() };
+    events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
     audit = { record: jest.fn() };
     sequence = { next: jest.fn().mockResolvedValue('K-001') };
     prisma = {

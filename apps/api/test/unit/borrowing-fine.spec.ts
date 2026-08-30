@@ -21,7 +21,7 @@ describe('BorrowingService — overdue fine calculation', () => {
       },
     };
     const tenant = { organizationId: 'org_test' };
-    const events = { publish: jest.fn() };
+    const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
     const sequence = { next: jest.fn().mockResolvedValue('LFINE-000001') };
     const documentBuilder = { groupForPosting: jest.fn().mockResolvedValue({ counterAccount: 'acc_ar', itemByAccount: new Map() }) };
     const posting = { post: jest.fn().mockResolvedValue({ id: 'je_1' }) };

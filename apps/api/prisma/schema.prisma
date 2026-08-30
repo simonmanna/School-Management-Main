@@ -11483,6 +11483,11 @@ model AdmissionApplication {
   applicantDob       DateTime?
   applicantGender    String?
   applyingForClassId String?
+  /// Fee/reporting category the applicant is admitted under (bursary, staff
+  /// child, sponsored...). The DTO and the create/update paths carried this
+  /// field but the model never did, so every application create failed Prisma
+  /// validation with "Unknown argument studentCategoryId".
+  studentCategoryId  String?
   /// FK to Contact (parent/guardian contact for this application).
   parentContactId    String?
   status             AdmissionStatus @default(submitted)
@@ -13599,8 +13604,15 @@ model StudentAssessment {
   percentage       Decimal? @db.Decimal(6, 3)
   /// Marking-approval workflow, reusing the GradeEntry enum (draft→submitted→approved/rejected).
   approvalStatus   GradeEntryStatus @default(draft)
+  /// Who ENTERED the mark. Distinct from who submitted it for approval and who
+  /// approved it: three actors, three facts. Submission used to overwrite this
+  /// with the submitter, so a marker whose work a colleague submitted could then
+  /// approve their own marks — and runPublishGate's SOD_VIOLATION check, which
+  /// compares enteredById against approvedById, could not see it either.
   enteredById      String?
   enteredAt        DateTime?
+  submittedById    String?
+  submittedAt      DateTime?
   approvedById     String?
   approvedAt       DateTime?
   /// Why an approver sent the marks back. Carried over from GradeEntry so the

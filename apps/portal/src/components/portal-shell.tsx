@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Suspense } from 'react';
 import {
   Home, Wallet, CalendarCheck, GraduationCap, BookOpen, ClipboardList,
@@ -100,15 +100,20 @@ function Header({ audience }: { audience: 'parent' | 'student' | 'teacher' }) {
   return (
     <header className="sticky top-0 z-20 border-b bg-card/95 backdrop-blur">
       <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <School className="h-5 w-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold leading-tight">{SCHOOL_NAME}</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {user ? `${user.firstName} ${user.lastName ?? ''}`.trim() : ''}
+        {/* The crest goes back to the public website. The portal and the school
+            site are one deployment, so leaving the workspace is a router link
+            rather than a second address to remember. */}
+        <Link to="/" className="flex min-w-0 flex-1 items-center gap-3" aria-label={`${SCHOOL_NAME} website`}>
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <School className="h-5 w-5" />
           </div>
-        </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold leading-tight">{SCHOOL_NAME}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {user ? `${user.firstName} ${user.lastName ?? ''}`.trim() : ''}
+            </div>
+          </div>
+        </Link>
         {audience === 'parent' && <ChildSwitcher />}
         <button
           type="button"

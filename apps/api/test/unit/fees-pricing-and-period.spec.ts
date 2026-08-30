@@ -45,7 +45,7 @@ function makeBilling(feeStructure: any, items: any[] = []) {
   const service = new BillingService(
     prisma as any,
     { organizationId: 'org_test' } as any,
-    { publish: jest.fn() } as any,
+    { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     { next: jest.fn() } as any,
     { groupForPosting: jest.fn() } as any,
     { post: jest.fn() } as any,
@@ -178,7 +178,7 @@ describe('period control covers every affected document (P1-B)', () => {
       prisma as any,
       { organizationId: 'org_test', userId: 'u1' } as any,
       { record: jest.fn(), recordInTx: jest.fn() } as any,
-      { publish: jest.fn() } as any,
+      { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
       { next: jest.fn() } as any,
       { post: jest.fn() } as any,
       { receivableAccount: jest.fn() } as any,

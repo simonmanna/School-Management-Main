@@ -57,7 +57,7 @@ function mockPrisma(overrides: { partner?: any; tab?: any; outstanding?: number 
 function makeService(prisma: any) {
   const payments = { createReceipt: jest.fn() };
   const posting = { post: jest.fn() };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const audit = { record: jest.fn().mockResolvedValue(undefined) };
   const svc = new PosInvoiceService(
     prisma as any,

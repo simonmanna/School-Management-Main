@@ -197,6 +197,19 @@ export function useSections() {
     queryFn: async () => (await api.get<Paginated<Section>>(`${S}/sections`, { params: { pageSize: 300 } })).data,
   });
 }
+
+/**
+ * The subdivisions of one class — what a primary school calls its streams
+ * ("P4 West"). Backed by Section, which is the subdivision that travels the
+ * whole academic pipeline: attendance, assessments, class lists and results all
+ * carry sectionId, while streamId stops at placement and the timetable.
+ * Filtered from the single cached list rather than a second request.
+ */
+export function useSectionsForClass(classId: string | undefined) {
+  const { data, ...rest } = useSections();
+  const sections = (data?.data ?? []).filter((x) => x.classId === classId);
+  return { ...rest, data: classId ? sections : [] };
+}
 export function useUpdateSection() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; classId?: string; name?: string; capacity?: number; classTeacherId?: string }) => (await api.patch<Section>(`${S}/sections/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'sections'] }) });
@@ -1018,6 +1031,9 @@ export function useIssuePortalLink() {
 export interface EnrollAdmissionInput {
   applicationId: string;
   classId: string;
+  /** Subdivision of the class — "Stream" in the UI. Optional server-side too. */
+  sectionId?: string;
+  streamId?: string;
   termId: string;
   rollNumber: string;
   student: { name: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string };
@@ -1136,15 +1152,93 @@ export function useCreateStudent() {
   });
 }
 
+/** Quick "register & place" — create the student and enroll them in one action. */
+export interface RegisterStudentInput {
+  name: string;
+  admissionNo?: string;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  religion?: string | null;
+  house?: string | null;
+  residenceType?: 'day' | 'boarder' | null;
+  studentCategoryId?: string | null;
+  classId: string;
+  sectionId?: string | null;
+  streamId?: string | null;
+  termId: string;
+  rollNumber: string;
+  guardianName?: string;
+  guardianPhone?: string;
+  guardianRelationship?: string;
+}
+export function useRegisterStudent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: RegisterStudentInput) => (await api.post<{ profile: { id: string } }>(`${S}/enrollments/register`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'students'] });
+      qc.invalidateQueries({ queryKey: ['school', 'enrollments'] });
+    },
+  });
+}
+
+/**
+ * Profile edits only. `currentClassId` / `currentSectionId` are NOT accepted:
+ * the API rejects them (forbidNonWhitelisted) because placement is an academic
+ * event, not a profile field. Moving a pupil goes through `useEnrollStudent`,
+ * which writes the Enrollment and the profile snapshot together.
+ */
 export function useUpdateStudent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, dto }: { id: string; dto: Partial<CreateStudentInput> & { status?: StudentStatus; reason?: string } }) =>
+    mutationFn: async ({ id, dto }: { id: string; dto: Omit<Partial<CreateStudentInput>, 'currentClassId' | 'currentSectionId'> & { status?: StudentStatus; reason?: string } }) =>
       (await api.patch<Student>(`${S}/students/${id}`, dto)).data,
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['school', 'students'] });
       qc.invalidateQueries({ queryKey: ['school', 'student', v.id] });
     },
+  });
+}
+
+export interface EnrollStudentInput {
+  studentProfileId: string;
+  classId: string;
+  /** The subdivision, shown to primary schools as "Stream". */
+  sectionId?: string;
+  streamId?: string;
+  termId: string;
+  rollNumber: string;
+  effectiveDate?: string;
+}
+
+/**
+ * Place a pupil in a class for a term — the authoritative placement write.
+ *
+ * `POST /school/enrollments` has existed since the enrollment module was built
+ * and had no client at all, which is why the only ways a pupil could be placed
+ * were the admissions dialog and promotion, and why the Student 360 resorted to
+ * editing the profile snapshot directly.
+ */
+export function useEnrollStudent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: EnrollStudentInput) => (await api.post(`${S}/enrollments`, dto)).data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['school', 'students'] });
+      qc.invalidateQueries({ queryKey: ['school', 'student', v.studentProfileId] });
+      qc.invalidateQueries({ queryKey: ['school', 'enrollments'] });
+    },
+  });
+}
+
+/** A pupil's placement history — every term they have been enrolled for. */
+export function useStudentEnrollments(studentProfileId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'enrollments', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<any[]>(`${S}/enrollments`, { params: { studentProfileId } })).data,
   });
 }
 
@@ -4140,6 +4234,29 @@ export function useResultSet(id: string | undefined) {
     queryKey: ['school', 'result-set', id],
     enabled: !!id,
     queryFn: async () => (await api.get<ResultSetDetail>(`${RES}/${id}`)).data,
+  });
+}
+export interface ResultReadiness {
+  ready: boolean;
+  conflicts: Array<{ code: string; studentProfileId?: string; detail: string }>;
+  summary: {
+    rosterFrozen: boolean;
+    studentsCovered: number;
+    studentsExpected: number;
+    marksApproved: number;
+    marksTotal: number;
+    sodViolations: number;
+    hasChecksums: boolean;
+  };
+}
+export function useResultReadiness(id: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'result-readiness', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<ResultReadiness>(`${RES}/${id}/readiness`)).data,
+    // Readiness is cheap and the admin is about to act on it; keep it fresh.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 export function usePublishResultSet() {

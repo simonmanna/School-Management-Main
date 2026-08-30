@@ -204,7 +204,7 @@ describe('PosInvoiceService', () => {
     beforeEach(() => {
       // The no-externalTx path runs post-commit side effects (audit + domain
       // event); the outer suite stubs both collaborators as `{}`.
-      (svc as any).events = { publish: jest.fn() };
+      (svc as any).events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
       (svc as any).audit = { record: jest.fn(), recordInTx: jest.fn() };
       prisma.client.order.findFirst.mockResolvedValue({
         id: 'ord-1', organizationId: orgId, orderNumber: 'ORD-1', status: 'confirmed',

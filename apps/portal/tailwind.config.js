@@ -20,6 +20,36 @@ export default {
         card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },
         success: { DEFAULT: 'hsl(var(--success))', foreground: 'hsl(var(--success-foreground))' },
       },
+      fontFamily: {
+        // Every family here has a full system fallback stack. The webfont is a
+        // progressive enhancement: a school on a slow link, or a device that
+        // blocks Google Fonts, still gets a page set in something reasonable
+        // rather than Times New Roman.
+        sans: [
+          '"Plus Jakarta Sans"',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+        ],
+        // Headings only. A separate token so the display face can be swapped for
+        // the school's own without touching body copy.
+        display: [
+          '"Plus Jakarta Sans"',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          'Segoe UI',
+          'Roboto',
+          'Helvetica Neue',
+          'Arial',
+          'sans-serif',
+        ],
+      },
       borderRadius: { lg: 'var(--radius)', md: 'calc(var(--radius) - 2px)', sm: 'calc(var(--radius) - 4px)' },
       spacing: {
         // Bottom nav clearance plus the iOS home indicator.

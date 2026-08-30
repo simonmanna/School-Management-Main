@@ -199,7 +199,7 @@ export class ResultRunService {
         action: 'create',
         newValues: { termId: dto.termId, scopeType, scopeId, revision, studentCount: output.students.length },
       });
-      this.events.publish(EVENTS.SchoolResultsComputed, {
+      await this.events.publishInTx(tx, EVENTS.SchoolResultsComputed, {
         organizationId,
         resultSetId: resultSet.id,
         termId: dto.termId,
@@ -228,7 +228,7 @@ export class ResultRunService {
         action: 'post',
         newValues: { action: 'lock', revision: rs.revision },
       });
-      this.events.publish(EVENTS.SchoolResultsLocked, {
+      await this.events.publishInTx(tx, EVENTS.SchoolResultsLocked, {
         organizationId, resultSetId, termId: rs.termId, revision: rs.revision,
       });
       return tx.resultSet.findFirst({ where: { id: resultSetId } });
@@ -262,7 +262,7 @@ export class ResultRunService {
         action: 'post',
         newValues: { action: 'publish', revision: rs.revision },
       });
-      this.events.publish(EVENTS.SchoolResultsPublished, {
+      await this.events.publishInTx(tx, EVENTS.SchoolResultsPublished, {
         organizationId,
         resultSetId,
         termId: rs.termId,
@@ -359,14 +359,85 @@ export class ResultRunService {
         data: { status: 'applied', reviewedById: this.tenant.userId ?? null, newResultSetId: next.id },
       });
       await this.audit.recordInTx(tx, { entity: 'AmendmentRequest', entityId: amendmentId, action: 'approve', newValues: { newResultSetId: next.id } });
-    });
-    this.events.publish(EVENTS.SchoolResultsAmended, {
-      organizationId: this.tenant.organizationId,
-      resultSetId: next.id,
-      previousResultSetId: rs.id,
-      revision: next.revision,
+      // Inside the tx that marks the amendment applied: the event and the
+      // record of the amendment commit together, or neither does.
+      await this.events.publishInTx(tx, EVENTS.SchoolResultsAmended, {
+        organizationId: this.tenant.organizationId,
+        resultSetId: next.id,
+        previousResultSetId: rs.id,
+        revision: next.revision,
+      });
     });
     return next;
+  }
+
+  /**
+   * Readiness report for a result set: the same all-or-nothing checks the publish
+   * gate runs, but returned as a structured checklist instead of throwing. The UI
+   * shows this BEFORE offering the Publish button, so an administrator sees
+   * "3 students have unapproved marks" rather than discovering it after the fact.
+   * `ready` is true only when there are zero conflicts.
+   */
+  async readiness(resultSetId: string): Promise<{
+    ready: boolean;
+    conflicts: PublishConflict[];
+    summary: {
+      rosterFrozen: boolean;
+      studentsCovered: number;
+      studentsExpected: number;
+      marksApproved: number;
+      marksTotal: number;
+      sodViolations: number;
+      hasChecksums: boolean;
+    };
+  }> {
+    // termResults is REQUIRED here: runPublishGate() reads rs.termResults to
+    // check coverage, so loading the set without it threw a TypeError and the
+    // readiness checklist — the screen that exists to explain why a publish is
+    // blocked — answered every request with a 500. publish() already includes
+    // it, which is why the gate worked there and only this caller was broken.
+    const rs = await this.prisma.client.resultSet.findFirst({
+      where: { id: resultSetId },
+      include: { termResults: true },
+    });
+    if (!rs) throw new NotFoundException(`ResultSet ${resultSetId} not found`);
+
+    const conflicts = await this.runPublishGate(rs);
+
+    const roster = rs.rosterId
+      ? await this.prisma.client.academicRoster.findFirst({
+          where: { id: rs.rosterId },
+          include: { members: true },
+        })
+      : null;
+
+    const studentIds = (roster?.members ?? []).map((m: any) => m.studentProfileId);
+    const contributing = studentIds.length
+      ? await this.prisma.client.studentAssessment.findMany({
+          where: { studentProfileId: { in: studentIds }, termId: rs.termId, assessment: { deletedAt: null } },
+        })
+      : [];
+
+    const approved = contributing.filter(
+      (sa: any) => sa.approvalStatus === 'approved' || ['exempt', 'excused', 'absent', 'malpractice'].includes(sa.participation),
+    ).length;
+    const sod = contributing.filter(
+      (sa: any) => sa.approvedById && sa.enteredById && sa.approvedById === sa.enteredById,
+    ).length;
+
+    return {
+      ready: conflicts.length === 0,
+      conflicts,
+      summary: {
+        rosterFrozen: !!roster?.frozenAt,
+        studentsCovered: rs.termResults?.length ?? 0,
+        studentsExpected: roster?.members?.length ?? 0,
+        marksApproved: approved,
+        marksTotal: contributing.length,
+        sodViolations: sod,
+        hasChecksums: !!rs.inputChecksum && !!rs.outputChecksum,
+      },
+    };
   }
 
   // ── reads ─────────────────────────────────────────────────────────────────

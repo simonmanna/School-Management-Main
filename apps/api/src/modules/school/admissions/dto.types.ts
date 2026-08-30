@@ -54,6 +54,8 @@ export class CreateApplicationDto {
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() entryStatus?: string;
   @IsOptional() @IsString() address?: string;
+  /// FK to StudentCategory (org-scoped master data), chosen at apply time.
+  @IsOptional() @IsString() studentCategoryId?: string;
   /// When true the application is created as a `draft` (portal / save-and-continue).
   @IsOptional() @IsBoolean() asDraft?: boolean;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
@@ -77,6 +79,8 @@ export class UpdateApplicationDto {
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() entryStatus?: string;
   @IsOptional() @IsString() address?: string;
+  /// FK to StudentCategory (org-scoped master data), chosen at apply time.
+  @IsOptional() @IsString() studentCategoryId?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => AdmissionGuardianDto) guardians?: AdmissionGuardianDto[];
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
@@ -198,6 +202,7 @@ export class TransferInDto {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsString() house?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() studentCategoryId?: string;
   @IsOptional() @IsString() transferredFrom?: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;

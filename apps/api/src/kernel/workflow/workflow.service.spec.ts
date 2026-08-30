@@ -108,7 +108,7 @@ describe('WorkflowService.transition — business events', () => {
     client.$transaction = jest.fn((cb: any) => cb(client));
     prisma = { client };
     audit = { recordInTx: jest.fn() };
-    outbox = { publish: jest.fn() };
+    outbox = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
     svc = new WorkflowService(
       prisma as any,
       { organizationId: orgId, userId: 'u1', permissions: [] } as any,

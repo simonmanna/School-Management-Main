@@ -38,7 +38,7 @@ function makeMomo(overrides: { request?: any; collectResult?: any } = {}) {
   const service = new MobileMoneyService(
     prisma as any,
     { organizationId: 'org', userId: 'u1' } as any,
-    { publish: jest.fn() } as any,
+    { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     { collect } as any,
     { studentBalance: jest.fn().mockResolvedValue({ balance: 300_000, billed: 900_000, collected: 600_000 }) } as any,
   );

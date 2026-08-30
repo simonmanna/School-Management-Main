@@ -55,7 +55,7 @@ describe('CrmService', () => {
       },
     };
     tenant = { organizationId: orgId, userId };
-    events = { publish: jest.fn(), subscribe: jest.fn() };
+    events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined), subscribe: jest.fn() };
     audit = { record: jest.fn() };
     svc = new CrmService(prisma as any, tenant as any, {} as any, events as any, audit as any);
   });

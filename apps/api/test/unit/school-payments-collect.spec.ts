@@ -19,7 +19,7 @@ import { SchoolPaymentService } from '../../src/modules/school/fees/billing.serv
 
 function makeService(openInvoices: any[] = [], existingPayment: any = null) {
   const tenant = { organizationId: 'org_test' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
 
   const documentFindMany = jest.fn().mockResolvedValue(openInvoices);
   const paymentFindFirst = jest

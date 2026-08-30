@@ -21,7 +21,7 @@ import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/a
 
 function makeService() {
   const tenant = { organizationId: 'org_test', userId: 'user_1' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const sequence = { next: jest.fn().mockResolvedValue('APP-2026-000001') };
   const auditRecordInTx = jest.fn().mockResolvedValue(undefined);
 

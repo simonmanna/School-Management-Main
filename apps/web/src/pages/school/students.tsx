@@ -1,11 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, GraduationCap, UserPlus, X } from 'lucide-react';
+import { Plus, GraduationCap, UserPlus, X, Zap } from 'lucide-react';
 import {
   useStudents,
   useCreateStudent,
   useUpdateStudent,
   useClasses,
+  useSections,
+  useStreams,
+  useTerms,
+  useRegisterStudent,
   useGuardians,
   useCreateGuardian,
   useStudentStatement,
@@ -34,13 +38,18 @@ export function SchoolStudentsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [detail, setDetail] = useState<Student | null>(null);
 
   const { data, isLoading } = useStudents({ search: search || undefined, pageSize: 50 });
   const { data: classes } = useClasses();
+  const { data: sections } = useSections();
+  const { data: streams } = useStreams();
+  const { data: terms } = useTerms();
   const create = useCreateStudent();
+  const register = useRegisterStudent();
   const update = useUpdateStudent();
 
   const rows = useMemo(() => data?.data ?? [], [data]);
@@ -65,7 +74,9 @@ export function SchoolStudentsPage() {
             email: form.email || undefined,
             phone: form.phone || undefined,
             gender: (form.gender || undefined) as 'male' | 'female' | 'other' | undefined,
-            currentClassId: form.currentClassId || undefined,
+            // Class is absent by design: moving a pupil is an enrolment, made
+            // from the pupil's record. Editing it here changed only the profile
+            // mirror and left the academic record behind.
             residenceType: (form.residenceType || undefined) as 'day' | 'boarder' | undefined,
           },
         });
@@ -89,6 +100,36 @@ export function SchoolStudentsPage() {
     }
   };
 
+  // ── Quick "register & place" — one action creates the student AND enrolls them. ──
+  const [quick, setQuick] = useState<Record<string, string>>({});
+  const quickSubmit = async () => {
+    try {
+      if (!quick.name?.trim() || !quick.classId || !quick.termId || !quick.rollNumber?.trim()) {
+        notify.error('Name, class, term and roll number are required');
+        return;
+      }
+      await register.mutateAsync({
+        name: quick.name.trim(),
+        admissionNo: quick.admissionNo?.trim() || undefined,
+        dateOfBirth: quick.dateOfBirth || null,
+        gender: (quick.gender || undefined) as 'male' | 'female' | 'other' | null,
+        classId: quick.classId,
+        sectionId: quick.sectionId || null,
+        streamId: quick.streamId || null,
+        termId: quick.termId,
+        rollNumber: quick.rollNumber.trim(),
+        guardianName: quick.guardianName?.trim() || undefined,
+        guardianPhone: quick.guardianPhone?.trim() || undefined,
+        guardianRelationship: quick.guardianRelationship?.trim() || undefined,
+      });
+      notify.success('Student registered and placed');
+      setQuickOpen(false);
+      setQuick({});
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not register student');
+    }
+  };
+
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
@@ -98,6 +139,9 @@ export function SchoolStudentsPage() {
         </div>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4" /> Admit student
+        </Button>
+        <Button variant="secondary" onClick={() => setQuickOpen(true)}>
+          <Zap className="h-4 w-4" /> Quick register &amp; place
         </Button>
       </div>
 
@@ -204,6 +248,19 @@ export function SchoolStudentsPage() {
       </Dialog>
 
       {detail && <StudentDetail student={detail} onClose={() => setDetail(null)} classNameById={classNameById} money={money} />}
+
+      <QuickRegisterDialog
+        open={quickOpen}
+        onOpenChange={setQuickOpen}
+        form={quick}
+        setForm={setQuick}
+        terms={terms?.data ?? []}
+        classes={classes?.data ?? []}
+        sections={sections?.data ?? []}
+        streams={streams?.data ?? []}
+        onSubmit={quickSubmit}
+        busy={register.isPending}
+      />
     </div>
   );
 }
@@ -331,5 +388,110 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ro
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`font-semibold ${tone === 'rose' ? 'text-rose-600' : tone === 'emerald' ? 'text-emerald-600' : ''}`}>{value}</div>
     </div>
+  );
+}
+
+/**
+ * Quick "register & place" — the one-screen path a secretary uses at the front desk.
+ * Creates the student and enrolls them in a class in a single server transaction,
+ * so there is no second "now assign a class" step. Guardian is optional; if given,
+ * a Contact is created and linked inline.
+ */
+function QuickRegisterDialog({
+  open, onOpenChange, form, setForm, terms, classes, sections, streams, onSubmit, busy,
+}: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  form: Record<string, string>; setForm: (v: Record<string, string>) => void;
+  terms: any[]; classes: any[]; sections: any[]; streams: any[];
+  onSubmit: () => void; busy: boolean;
+}) {
+  const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Zap className="h-4 w-4" /> Quick register &amp; place</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Register the pupil and place them in a class in one step.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Full name *</Label>
+              <Input value={form.name ?? ''} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="E.g. Isabelle Atweoki" />
+            </div>
+            <div>
+              <Label>Admission no.</Label>
+              <Input value={form.admissionNo ?? ''} onChange={(e) => setForm({ ...form, admissionNo: e.target.value })} placeholder="Auto if blank" />
+            </div>
+            <div>
+              <Label>Date of birth</Label>
+              <Input type="date" value={form.dateOfBirth ?? ''} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} />
+            </div>
+            <div>
+              <Label>Gender</Label>
+              <select className={sel} value={form.gender ?? ''} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+                <option value="">—</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <Label>Term *</Label>
+              <select className={sel} value={form.termId ?? ''} onChange={(e) => setForm({ ...form, termId: e.target.value })}>
+                <option value="">Choose term</option>
+                {(terms ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Class *</Label>
+              <select className={sel} value={form.classId ?? ''} onChange={(e) => setForm({ ...form, classId: e.target.value })}>
+                <option value="">Choose class</option>
+                {(classes ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Section</Label>
+              <select className={sel} value={form.sectionId ?? ''} onChange={(e) => setForm({ ...form, sectionId: e.target.value })}>
+                <option value="">—</option>
+                {(sections ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Stream</Label>
+              <select className={sel} value={form.streamId ?? ''} onChange={(e) => setForm({ ...form, streamId: e.target.value })}>
+                <option value="">—</option>
+                {(streams ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Roll number *</Label>
+              <Input value={form.rollNumber ?? ''} onChange={(e) => setForm({ ...form, rollNumber: e.target.value })} placeholder="E.g. 23" />
+            </div>
+            <div>
+              <Label>Guardian name</Label>
+              <Input value={form.guardianName ?? ''} onChange={(e) => setForm({ ...form, guardianName: e.target.value })} placeholder="Optional" />
+            </div>
+            <div>
+              <Label>Guardian phone</Label>
+              <Input value={form.guardianPhone ?? ''} onChange={(e) => setForm({ ...form, guardianPhone: e.target.value })} placeholder="Optional" />
+            </div>
+            <div>
+              <Label>Relationship</Label>
+              <select className={sel} value={form.guardianRelationship ?? ''} onChange={(e) => setForm({ ...form, guardianRelationship: e.target.value })}>
+                <option value="">—</option>
+                {['father', 'mother', 'guardian', 'uncle', 'aunt', 'sibling', 'grandparent', 'other'].map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={onSubmit} disabled={busy}><Zap className="h-4 w-4" /> Register &amp; place</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

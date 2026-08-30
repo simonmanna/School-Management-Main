@@ -21,6 +21,30 @@ They share the same API, the same tokens and the same database. A portal account
 is an ordinary `User` plus a `PortalIdentity` row saying which real person it
 speaks for.
 
+### The public website
+
+The same deployment also serves the school's public website. `/` and its pages
+(`/about`, `/academics`, `/admissions`, `/news`, `/contact`, `/portals`,
+`/verify`) render to anyone, with no token and no `portals/me` call; everything
+from `/login` inwards is unchanged.
+
+| | |
+|---|---|
+| App entry for a signed-in account | `/home` — the landing redirect, and the PWA `start_url` |
+| Content (prose, term dates, news, staff) | `apps/portal/src/site/content.ts` |
+| School name | `VITE_SCHOOL_NAME`, shared with the portal header |
+| Live public API reads | `GET /verify/certificate/:code`, `GET /school/admissions/portal/application?token=` |
+
+Two consequences for a deployment:
+
+- **`/` is now indexable and quotable.** It was a redirect to a login screen; it
+  is now the page a family lands on from a search result. Anything in
+  `content.ts` is public the moment it ships.
+- **The two public API reads need the global rate limiter in front of them.**
+  Both are unauthenticated by design — the certificate check answers strangers,
+  and the application view is authorized only by the emailed token — so they are
+  the endpoints an unfriendly visitor will enumerate.
+
 ---
 
 ## 2. Before you expose anything

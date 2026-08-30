@@ -16,7 +16,7 @@ export class CampusService extends BaseCrudService<Campus, CreateCampusDto, Upda
 
   constructor(
     private readonly prisma: PrismaService,
-    tenant: TenantContextService,
+    private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
   ) {
@@ -25,8 +25,13 @@ export class CampusService extends BaseCrudService<Campus, CreateCampusDto, Upda
 
   async create(dto: CreateCampusDto): Promise<Campus> {
     const prisma = (this as any).delegate;
+    const orgId = this.tenant.organizationId;
     const created = await this.prisma.client.$transaction(async (tx: any) => {
-      const row = await tx.campus.create({ data: dto });
+      // Default the first campus of an org to "main" unless caller says otherwise.
+      const existingCount = await tx.campus.count({ where: { organizationId: orgId, deletedAt: null } });
+      const row = await tx.campus.create({
+        data: { ...(dto as any), isMain: dto.isMain ?? (existingCount === 0) },
+      });
       await this.audit.recordInTx(tx, {
         entity: 'Campus',
         entityId: row.id,

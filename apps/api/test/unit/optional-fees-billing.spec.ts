@@ -41,7 +41,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
   const service = new BillingService(
     prisma as any,
     { organizationId: 'org_test' } as any,
-    { publish: jest.fn() } as any,
+    { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     { next: jest.fn().mockResolvedValue('SFI-000001') } as any,
     { groupForPosting: jest.fn() } as any,
     { post: jest.fn() } as any,

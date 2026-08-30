@@ -13,6 +13,7 @@ import {
   useClasses,
   useAdmissionCycles,
   useNationalities,
+  useStudentCategories,
   type CreateAdmissionInput,
   type UpdateAdmissionInput,
   type AdmissionGuardianInput,
@@ -50,6 +51,7 @@ export function SchoolApplicationFormPage() {
   const { data: classes } = useClasses();
   const { data: cycles } = useAdmissionCycles();
   const { data: nationalities } = useNationalities();
+  const { data: studentCategories } = useStudentCategories();
   const { data: history } = useAdmissionHistory(id);
   const { data: committee } = useCommitteeSummary(id);
   const create = useCreateAdmission();
@@ -82,6 +84,7 @@ export function SchoolApplicationFormPage() {
     const residenceType = existing.residenceType ?? cf.residenceType ?? '';
     const entryStatus = existing.entryStatus ?? cf.entryStatus ?? '';
     const address = existing.address ?? cf.address ?? '';
+    const studentCategoryId = existing.studentCategoryId ?? '';
     setForm({
       academicYearId: existing.academicYearId ?? '',
       admissionCycleId: existing.admissionCycleId ?? '',
@@ -101,6 +104,7 @@ export function SchoolApplicationFormPage() {
       schoolPayCode: cf.schoolPayCode ?? '',
       formerSchool: cf.formerSchool ?? '',
       address,
+      studentCategoryId,
     });
   }, [existing]);
 
@@ -163,6 +167,7 @@ export function SchoolApplicationFormPage() {
           residenceType: (form.residenceType || undefined) as CreateAdmissionInput['residenceType'],
           entryStatus: form.entryStatus || undefined,
           address: form.address || undefined,
+          studentCategoryId: form.studentCategoryId || undefined,
           asDraft,
           guardians: validGuardians(),
           customFields: collectExtras(),
@@ -184,6 +189,7 @@ export function SchoolApplicationFormPage() {
           residenceType: (form.residenceType || undefined) as UpdateAdmissionInput['residenceType'],
           entryStatus: form.entryStatus || undefined,
           address: form.address || undefined,
+          studentCategoryId: form.studentCategoryId || undefined,
           customFields: collectExtras(),
         };
         await update.mutateAsync({ id: id!, dto });
@@ -287,6 +293,24 @@ export function SchoolApplicationFormPage() {
                 />
                 {(!(nationalities ?? []).some((n: any) => n.isActive) && nationalities?.length) && (
                   <p className="mt-1 text-xs text-amber-600">No active nationalities — configure them in Company Settings.</p>
+                )}
+              </Field>
+              <Field label="Student category">
+                <Select
+                  value={form.studentCategoryId ?? ''}
+                  onChange={(v) => set('studentCategoryId', v)}
+                  options={[
+                    ['', studentCategories?.length ? 'Choose a category' : 'No categories configured'],
+                    ...(studentCategories ?? [])
+                      .filter((c: any) => c.isActive)
+                      .map((c: any) => [c.id, c.name] as [string, string]),
+                    ...(form.studentCategoryId && !(studentCategories ?? []).some((c: any) => c.id === form.studentCategoryId)
+                      ? [[form.studentCategoryId, 'Previously selected'] as [string, string]]
+                      : []),
+                  ]}
+                />
+                {(!(studentCategories ?? []).some((n: any) => n.isActive) && studentCategories?.length) && (
+                  <p className="mt-1 text-xs text-amber-600">No active student categories — configure them in School → Student Categories.</p>
                 )}
               </Field>
               <Field label="Entry status" required>

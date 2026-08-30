@@ -46,7 +46,7 @@ function makeService(sa: Record<string, unknown>, entries: Row[] = [], adjustmen
     { client: {} } as any,
     { organizationId: 'org_1', userId: 'user_1' } as any,
     { record: jest.fn(), recordInTx: jest.fn() } as any,
-    { publish: jest.fn() } as any,
+    { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     // Ownership resolver. This suite exercises the recompute kernel, not who is
     // allowed to run it; assessment ownership is covered by the marking-ownership
     // spec.

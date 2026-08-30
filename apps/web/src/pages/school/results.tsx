@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Calculator, ShieldCheck, History, Send, Lock } from 'lucide-react';
+import { Calculator, ShieldCheck, History, Send, Lock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import {
   useTerms, useRosters,
   useComputeResults, useResultSets, useResultSet, usePublishResultSet,
   useRequestAmendment, useAmendments, useApproveAmendment, useLockResultSet,
+  useResultReadiness,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +23,7 @@ export function SchoolResultsPage() {
   const compute = useComputeResults();
   const [setId, setSetId] = useState('');
   const { data: detail } = useResultSet(setId || undefined);
+  const { data: readiness } = useResultReadiness(setId || undefined);
   const publish = usePublishResultSet();
   const lock = useLockResultSet();
   const requestAmd = useRequestAmendment();
@@ -68,13 +70,27 @@ export function SchoolResultsPage() {
               <div className="flex gap-1">
                 {detail.resultSet.status === 'locked' && <Badge><Lock className="h-3 w-3" /> Locked</Badge>}
                 {detail.resultSet.status === 'published' && <Button size="sm" variant="ghost" disabled={lock.isPending} onClick={() => lock.mutate(detail.resultSet.id)}><Lock className="h-4 w-4" /> Lock</Button>}
-                {detail.resultSet.status !== 'published' && detail.resultSet.status !== 'locked' && <Button size="sm" variant="ghost" disabled={publish.isPending} onClick={() => publish.mutate(detail.resultSet.id)}><ShieldCheck className="h-4 w-4" /> Publish</Button>}
+                {detail.resultSet.status !== 'published' && detail.resultSet.status !== 'locked' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={publish.isPending || !readiness?.ready}
+                    onClick={() => publish.mutate(detail.resultSet.id)}
+                    title={readiness && !readiness.ready ? 'Resolve the items below before publishing' : 'Publish results'}
+                  >
+                    <ShieldCheck className="h-4 w-4" /> Publish
+                  </Button>
+                )}
               </div>
             )}
           </CardHeader>
           <CardContent className="space-y-3">
             {detail ? (
               <>
+                {/* Readiness gate — shown before publish so missing marks/approvals are visible up front. */}
+                {readiness && detail.resultSet.status !== 'published' && detail.resultSet.status !== 'locked' && (
+                  <ReadinessChecklist readiness={readiness} />
+                )}
                 <div className="flex flex-wrap gap-2 text-xs">
                   <Badge>rev {detail.resultSet.revision}</Badge>
                   <Badge variant="secondary">coverage {detail.resultSet.coveragePct != null ? `${Number(detail.resultSet.coveragePct)}%` : '—'}</Badge>
@@ -138,6 +154,47 @@ export function SchoolResultsPage() {
             ))}
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The "what is ready, what is missing" gate shown above the Publish button.
+ * Surfaces the server's publish-gate checks as a plain-language checklist so an
+ * administrator never discovers missing marks or approvals after publishing.
+ */
+function ReadinessChecklist({ readiness }: { readiness: { ready: boolean; summary: any; conflicts: Array<{ code: string; detail: string }> } }) {
+  const s = readiness.summary ?? {};
+  const rows: { label: string; ok: boolean }[] = [
+    { label: 'Academic roster frozen', ok: !!s.rosterFrozen },
+    { label: `Students covered (${s.studentsCovered ?? 0}/${s.studentsExpected ?? 0})`, ok: (s.studentsCovered ?? 0) === (s.studentsExpected ?? 0) && (s.studentsExpected ?? 0) > 0 },
+    { label: `Marks approved (${s.marksApproved ?? 0}/${s.marksTotal ?? 0})`, ok: (s.marksApproved ?? 0) === (s.marksTotal ?? 0) && (s.marksTotal ?? 0) > 0 },
+    { label: 'No segregation-of-duties violations', ok: (s.sodViolations ?? 0) === 0 },
+    { label: 'Result checksums present', ok: !!s.hasChecksums },
+  ];
+
+  return (
+    <div className={`rounded-md border p-3 text-sm ${readiness.ready ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-amber-500/40 bg-amber-500/10'}`}>
+      <div className="mb-2 flex items-center gap-2 font-medium">
+        {readiness.ready
+          ? <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> Ready to publish</>
+          : <><AlertTriangle className="h-4 w-4 text-amber-600" /> Not ready to publish yet</>}
+      </div>
+      <ul className="space-y-1">
+        {rows.map((r, i) => (
+          <li key={i} className="flex items-center gap-2">
+            {r.ok
+              ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+              : <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />}
+            <span className={r.ok ? 'text-muted-foreground' : ''}>{r.label}</span>
+          </li>
+        ))}
+      </ul>
+      {!readiness.ready && readiness.conflicts?.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {readiness.conflicts.length} item{readiness.conflicts.length === 1 ? '' : 's'} need attention before results can be published.
+        </p>
       )}
     </div>
   );

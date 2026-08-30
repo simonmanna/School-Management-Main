@@ -26,7 +26,18 @@ export class PromoteStudentDto {
   /** Target class. Required for `promoted`/`repeated`; ignored for `graduated`. */
   @IsOptional() @IsString() toClassId?: string;
 
+  /**
+   * Target subdivision ids. Presented to primary schools as "Stream".
+   *
+   * Section and Stream are unique per (organizationId, classId, name), so the
+   * SOURCE class's row is not valid for the TARGET class: promoting P4/West to
+   * P5 must resolve P5's own "West" and never carry P4's id across. Callers
+   * pass already-resolved target ids here; the batch rollover resolves them by
+   * name (PromotionService.resolveSubdivision).
+   */
   @IsOptional() @IsString() toSectionId?: string;
+
+  @IsOptional() @IsString() toStreamId?: string;
 
   /** Defaults to the student's admission number when omitted. */
   @IsOptional() @IsString() rollNumber?: string;

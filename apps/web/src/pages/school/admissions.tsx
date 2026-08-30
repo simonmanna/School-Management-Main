@@ -4,7 +4,7 @@ import { Plus, Send, CheckCircle2, XCircle, CalendarClock, LogOut, Mail, ThumbsU
 import {
   useAdmissions,
   useAdmissionAction,
-  useEnrollAdmission,
+  useEnrollAdmission, useSections,
   useIssueAdmissionOffer,
   useAcceptAdmissionOffer,
   useDeclineAdmissionOffer,
@@ -41,6 +41,7 @@ export function SchoolAdmissionsPage() {
   const { data: terms } = useTerms();
   const act = useAdmissionAction();
   const enroll = useEnrollAdmission();
+  const { data: allSections } = useSections();
   const issueOffer = useIssueAdmissionOffer();
   const acceptOffer = useAcceptAdmissionOffer();
   const declineOffer = useDeclineAdmissionOffer();
@@ -109,6 +110,10 @@ export function SchoolAdmissionsPage() {
     });
   };
 
+  // Streams of the class being enrolled into. Section is unique per class, so
+  // this list has to follow the class picker rather than being global.
+  const enrollSections = (allSections?.data ?? []).filter((x: any) => x.classId === enrollForm.classId);
+
   const submitOffer = async () => {
     if (!offerFor) return;
     if (!offerForm.expiresAt) {
@@ -139,13 +144,18 @@ export function SchoolAdmissionsPage() {
   };
 
   const openEnroll = (app: AdmissionApplication) => {
-    const firstTerm = (terms?.data ?? [])[0]?.id ?? '';
+    // The CURRENT term, not whichever the API listed first. Enrollment is unique
+    // per (student, term), so enrolling into the wrong term silently consumes
+    // the pupil's only placement slot for it and the correct one then fails.
+    const all = terms?.data ?? [];
+    const firstTerm = (all.find((t: any) => t.isCurrent) ?? all[0])?.id ?? '';
     setEnrollFor(app);
     // Seeded from the APPLICATION being enrolled. This used to read the
     // new-application dialog's state (`form.applicantGender` / `form.applicantDob`),
     // so students were created with whatever was left over in that form.
     setEnrollForm({
       classId: app.applyingForClassId ?? (classes?.data ?? [])[0]?.id ?? '',
+      sectionId: '',
       termId: firstTerm,
       rollNumber: '',
       name: `${app.applicantFirstName} ${app.applicantLastName}`,
@@ -160,9 +170,13 @@ export function SchoolAdmissionsPage() {
       return;
     }
     try {
-      await enroll.mutateAsync({
+      const res = await enroll.mutateAsync({
         applicationId: enrollFor.id,
         classId: enrollForm.classId,
+        // The subdivision the school actually teaches in. The API has accepted
+        // this since the module was built; the dialog never sent it, so every
+        // pupil admitted through the pipeline landed with no stream.
+        sectionId: enrollForm.sectionId || undefined,
         termId: enrollForm.termId,
         rollNumber: enrollForm.rollNumber,
         student: {
@@ -171,7 +185,21 @@ export function SchoolAdmissionsPage() {
           dateOfBirth: enrollForm.dateOfBirth || undefined,
         },
       });
-      notify.success('Student enrolled from application');
+      // Say where the pupil landed and offer the next step. The dialog used to
+      // close on a bare "enrolled" toast, leaving the operator to find the new
+      // pupil themselves through the students list.
+      const placed = [
+        (classes?.data ?? []).find((c) => c.id === enrollForm.classId)?.name,
+        enrollSections.find((x: any) => x.id === enrollForm.sectionId)?.name,
+      ].filter(Boolean).join(' — ');
+      const termName = (terms?.data ?? []).find((t) => t.id === enrollForm.termId)?.name ?? '';
+      const profileId = (res as any)?.profile?.id ?? (res as any)?.studentProfileId ?? null;
+      notify.success(
+        `${enrollForm.name} enrolled into ${placed || 'the selected class'}${termName ? ` for ${termName}` : ''}`,
+        profileId
+          ? { action: { label: 'Open pupil', onClick: () => navigate(`/school/students/${profileId}`) } }
+          : undefined,
+      );
       setEnrollFor(null);
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Enrollment failed');
@@ -365,10 +393,23 @@ export function SchoolAdmissionsPage() {
                 {(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
+            <Field label="Stream">
+              <select
+                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
+                value={enrollForm.sectionId ?? ''}
+                disabled={!enrollForm.classId || enrollSections.length === 0}
+                onChange={(e) => setEnrollForm({ ...enrollForm, sectionId: e.target.value })}
+              >
+                <option value="">
+                  {!enrollForm.classId ? 'Choose a class first' : enrollSections.length ? 'No stream' : 'This class has no streams'}
+                </option>
+                {enrollSections.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </Field>
             <Field label="Term" required>
               <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.termId ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, termId: e.target.value })}>
                 <option value="">—</option>
-                {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
               </select>
             </Field>
             <Field label="Student name" required>

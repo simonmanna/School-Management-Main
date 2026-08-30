@@ -62,12 +62,59 @@ export class PromotionService {
       return cands.find((c: any) => c.campusId === campusId) ?? cands[0];
     };
 
+    // Subdivisions, keyed by class, so a student's "West" can be re-resolved
+    // inside the TARGET class. Section/Stream are unique per (org, class, name),
+    // so ids are never portable between classes — only the name is.
+    const [allSections, allStreams] = await Promise.all([
+      client.section.findMany({ where: { deletedAt: null }, select: { id: true, classId: true, name: true } }),
+      client.stream.findMany({ where: { deletedAt: null }, select: { id: true, classId: true, name: true } }),
+    ]);
+    // Sections and streams are indexed SEPARATELY. One map keyed on
+    // classId::name collided whenever a class had a section AND a stream of the
+    // same name — "West" as both — and whichever loaded second silently won, so
+    // a section resolved to a stream's id. The integration spec builds exactly
+    // that fixture, which is how this was caught.
+    const nameById = new Map<string, string>();
+    const sectionByClassAndName = new Map<string, string>();
+    const streamByClassAndName = new Map<string, string>();
+    const key = (classId: string, name: string) => `${classId}::${name.trim().toLowerCase()}`;
+    for (const row of allSections) {
+      nameById.set(row.id, row.name);
+      sectionByClassAndName.set(key(row.classId, row.name), row.id);
+    }
+    for (const row of allStreams) {
+      nameById.set(row.id, row.name);
+      streamByClassAndName.set(key(row.classId, row.name), row.id);
+    }
+    /** The same-named subdivision OF THE SAME KIND inside the target class. */
+    const resolveSubdivision = (
+      kind: 'section' | 'stream',
+      sourceId: string | null | undefined,
+      targetClassId: string | null,
+    ) => {
+      if (!sourceId || !targetClassId) return { id: null as string | null, name: null as string | null };
+      const name = nameById.get(sourceId);
+      if (!name) return { id: null, name: null };
+      const index = kind === 'section' ? sectionByClassAndName : streamByClassAndName;
+      return { id: index.get(key(targetClassId, name)) ?? null, name };
+    };
+
     const students = await client.studentProfile.findMany({
       where: { status: 'active' },
       include: { currentClass: { include: { gradeLevel: true } } },
     });
 
-    type PlanRow = { studentProfileId: string; admissionNo: string; outcome: PromotionOutcome | 'skipped'; toClassId: string | null; reason?: string };
+    type PlanRow = {
+      studentProfileId: string;
+      admissionNo: string;
+      outcome: PromotionOutcome | 'skipped';
+      toClassId: string | null;
+      toSectionId: string | null;
+      toStreamId: string | null;
+      /** Human-readable subdivision carried forward, e.g. "West" — shown in the dry run. */
+      subdivision?: string | null;
+      reason?: string;
+    };
     const promote: PlanRow[] = [];
     const repeat: PlanRow[] = [];
     const graduate: PlanRow[] = [];
@@ -77,7 +124,7 @@ export class PromotionService {
       const base = { studentProfileId: s.id, admissionNo: s.admissionNo };
       const cur = s.currentClass;
       if (!cur || !cur.gradeLevel) {
-        skip.push({ ...base, outcome: 'skipped', toClassId: null, reason: 'no current class/grade' });
+        skip.push({ ...base, outcome: 'skipped', toClassId: null, toSectionId: null, toStreamId: null, reason: 'no current class/grade' });
         continue;
       }
       // Resumable: already enrolled in the target term → leave alone.
@@ -86,12 +133,12 @@ export class PromotionService {
         select: { id: true },
       });
       if (existing) {
-        skip.push({ ...base, outcome: 'skipped', toClassId: null, reason: 'already enrolled in target term' });
+        skip.push({ ...base, outcome: 'skipped', toClassId: null, toSectionId: null, toStreamId: null, reason: 'already enrolled in target term' });
         continue;
       }
       const order = cur.gradeLevel.order;
       if (order >= maxOrder) {
-        graduate.push({ ...base, outcome: 'graduated', toClassId: null });
+        graduate.push({ ...base, outcome: 'graduated', toClassId: null, toSectionId: null, toStreamId: null });
         continue;
       }
       // A8: consult the published result spine for the term being closed. A
@@ -100,16 +147,43 @@ export class PromotionService {
       // promotion (no academic gate available for that student).
       const rec = await this.latestRecommendation(client, s.id, dto.fromTermId);
       if (rec === 'repeat') {
-        repeat.push({ ...base, outcome: 'repeated', toClassId: cur.id, reason: 'result: repeat recommended' });
+        // Repeating the same class keeps the identical subdivision rows — the
+        // class has not changed, so the ids remain valid as-is.
+        repeat.push({
+          ...base,
+          outcome: 'repeated',
+          toClassId: cur.id,
+          toSectionId: s.currentSectionId ?? null,
+          toStreamId: s.currentStreamId ?? null,
+          subdivision: s.currentSectionId ? nameById.get(s.currentSectionId) ?? null : null,
+          reason: 'result: repeat recommended',
+        });
         continue;
       }
 
       const target = pickClass(order + 1, cur.campusId ?? null);
       if (!target) {
-        skip.push({ ...base, outcome: 'skipped', toClassId: null, reason: `no class for grade order ${order + 1}` });
+        skip.push({ ...base, outcome: 'skipped', toClassId: null, toSectionId: null, toStreamId: null, reason: `no class for grade order ${order + 1}` });
         continue;
       }
-      promote.push({ ...base, outcome: 'promoted', toClassId: target.id, reason: rec ? `result: ${rec}` : 'order-based (no result)' });
+      const section = resolveSubdivision('section', s.currentSectionId, target.id);
+      const stream = resolveSubdivision('stream', s.currentStreamId, target.id);
+      // A subdivision the target class does not define is dropped deliberately
+      // and said so in the plan, rather than silently vanishing at write time.
+      const lost = [
+        section.name && !section.id ? `section "${section.name}"` : null,
+        stream.name && !stream.id ? `stream "${stream.name}"` : null,
+      ].filter(Boolean);
+      const why = rec ? `result: ${rec}` : 'order-based (no result)';
+      promote.push({
+        ...base,
+        outcome: 'promoted',
+        toClassId: target.id,
+        toSectionId: section.id,
+        toStreamId: stream.id,
+        subdivision: section.name ?? stream.name ?? null,
+        reason: lost.length ? `${why} — ${lost.join(', ')} not defined in target class` : why,
+      });
     }
 
     const plan = {
@@ -133,6 +207,8 @@ export class PromotionService {
             studentProfileId: row.studentProfileId,
             toTermId: dto.toTermId,
             toClassId: row.toClassId ?? undefined,
+            toSectionId: row.toSectionId ?? undefined,
+            toStreamId: row.toStreamId ?? undefined,
             outcome: row.outcome as PromotionOutcome,
             reason: 'academic-year rollover',
           }),
@@ -204,15 +280,24 @@ export class PromotionService {
           studentProfileId: student.id,
           classId: dto.toClassId!,
           sectionId: dto.toSectionId ?? null,
+          streamId: dto.toStreamId ?? null,
           termId: dto.toTermId,
           rollNumber: dto.rollNumber ?? student.admissionNo,
           status: 'enrolled',
         },
       });
       enrollmentId = enrollment.id;
+      // All THREE snapshot fields move together with the enrollment. Updating
+      // only class and section left currentStreamId pointing at the OLD class's
+      // stream — a profile that disagreed with its own enrollment, which is
+      // worse than a null. The placement invariant spec asserts they agree.
       await tx.studentProfile.update({
         where: { id: student.id },
-        data: { currentClassId: dto.toClassId!, currentSectionId: dto.toSectionId ?? null },
+        data: {
+          currentClassId: dto.toClassId!,
+          currentSectionId: dto.toSectionId ?? null,
+          currentStreamId: dto.toStreamId ?? null,
+        },
       });
     }
 
@@ -229,7 +314,7 @@ export class PromotionService {
         },
       });
       await tx.studentProfile.update({ where: { id: student.id }, data: { status: 'alumni' } });
-      this.events.publish(EVENTS.SchoolStudentStatusChanged, {
+      await this.events.publishInTx(tx, EVENTS.SchoolStudentStatusChanged, {
         organizationId,
         studentProfileId: student.id,
         fromStatus: student.status,
@@ -244,7 +329,7 @@ export class PromotionService {
       newValues: { action: 'promote', outcome, toClassId: dto.toClassId ?? null, toTermId: dto.toTermId, enrollmentId },
     });
 
-    this.events.publish(EVENTS.SchoolStudentPromoted, {
+    await this.events.publishInTx(tx, EVENTS.SchoolStudentPromoted, {
       organizationId,
       studentProfileId: student.id,
       outcome,

@@ -182,6 +182,45 @@ describeDb('integration: A3 result spine', () => {
     expect(conflicts.some((c: any) => c.code === 'MARKS_NOT_APPROVED')).toBe(true);
   });
 
+  // readiness() is the pre-publish checklist the UI is meant to call BEFORE
+  // offering Publish, so an administrator sees "3 pupils have unapproved marks"
+  // instead of discovering it from a failed publish. It loaded the ResultSet
+  // without its termResults relation and then handed it to runPublishGate,
+  // which reads rs.termResults for the coverage check — so every call on a set
+  // that HAD a roster threw a TypeError and answered 500. Only the NO_ROSTER
+  // early-return escaped, which is why nothing else in this suite caught it:
+  // publish() includes the relation and was always fine.
+  it('A3-readiness: the checklist returns structured conflicts, not a 500', async () => {
+    const { rosterId } = await seedClass('RDY', { approve: false });
+    const rs: any = await asUser('exams', () => results.compute({ termId, rosterId } as any));
+
+    const report: any = await asUser('head', () => results.readiness(rs.id));
+
+    expect(report.ready).toBe(false);
+    expect(report.conflicts.some((c: any) => c.code === 'MARKS_NOT_APPROVED')).toBe(true);
+    // The summary counts come off the relation that was missing.
+    expect(report.summary.studentsExpected).toBeGreaterThan(0);
+    expect(report.summary.studentsCovered).toBe(report.summary.studentsExpected);
+    expect(report.summary.marksTotal).toBeGreaterThan(0);
+    expect(report.summary.hasChecksums).toBe(true);
+  });
+
+  it('A3-readiness: a fully approved set reports ready with no conflicts', async () => {
+    const { rosterId } = await seedClass('RDY2', { approve: true });
+    const rs: any = await asUser('exams', () => results.compute({ termId, rosterId } as any));
+
+    const report: any = await asUser('head', () => results.readiness(rs.id));
+
+    expect(report.conflicts).toEqual([]);
+    expect(report.ready).toBe(true);
+    expect(report.summary.rosterFrozen).toBe(true);
+    expect(report.summary.sodViolations).toBe(0);
+
+    // readiness() and the publish gate must agree: what the checklist calls
+    // ready is exactly what publish accepts.
+    await expect(asUser('head', () => results.publish(rs.id))).resolves.toBeTruthy();
+  });
+
   it('A3-immutable: a published result set snapshot is UPDATE-proof', async () => {
     const { rosterId } = await seedClass('IMM', { approve: true });
     const rs: any = await asUser('exams', () => results.compute({ termId, rosterId } as any));

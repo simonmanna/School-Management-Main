@@ -204,7 +204,6 @@ const NAV_SECTIONS: NavSection[] = [
     icon: GraduationCap,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/management/student-categories', label: 'Student Categories', icon: Tag, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },

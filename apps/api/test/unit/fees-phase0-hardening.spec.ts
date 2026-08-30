@@ -54,7 +54,7 @@ describe('fee document constants (P0-1, P0-7)', () => {
 
 function makeCollectService(openInvoices: any[] = []) {
   const tenant = { organizationId: 'org_test' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const documentFindMany = jest.fn().mockResolvedValue(openInvoices);
   const tx = {
     studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }) },
@@ -126,7 +126,7 @@ describe('SchoolPaymentService.collect — lifecycle filtering (P0-7)', () => {
 
 function makeRefundService(opts: { unallocated: number; creditRemaining: number }) {
   const tenant = { organizationId: 'org_test' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const createCustomerRefund = jest.fn().mockResolvedValue({ id: 'refund_1' });
   const feeCreditUpdate = jest.fn().mockResolvedValue({});
   const feeCreditClaim = jest.fn().mockResolvedValue({ count: 1 });

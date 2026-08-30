@@ -123,7 +123,7 @@ describe('D1 · the bursar statement agrees with the receipts printed beside it'
       prisma as any,
       { organizationId: 'org_test' } as any,
       { record: jest.fn(), recordInTx: jest.fn() } as any,
-      { publish: jest.fn() } as any,
+      { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
       { next: jest.fn() } as any,
       finance as any,
     );

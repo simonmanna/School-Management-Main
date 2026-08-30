@@ -34,7 +34,7 @@ function makeCurriculumService(curRow: any | null, handlers: Record<string, any>
   const { client } = mockPrisma({ curriculum: { findFirst: async () => curRow } });
   const tenant = { organizationId: 'org_test', userId: 'user_1' } as any;
   const audit = { recordInTx: jest.fn(async () => undefined) } as any;
-  const events = { publish: jest.fn() } as any;
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any;
   const service = new CurriculumService({ client } as any, tenant, audit, events);
   void handlers;
   return { service, audit, events };
@@ -44,7 +44,7 @@ function makeEnrollmentService(enrRow: any | null) {
   const { client } = mockPrisma({ enrollment: { findFirst: async () => enrRow } });
   const tenant = { organizationId: 'org_test', userId: 'user_1' } as any;
   const audit = { recordInTx: jest.fn(async () => undefined) } as any;
-  const events = { publish: jest.fn() } as any;
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any;
   // SequenceService is the fifth constructor argument. It was added and this call
   // was not updated, so the whole file stopped compiling (TS2554) and every test
   // in it silently stopped running — the same rot that had killed admission-fsm.spec.
@@ -107,7 +107,7 @@ describe('EnrollmentService — enrollment history FSM', () => {
       termId: 't1', rollNumber: 'R1',
     });
     expect(res.status).toBe('enrolled');
-    expect(events.publish).toHaveBeenCalled();
+    expect(events.publishInTx).toHaveBeenCalled();
   });
 
   it('rejects a second active enrollment for the same student+term (concurrency)', async () => {

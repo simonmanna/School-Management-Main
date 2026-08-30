@@ -27,7 +27,14 @@ export default defineConfig({
         // Portrait: the overwhelming majority of portal traffic is a phone held
         // upright, which is also the case the admin app never has to serve.
         orientation: 'portrait',
-        start_url: '/',
+        // `/` is the public school website; someone who installed this to their
+        // home screen did so to reach their own child, not to read the
+        // admissions page. `/home` is the landing redirect — it sends a signed-in
+        // account to its own workspace and everyone else to the login screen.
+        start_url: '/home',
+        // Scope stays at the root so the installed app can still navigate to the
+        // public pages (term dates, the school's phone number) without kicking
+        // the visitor out to a browser tab.
         scope: '/',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },

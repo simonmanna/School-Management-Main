@@ -27,7 +27,7 @@ describe('PosReportsService (financial accuracy)', () => {
     prisma = mockPrisma();
     const tenant = { organizationId: orgId, userId: 'u1' } as any;
     const audit = { record: jest.fn() } as any;
-    const events = { publish: jest.fn() } as any;
+    const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any;
     svc = new PosReportsService(prisma, tenant, audit, events);
   });
 

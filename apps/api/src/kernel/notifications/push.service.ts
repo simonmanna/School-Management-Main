@@ -75,27 +75,38 @@ export class PushService implements OnModuleInit {
     auth: string;
     userAgent?: string | null;
   }) {
-    const row = await this.prisma.client.pushSubscription.upsert({
-      where: { endpoint: input.endpoint },
-      update: {
-        organizationId: input.organizationId,
-        userId: input.userId,
-        p256dh: input.p256dh,
-        auth: input.auth,
-        userAgent: input.userAgent ?? null,
-        lastSeenAt: new Date(),
-        revokedAt: null,
-      },
-      create: {
-        organizationId: input.organizationId,
-        userId: input.userId,
-        endpoint: input.endpoint,
-        p256dh: input.p256dh,
-        auth: input.auth,
-        userAgent: input.userAgent ?? null,
-      },
-    });
-    return { id: row.id };
+    // Use the unscoped `raw` client: PushSubscription is a per-user × device
+    // system table, not org business data. The tenant-aware `client` only injects
+    // the `app.org_id` RLS GUC inside an interactive $transaction, so a plain
+    // upsert hits the FORCEd tenant_isolation policy with a null org_id and 500s.
+    // (unsubscribe/sendToUser already use `raw` for the same reason.)
+    try {
+      const row = await this.prisma.raw.pushSubscription.upsert({
+        where: { endpoint: input.endpoint },
+        update: {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          p256dh: input.p256dh,
+          auth: input.auth,
+          userAgent: input.userAgent ?? null,
+          lastSeenAt: new Date(),
+          revokedAt: null,
+        },
+        create: {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          endpoint: input.endpoint,
+          p256dh: input.p256dh,
+          auth: input.auth,
+          userAgent: input.userAgent ?? null,
+        },
+      });
+      return { id: row.id };
+    } catch (err: any) {
+      // Push subscription is best-effort — don't let DB errors 500 the request.
+      this.logger.error(`Push subscribe DB error: ${err?.message ?? err}`);
+      throw err;
+    }
   }
 
   async unsubscribe(endpoint: string) {

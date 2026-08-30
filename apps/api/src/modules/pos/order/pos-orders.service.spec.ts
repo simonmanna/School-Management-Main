@@ -35,7 +35,7 @@ describe('PosOrdersService — fireKitchen (menu-item routing)', () => {
   beforeEach(() => {
     tenant = { organizationId: orgId, userId: 'u1' };
     audit = { record: jest.fn(), recordInTx: jest.fn() };
-    events = { publish: jest.fn() };
+    events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
     kds = { createTicketsForSale: jest.fn().mockResolvedValue(['t1']) };
     prisma = {
       client: {

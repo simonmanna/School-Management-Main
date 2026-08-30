@@ -43,6 +43,28 @@ export class EventBus {
     });
   }
 
+  /**
+   * Publish INSIDE the caller's transaction: the outbox row is written with the
+   * same `tx` as the business write, so the two commit or roll back together.
+   *
+   * Use this for anything that records a business fact. `publish()` above opens
+   * its own transaction, so a caller that publishes from inside a `$transaction`
+   * which then rolls back has already emitted an event for something that never
+   * happened — an enrolment that was undone still announcing
+   * `SchoolEnrollmentCreated`. Consumers must be idempotent either way, but
+   * idempotency does not help with an event that should never have existed.
+   *
+   * Awaited, unlike `publish()`: a failure to record the fact must fail the
+   * business write rather than being swallowed.
+   */
+  async publishInTx<K extends DomainEventName>(
+    tx: unknown,
+    eventName: K,
+    payload: DomainEventMap[K],
+  ): Promise<void> {
+    await this.outbox.publish(tx as never, eventName, payload);
+  }
+
   /** Subscribe to an event for in-process handlers. */
   subscribe<K extends DomainEventName>(
     eventName: K,

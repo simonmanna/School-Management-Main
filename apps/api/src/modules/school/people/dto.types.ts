@@ -60,8 +60,20 @@ export class UpdateStudentDto {
   @IsOptional() @IsBoolean() isCompany?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() admissionNo?: string;
   @IsOptional() @IsString() enrollmentDate?: string;
-  @IsOptional() @IsString() currentClassId?: string;
-  @IsOptional() @IsString() currentSectionId?: string;
+  // NO currentClassId / currentSectionId / currentStreamId here, deliberately.
+  //
+  // Placement is an academic event, not a profile attribute. Enrollment is the
+  // authoritative record and StudentProfile.current* only mirrors it (see the
+  // note on StudentProfile in schema.prisma: "currentClassId is only ever an
+  // *input* to capture, never academic truth"). This endpoint used to let the
+  // Student 360 move a pupil between classes by writing the mirror alone, so
+  // the profile said P5 while every enrollment, register, mark sheet and
+  // result still said P4.
+  //
+  // Moving a pupil goes through POST /school/enrollments (transfer within the
+  // year) or POST /school/promotion/promote (into a new term), both of which
+  // write the Enrollment and the snapshot together. The global ValidationPipe
+  // runs forbidNonWhitelisted, so sending these fields here is a 400.
   @IsOptional() @IsString() dateOfBirth?: string;
   @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
   @IsOptional() @IsString() nationality?: string;

@@ -120,6 +120,13 @@ export class RecordMarkDto {
   @IsOptional() @IsIn([...MARK_ROUND]) round?: (typeof MARK_ROUND)[number];
   @IsNumber() @Min(0) score!: number;
   @IsOptional() @IsString() comment?: string;
+
+  /**
+   * The version the caller believes it is editing. Optional so existing clients
+   * keep working, but a client that sends it gets the same protection from a
+   * concurrent marker that the board and the gradebook already have.
+   */
+  @IsOptional() @IsNumber() expectedVersion?: number;
 }
 
 // ── Mark adjustment (append-only) ──

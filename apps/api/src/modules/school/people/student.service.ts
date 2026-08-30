@@ -128,6 +128,46 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         },
       });
 
+      // A class at admission means a placement, and a placement means an
+      // Enrollment. Writing only the profile mirror produced pupils who
+      // appeared in a class on their record but in no class list, no register
+      // and no result run — the same split the 360's class dropdown used to
+      // cause. The term is the current one; without a current term there is no
+      // period to enrol INTO, so the caller is told rather than silently left
+      // with a half-placement.
+      if (dto.currentClassId) {
+        const term = await tx.term.findFirst({
+          where: { organizationId, isCurrent: true },
+          select: { id: true },
+        });
+        if (!term) {
+          throw new BadRequestException(
+            'No current term is set, so this pupil cannot be placed in a class yet. Set the current term under School → Academic Years, or admit them without a class and place them afterwards.',
+          );
+        }
+        const enrollment = await tx.enrollment.create({
+          data: {
+            organizationId,
+            studentProfileId: profile.id,
+            classId: dto.currentClassId,
+            sectionId: dto.currentSectionId ?? null,
+            termId: term.id,
+            rollNumber: dto.admissionNo,
+            status: 'enrolled',
+          },
+        });
+        await tx.enrollmentHistory.create({
+          data: {
+            organizationId,
+            enrollmentId: enrollment.id,
+            fromStatus: null,
+            toStatus: 'enrolled',
+            reason: 'admitted with class placement',
+            changedById: this.tenant.userId ?? null,
+          },
+        });
+      }
+
       await this.audit.recordInTx(tx, {
         entity: 'StudentProfile',
         entityId: profile.id,
@@ -198,8 +238,10 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       // we merge them in rather than overwrite the whole object.
       const profileUpdates: Record<string, unknown> = {};
       for (const k of [
-        'currentClassId',
-        'currentSectionId',
+        // currentClassId / currentSectionId are absent by design — see
+        // UpdateStudentDto. Placement changes go through the enrollment or
+        // promotion endpoints, which write the Enrollment and the snapshot in
+        // one transaction.
         'dateOfBirth',
         'gender',
         'nationality',

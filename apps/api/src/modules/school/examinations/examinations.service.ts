@@ -72,7 +72,7 @@ export class ExamService extends BaseCrudService<Exam, CreateExamDto, UpdateExam
       const res = await tx.exam.updateMany({ where: { id }, data: { status: 'published' } });
       if (res.count === 0) throw new NotFoundException(`Exam ${id} not found`);
       const row = await tx.exam.findFirst({ where: { id } });
-      this.events.publish(EVENTS.SchoolExamPublished, {
+      await this.events.publishInTx(tx, EVENTS.SchoolExamPublished, {
         organizationId: this.tenant.organizationId,
         examId: id,
       });
@@ -85,7 +85,7 @@ export class ExamService extends BaseCrudService<Exam, CreateExamDto, UpdateExam
       const res = await tx.exam.updateMany({ where: { id }, data: { status: 'closed' } });
       if (res.count === 0) throw new NotFoundException(`Exam ${id} not found`);
       const row = await tx.exam.findFirst({ where: { id } });
-      this.events.publish(EVENTS.SchoolExamClosed, {
+      await this.events.publishInTx(tx, EVENTS.SchoolExamClosed, {
         organizationId: this.tenant.organizationId,
         examId: id,
       });
@@ -231,7 +231,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
             // the concurrency guard this method's docstring promises never fired.
             expectedVersion: (e as { version?: number }).version,
           });
-          this.events.publish(EVENTS.SchoolGradePosted, {
+          await this.events.publishInTx(tx, EVENTS.SchoolGradePosted, {
             organizationId,
             examScheduleId: dto.examScheduleId,
             studentProfileId: e.studentProfileId,
@@ -372,7 +372,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         action: 'approve',
         newValues: { examScheduleId, approvedById: approverId, count: res.count },
       });
-      this.events.publish(EVENTS.SchoolGradeApproved, {
+      await this.events.publishInTx(tx, EVENTS.SchoolGradeApproved, {
         organizationId,
         examScheduleId,
         approvedById: approverId ?? '',
@@ -408,7 +408,7 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
         action: 'reject',
         newValues: { examScheduleId, rejectedById, reason, count: res.count },
       });
-      this.events.publish(EVENTS.SchoolGradeRejected, {
+      await this.events.publishInTx(tx, EVENTS.SchoolGradeRejected, {
         organizationId,
         examScheduleId,
         rejectedById: rejectedById ?? '',
@@ -532,7 +532,7 @@ export class ReportCardService {
         oldValues: { publishedAt: card.publishedAt },
         newValues: { action: publish ? 'publish' : 'unpublish', publishedAt: publish ? 'now' : null },
       });
-      this.events.publish(EVENTS.SchoolReportCardPublished, {
+      await this.events.publishInTx(tx, EVENTS.SchoolReportCardPublished, {
         organizationId,
         reportCardId: id,
         studentProfileId: card.studentProfileId,
@@ -636,7 +636,7 @@ export class ReportCardService {
         action: 'create',
         newValues: { studentProfileId: dto.studentProfileId, termId: dto.termId, gpa, rank },
       });
-      this.events.publish(EVENTS.SchoolReportCardGenerated, {
+      await this.events.publishInTx(tx, EVENTS.SchoolReportCardGenerated, {
         organizationId,
         reportCardId: upserted.id,
         studentProfileId: dto.studentProfileId,

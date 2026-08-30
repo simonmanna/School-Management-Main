@@ -27,7 +27,7 @@ function makeCollect(opts: { residual: number } = { residual: 700_000 }) {
   const service = new SchoolPaymentService(
     prisma as any,
     { organizationId: 'org_test' } as any,
-    { publish: jest.fn() } as any,
+    { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     { createReceipt } as any,
     {
       refundableAmount: jest.fn().mockResolvedValue(0),

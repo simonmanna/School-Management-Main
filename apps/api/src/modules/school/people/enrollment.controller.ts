@@ -3,7 +3,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
-import { EnrollmentService, EnrollStudentDto, EndEnrollmentDto } from './enrollment.service';
+import { EnrollmentService, EnrollStudentDto, EndEnrollmentDto, RegisterStudentDto } from './enrollment.service';
 
 @Controller('school/enrollments')
 export class EnrollmentController {
@@ -26,6 +26,12 @@ export class EnrollmentController {
   @RequirePermissions(PERMISSIONS.school.read)
   history(@Param('id') id: string) {
     return this.service.history(id);
+  }
+
+  @Post('register')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  register(@Body() dto: RegisterStudentDto) {
+    return this.service.register(dto);
   }
 
   @Post()

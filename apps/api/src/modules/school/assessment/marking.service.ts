@@ -282,6 +282,11 @@ export class MarkingService {
       data: {
         status: input.score === null ? 'assigned' : 'graded',
         enteredById: input.markerId ?? this.tenant.userId ?? null,
+        // Stamped here, alongside the identity. submit() used to backfill
+        // enteredAt, which only worked because it was also overwriting
+        // enteredById; now that submission records its own actor, the entry
+        // time belongs to the write that actually entered the mark.
+        enteredAt: new Date(),
       },
     });
     await this.audit.recordInTx(tx, {
@@ -321,8 +326,14 @@ export class MarkingService {
   }
 
   /**
-   * Record one marker round. Upserts on (studentAssessment, round) so a marker
-   * can revise their own round, then recomputes the derived scores.
+   * Record one marker round, via `postMark` — the ONE writer.
+   *
+   * This used to upsert `MarkEntry` itself. That made `POST /school/marking/mark`
+   * the only mark-writing route in the system with no lock check, no
+   * `StudentAssessmentHistory` row and no optimistic-concurrency guard — and it
+   * is the route the parent-portal teacher screen posts to, so the least
+   * supervised client had the least protected path. It is now a thin adapter
+   * over the same pipeline the board, the gradebook and the exam workspace use.
    */
   async recordMark(dto: RecordMarkDto) {
     // Resolved before the transaction opens: an authorization failure should not
@@ -333,38 +344,16 @@ export class MarkingService {
     });
     await this.assertMayMarkAssessment(owner?.assessmentId);
 
-    return this.prisma.client.$transaction(async (tx: any) => {
-      const sa = await tx.studentAssessment.findFirst({ where: { id: dto.studentAssessmentId } });
-      if (!sa) throw new NotFoundException(`StudentAssessment ${dto.studentAssessmentId} not found`);
-      if (sa.approvalStatus === 'approved') {
-        throw new BadRequestException('Marks are approved; reject them before recording new marks');
-      }
-      const max = new Prisma.Decimal(sa.maxScore);
-      if (new Prisma.Decimal(dto.score).lessThan(0) || new Prisma.Decimal(dto.score).greaterThan(max)) {
-        throw new BadRequestException(`Score ${dto.score} out of range [0, ${max.toString()}]`);
-      }
-      const round = dto.round ?? 'first';
-      await tx.markEntry.upsert({
-        where: { studentAssessmentId_round: { studentAssessmentId: dto.studentAssessmentId, round } },
-        create: {
-          organizationId: this.tenant.organizationId,
-          studentAssessmentId: dto.studentAssessmentId,
-          markerId: this.tenant.userId ?? null,
-          round,
-          score: dto.score,
-          comment: dto.comment ?? null,
-        },
-        update: { score: dto.score, comment: dto.comment ?? null, markerId: this.tenant.userId ?? null },
-      });
-      await this.recompute(tx, dto.studentAssessmentId);
-      await this.audit.recordInTx(tx, {
-        entity: 'StudentAssessment',
-        entityId: dto.studentAssessmentId,
-        action: 'update',
-        newValues: { round, score: dto.score, action: 'record_mark' },
-      });
-      return tx.studentAssessment.findFirst({ where: { id: dto.studentAssessmentId } });
-    });
+    return this.prisma.client.$transaction((tx: any) =>
+      this.postMark(tx, {
+        studentAssessmentId: dto.studentAssessmentId,
+        score: dto.score,
+        round: dto.round,
+        comment: dto.comment ?? null,
+        source: 'manual',
+        expectedVersion: dto.expectedVersion,
+      }),
+    );
   }
 
   /**
@@ -442,12 +431,18 @@ export class MarkingService {
         // `rejected`, and a marker fixing them must be able to send them on
         // again without an admin resetting the row by hand.
         const from = dto.action === 'resubmit' ? 'rejected' : 'draft';
+        // enteredById is the person who ENTERED the mark and must survive
+        // submission. Overwriting it with the submitter collapsed two distinct
+        // actors into one field, so a marker whose work someone else submitted
+        // could then approve their own marks — and runPublishGate's
+        // SOD_VIOLATION check, which compares the same two columns, could not
+        // see it either. Entered / submitted / approved are three facts.
         const res = await tx.studentAssessment.updateMany({
           where: { assessmentId: dto.assessmentId, approvalStatus: from },
           data: {
             approvalStatus: 'submitted',
-            enteredById: actorId,
-            enteredAt: new Date(),
+            submittedById: actorId,
+            submittedAt: new Date(),
             rejectionReason: null,
           },
         });
@@ -459,6 +454,11 @@ export class MarkingService {
         const submitted = rows.filter((r: any) => r.approvalStatus === 'submitted');
         if (submitted.some((r: any) => r.enteredById && r.enteredById === actorId)) {
           throw new BadRequestException('You entered one or more of these marks and cannot approve them (segregation of duty).');
+        }
+        // Submitting is also an act of authorship over the batch: the person who
+        // sent marks for approval does not get to approve them either.
+        if (submitted.some((r: any) => r.submittedById && r.submittedById === actorId)) {
+          throw new BadRequestException('You submitted these marks for approval and cannot approve them (segregation of duty).');
         }
         const res = await tx.studentAssessment.updateMany({
           where: { assessmentId: dto.assessmentId, approvalStatus: 'submitted' },

@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0f766e" />
     <title>School Portal</title>
+    <meta
+      name="description"
+      content="School website and family portal: admissions, academics, news, and secure access to fees, attendance and results."
+    />
+
+    <!--
+      Headings and body are set in Plus Jakarta Sans where it loads. `display=swap`
+      and a full system fallback in tailwind.config.js mean a family on a slow
+      connection — or a network that cannot reach Google — sees text immediately
+      in the system face rather than waiting on a font, and never a blank page.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    />
     <script>
       // Follow the phone's own light/dark setting, before first paint so there
       // is no white flash on a device set to dark. Tailwind is configured
@@ -13,6 +30,12 @@
       // with it all day, a portal is open for a minute and should just match the
       // device.
       (function () {
+        // Marks that scripting is alive. The public site's scroll-reveal starts
+        // its elements at opacity 0, which would leave the whole page blank for
+        // anything that does not run the observer — a crawler, a reader mode, a
+        // browser with scripts blocked. Gating that start state on `.js` means
+        // the fallback is "no animation", not "no content".
+        document.documentElement.classList.add('js');
         try {
           var dark = window.matchMedia('(prefers-color-scheme: dark)');
           var apply = function (on) { document.documentElement.classList.toggle('dark', on); };

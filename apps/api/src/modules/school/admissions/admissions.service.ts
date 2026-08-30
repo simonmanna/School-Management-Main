@@ -27,6 +27,20 @@ import { AdmissionsWorkflowService } from './admissions-workflow.service';
 import type { StageKey } from './admission-workflow.schema';
 
 /**
+ * Human titles for documents carried from an application onto a pupil record.
+ * StudentDocument requires a title; ApplicationDocument has only a type.
+ */
+const TITLE_BY_DOC_TYPE: Record<string, string> = {
+  birth_cert: 'Birth certificate',
+  report_card: 'Previous report card',
+  recommendation: 'Letter of recommendation',
+  photo: 'Passport photograph',
+  transfer_letter: 'Transfer letter',
+  medical: 'Medical record',
+  other: 'Admission document',
+};
+
+/**
  * Student lifecycle FSM (mirror of people/student.service.ts) used by
  * withdrawStudent() and reEnroll(). Now delegated to the canonical EnrollmentService
  * (single owner of the student-lifecycle FSM), so the local copy is removed.
@@ -389,6 +403,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           residenceType: dto.residenceType ?? null,
           entryStatus: dto.entryStatus ?? null,
           address: dto.address ?? null,
+          studentCategoryId: dto.studentCategoryId ?? null,
           ninCiphertext: nin?.ciphertext ?? null,
           ninIv: nin?.iv ?? null,
           ninTag: nin?.tag ?? null,
@@ -433,7 +448,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       });
       // A draft is not yet in the pipeline, so it does not announce a submission.
       if (status === 'submitted') {
-        this.events.publish(EVENTS.SchoolAdmissionSubmitted, {
+        await this.events.publishInTx(tx, EVENTS.SchoolAdmissionSubmitted, {
           organizationId,
           applicationId: row.id,
           applicationNumber: row.applicationNumber,
@@ -596,6 +611,51 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * does not duplicate guardians. Contacts belong to the student's own Partner,
    * matching the convention in people/guardian.service.ts.
    */
+  /**
+   * Carry the applicant's uploaded documents onto the pupil record.
+   *
+   * Enrolment converted the application's guardians into contacts but left its
+   * documents behind: the birth certificate a parent uploaded to apply was
+   * checked by the eligibility gate and then never seen again, so the Student
+   * 360 showed no documents and the school asked for a second copy. Only the
+   * file reference is copied — the same fileId is pointed at from both rows,
+   * so nothing is re-uploaded and the application keeps its own evidence.
+   *
+   * Idempotent: re-running skips any type/fileId pair the pupil already has,
+   * so a retried enrolment cannot duplicate the set.
+   */
+  private async copyApplicationDocuments(tx: any, applicationId: string, studentProfileId: string): Promise<number> {
+    const docs = await tx.applicationDocument.findMany({ where: { applicationId } });
+    if (docs.length === 0) return 0;
+
+    const existing = await tx.studentDocument.findMany({
+      where: { studentProfileId },
+      select: { type: true, fileId: true },
+    });
+    const seen = new Set(existing.map((d: any) => `${d.type}::${d.fileId}`));
+
+    let copied = 0;
+    for (const doc of docs) {
+      if (seen.has(`${doc.type}::${doc.fileId}`)) continue;
+      await tx.studentDocument.create({
+        data: {
+          organizationId: this.tenant.organizationId,
+          studentProfileId,
+          type: doc.type,
+          title: TITLE_BY_DOC_TYPE[doc.type] ?? 'Admission document',
+          fileId: doc.fileId,
+          // A reviewer's verification carries over: it was the same document.
+          verified: doc.verified,
+          verifiedById: doc.verifiedById ?? null,
+          verifiedAt: doc.verifiedAt ?? null,
+          customFields: { source: 'admission', applicationId },
+        },
+      });
+      copied++;
+    }
+    return copied;
+  }
+
   private async promoteGuardians(tx: any, applicationId: string, organizationId: string, partnerId: string, studentProfileId: string) {
     const guardians = await tx.admissionGuardian.findMany({ where: { applicationId } });
     for (const g of guardians) {
@@ -776,13 +836,14 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // customFields and were dropped on the floor at enrollment, so every
       // enrolled student had zero guardians (no fee payer, no emergency contact).
       await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
+      await this.copyApplicationDocuments(tx, app.id, profile.id);
 
       await this.applyReview(tx, app.id, 'enroll', undefined, {
         allowed: workflowAllowed,
         skippedStages,
       });
 
-      this.events.publish(EVENTS.SchoolAdmissionEnrolled, {
+      await this.events.publishInTx(tx, EVENTS.SchoolAdmissionEnrolled, {
         organizationId,
         applicationId: app.id,
         studentProfileId: profile.id,
@@ -1132,7 +1193,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         oldValues: { feeStatus: app.feeStatus, feeInvoiceId: app.feeInvoiceId },
         newValues: { feeStatus: 'pending', feeInvoiceId: invoice.id, amount: dto.amount },
       });
-      this.events.publish(EVENTS.SchoolAdmissionFeeInvoiced, {
+      await this.events.publishInTx(tx, EVENTS.SchoolAdmissionFeeInvoiced, {
         organizationId: app.organizationId,
         applicationId,
         invoiceId: invoice.id,
@@ -1212,6 +1273,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       religion: dto.religion ?? null,
       house: dto.house ?? null,
       residenceType: dto.residenceType ?? 'day',
+      studentCategoryId: dto.studentCategoryId ?? null,
       admissionNo: dto.admissionNo ?? undefined,
       classId: dto.classId,
       sectionId: dto.sectionId ?? null,
@@ -1330,7 +1392,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
 
     const eventName = EVENT_MAP[action];
     if (eventName) {
-      this.events.publish(eventName as any, {
+      await this.events.publishInTx(tx, eventName as any, {
         organizationId: this.tenant.organizationId,
         applicationId,
         reason: reason ?? action,
@@ -1790,7 +1852,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           });
         }
       }
-      this.events.publish('school.admission.decision' as any, { organizationId, applicationId, decision, reason });
+      await this.events.publishInTx(tx, 'school.admission.decision' as any, { organizationId, applicationId, decision, reason });
       return decision_;
     });
   }

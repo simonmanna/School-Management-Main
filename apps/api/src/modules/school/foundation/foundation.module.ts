@@ -15,6 +15,8 @@ import { SubjectCategoryService } from './subject-category.service';
 import { SubjectCategoryController } from './subject-category.controller';
 import { StreamService } from './stream.service';
 import { StreamController } from './stream.controller';
+import { StudentCategoryService } from './student-category.service';
+import { StudentCategoryController } from './student-category.controller';
 import { CalendarService, PeriodService } from './period-calendar.service';
 import { CalendarController, PeriodController } from './period-calendar.controller';
 import { CalendarEventService } from './calendar-event.service';
@@ -40,6 +42,7 @@ import { CustomFieldController } from './custom-field.controller';
     SubjectController,
     SubjectCategoryController,
     StreamController,
+    StudentCategoryController,
     PeriodController,
     CalendarController,
     CalendarEventController,
@@ -57,6 +60,7 @@ import { CustomFieldController } from './custom-field.controller';
     SubjectService,
     SubjectCategoryService,
     StreamService,
+    StudentCategoryService,
     PeriodService,
     CalendarService,
     CalendarEventService,
@@ -74,6 +78,7 @@ import { CustomFieldController } from './custom-field.controller';
     SubjectService,
     SubjectCategoryService,
     StreamService,
+    StudentCategoryService,
     PeriodService,
     CalendarService,
     CalendarEventService,

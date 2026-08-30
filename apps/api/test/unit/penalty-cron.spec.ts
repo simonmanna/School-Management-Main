@@ -37,7 +37,7 @@ interface Mocks {
 
 function makeService() {
   const tenant = { organizationId: 'org_test' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const sequence = { next: jest.fn().mockImplementation((name: string) => Promise.resolve(name.includes('PEN') ? 'PEN-2026-000001' : 'FEE-2026-000001')) };
 
   const penaltyRuleFindFirst = jest.fn().mockResolvedValue({

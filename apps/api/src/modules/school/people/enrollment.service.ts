@@ -67,8 +67,31 @@ export class EnrollNewStudentInput {
   customFields?: Record<string, unknown>;
 }
 
+/** Quick "register & place" payload — everything a secretary types on one screen. */
+export class RegisterStudentDto {
+  name!: string;
+  admissionNo?: string;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  nationality?: string | null;
+  religion?: string | null;
+  house?: string | null;
+  residenceType?: string | null;
+  studentCategoryId?: string | null;
+  classId!: string;
+  sectionId?: string | null;
+  streamId?: string | null;
+  termId!: string;
+  rollNumber!: string;
+  /** Optional guardian created inline so the whole placement is one action. */
+  guardianName?: string;
+  guardianPhone?: string;
+  guardianRelationship?: string;
+}
+
 @Injectable()
 export class EnrollmentService {
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
@@ -191,11 +214,75 @@ export class EnrollmentService {
       });
 
       await this.audit.recordInTx(tx, { entity: 'StudentProfile', entityId: profile.id, action: 'create', newValues: { partner, profile, enrollment } });
-      this.events.publish(EVENTS.SchoolStudentCreated, { organizationId, studentProfileId: profile.id, partnerId: partner.id, admissionNo: profile.admissionNo });
-      this.events.publish(EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: profile.id });
+      await this.events.publishInTx(tx, EVENTS.SchoolStudentCreated, { organizationId, studentProfileId: profile.id, partnerId: partner.id, admissionNo: profile.admissionNo });
+      await this.events.publishInTx(tx, EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: profile.id });
       return { partner, profile, enrollment };
     };
     return outerTx ? run(outerTx) : this.prisma.client.$transaction(run);
+  }
+
+  /**
+   * Quick "register & place" — the one-step path a secretary uses at the front desk:
+   * create the student AND enroll them into a class in a single atomic action. If a
+   * guardian name/phone is supplied, a Contact is created inline and linked, so the
+   * parent can later be invited to the portal without a second trip.
+   *
+   * Delegates the heavy lifting to `enrollNewStudent` (Partner + Profile + Enrollment
+   * + guardians + history, all in one transaction) — this wrapper only resolves the
+   * guardian Contact first when one wasn't provided as an existing id.
+   */
+  async register(dto: RegisterStudentDto): Promise<{ partner: any; profile: any; enrollment: Enrollment }> {
+    const organizationId = this.tenant.organizationId;
+    const guardians = await this.resolveGuardian(dto, organizationId);
+    return this.enrollNewStudent({
+      organizationId,
+      name: dto.name,
+      admissionNo: dto.admissionNo ?? null,
+      dateOfBirth: dto.dateOfBirth ?? null,
+      gender: dto.gender ?? null,
+      nationality: dto.nationality ?? null,
+      religion: dto.religion ?? null,
+      house: dto.house ?? null,
+      residenceType: dto.residenceType ?? null,
+      studentCategoryId: dto.studentCategoryId ?? null,
+      classId: dto.classId,
+      sectionId: dto.sectionId ?? null,
+      streamId: dto.streamId ?? null,
+      termId: dto.termId,
+      rollNumber: dto.rollNumber,
+      guardians,
+    });
+  }
+
+  /** Build GuardianInput[] — create a Contact inline when only a name/phone was given. */
+  private async resolveGuardian(dto: RegisterStudentDto, organizationId: string): Promise<GuardianInput[]> {
+    if (!dto.guardianName?.trim()) return [];
+    const contact = await this.prisma.client.contact.create({
+      data: {
+        organizationId,
+        partnerId: (await this.tenantOrgPartner(organizationId)) ?? '',
+        firstName: dto.guardianName.trim(),
+        lastName: '',
+        phone: dto.guardianPhone ?? null,
+      },
+    });
+    return [
+      {
+        guardianContactId: contact.id,
+        relationship: dto.guardianRelationship?.trim() || 'guardian',
+        isPrimary: true,
+        canPickup: true,
+        receivesStatements: true,
+      },
+    ];
+  }
+
+  /** The org's own Partner row, used as the contact's owning partner when created inline. */
+  private async tenantOrgPartner(organizationId: string): Promise<string | null> {
+    const org = await this.prisma.client.organization.findFirst({ where: { id: organizationId } });
+    if (!org) return null;
+    const partner = await this.prisma.client.partner.findFirst({ where: { code: org.code } });
+    return partner?.id ?? null;
   }
 
   /** Enroll an existing student profile into a class/section/stream for a term. One active enrollment per student+term. */
@@ -203,13 +290,20 @@ export class EnrollmentService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const organizationId = this.tenant.organizationId;
 
-      // Concurrency: no overlapping active enrollment for the same student + term.
+      // Status-AGNOSTIC, matching @@unique([organizationId, studentProfileId,
+      // termId]) in the schema. Filtering on status:'enrolled' let a withdrawn
+      // or completed row past this check and into a P2002 that surfaced as an
+      // unhandled 500. Returning to a term the student already has a row for is
+      // reEnroll's job, and the message says so.
       const existing = await tx.enrollment.findFirst({
-        where: { organizationId, studentProfileId: dto.studentProfileId, termId: dto.termId, status: 'enrolled' },
+        where: { organizationId, studentProfileId: dto.studentProfileId, termId: dto.termId },
+        select: { id: true, status: true },
       });
       if (existing) {
         throw new BadRequestException(
-          `Student ${dto.studentProfileId} already has an active enrollment for term ${dto.termId}.`,
+          existing.status === 'enrolled'
+            ? `Student ${dto.studentProfileId} already has an active enrollment for term ${dto.termId}.`
+            : `Student ${dto.studentProfileId} already has a '${existing.status}' enrollment for term ${dto.termId}. Re-enrol that record instead of creating a second one.`,
         );
       }
 
@@ -253,7 +347,7 @@ export class EnrollmentService {
         entity: 'Enrollment', entityId: enrollment.id, action: 'create',
         newValues: { status: 'enrolled', studentProfileId: dto.studentProfileId, termId: dto.termId },
       });
-      this.events.publish(EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: dto.studentProfileId });
+      await this.events.publishInTx(tx, EVENTS.SchoolEnrollmentCreated, { organizationId, enrollmentId: enrollment.id, studentProfileId: dto.studentProfileId });
       return enrollment;
     });
   }
@@ -290,7 +384,7 @@ export class EnrollmentService {
       await this.releaseAdmissionSeat(tx, organizationId, enrollment);
 
       await this.audit.recordInTx(tx, { entity: 'Enrollment', entityId: id, action: 'update', oldValues: { status: enrollment.status }, newValues: { status: toStatus } });
-      this.events.publish(EVENTS.SchoolEnrollmentEnded, { organizationId, enrollmentId: id, toStatus, reason: dto.reason });
+      await this.events.publishInTx(tx, EVENTS.SchoolEnrollmentEnded, { organizationId, enrollmentId: id, toStatus, reason: dto.reason });
       return tx.enrollment.findFirst({ where: { id } });
     });
   }
@@ -382,7 +476,7 @@ export class EnrollmentService {
       await this.reclaimAdmissionSeat(tx, organizationId, enrollment);
 
       await this.audit.recordInTx(tx, { entity: 'Enrollment', entityId: id, action: 'update', oldValues: { status: enrollment.status }, newValues: { status: 'enrolled' } });
-      this.events.publish(EVENTS.SchoolEnrollmentReEnrolled, { organizationId, enrollmentId: id });
+      await this.events.publishInTx(tx, EVENTS.SchoolEnrollmentReEnrolled, { organizationId, enrollmentId: id });
       return tx.enrollment.findFirst({ where: { id } });
     });
   }

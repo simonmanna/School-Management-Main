@@ -18,7 +18,7 @@ interface MockContext {
 
 function makeService(): { service: BillingService; mocks: MockContext } {
   const tenant = { organizationId: 'org_test' };
-  const events = { publish: jest.fn() };
+  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const sequence = { next: jest.fn().mockResolvedValue('FEE-2026-000001') };
   const documentBuilder = { groupForPosting: jest.fn() };
   const posting = { post: jest.fn() };

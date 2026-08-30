@@ -391,6 +391,7 @@ export const ORG_SCOPED = new Set<string>([
   'CurriculumSubject',
   'SubjectCategory',
   'Stream',
+  'StudentCategory',
   'Competency',
   'Topic',
   'Unit',

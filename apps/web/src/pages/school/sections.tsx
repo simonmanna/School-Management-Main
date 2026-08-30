@@ -23,7 +23,7 @@ export function SchoolSectionsPage() {
       ]}
       columns={[
         { key: 'name', label: 'Name' },
-        { key: 'classId', label: 'Class', render: (r) => r.class?.name ?? '' },
+        { key: 'classId', label: 'Class', render: (r) => r.schoolClass?.name ?? r.class?.name ?? '' },
         { key: 'capacity', label: 'Capacity' },
       ]}
     />

@@ -2,24 +2,52 @@
 
 ## `migrations/` — the live set
 
-The only directory Prisma reads. Currently a 5-folder baseline:
+The only directory Prisma reads. 109 folders, from
+`20260727120000_squashed_baseline` (the whole schema as of the 2026-07-27
+consolidation, plus `..._rls_and_triggers` holding the RLS policies and triggers
+preserved verbatim through the squash) to
+`20260830120000_reconcile_manual_ddl`.
 
-| Folder | What |
-| --- | --- |
-| `20260727120000_squashed_baseline` | The whole schema as of the 2026-07-27 consolidation |
-| `20260727120001_rls_and_triggers` | RLS policies + triggers, preserved verbatim through the squash |
-| `20260731090000_approval_workflow_multistep` | Multi-step approval chains |
-| `20260731093000_rls_all_org_scoped_tables` | Catalog-driven RLS sweep over every `organizationId` table |
-| `20260731094500_cogs_correction_movement_type` | COGS correction movement type |
+**Invariant:** this folder must reproduce `schema.prisma` exactly.
 
-**Invariant:** this folder must reproduce `schema.prisma` exactly. CI enforces it
-("Schema drift check"). Verify locally against a scratch database:
+### The invariant was broken, and how
+
+Between 2026-08-25 and 2026-08-30 several schema changes were applied to the
+working database with hand-run psql scripts instead of migrations —
+`EmergencyContact`, `StudentCategory` + `StudentProfile.studentCategoryId`,
+`Nationality`, the front-desk `Complaint`/`PhoneCall` tables, five HR phases and
+two messaging phases. `schema.prisma` was updated to match, so the code and the
+working database agreed and everything looked healthy. `prisma migrate deploy`
+into an empty database, however, produced a schema the code could not run
+against: 12 missing tables, 5 missing enums and 53 missing columns.
+
+That failure mode is invisible until a second environment is provisioned, which
+is the worst moment to find it. `20260830120000_reconcile_manual_ddl` folds the
+whole difference back in; the superseded scripts are kept under
+`superseded-ddl/` for provenance and must not be re-run.
+
+**Never apply schema changes with psql.** If a migration is awkward to author,
+that is a reason to work out the migration, not a reason to route around it.
+
+### Verifying
+
+Prove it from empty, which is the property that actually matters:
 
 ```bash
-pnpm --filter @erp/api exec prisma migrate diff --from-migrations ./prisma/migrations --to-schema-datamodel ./prisma/schema.prisma --shadow-database-url "postgresql://postgres:postgres@localhost:5432/pos_cafe_drift_shadow?schema=public" --exit-code
+psql -d postgres -c "DROP DATABASE IF EXISTS schooldb_deploy_probe;" -c "CREATE DATABASE schooldb_deploy_probe;"
+DATABASE_URL="postgresql://USER:PASS@localhost:5432/schooldb_deploy_probe" npx prisma migrate deploy
+npx prisma migrate diff --from-url "postgresql://USER:PASS@localhost:5432/schooldb_deploy_probe" --to-schema-datamodel prisma/schema.prisma --exit-code
 ```
 
-`No difference detected.` is the pass condition. Verified green on 2026-07-31.
+`No difference detected.` is the pass condition. Verified green on 2026-08-30
+against all 109 migrations.
+
+On a database that already received the hand-run DDL, record the reconciliation
+as applied rather than running it — the objects are already present:
+
+```bash
+npx prisma migrate resolve --applied 20260830120000_reconcile_manual_ddl
+```
 
 Use `db:deploy` (`prisma migrate deploy`) anywhere shared. `db:migrate`
 (`migrate dev`) authors new migrations and will happily paper over drift — keep

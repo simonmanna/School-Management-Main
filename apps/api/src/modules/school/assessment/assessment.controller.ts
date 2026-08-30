@@ -366,6 +366,12 @@ export class ResultController {
     return this.service.latestPublished(termId, studentProfileId);
   }
 
+  @Get(':id/readiness')
+  @RequirePermissions(PERMISSIONS.school.read)
+  readiness(@Param('id') id: string) {
+    return this.service.readiness(id);
+  }
+
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
   findOne(@Param('id') id: string) {
