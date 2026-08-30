@@ -14,6 +14,7 @@ export class CreateCampusDto {
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsBoolean() isMain?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 export class UpdateCampusDto {
@@ -23,6 +24,7 @@ export class UpdateCampusDto {
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsBoolean() isMain?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
@@ -101,11 +103,13 @@ export class CreateSectionDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsString() classTeacherId?: string;
 }
 export class UpdateSectionDto {
   @IsOptional() @IsString() @IsNotEmpty() classId?: string;
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsString() classTeacherId?: string;
 }
 
 // ── Subject ─────────────────────────────────────────────────────────────────

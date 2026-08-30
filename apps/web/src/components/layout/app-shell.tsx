@@ -248,6 +248,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/class-teacher', label: 'Class Teachers', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/teaching-load', label: 'Teaching Load', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/teacher-cover', label: 'Teacher Cover', icon: CalendarX2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
@@ -446,6 +447,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/credit-notes', label: 'Credit Notes', icon: FileMinus, permission: PERMISSIONS.creditNote.read },
       { to: '/payments', label: 'Receipts', icon: HandCoins, permission: PERMISSIONS.payment.read },
       { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock, permission: PERMISSIONS.report.ar },
+      { to: '/income', label: 'Other Income', icon: Coins, permission: PERMISSIONS.income.read },
     ],
   },
   {
@@ -467,7 +469,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/expenses', label: 'Expenses', icon: FileText, permission: PERMISSIONS.expense.read },
       { to: '/expenses/categories', label: 'Expense Categories', icon: Tag, permission: PERMISSIONS.expense.read },
       { to: '/expenses/reports', label: 'Expense Reports', icon: BarChart3, permission: PERMISSIONS.expense.read },
-      { to: '/income', label: 'Other Revenue', icon: Coins, permission: PERMISSIONS.income.read },
       { to: '/supplier-payments', label: 'Supplier Payments', icon: Banknote, permission: PERMISSIONS.payment.read },
     ],
   },

@@ -24,7 +24,10 @@ export class SchoolClassService extends BaseCrudService<SchoolClass, CreateSchoo
 export class SectionService extends BaseCrudService<Section, CreateSectionDto, UpdateSectionDto> {
   protected readonly entityName = 'Section';
   protected readonly searchFields = ['name'];
-  protected readonly defaultInclude = { schoolClass: { include: { gradeLevel: true } } };
+  protected readonly defaultInclude = { 
+    schoolClass: { include: { gradeLevel: true } },
+    classTeacher: { include: { partner: true } }
+  };
 
   constructor(prisma: PrismaService) {
     super(prisma.client.section as unknown as CrudDelegate);

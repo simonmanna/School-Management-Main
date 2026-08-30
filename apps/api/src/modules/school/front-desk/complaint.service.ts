@@ -23,13 +23,13 @@ export class ComplaintService {
     if (filters?.partnerId) where.partnerId = filters.partnerId;
     if (filters?.assignedToId) where.assignedToId = filters.assignedToId;
     if (filters?.fromDate || filters?.toDate) {
-      where.receivedAt = {};
-      if (filters.fromDate) where.receivedAt.gte = filters.fromDate;
-      if (filters.toDate) where.receivedAt.lte = filters.toDate;
+      where.createdAt = {};
+      if (filters.fromDate) where.createdAt.gte = filters.fromDate;
+      if (filters.toDate) where.createdAt.lte = filters.toDate;
     }
     return this.prisma.client.complaint.findMany({
       where,
-      orderBy: { receivedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

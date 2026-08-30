@@ -92,6 +92,7 @@ import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
 import { SchoolAssessmentsPage } from '@/pages/school/assessments';
+import { SchoolClassTeacherPage } from '@/pages/school/class-teacher';
 import { SchoolAssessmentMarkPage } from '@/pages/school/assessment-mark';
 import { SchoolApprovalsPage } from '@/pages/school/approvals';
 import { SchoolExamWorkspacePage } from '@/pages/school/exam-workspace';
@@ -574,6 +575,7 @@ export function App() {
           <Route path="/school/library/students" element={<SchoolLibraryPage />} />
           <Route path="/school/library/fines" element={<SchoolLibraryPage />} />
           <Route path="/school/library/reports" element={<SchoolLibraryPage />} />
+          <Route path="/school/class-teacher" element={<SchoolClassTeacherPage />} />
           <Route path="/school/front-desk" element={<FrontDeskPage />} />
           <Route path="/school/phone-calls" element={<PhoneCallsPage />} />
           <Route path="/school/complaints" element={<ComplaintsPage />} />

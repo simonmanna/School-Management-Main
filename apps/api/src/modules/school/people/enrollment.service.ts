@@ -56,6 +56,7 @@ export class EnrollNewStudentInput {
   religion?: string | null;
   house?: string | null;
   residenceType?: string | null;
+  studentCategoryId?: string | null;
   admissionNo?: string | null;
   classId!: string;
   sectionId?: string | null;
@@ -137,6 +138,7 @@ export class EnrollmentService {
           religion: input.religion ?? null,
           residenceType: input.residenceType ?? 'day',
           house: input.house ?? null,
+          studentCategoryId: input.studentCategoryId ?? null,
           status: 'active',
           customFields: input.customFields ?? {},
         },

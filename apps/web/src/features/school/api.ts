@@ -39,7 +39,7 @@ export interface Student {
 export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean }
 export interface Term { id: string; academicYearId: string; name: string; isCurrent: boolean }
 export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null }
-export interface Section { id: string; classId: string; name: string }
+export interface Section { id: string; classId: string; name: string; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string } | null }
 
 export interface Guardian {
   id: string;
@@ -196,6 +196,10 @@ export function useSections() {
     queryKey: ['school', 'sections'],
     queryFn: async () => (await api.get<Paginated<Section>>(`${S}/sections`, { params: { pageSize: 300 } })).data,
   });
+}
+export function useUpdateSection() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; classId?: string; name?: string; capacity?: number; classTeacherId?: string }) => (await api.patch<Section>(`${S}/sections/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'sections'] }) });
 }
 
 /* ───────────────────────── Admissions ───────────────────────── */

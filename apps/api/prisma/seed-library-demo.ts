@@ -15,7 +15,7 @@ import 'dotenv/config';
 import { PrismaClient, Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const ORG_CODE = 'DEMO';
+const ORG_CODE = 'SUNRISE';
 const D = (v: number | string) => new Prisma.Decimal(v);
 
 const log = (m: string) => console.log(`  • ${m}`);

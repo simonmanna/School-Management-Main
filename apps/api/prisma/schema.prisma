@@ -671,6 +671,8 @@ model Partner {
   hrEmployee       HrEmployee?           @relation("HrEmployeePartner")
   sponsorships     Sponsorship[]
   frontDeskLogs    FrontDeskLog[]
+  complaints       Complaint[]
+  phoneCalls       PhoneCall[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -10536,6 +10538,7 @@ model Campus {
   phone          String?
   email          String?
   isActive       Boolean   @default(true)
+  isMain         Boolean   @default(false)
   customFields   Json      @default("{}")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -10551,6 +10554,7 @@ model Campus {
 
   @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([organizationId, isMain])
 }
 
 model SchoolProfile {
@@ -10737,6 +10741,7 @@ model Section {
   classId        String
   name           String
   capacity       Int       @default(40)
+  classTeacherId String?  // Homeroom/class teacher (StaffProfile)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -10744,6 +10749,7 @@ model Section {
   deletedAt      DateTime?
 
   schoolClass        SchoolClass          @relation(fields: [classId], references: [id])
+  classTeacher       StaffProfile?        @relation(fields: [classTeacherId], references: [id], onDelete: SetNull)
   studentProfiles    StudentProfile[]
   enrollments        Enrollment[]
   teacherAssignments TeacherAssignment[]
@@ -10754,6 +10760,7 @@ model Section {
   @@unique([organizationId, classId, name])
   @@index([organizationId])
   @@index([classId])
+  @@index([classTeacherId])
 }
 
 /// Stream: a sub-grouping of a class distinct from a Section (e.g. S1 → Section A →
@@ -10903,6 +10910,9 @@ model StudentProfile {
   religion         String?
   /// 'day' | 'boarder'
   residenceType    String        @default("day")
+  /// Optional student category (day scholar, boarder, scholar, etc.).
+  studentCategoryId String?
+  studentCategory   StudentCategory? @relation(fields: [studentCategoryId], references: [id], onDelete: SetNull)
   /// House assignment (Red/Blue/etc.).
   house            String?
   customFields     Json          @default("{}")
@@ -10944,6 +10954,7 @@ model StudentProfile {
   emergencyContacts   EmergencyContact[]
 
   outcomeAchievements StudentOutcomeAchievement[]
+  borrowings         Borrowing[]
 
   @@unique([organizationId, admissionNo])
   @@index([organizationId])
@@ -11178,6 +11189,7 @@ model StaffProfile {
   homeworks          HomeworkAssignment[]
   timetableSlots     TimetableSlot[]
   substituteSlots    TimetableSlot[]      @relation("TimetableSlotSubstitute")
+  sections           Section[]          // Class teacher (homeroom) assignments
 
   @@unique([organizationId, employeeNo])
   @@index([organizationId])
@@ -15155,8 +15167,9 @@ model Borrowing {
   fineInvoiceId    String? // FK to Document if a fine was issued
   notes            String?
 
-  book     BookMetadata @relation(fields: [bookMetadataId], references: [id])
-  bookCopy BookCopy     @relation(fields: [bookCopyId], references: [id])
+  book       BookMetadata     @relation(fields: [bookMetadataId], references: [id])
+  bookCopy   BookCopy        @relation(fields: [bookCopyId], references: [id])
+  studentProfile StudentProfile? @relation(fields: [studentProfileId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([studentProfileId])
@@ -17025,12 +17038,119 @@ model FrontDeskLog {
 
   partner Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
-  @@index([organizationId])
+@@index([organizationId])
   @@index([partnerId])
   @@index([status])
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
+/// Student category — classification for students (e.g., day scholar, boarder, scholar, etc.).
+model StudentCategory {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  students       StudentProfile[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// Complaint — formal complaints/grievances logged at the front desk.
+model Complaint {
+  id             String             @id @default(uuid())
+  organizationId String
+  partnerId      String?
+  category       ComplaintCategory
+  subject        String
+  description    String
+  status         ComplaintStatus    @default(open)
+  priority       ComplaintPriority  @default(medium)
+  assignedToId   String?
+  resolution     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  partner        Partner?           @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([partnerId])
+  @@index([status])
+  @@index([category])
+}
+
+enum ComplaintCategory {
+  academic
+  behavior
+  facilities
+  staff_conduct
+  communication
+  fees
+  transport
+  meals
+  safety
+  other
+}
+
+enum ComplaintStatus {
+  open
+  in_progress
+  awaiting_response
+  resolved
+  closed
+  escalated
+}
+
+enum ComplaintPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+/// Phone call — log of phone calls made/received at the front desk.
+model PhoneCall {
+  id             String        @id @default(uuid())
+  organizationId String
+  partnerId      String?
+  direction      CallDirection
+  contactName    String
+  phone          String
+  subject        String?
+  outcome        String?
+  notes          String?
+  durationSec    Int?
+  status         CallStatus    @default(completed)
+  callAt         DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  partner Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([partnerId])
+  @@index([callAt])
+  @@index([direction])
+}
+
+enum CallDirection {
+  inbound
+  outbound
+}
+
+enum CallStatus {
+  completed
+  missed
+  voicemail
+  scheduled
+  cancelled
+}
+
+// ╔══════════════════════════════════════════════════════════════════════════════╗
 // ║  MOODLE-SHAPED LMS  (ADR-014)                                              ║
 // ║  docs/architecture/LMS-MOODLE-ARCHITECTURE.md                             ║
 // ║  All models below are additive. Cross-aggregate links are FK-less string  ║
