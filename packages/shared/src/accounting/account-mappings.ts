@@ -159,6 +159,14 @@ export const ACCOUNT_MAPPING_REGISTRY: readonly AccountMappingDef[] = [
     required: true,
     description: 'Damage / replacement / missing-item recovery and forfeited deposits.',
   },
+  {
+    key: 'other_revenue',
+    label: 'Other Revenue',
+    group: 'sales',
+    expectedCategories: ['other_income', 'revenue'],
+    required: false,
+    description: 'Revenue account credited for Other Revenue / Income receipts (fine, donation, grant, interest, canteen, etc.) when the Income Head has no own GL account.',
+  },
 
   // ------------------------------------------------------------------ tax ---
   {

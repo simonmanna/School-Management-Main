@@ -10,6 +10,7 @@ import { BeverageModule } from './modules/beverage/beverage.module';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { ProcurementModule } from './modules/procurement/procurement.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { IncomeModule } from './modules/income/income.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { HealthModule } from './health/health.module';
 import { MetricsController } from './observability/metrics.controller';
@@ -71,6 +72,7 @@ const enabled = (flag: string): boolean => process.env[flag] === 'true';
     InvoicingModule,
     ProcurementModule,
     ExpensesModule,
+    IncomeModule,
     CrmModule,
     PosModule,
     SyncModule,

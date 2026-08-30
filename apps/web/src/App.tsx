@@ -65,10 +65,15 @@ import { SchoolAttendancePage } from '@/pages/school/attendance';
 import { SchoolAttendanceStatusesPage } from '@/pages/school/attendance-statuses';
 import { SchoolAttendanceReportPage } from '@/pages/school/attendance-report';
 import { SchoolTimetablePage } from '@/pages/school/timetable';
+import { ClassTimetablePage } from '@/pages/school/timetable-class';
+import { StudentTimetablePage } from '@/pages/school/timetable-student';
 import { SchoolTripsPage } from '@/pages/school/trips';
 import { SchoolTransportPage } from '@/pages/school/transport';
 import { SchoolLibraryPage } from '@/pages/school/library';
 import { FrontDeskPage } from '@/pages/school/front-desk';
+import { PhoneCallsPage } from '@/pages/school/phone-calls';
+import { ComplaintsPage } from '@/pages/school/complaints';
+import { SchoolStaff360Page } from '@/pages/school/staff-360';
 import { SchoolReportCardsPage } from '@/pages/school/report-cards';
 import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-settings';
 import { SchoolPromotionPage } from '@/pages/school/promotion';
@@ -113,6 +118,7 @@ import { SchoolDepartmentsPage } from '@/pages/school/departments';
 import { SchoolClassesPage } from '@/pages/school/classes';
 import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolStreamsPage } from '@/pages/school/streams';
+import { SchoolStudentCategoriesPage } from '@/pages/school/student-categories';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
 import { SchoolTeachingLoadPage } from '@/pages/school/teaching-load';
@@ -197,6 +203,7 @@ import { ReceivablesPage } from '@/pages/pos/ReceivablesPage';
 import { ExpensesPage } from '@/pages/expenses/ExpensesPage';
 import ExpensesReportPage from '@/pages/expenses/ExpensesReportPage';
 import ExpenseCategoriesPage from '@/pages/expenses/ExpenseCategoriesPage';
+import IncomePage from '@/pages/income/IncomePage';
 import { SupplierPaymentsPage } from '@/pages/purchasing/supplier-payments';
 import { JournalsPage } from '@/pages/accounting/journals';
 import { JournalDetailPage } from '@/pages/accounting/JournalDetailPage';
@@ -352,6 +359,7 @@ export function App() {
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/expenses/categories" element={<ExpenseCategoriesPage />} />
           <Route path="/expenses/reports" element={<ExpensesReportPage />} />
+          <Route path="/income" element={<IncomePage />} />
           <Route path="/supplier-payments" element={<SupplierPaymentsPage />} />
           <Route path="/ar-aging" element={<ArAgingPage />} />
           <Route path="/accounts" element={<ChartOfAccountsPage />} />
@@ -523,6 +531,8 @@ export function App() {
           <Route path="/school/attendance/statuses" element={<SchoolAttendanceStatusesPage />} />
           <Route path="/school/attendance/report" element={<SchoolAttendanceReportPage />} />
           <Route path="/school/timetable" element={<SchoolTimetablePage />} />
+          <Route path="/school/timetable/class" element={<ClassTimetablePage />} />
+          <Route path="/school/timetable/student" element={<StudentTimetablePage />} />
           {/* P6: the classic exam page is superseded by the numbered workspace. */}
           <Route path="/school/exams" element={<Navigate to="/school/exam-workspace" replace />} />
           <Route path="/school/report-cards" element={<SchoolReportCardsPage />} />
@@ -547,6 +557,7 @@ export function App() {
           <Route path="/school/management/classes" element={<SchoolClassesPage />} />
           <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
           <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
+          <Route path="/school/management/student-categories" element={<SchoolStudentCategoriesPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
           <Route path="/school/teaching-load" element={<SchoolTeachingLoadPage />} />
@@ -557,7 +568,17 @@ export function App() {
           <Route path="/school/timetable/trips" element={<SchoolTripsPage />} />
           <Route path="/school/transport" element={<SchoolTransportPage />} />
           <Route path="/school/library" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/catalogue" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/copies" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/borrowings" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/students" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/fines" element={<SchoolLibraryPage />} />
+          <Route path="/school/library/reports" element={<SchoolLibraryPage />} />
           <Route path="/school/front-desk" element={<FrontDeskPage />} />
+          <Route path="/school/phone-calls" element={<PhoneCallsPage />} />
+          <Route path="/school/complaints" element={<ComplaintsPage />} />
+          <Route path="/school/staff/:id" element={<SchoolStaff360Page />} />
+          <Route path="/school/staff/:id/edit" element={<SchoolStaff360Page />} />
           <Route path="/school/management/policies" element={<SchoolPoliciesPage />} />
           <Route path="/school/management/custom-fields" element={<SchoolCustomFieldsPage />} />
           <Route path="/school/management/roles" element={<SchoolRolesPage />} />

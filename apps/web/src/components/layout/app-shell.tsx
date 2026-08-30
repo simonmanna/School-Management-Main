@@ -79,6 +79,7 @@ import {
   PiggyBank,
   UserCircle,
   DoorOpen,
+  Phone,
   Presentation,
   BookCopy,
   FileStack,
@@ -86,7 +87,10 @@ import {
   MessagesSquare,
   Target,
   GitBranch,
+  Copy,
+  ArrowLeftRight,
   Workflow,
+  Coins,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -188,6 +192,8 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Users,
     items: [
       { to: '/school/front-desk', label: 'Visitors', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/phone-calls', label: 'Phone Calls', icon: Phone, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/complaints', label: 'Complaints', icon: AlertTriangle, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/applications', label: 'Applications', icon: ClipboardList, permission: PERMISSIONS.school.manageFoundation },
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
@@ -200,6 +206,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/school', label: 'School Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/management/student-categories', label: 'Student Categories', icon: Tag, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/portals', label: 'Portals & Promotion', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
@@ -300,6 +307,8 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/timetable', label: 'Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
+      { to: '/school/timetable/class', label: 'Class Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
+      { to: '/school/timetable/student', label: 'Student Timetable', icon: CalendarClock, permission: PERMISSIONS.school.read },
       { to: '/school/timetable/calendar', label: 'Calendar', icon: CalendarDays, permission: PERMISSIONS.school.read },
       { to: '/school/timetable/events', label: 'Events', icon: CalendarHeart, permission: PERMISSIONS.school.read },
       { to: '/school/timetable/trips', label: 'Trips & Field Activities', icon: MapPin, group: 'Activities & Extracurriculars', permission: PERMISSIONS.school.read },
@@ -373,7 +382,20 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/documents', label: 'Documents', icon: FileText, permission: PERMISSIONS.school.read },
-      { to: '/school/library', label: 'Library', icon: BookOpen, permission: PERMISSIONS.school.manageLibrary },
+    ],
+  },
+  {
+    title: 'Library Management',
+    icon: BookOpen,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/library', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/catalogue', label: 'Catalogue', icon: BookOpen, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/copies', label: 'Copies', icon: Copy, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/borrowings', label: 'Borrowings', icon: ArrowLeftRight, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/students', label: 'Students', icon: Users, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/fines', label: 'Fines', icon: AlertTriangle, permission: PERMISSIONS.school.manageLibrary },
+      { to: '/school/library/reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.school.manageLibrary },
     ],
   },
   // ===== Finance & Accounting =====
@@ -445,6 +467,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/expenses', label: 'Expenses', icon: FileText, permission: PERMISSIONS.expense.read },
       { to: '/expenses/categories', label: 'Expense Categories', icon: Tag, permission: PERMISSIONS.expense.read },
       { to: '/expenses/reports', label: 'Expense Reports', icon: BarChart3, permission: PERMISSIONS.expense.read },
+      { to: '/income', label: 'Other Revenue', icon: Coins, permission: PERMISSIONS.income.read },
       { to: '/supplier-payments', label: 'Supplier Payments', icon: Banknote, permission: PERMISSIONS.payment.read },
     ],
   },

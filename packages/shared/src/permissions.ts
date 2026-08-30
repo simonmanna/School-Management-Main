@@ -156,6 +156,13 @@ export const PERMISSIONS = {
     cancel: 'expense:cancel',
     approve: 'expense:approve',
   },
+  income: {
+    read: 'income:read',
+    create: 'income:create',
+    update: 'income:update',
+    post: 'income:post',
+    cancel: 'income:cancel',
+  },
   payment: {
     read: 'payment:read',
     create: 'payment:create',

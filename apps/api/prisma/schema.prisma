@@ -5981,6 +5981,70 @@ model ExpensePayment {
   @@index([expenseId])
 }
 
+model IncomeHead {
+  id              String   @id @default(uuid())
+  organizationId  String
+  name            String
+  icon            String?
+  description     String?
+  /// Optional GL revenue account this head credits when income is received.
+  /// Plain id (no relation) so the Account model needs no back-reference.
+  ledgerAccountId String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+  deletedAt       DateTime?
+  incomes         Income[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A single other-revenue / income receipt (fine, donation, grant, interest,
+/// canteen sale, etc.). Simple lifecycle: entered → RECEIVED (cash) or DRAFT
+/// (bank/credit) → optionally POSTED to the GL. No approvals/payments splitting
+/// like expenses — it is money-in, recorded in full on entry.
+model Income {
+  id              String   @id @default(uuid())
+  organizationId  String
+  incomeCode      String
+  /// What the income is for, e.g. "PTA donation Q3" or "Late pickup fine".
+  name            String
+  description     String?
+  /// Free invoice/reference number from the external source (optional).
+  invoiceNumber   String?
+  amount          Decimal  @db.Decimal(20, 6)
+  /// Date the income was received / earned.
+  incomeDate      DateTime
+  /// Income Head (category) this receipt falls under.
+  incomeHeadId    String?
+  /// Permanent snapshot of the head name (history-safe if the head is renamed/deleted).
+  incomeHeadName  String?
+  /// How the money came in.
+  paymentMethod   String   @default("CASH")
+  /// Cash/bank GL account that was debited (plain id) when posted.
+  accountId       String?
+  /// Optional attached supporting document (links the File vault).
+  attachmentId    String?
+  /// The GL journal entry this receipt posted (null if GL was skipped because
+  /// no postable accounts were resolvable). Used to reverse on void/delete.
+  journalEntryId  String?
+  /// RECEIVED = cash in hand now; POSTED = banked/credited to GL.
+  status          String   @default("RECEIVED")
+  receivedById    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  incomeHead      IncomeHead? @relation(fields: [incomeHeadId], references: [id])
+
+  @@unique([organizationId, incomeCode])
+  @@index([organizationId])
+  @@index([organizationId, incomeDate])
+  @@index([incomeHeadId])
+}
+
 /// ============================ Offline sync (P1) ============================
 
 /// A registered offline-capable POS client (Android tablet, offline web
