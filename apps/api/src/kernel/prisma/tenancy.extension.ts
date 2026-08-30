@@ -583,6 +583,74 @@ export const ORG_SCOPED = new Set<string>([
   'MealAccountTransaction',
   'FrontDeskLog',
   'SchoolDashboardCache',
+
+  // ── Registered by the tenancy-registration ratchet (was: unscoped) ──────
+  // These models all carry a non-null organizationId but were never added to
+  // ORG_SCOPED, so nothing injected the org on write and nothing filtered it
+  // on read — one tenant could fetch another tenant's row by id. The whole
+  // Moodle-shaped LMS vertical, the income module, complaints/phone calls and
+  // `PortalIdentity` (the signed-in subject for every parent and pupil) were
+  // in that state.
+  'IncomeHead',
+  'Income',
+  'EmergencyContact',
+  'Nationality',
+  'Complaint',
+  'PhoneCall',
+  'LmsContext',
+  'LmsRole',
+  'LmsRoleAssignment',
+  'CourseCategory',
+  'CourseSection',
+  'CourseModule',
+  'ModResource',
+  'ModUrl',
+  'ModPage',
+  'ModLabel',
+  'ModFolder',
+  'ModAssign',
+  'ModForum',
+  'ModForumSubscription',
+  'CourseEnrolmentMethod',
+  'CourseEnrolment',
+  'LmsGroup',
+  'LmsGrouping',
+  'CourseModuleCompletion',
+  'CourseCompletionCriteria',
+  'AssessmentGradeOverride',
+  'StudentAssessmentHistory',
+  'ModQuiz',
+  'QuestionCategory',
+  'QuizSlot',
+  'QuizOverride',
+  'LmsEvent',
+  'LmsBadge',
+  'LmsBadgeAward',
+  'ModChoice',
+  'ModChoiceAnswer',
+  'ModGlossary',
+  'ModGlossaryEntry',
+  'ModWiki',
+  'ModWikiPage',
+  'ModLesson',
+  'ModLessonPage',
+  'ModFeedback',
+  'ModFeedbackItem',
+  'ModFeedbackResponse',
+  'ModWorkshop',
+  'ModWorkshopSubmission',
+  'ModWorkshopAllocation',
+  'ModScorm',
+  'ScormTrack',
+  'ModLti',
+  'ModH5p',
+  'XapiStatement',
+  'LmsFile',
+  'ModAssignSubmission',
+  'PortalIdentity',
+  'LtiPlatformKey',
+  'LtiLaunchSession',
+  'ModLessonAttempt',
 ]);
 
 /**
@@ -590,6 +658,14 @@ export const ORG_SCOPED = new Set<string>([
  * Exported for the same reason as ORG_SCOPED — see `tenancy-registration.spec.ts`.
  */
 export const SOFT_DELETE = new Set<string>([
+  // Registered by the tenancy-registration ratchet: these carry `deletedAt`
+  // but were not filtered, so soft-deleted rows kept being returned.
+  'IncomeHead',
+  'Income',
+  'EmergencyContact',
+  'CourseSection',
+  'CourseModule',
+
   'User',
   'Role',
   'Partner',

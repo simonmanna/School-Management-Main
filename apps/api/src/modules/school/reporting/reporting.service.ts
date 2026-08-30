@@ -21,24 +21,70 @@ export class ReportingService {
 
   /** Single call that powers the admin dashboard tile. */
   async adminDashboard() {
-    const [students, staff, campuses, classes, sections] = await Promise.all([
+    const [students, staff, teachers, campuses, classes, sections] = await Promise.all([
       this.prisma.client.studentProfile.count({ where: { status: 'active' } }),
       this.prisma.client.staffProfile.count({ where: { status: 'active' } }),
+      // The teaching subset. A "teacher : pupil ratio" computed against all
+      // active staff counts cooks, drivers and the bursary, which flatters the
+      // number badly in a boarding school.
+      this.prisma.client.staffProfile.count({ where: { status: 'active', staffCategory: 'teaching' } }),
       this.prisma.client.campus.count({ where: { isActive: true } }),
       this.prisma.client.schoolClass.count(),
       this.prisma.client.section.count(),
     ]);
     const outstanding = await this.outstandingFeesTotal();
-    return { students, staff, campuses, classes, sections, outstandingFees: outstanding };
+    return { students, staff, teachers, campuses, classes, sections, outstandingFees: outstanding };
   }
 
+  /**
+   * Academic headline for the current term.
+   *
+   * Reads the assessment spine. It used to count `GradeEntry`, which the B6
+   * migration sealed read-only — so from the cutover onward the pass rate was
+   * frozen at whatever the legacy table happened to hold and could never move
+   * again, however many marks were entered.
+   *
+   * Also returns the work actually outstanding, because a headteacher opening
+   * the dashboard needs to know what is waiting on someone, not only what has
+   * already been signed off.
+   */
   async academicDashboard() {
-    const totalGrades = await this.prisma.client.gradeEntry.count({ where: { status: 'approved' } });
-    const passed = await this.prisma.client.gradeEntry.count({
-      where: { status: 'approved', gradePoint: { gte: 2.0 } },
-    });
-    const passRate = totalGrades > 0 ? Math.round((passed / totalGrades) * 100) : 0;
-    return { totalGrades, passed, passRate };
+    const currentTerm = await this.prisma.client.term.findFirst({ where: { isCurrent: true } });
+    const termId = currentTerm?.id;
+
+    const scope = termId ? { termId, deletedAt: null, assessment: { deletedAt: null } } : null;
+    if (!scope) {
+      return {
+        termId: null, termName: null,
+        totalMarks: 0, approved: 0, passed: 0, passRate: 0,
+        awaitingApproval: 0, draft: 0, rejected: 0,
+      };
+    }
+
+    const [totalMarks, approved, passed, awaitingApproval, draft, rejected] = await Promise.all([
+      this.prisma.client.studentAssessment.count({ where: { ...scope, effectiveScore: { not: null } } }),
+      this.prisma.client.studentAssessment.count({ where: { ...scope, approvalStatus: 'approved' } }),
+      this.prisma.client.studentAssessment.count({
+        where: { ...scope, approvalStatus: 'approved', percentage: { gte: 50 } },
+      }),
+      this.prisma.client.studentAssessment.count({ where: { ...scope, approvalStatus: 'submitted' } }),
+      this.prisma.client.studentAssessment.count({
+        where: { ...scope, approvalStatus: 'draft', effectiveScore: { not: null } },
+      }),
+      this.prisma.client.studentAssessment.count({ where: { ...scope, approvalStatus: 'rejected' } }),
+    ]);
+
+    return {
+      termId,
+      termName: currentTerm?.name ?? null,
+      totalMarks,
+      approved,
+      passed,
+      passRate: approved > 0 ? Math.round((passed / approved) * 100) : 0,
+      awaitingApproval,
+      draft,
+      rejected,
+    };
   }
 
   async financeDashboard() {
@@ -140,25 +186,61 @@ export class ReportingService {
     );
   }
 
-  /** Top performers (by GPA in current term). */
+  /**
+   * Top performers this term, from a PUBLISHED result set.
+   *
+   * Two changes from the version this replaces. It read `GradeEntry`, sealed
+   * read-only since B6, so it could only ever surface pre-cutover pupils. And
+   * it ranked on a mean of raw grade points, which is not the school's own
+   * ranking — `StudentTermResult` already carries the rank the result run
+   * computed under the school's grading policy, so use that rather than
+   * inventing a second answer to "who came first".
+   */
   async topPerformers(limit = 10) {
     const currentTerm = await this.prisma.client.term.findFirst({ where: { isCurrent: true } });
     if (!currentTerm) return [];
-    const entries = await this.prisma.client.gradeEntry.findMany({
-      where: { examSchedule: { exam: { termId: currentTerm.id } }, status: 'approved' },
-      include: { studentProfile: true, examSchedule: { include: { exam: { include: { examType: true } } } } },
+
+    const rows = await this.prisma.client.studentTermResult.findMany({
+      where: { termId: currentTerm.id, resultSet: { status: 'published' } },
+      include: { resultSet: true },
+      orderBy: [{ resultSet: { revision: 'desc' } }],
     });
-    const byStudent: Record<string, { id: string; admissionNo: string; gpa: number; count: number }> = {};
-    for (const e of entries) {
-      const sid = e.studentProfileId;
-      if (!byStudent[sid]) byStudent[sid] = { id: sid, admissionNo: e.studentProfile.admissionNo, gpa: 0, count: 0 };
-      byStudent[sid].gpa += Number(e.gradePoint ?? 0);
-      byStudent[sid].count += 1;
-    }
-    return Object.values(byStudent)
-      .map((s) => ({ ...s, gpa: s.count > 0 ? Math.round((s.gpa / s.count) * 100) / 100 : 0 }))
-      .sort((a, b) => b.gpa - a.gpa)
+
+    // One row per pupil — the newest published revision wins.
+    const seen = new Set<string>();
+    const latest = rows
+      .filter((r: any) => {
+        if (seen.has(r.studentProfileId)) return false;
+        seen.add(r.studentProfileId);
+        return true;
+      })
+      .filter((r: any) => r.classRank != null)
+      .sort((a: any, b: any) => Number(a.classRank) - Number(b.classRank))
       .slice(0, limit);
+
+    // StudentTermResult carries no relation to the pupil (it is keyed by id), so
+    // the names come from a second, bounded lookup.
+    const profiles = latest.length
+      ? await this.prisma.client.studentProfile.findMany({
+          where: { id: { in: latest.map((r: any) => r.studentProfileId) } },
+          include: { partner: true, currentClass: true },
+        })
+      : [];
+    const byId = new Map(profiles.map((p: any) => [p.id, p]));
+
+    return latest.map((r: any) => {
+      const p: any = byId.get(r.studentProfileId);
+      return {
+        id: r.studentProfileId,
+        admissionNo: p?.admissionNo ?? '',
+        name: p?.partner?.name ?? null,
+        className: p?.currentClass?.name ?? null,
+        classRank: r.classRank != null ? Number(r.classRank) : null,
+        gpa: r.gpa != null ? Number(r.gpa) : null,
+        meanPercent: r.meanPercent != null ? Number(r.meanPercent) : null,
+        division: r.division ?? null,
+      };
+    });
   }
 
   /** Daily collections — last 30 days. */

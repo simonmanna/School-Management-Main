@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ShieldCheck, Undo2 } from 'lucide-react';
 import {
   useAcademicYears, useApprovalQueue, useApproveAssessmentMarks, useClasses, useTerms,
@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
-import { EmptyState, Picker, useDefaulted, useStickyState } from './_components/exam-workflow';
+import { EmptyState, Picker, WorkflowSteps, useDefaulted, useStickyState } from './_components/exam-workflow';
 
 /**
  * Approvals — the head of department's screen.
@@ -25,6 +25,7 @@ import { EmptyState, Picker, useDefaulted, useStickyState } from './_components/
  * offers.
  */
 export function SchoolApprovalsPage() {
+  const navigate = useNavigate();
   const { data: years } = useAcademicYears();
   const { data: terms } = useTerms();
   const { data: classes } = useClasses();
@@ -52,10 +53,19 @@ export function SchoolApprovalsPage() {
     if (action === 'reject' && !reason) return;
     try {
       const res: any = await act.mutateAsync({ assessmentId: row.assessmentId, action, reason });
+      // Approving is the last gate before results can be worked out, so say so
+      // and offer the screen that does it — otherwise the approver is left on a
+      // shrinking queue with no idea the term is now ready to compute.
       notify.success(
         action === 'approve'
           ? `${row.title}: ${res?.updated ?? 0} mark(s) approved.`
           : `${row.title} returned for correction.`,
+        action === 'approve'
+          ? {
+              description: 'These marks can now go into the term result.',
+              action: { label: 'Work out results', onClick: () => navigate('/school/results') },
+            }
+          : { description: `${row.submittedBy ?? 'The teacher'} can correct and resubmit.` },
       );
       void refetch();
     } catch (e: any) {
@@ -65,11 +75,14 @@ export function SchoolApprovalsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Approvals</h1>
-        <p className="text-sm text-muted-foreground">
-          Marks teachers have submitted, waiting on you. Approving locks them into the term result.
-        </p>
+      <div className="space-y-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Approve marks</h1>
+          <p className="text-sm text-muted-foreground">
+            Marks teachers have submitted, waiting on you. Approving lets them go into the term result.
+          </p>
+        </div>
+        <WorkflowSteps current={4} />
       </div>
 
       <Card>

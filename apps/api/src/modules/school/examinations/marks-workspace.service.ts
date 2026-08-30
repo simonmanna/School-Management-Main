@@ -429,6 +429,9 @@ export class MarksWorkspaceService {
           marksObtained: dto.marks!,
           maxMarks,
           remarks: dto.participation && dto.participation !== 'present' ? dto.participation : undefined,
+          // `bulkUpsert` already forwards this to postMark; it was simply never
+          // populated from this route, so mark entry had no concurrency guard.
+          version: dto.expectedVersion,
         },
       ],
     });

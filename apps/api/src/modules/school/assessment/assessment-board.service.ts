@@ -446,6 +446,7 @@ export class AssessmentBoardService {
     studentProfileId: string;
     marks: number | null;
     participation?: string;
+    expectedVersion?: number;
   }) {
     const assessment = await this.prisma.client.assessment.findFirst({
       where: { id: dto.assessmentId, deletedAt: null },
@@ -466,6 +467,8 @@ export class AssessmentBoardService {
           sectionId: assessment.sectionId ?? undefined,
           termId: assessment.termId,
         },
+        // Refuse a stale write rather than letting the later save win.
+        expectedVersion: dto.expectedVersion,
       });
       await tx.studentAssessment.updateMany({
         where: { id: sa.id },

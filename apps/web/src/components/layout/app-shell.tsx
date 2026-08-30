@@ -187,6 +187,13 @@ const flagEnabled = (flag?: string): boolean =>
 const NAV_SECTIONS: NavSection[] = [
   { items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }] },
   // ===== School & Academic =====
+  // `/school` — the school's own dashboard — had no nav entry at all, so the
+  // one screen that summarises the term was reachable only by typing the URL.
+  {
+    items: [
+      { to: '/school', label: 'School Dashboard', icon: GraduationCap, flag: 'VITE_ENABLE_SCHOOL', permission: PERMISSIONS.school.read },
+    ],
+  },
   {
     title: 'Front Desk & CRM',
     icon: Users,
@@ -206,8 +213,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/management/student-categories', label: 'Student Categories', icon: Tag, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/promotion', label: 'Promotion & Rollover', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
-      { to: '/school/portals', label: 'Portals & Promotion', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/promotion', label: 'Promote & Roll Over', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
+      { to: '/school/portals', label: 'Parent & Pupil Portals', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
     ],
   },

@@ -2,7 +2,7 @@ import type { BandConfig } from './result-computation';
 
 /**
  * Built-in grading bands for the result kernel, mirroring the Uganda scales in
- * examinations/grading.service.ts (UCE, UACE, CBC, generic). Kept here — as
+ * examinations/grading.service.ts (PLE, UCE, UACE, CBC, generic). Kept here — as
  * plain data with no Prisma/Nest dependency — so the result module doesn't have
  * to import the examinations vertical (which would create a module cycle).
  * `resolveBands` prefers a registered GradingScale, then falls back to these.
@@ -27,6 +27,7 @@ export function defaultBands(system: string): BandConfig[] {
         { min: 50, max: 64, grade: 'C', gpa: 2.0, remark: 'Approaching Expectations' },
         { min: 0, max: 49, grade: 'D', gpa: 1.0, remark: 'Below Expectations' },
       ];
+    case 'PLE':
     case 'UCE':
     default:
       return [

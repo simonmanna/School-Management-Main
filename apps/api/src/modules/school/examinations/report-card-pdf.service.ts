@@ -72,6 +72,23 @@ export class ReportCardPdfService {
     return this.render(model);
   }
 
+  /**
+   * One printable document for a whole class.
+   *
+   * A class of sixty was sixty separate downloads, which is not how report cards
+   * get handed out. Each card still renders exactly as it does on its own — same
+   * layout, same settings — just onto a shared document with a page break
+   * between pupils, so it goes to the printer once.
+   */
+  async generateClassPdf(reportCardIds: string[]): Promise<Buffer> {
+    if (reportCardIds.length === 0) {
+      throw new NotFoundException('No report cards to print.');
+    }
+    const models: RenderModel[] = [];
+    for (const id of reportCardIds) models.push(await this.loadModel(id));
+    return this.render(models);
+  }
+
   // ── Data loading ───────────────────────────────────────────────────────
 
   private async loadModel(reportCardId: string): Promise<RenderModel> {
@@ -216,7 +233,12 @@ export class ReportCardPdfService {
 
   // ── Rendering ──────────────────────────────────────────────────────────
 
-  private render(m: RenderModel): Promise<Buffer> {
+  private render(input: RenderModel | RenderModel[]): Promise<Buffer> {
+    const models = Array.isArray(input) ? input : [input];
+    // Page geometry, fonts and watermark come from the school's settings, which
+    // are the same for every card in a run, so the first model defines the
+    // document and each pupil is a fresh page inside it.
+    const m = models[0];
     const s = m.settings;
     const fonts = FONT_SETS[String(s.fontFamily)] ?? FONT_SETS.helvetica;
     const gap = DENSITY[String(s.density)] ?? 1;
@@ -268,32 +290,38 @@ export class ReportCardPdfService {
       paintWatermark();
       doc.y = doc.page.margins.top;
 
-      const ctx: Ctx = { doc, s, fonts, gap, left, right, width, m };
-
-      // ── Header is fixed at the top of page 1; body blocks follow the
-      //    configured order.
-      this.drawHeader(ctx);
-
       const blocks = enabledKeys(s.blockOrder, ['studentInfo', 'marksTable', 'summary', 'comments', 'signatures']);
-      for (const block of blocks) {
-        switch (block) {
-          case 'studentInfo': this.drawStudentInfo(ctx); break;
-          case 'marksTable': this.drawMarksTable(ctx); break;
-          case 'summary': this.drawSummary(ctx); break;
-          case 'gradeKey': this.drawGradeKey(ctx); break;
-          case 'attendance': this.drawAttendance(ctx); break;
-          case 'conduct': this.drawConduct(ctx); break;
-          case 'coCurricular': this.drawCoCurricular(ctx); break;
-          case 'fees': this.drawFees(ctx); break;
-          case 'comments': this.drawComments(ctx); break;
-          case 'nextTerm': this.drawNextTerm(ctx); break;
-          case 'signatures': this.drawSignatures(ctx); break;
-          default: break;
+
+      models.forEach((model, i) => {
+        // `pageAdded` already repaints the watermark and resets the cursor.
+        if (i > 0) doc.addPage();
+
+        const ctx: Ctx = { doc, s, fonts, gap, left, right, width, m: model };
+
+        // ── Header is fixed at the top of the pupil's first page; body blocks
+        //    follow the configured order.
+        this.drawHeader(ctx);
+
+        for (const block of blocks) {
+          switch (block) {
+            case 'studentInfo': this.drawStudentInfo(ctx); break;
+            case 'marksTable': this.drawMarksTable(ctx); break;
+            case 'summary': this.drawSummary(ctx); break;
+            case 'gradeKey': this.drawGradeKey(ctx); break;
+            case 'attendance': this.drawAttendance(ctx); break;
+            case 'conduct': this.drawConduct(ctx); break;
+            case 'coCurricular': this.drawCoCurricular(ctx); break;
+            case 'fees': this.drawFees(ctx); break;
+            case 'comments': this.drawComments(ctx); break;
+            case 'nextTerm': this.drawNextTerm(ctx); break;
+            case 'signatures': this.drawSignatures(ctx); break;
+            default: break;
+          }
         }
-      }
+      });
 
       // Page furniture last, so it lands on every buffered page.
-      this.decoratePages(ctx);
+      this.decoratePages({ doc, s, fonts, gap, left, right, width, m });
       doc.end();
     });
   }

@@ -8,6 +8,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import { AssessmentPolicyService } from './assessment-config.service';
 import { resolveBands } from './grade-bands';
+import { isCompulsorySubject, isSubsidiarySubject, isPleCoreSubject } from './subject-roles';
 import {
   computeResultSet,
   type AssessmentDatum,
@@ -80,7 +81,7 @@ export class ResultRunService {
       bands,
       roundingMode: 'half_up',
       decimalPlaces: 2,
-      rankOn: gradingSystem === 'UCE' || gradingSystem === 'UACE' ? 'aggregate' : 'gpa',
+      rankOn: ['PLE', 'UCE', 'UACE'].includes(gradingSystem) ? 'aggregate' : 'gpa',
       students,
     };
     const inputChecksum = sha(input);
@@ -475,6 +476,18 @@ export class ResultRunService {
       include: { assessment: { include: { component: true } } },
     });
 
+    // Subject roles drive the aggregate: PLE needs to know which four papers are
+    // core, UCE which are compulsory, UACE which are principal. These were never
+    // populated here, so `computeUCEAggregate`'s compulsory check ran against an
+    // empty set and passed vacuously for every candidate.
+    const subjectIds = [...new Set(rows.map((r: any) => r.assessment.subjectId))];
+    const subjectRows = subjectIds.length
+      ? await this.prisma.client.subject.findMany({ where: { id: { in: subjectIds as string[] } } })
+      : [];
+    const subjectMeta = new Map(subjectRows.map((x: any) => [x.id, x]));
+    const system = (await this.prisma.client.schoolProfile.findFirst({ select: { gradingSystem: true } }))
+      ?.gradingSystem ?? 'UCE';
+
     const students: StudentInput[] = [];
     for (const m of roster.members) {
       const mine = rows.filter((r: any) => r.studentProfileId === m.studentProfileId);
@@ -501,8 +514,17 @@ export class ResultRunService {
           participation: r.participation,
           order: i,
         }));
+        const meta: any = subjectMeta.get(subjectId);
+        const subjectName = meta?.name ?? '';
+        const subjectCode = meta?.code ?? undefined;
         subjects.push({
           subjectId,
+          isCompulsory: isCompulsorySubject(subjectName),
+          isPrincipal: !isSubsidiarySubject(subjectName, subjectCode, system),
+          // `Subject.isCore` defaults to true for everything, so the national
+          // paper identity has to agree before a subject counts toward a PLE
+          // aggregate — otherwise every subject a school teaches would.
+          isCore: (meta?.isCore ?? true) && isPleCoreSubject(subjectName, subjectCode),
           passMark: policy?.passMark ?? 50,
           components: (policy?.components ?? []).map((c: any) => ({
             id: c.id,

@@ -147,6 +147,28 @@ export class GenerateReportCardDto {
   @IsString() @IsNotEmpty() termId!: string;
 }
 
+/**
+ * Generate every card for a class in one action.
+ *
+ * A Ugandan primary class is 50–80 pupils and a term ends with all of them at
+ * once. One-at-a-time generation meant an administrator clicking through the
+ * whole register three times a year, so this is the shape the work actually has.
+ */
+export class GenerateClassReportCardsDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  /** Optional stream/section filter, so one stream can be done at a time. */
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
+}
+
+export class ClassReportCardPdfDto {
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
+}
+
 export class UpdateReportCardCommentDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsString() @IsNotEmpty() termId!: string;

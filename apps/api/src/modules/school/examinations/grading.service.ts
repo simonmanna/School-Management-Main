@@ -38,7 +38,19 @@ export interface GradeBand {
   remark?: string;
 }
 
-export type GradingSystem = 'UCE' | 'UACE' | 'CBC' | 'generic';
+export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'generic';
+
+/**
+ * The four subjects a PLE aggregate is built from. Matched by name (and code)
+ * the same way `computeUCEAggregate` already identifies English and Maths,
+ * because a report card carries subject names, not ids.
+ */
+const PLE_CORE: ReadonlyArray<{ key: string; test: RegExp }> = [
+  { key: 'english', test: /english/i },
+  { key: 'mathematics', test: /math/i },
+  { key: 'science', test: /science/i },
+  { key: 'social', test: /social|sst/i },
+];
 
 @Injectable()
 export class GradingService {
@@ -130,6 +142,65 @@ export class GradingService {
     };
   }
 
+  // ── PLE aggregate (Uganda Primary Leaving Examination) ─────────────────
+
+  /**
+   * PLE aggregate: the sum of the four core subject points — English,
+   * Mathematics, Science and Social Studies — each graded D1..F9 (1..9).
+   * Range 4 (four D1s) to 36 (four F9s); lower is better.
+   *
+   * Unlike UCE this is NOT "best N of however many were sat": the four are
+   * fixed, and a candidate missing one has no aggregate at all rather than a
+   * flatteringly small one. That is why `eligible` is false unless all four
+   * are present.
+   */
+  computePLEAggregate(subjects: Array<{ subject: string; subjectCode?: string; points: number | null }>): {
+    core: Array<{ key: string; subject: string; points: number }>;
+    best4Aggregate: number;
+    missing: string[];
+    f9Count: number;
+    eligible: boolean;
+  } {
+    const core: Array<{ key: string; subject: string; points: number }> = [];
+    const missing: string[] = [];
+
+    for (const want of PLE_CORE) {
+      const hit = subjects.find(
+        (s) => s.points != null && (want.test.test(s.subject) || want.test.test(s.subjectCode ?? '')),
+      );
+      if (hit) core.push({ key: want.key, subject: hit.subject, points: hit.points as number });
+      else missing.push(want.key);
+    }
+
+    const best4Aggregate = core.reduce((sum, s) => sum + s.points, 0);
+    const f9Count = core.filter((s) => s.points === 9).length;
+
+    return { core, best4Aggregate, missing, f9Count, eligible: missing.length === 0 };
+  }
+
+  /**
+   * Classic PLE division bands over the four-subject aggregate (min 4, max 36).
+   * A candidate who did not sit all four core papers is Ungraded.
+   */
+  divisionPLE(aggregate: number, eligible: boolean): string {
+    if (!eligible) return 'U';
+    if (aggregate <= 12) return 'I';
+    if (aggregate <= 23) return 'II';
+    if (aggregate <= 29) return 'III';
+    if (aggregate <= 34) return 'IV';
+    return 'U';
+  }
+
+  /** Classic UCE division bands over the best-8 aggregate (min 8, max 72). */
+  divisionUCE(aggregate: number, eligible: boolean): string {
+    if (!eligible) return 'U';
+    if (aggregate <= 32) return 'I';
+    if (aggregate <= 44) return 'II';
+    if (aggregate <= 56) return 'III';
+    if (aggregate <= 72) return 'IV';
+    return 'U';
+  }
+
   // ── UACE aggregate ─────────────────────────────────────────────────────
 
   /**
@@ -189,54 +260,11 @@ export class GradingService {
     return null;
   }
 
-  /**
-   * Compute weighted GPA + class rank for a term. Pulls all GradeEntries
-   * for the term's exam schedules and aggregates per student.
-   */
-  async computeTermGpa(studentProfileId: string, termId: string): Promise<{
-    gpa: number;
-    totalMarks: number;
-    meanPercent: number;
-    rank: number | null;
-  }> {
-    const entries = await this.prisma.client.gradeEntry.findMany({
-      where: {
-        studentProfileId,
-        examSchedule: { exam: { termId } },
-      },
-      include: { examSchedule: { include: { exam: { include: { examType: true } } } } },
-    });
-    if (entries.length === 0) return { gpa: 0, totalMarks: 0, meanPercent: 0, rank: null };
+  // `computeTermGpa` was removed here: it aggregated `GradeEntry`, the table the
+  // B6 migration sealed read-only, so after the cutover it returned zeros for
+  // every term. Its only caller was the report card, which now derives its
+  // headline from `ReportCardTemplateService.termStats` (P0-2).
 
-    // A0: all aggregation in exact Decimal — no float drift through the
-    // weighted GPA, the mean percent, or (critically) the ranking scores that
-    // decide who is first in the class.
-    const gpa = GradingService.weightedGpa(entries);
-    const meanPercent = entries
-      .reduce((acc, e) => acc.add(percent(e.marksObtained ?? 0, e.maxMarks)), new D(0))
-      .div(entries.length);
-
-    const allEntries = await this.prisma.client.gradeEntry.findMany({
-      where: { examSchedule: { exam: { termId } } },
-      include: { examSchedule: { include: { exam: { include: { examType: true } } } } },
-    });
-    const studentIds = Array.from(new Set(allEntries.map((e) => e.studentProfileId)));
-    const scores = new Map<string, number>();
-    for (const sid of studentIds) {
-      const myEntries = allEntries.filter((e) => e.studentProfileId === sid);
-      // Rank on the Decimal GPA, materialised to a number only for the sort key.
-      scores.set(sid, GradingService.weightedGpa(myEntries).toNumber());
-    }
-    const sorted = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
-    // P0-5 (C5): use competition ranking so tied students share a rank.
-    const rank = GradingService.competitionRank(sorted, studentProfileId);
-    return {
-      gpa: Number(gpa.toDecimalPlaces(2)),
-      totalMarks: entries.length,
-      meanPercent: Number(meanPercent.toDecimalPlaces(2)),
-      rank,
-    };
-  }
 
   /**
    * Weighted GPA = Σ(gradePoint × examTypeWeight) / Σ(examTypeWeight), in exact

@@ -247,6 +247,9 @@ export class GradebookService {
         studentProfileId: dto.studentProfileId,
         score: clearing ? null : dto.marks!,
         source: 'manual',
+        // Pass the caller's version through so a second marker holding a stale
+        // copy of the sheet is refused rather than silently overwriting.
+        expectedVersion: dto.expectedVersion,
       });
 
       // A non-scoring participation with no numeric mark still needs recording.

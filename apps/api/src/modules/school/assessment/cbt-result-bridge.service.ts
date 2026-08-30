@@ -4,6 +4,13 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { MarkingService } from './marking.service';
 
 /**
+ * Approver of record for machine-marked CBT attempts. A sentinel rather than a
+ * real user id: no person approved it, and the audit trail should say so
+ * plainly rather than borrowing whoever happened to trigger the sync.
+ */
+export const CBT_AUTOMARK_ACTOR = 'system:cbt-automark';
+
+/**
  * P1-A bridge: posts an auto-marked CBT/quiz attempt into the assessment spine
  * so that quiz marks are treated exactly like any other assessment when the
  * result spine computes term aggregates (no double entry, no orphan scores).
@@ -102,6 +109,17 @@ export class CbtResultBridgeService {
       update: { maxScore, status: 'graded' },
     });
 
+    // P0-7: a machine-marked quiz is auto-approved, but it must still name its
+    // approver. Leaving `approvedById` null meant the row satisfied the publish
+    // gate twice over — `MARKS_NOT_APPROVED` passed because the status said
+    // approved, and `SOD_VIOLATION` passed because the `approvedById &&
+    // enteredById` guard short-circuits on a null — so a mark nobody signed off
+    // sailed through a gate whose whole job is to prove somebody did.
+    //
+    // The attempt is graded by the engine, so the engine is the approver of
+    // record; there is no human to attribute it to and pretending otherwise
+    // would be worse.
+    const approvedAt = new Date();
     const sa = await tx.studentAssessment.upsert({
       where: { assessmentId_studentProfileId: { assessmentId: assessment.id, studentProfileId } },
       create: {
@@ -114,8 +132,16 @@ export class CbtResultBridgeService {
         status: 'graded',
         participation: 'present',
         approvalStatus: 'approved',
+        approvedById: CBT_AUTOMARK_ACTOR,
+        approvedAt,
       },
-      update: { maxScore, approvalStatus: 'approved', status: 'graded' },
+      update: {
+        maxScore,
+        approvalStatus: 'approved',
+        status: 'graded',
+        approvedById: CBT_AUTOMARK_ACTOR,
+        approvedAt,
+      },
     });
 
     await this.marking.postMark(tx, {

@@ -300,6 +300,26 @@ export class MarkingService {
   }
 
   /** Set a student's participation (present/absent/exempt/…) on an assessment. */
+  /**
+   * P0-5: the same two gates `postMark` applies, for the paths that change what
+   * a mark means without going through it.
+   *
+   * `setParticipation` and `appendAdjustment` both alter the result — one by
+   * making a score non-scoring, the other by moving `effectiveScore` — but
+   * neither passed through `postMark`, so a locked or already-approved
+   * assessment could still be edited by either. A lock that only holds against
+   * one of three doors is not a lock.
+   */
+  private async assertAssessmentMutable(tx: any, sa: { id: string; assessmentId: string; approvalStatus: string }) {
+    const assessment = await tx.assessment.findFirst({ where: { id: sa.assessmentId } });
+    if (assessment?.lockedAt) {
+      throw new ConflictException('This grade item is locked. Unlock it before changing marks.');
+    }
+    if (sa.approvalStatus === 'approved') {
+      throw new BadRequestException('Marks are approved; reject them before recording new marks');
+    }
+  }
+
   async setParticipation(dto: SetParticipationDto) {
     // Marking a pupil absent from a paper changes what their result means, so it
     // is held to the same ownership rule as entering the mark itself.
@@ -311,6 +331,7 @@ export class MarkingService {
         gradeLevelId: dto.gradeLevelId,
         termId: dto.termId,
       });
+      await this.assertAssessmentMutable(tx, row as any);
       await tx.studentAssessment.updateMany({
         where: { id: row.id },
         data: { participation: dto.participation, version: { increment: 1 } },
@@ -371,6 +392,7 @@ export class MarkingService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const sa = await tx.studentAssessment.findFirst({ where: { id: dto.studentAssessmentId } });
       if (!sa) throw new NotFoundException(`StudentAssessment ${dto.studentAssessmentId} not found`);
+      await this.assertAssessmentMutable(tx, sa as any);
 
       const last = await tx.markAdjustment.findFirst({
         where: { studentAssessmentId: dto.studentAssessmentId },

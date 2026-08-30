@@ -313,7 +313,13 @@ export class PromotionService {
           changedById: this.tenant.userId ?? null,
         },
       });
-      await tx.studentProfile.update({ where: { id: student.id }, data: { status: 'alumni' } });
+      // P0-4: a graduate holds no placement. Leaving `current*` populated kept
+      // every alumnus counted in the P7 class list they left, and made the
+      // snapshot disagree with the (now closed) enrollment permanently.
+      await tx.studentProfile.update({
+        where: { id: student.id },
+        data: { status: 'alumni', currentClassId: null, currentSectionId: null, currentStreamId: null },
+      });
       await this.events.publishInTx(tx, EVENTS.SchoolStudentStatusChanged, {
         organizationId,
         studentProfileId: student.id,

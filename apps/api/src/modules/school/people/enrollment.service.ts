@@ -10,6 +10,16 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { EVENTS } from '@erp/shared';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+
+const RESIDENCE = ['day', 'boarder'] as const;
+const GENDERS = ['male', 'female', 'other'] as const;
 
 /** Enrollment lifecycle FSM: enrolled → (transferred_out | withdrawn | completed). */
 const ENROLLMENT_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
@@ -19,20 +29,27 @@ const ENROLLMENT_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
   completed: [],
 };
 
+/**
+ * P0-1: these are `@Body()` types behind the global ValidationPipe
+ * (whitelist + forbidNonWhitelisted). A class with no class-validator metadata
+ * short-circuits in ValidationExecutor and every request to the route 400s
+ * before the service is reached — which is exactly what happened to all five
+ * placement routes. Same convention as `people/dto.types.ts`.
+ */
 export class EnrollStudentDto {
-  studentProfileId!: string;
-  classId!: string;
-  sectionId?: string;
-  streamId?: string;
-  termId!: string;
-  rollNumber!: string;
-  applicationId?: string;
-  effectiveDate?: Date | string;
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsString() @IsNotEmpty() rollNumber!: string;
+  @IsOptional() @IsString() applicationId?: string;
+  @IsOptional() @IsString() effectiveDate?: string;
 }
 
 export class EndEnrollmentDto {
-  reason!: string;
-  endedAt?: Date | string;
+  @IsString() @IsNotEmpty() reason!: string;
+  @IsOptional() @IsString() endedAt?: string;
 }
 
 export class GuardianInput {
@@ -69,24 +86,24 @@ export class EnrollNewStudentInput {
 
 /** Quick "register & place" payload — everything a secretary types on one screen. */
 export class RegisterStudentDto {
-  name!: string;
-  admissionNo?: string;
-  dateOfBirth?: string | null;
-  gender?: string | null;
-  nationality?: string | null;
-  religion?: string | null;
-  house?: string | null;
-  residenceType?: string | null;
-  studentCategoryId?: string | null;
-  classId!: string;
-  sectionId?: string | null;
-  streamId?: string | null;
-  termId!: string;
-  rollNumber!: string;
+  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() admissionNo?: string;
+  @IsOptional() @IsString() dateOfBirth?: string;
+  @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
+  @IsOptional() @IsString() nationality?: string;
+  @IsOptional() @IsString() religion?: string;
+  @IsOptional() @IsString() house?: string;
+  @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() studentCategoryId?: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsString() @IsNotEmpty() rollNumber!: string;
   /** Optional guardian created inline so the whole placement is one action. */
-  guardianName?: string;
-  guardianPhone?: string;
-  guardianRelationship?: string;
+  @IsOptional() @IsString() guardianName?: string;
+  @IsOptional() @IsString() guardianPhone?: string;
+  @IsOptional() @IsString() guardianRelationship?: string;
 }
 
 @Injectable()
@@ -376,9 +393,23 @@ export class EnrollmentService {
       await tx.enrollmentHistory.create({
         data: { organizationId, enrollmentId: id, fromStatus: enrollment.status, toStatus, reason: dto.reason, changedById: this.tenant.userId ?? null },
       });
+      // P0-4: clear the placement snapshot as well as the status.
+      //
+      // This used to set `status` only, leaving `currentClassId` /
+      // `currentSectionId` / `currentStreamId` pointing at the class the pupil
+      // had just left. Class lists survived that only because they also filter
+      // `status: 'active'` — every read that forgot the filter counted a
+      // departed pupil in their old class, and the placement invariant
+      // (snapshot === latest open Enrollment) was false for the whole cohort of
+      // leavers. There is no open enrollment now, so there is no placement.
       await tx.studentProfile.updateMany({
         where: { id: enrollment.studentProfileId },
-        data: { status: toStatus === 'withdrawn' ? 'withdrawn' : 'transferred' },
+        data: {
+          status: toStatus === 'withdrawn' ? 'withdrawn' : 'transferred',
+          currentClassId: null,
+          currentSectionId: null,
+          currentStreamId: null,
+        },
       });
 
       await this.releaseAdmissionSeat(tx, organizationId, enrollment);

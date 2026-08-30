@@ -85,6 +85,7 @@ export function SchoolEnterMarksPage() {
   const [states, setStates] = useState<Record<string, SaveState>>({});
   const [participation, setParticipation] = useState<Record<string, string>>({});
   const [grades, setGrades] = useState<Record<string, string | null>>({});
+  const [versions, setVersions] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -145,13 +146,31 @@ export function SchoolEnterMarksPage() {
         marks: isClear ? null : num,
         participation: part ?? participation[id] ?? 'present',
         maxMarks,
+        // The version this sheet was loaded with. If a colleague has saved the
+        // same cell since, the server refuses rather than letting whoever typed
+        // last quietly win.
+        expectedVersion: versions[id] ?? s.version,
       });
+      // Track the new version so a second edit in the same session is not
+      // rejected against a version we ourselves superseded.
+      const nextVersion = (res as { version?: number } | undefined)?.version;
+      if (typeof nextVersion === 'number') setVersions((v) => ({ ...v, [id]: nextVersion }));
       setGrades((g) => ({ ...g, [id]: (res as any)?.grade ?? null }));
       setStates((st) => ({ ...st, [id]: 'saved' }));
       setTimeout(() => setStates((st) => (st[id] === 'saved' ? { ...st, [id]: 'idle' } : st)), 1200);
     } catch (e: any) {
       setStates((st) => ({ ...st, [id]: 'error' }));
-      notify.error(e?.response?.data?.message ?? `Could not save ${s.name}'s mark`);
+      const status = e?.response?.status;
+      if (status === 409) {
+        // Someone else edited this paper. Refetching is the fix, and saying so
+        // is far more useful than repeating the server's version numbers.
+        notify.error(`${s.name}'s mark was changed by someone else`, {
+          description: 'Reloading this sheet so you can see the current marks.',
+        });
+        void refetch();
+      } else {
+        notify.error(e?.response?.data?.message ?? `Could not save ${s.name}'s mark`);
+      }
     }
   }
 

@@ -1,4 +1,12 @@
-import { IsArray, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 /** Every kind an assessment can be. Exam and homework are kinds, not systems. */
 export const ASSESSMENT_KINDS = [
@@ -65,4 +73,15 @@ export class SaveBoardMarkDto {
 
   @IsOptional() @IsIn(['present', 'absent', 'exempt', 'excused', 'malpractice'])
   participation?: string;
+
+  /**
+   * The version of the row the marker had on screen.
+   *
+   * `MarkingService.postMark` has always refused a stale write, but only when a
+   * caller passed this — and none of the mark-entry screens did, so two teachers
+   * on the same paper silently overwrote each other and the guard never once
+   * fired in production. Optional so an older client is not broken; every screen
+   * in this repo now sends it.
+   */
+  @IsOptional() @IsInt() @Min(0) expectedVersion?: number;
 }

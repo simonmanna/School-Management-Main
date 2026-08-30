@@ -19,7 +19,7 @@ import { Prisma } from '@prisma/client';
 const D = Prisma.Decimal;
 type Dec = Prisma.Decimal;
 
-export type GradingSystem = 'UCE' | 'UACE' | 'CBC' | 'generic';
+export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'generic';
 export type RoundingModeName = 'half_up' | 'half_even' | 'floor' | 'ceil';
 export type RankOn = 'gpa' | 'aggregate' | 'meanPercent';
 
@@ -55,6 +55,9 @@ export interface SubjectInput {
   subjectId: string;
   isCompulsory?: boolean;
   isPrincipal?: boolean;
+  /** PLE: the four core papers (English, Maths, Science, SST) that the
+   *  aggregate is built from. Sourced from `Subject.isCore`, never a name. */
+  isCore?: boolean;
   passMark: Prisma.Decimal.Value;
   components: ComponentConfig[];
   assessments: AssessmentDatum[];
@@ -290,6 +293,36 @@ export function computeSubject(subject: SubjectInput, input: ResultInput): Subje
   };
 }
 
+// ── PLE aggregate (Uganda Primary Leaving Examination) ──────────────────────
+/**
+ * PLE aggregate: the sum of the four core subject points — English, Maths,
+ * Science and Social Studies — each D1..F9 (1..9). Range 4..36, lower better.
+ *
+ * The four are fixed, not "best 4 of everything sat": a pupil missing a core
+ * paper has no aggregate rather than a flatteringly small one, so `eligible`
+ * is false unless all four are present. Where a school has flagged more than
+ * four subjects core, the best four among them are taken.
+ */
+export function computePLEAggregate(
+  subjects: Array<{ subjectId: string; points: number | null; isCore?: boolean }>,
+): { best4Aggregate: number; coreCount: number; f9Count: number; eligible: boolean } {
+  const core = subjects.filter((s) => s.isCore && s.points != null) as Array<{ points: number }>;
+  const best4 = [...core].sort((a, b) => a.points - b.points).slice(0, 4);
+  const best4Aggregate = best4.reduce((sum, s) => sum + s.points, 0);
+  const f9Count = core.filter((s) => s.points === 9).length;
+  return { best4Aggregate, coreCount: core.length, f9Count, eligible: core.length >= 4 };
+}
+
+/** Classic PLE division bands over the four-subject aggregate (min 4, max 36). */
+export function divisionPLE(aggregate: number, eligible: boolean): string {
+  if (!eligible) return 'U';
+  if (aggregate <= 12) return 'I';
+  if (aggregate <= 23) return 'II';
+  if (aggregate <= 29) return 'III';
+  if (aggregate <= 34) return 'IV';
+  return 'U';
+}
+
 // ── UCE / UACE aggregates ───────────────────────────────────────────────────
 export function computeUCEAggregate(
   subjects: Array<{ subjectId: string; points: number | null; isCompulsory?: boolean }>,
@@ -345,10 +378,15 @@ export function computeTerm(subjectResults: SubjectResult[], subjects: SubjectIn
   let eligible = true;
   const pointsBySubject = subjectResults.map((r) => {
     const meta = subjects.find((s) => s.subjectId === r.subjectId);
-    return { subjectId: r.subjectId, points: r.points, isCompulsory: meta?.isCompulsory, isPrincipal: meta?.isPrincipal };
+    return { subjectId: r.subjectId, points: r.points, isCompulsory: meta?.isCompulsory, isPrincipal: meta?.isPrincipal, isCore: meta?.isCore };
   });
 
-  if (input.gradingSystem === 'UCE') {
+  if (input.gradingSystem === 'PLE') {
+    const agg = computePLEAggregate(pointsBySubject);
+    aggregate = agg.best4Aggregate;
+    eligible = agg.eligible;
+    division = divisionPLE(agg.best4Aggregate, agg.eligible);
+  } else if (input.gradingSystem === 'UCE') {
     const agg = computeUCEAggregate(pointsBySubject);
     aggregate = agg.best8Aggregate;
     eligible = agg.eligible;

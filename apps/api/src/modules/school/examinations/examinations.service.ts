@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Exam, ExamSchedule, ExamType, GradeEntry, GradingScale } from '@prisma/client';
+import { PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
@@ -319,9 +320,22 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
       // is the whole point of the reject affordance. Accepting only `draft` left
       // rejected rows stranded: nothing moved them back, so the paper could never
       // be approved and the marks were stuck for good.
+      // P0-6: record WHO submitted, and stop overwriting when the mark was entered.
+      //
+      // This wrote `enteredAt: new Date()` — clobbering the entry timestamp with
+      // the submit time — and never wrote `submittedById` at all. That left the
+      // column null for every mark submitted from the exam workspace, which in
+      // turn silently disabled the "you submitted these, you cannot approve
+      // them" arm of the SoD check further down, and the publish gate's
+      // equivalent. A duty you cannot attribute is a duty you cannot segregate.
       const res = await tx.studentAssessment.updateMany({
         where: { assessmentId: assessment.id, approvalStatus: { in: ['draft', 'rejected'] } },
-        data: { approvalStatus: 'submitted', enteredAt: new Date(), rejectionReason: null },
+        data: {
+          approvalStatus: 'submitted',
+          submittedById: this.tenant.userId ?? null,
+          submittedAt: new Date(),
+          rejectionReason: null,
+        },
       });
       if (res.count > 0) {
         await this.audit.recordInTx(tx, {
@@ -351,14 +365,23 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
       if (!assessment) return { updated: 0 };
       const pending = await tx.studentAssessment.findMany({
         where: { assessmentId: assessment.id, approvalStatus: 'submitted' },
-        select: { id: true, enteredById: true },
+        select: { id: true, enteredById: true, submittedById: true },
       });
       if (pending.length === 0) return { updated: 0 };
 
+      // P0-6: both arms of the rule, matching `MarkingService.markingApproval`.
+      // Checking only `enteredById` let whoever pushed the paper into approval
+      // sign it off themselves.
       const selfEntered = pending.some((g: any) => g.enteredById && g.enteredById === approverId);
       if (selfEntered) {
         throw new BadRequestException(
           'You entered one or more of these marks and cannot approve your own entries (segregation of duty).',
+        );
+      }
+      const selfSubmitted = pending.some((g: any) => g.submittedById && g.submittedById === approverId);
+      if (selfSubmitted) {
+        throw new BadRequestException(
+          'You submitted these marks for approval and cannot approve them (segregation of duty).',
         );
       }
 
@@ -543,22 +566,193 @@ export class ReportCardService {
     });
   }
 
+  /**
+   * Generate a report card for every pupil in a class, in one action.
+   *
+   * A term ends for a whole class at once — 50 to 80 pupils in a Ugandan
+   * primary stream — so generating one at a time was never the shape of the
+   * work. Each card is still built by the same `generate` above, in its own
+   * transaction: one pupil failing (an already-published card, say) must not
+   * roll back the rest of the class, so failures are collected and reported
+   * rather than thrown.
+   */
+  async generateForClass(dto: {
+    classId: string;
+    termId: string;
+    sectionId?: string;
+    streamId?: string;
+  }): Promise<{
+    termId: string;
+    classId: string;
+    generated: number;
+    skipped: Array<{ studentProfileId: string; name: string | null; reason: string }>;
+  }> {
+    const pupils = await this.classRoll(dto);
+    if (pupils.length === 0) {
+      throw new NotFoundException('No pupils found in that class for this term.');
+    }
+
+    let generated = 0;
+    const skipped: Array<{ studentProfileId: string; name: string | null; reason: string }> = [];
+
+    for (const p of pupils) {
+      try {
+        await this.generate({ studentProfileId: p.id, termId: dto.termId });
+        generated += 1;
+      } catch (err: unknown) {
+        skipped.push({
+          studentProfileId: p.id,
+          name: p.name,
+          reason: err instanceof Error ? err.message : 'Could not generate this card.',
+        });
+      }
+    }
+
+    return { termId: dto.termId, classId: dto.classId, generated, skipped };
+  }
+
+  /**
+   * The pupils a class report-card run covers.
+   *
+   * Reads the `Enrollment` for the term — the authoritative placement — rather
+   * than the `StudentProfile.current*` snapshot, so a pupil who moved class
+   * mid-term is printed with the class they actually sat the term in.
+   */
+  async classRoll(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
+    const enrolments = await this.prisma.client.enrollment.findMany({
+      where: {
+        classId: dto.classId,
+        termId: dto.termId,
+        status: 'enrolled',
+        ...(dto.sectionId ? { sectionId: dto.sectionId } : {}),
+        ...(dto.streamId ? { streamId: dto.streamId } : {}),
+      },
+      select: { studentProfileId: true, rollNumber: true },
+    });
+    if (enrolments.length === 0) return [];
+
+    const profiles = await this.prisma.client.studentProfile.findMany({
+      where: { id: { in: enrolments.map((e) => e.studentProfileId) } },
+      include: { partner: true },
+    });
+    const byId = new Map(profiles.map((p: any) => [p.id, p]));
+
+    return enrolments
+      .map((e) => {
+        const p: any = byId.get(e.studentProfileId);
+        return {
+          id: e.studentProfileId,
+          name: (p?.partner?.name as string | undefined) ?? null,
+          admissionNo: (p?.admissionNo as string | undefined) ?? null,
+          rollNumber: e.rollNumber ?? null,
+        };
+      })
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+  }
+
+  /**
+   * Release every generated card for a class.
+   *
+   * Publishing one pupil at a time is the same mismatch as generating one at a
+   * time: the decision is made for the class, once. Cards that are already
+   * released are left alone rather than counted as failures.
+   */
+  async publishForClass(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
+    const pupils = await this.classRoll(dto);
+    const cards = await this.prisma.client.reportCard.findMany({
+      where: { termId: dto.termId, studentProfileId: { in: pupils.map((p) => p.id) } },
+      select: { id: true, publishedAt: true },
+    });
+
+    const pending = cards.filter((c) => !c.publishedAt);
+    for (const c of pending) await this.setPublished(c.id, true);
+
+    return {
+      published: pending.length,
+      alreadyPublished: cards.length - pending.length,
+      notGenerated: pupils.length - cards.length,
+    };
+  }
+
+  /**
+   * The released cards for a class, in register order, plus a filename a
+   * secretary can recognise in a downloads folder.
+   *
+   * Draft cards are excluded rather than rejected: a class print run should not
+   * fail because one pupil's marks are still in approval — it should print the
+   * rest and let the caller see the shortfall in the count.
+   */
+  async publishedClassCardIds(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
+    const pupils = await this.classRoll(dto);
+    const order = new Map(pupils.map((p, i) => [p.id, i]));
+
+    const cards = await this.prisma.client.reportCard.findMany({
+      where: {
+        termId: dto.termId,
+        studentProfileId: { in: pupils.map((p) => p.id) },
+        publishedAt: { not: null },
+      },
+      select: { id: true, studentProfileId: true },
+    });
+    if (cards.length === 0) {
+      throw new NotFoundException(
+        'No released report cards for this class yet. Generate them, then release them, before printing.',
+      );
+    }
+
+    const [klass, term] = await Promise.all([
+      this.prisma.client.schoolClass.findFirst({ where: { id: dto.classId }, select: { name: true } }),
+      this.prisma.client.term.findFirst({ where: { id: dto.termId }, select: { name: true } }),
+    ]);
+    const slug = (v?: string | null) => (v ?? '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'class';
+
+    return {
+      ids: cards
+        .sort((a, b) => (order.get(a.studentProfileId) ?? 0) - (order.get(b.studentProfileId) ?? 0))
+        .map((c) => c.id),
+      filename: `report-cards-${slug(klass?.name)}-${slug(term?.name)}.pdf`,
+    };
+  }
+
+  /**
+   * P0-8: gate a DRAFT card's PDF behind the permission that could publish it.
+   *
+   * A released card is fair game for any staff member who can read the school.
+   * An unpublished one is working material — it can hold marks still in
+   * approval, and the parent-facing route refuses it outright — so reading it
+   * takes `publishResults`, the permission that would let you release it anyway.
+   */
+  async assertReadableAsDraft(reportCardId: string) {
+    const card = await this.prisma.client.reportCard.findFirst({
+      where: { id: reportCardId },
+      select: { id: true, publishedAt: true },
+    });
+    if (!card) throw new NotFoundException(`Report card ${reportCardId} not found`);
+    if (card.publishedAt) return;
+
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.includes('*') || perms.includes(PERMISSIONS.school.publishResults)) return;
+    throw new ForbiddenException(
+      'This report card has not been released yet. Only staff who can publish results may open a draft.',
+    );
+  }
+
   async generate(dto: GenerateReportCardDto) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
       const term = await tx.term.findFirst({ where: { id: dto.termId } });
       if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
 
-      // A3: prefer the published result spine as the source of truth. The spine
-      // is a versioned, immutable, reproducible snapshot; the legacy per-call
-      // computeTermGpa remains only as the fallback for terms not yet run.
+      // A3: the published result spine is the source of truth — a versioned,
+      // immutable, reproducible snapshot. Where a term has not been published
+      // yet, the card is built from live approved marks instead, and says so in
+      // its provenance.
       const spine = await this.results.latestPublished(dto.termId, dto.studentProfileId);
-      const legacy = await this.grading.computeTermGpa(dto.studentProfileId, dto.termId);
 
       // Build the templated layout (sections + summary + eligibility). Pass the
       // spine so the subject table is sourced from it too (P3), not just the
       // headline numbers — otherwise the body and header of one card disagree.
-      const { layout, layoutSource } = await this.templates.buildLayout(dto.studentProfileId, dto.termId, spine);
+      const { layout, layoutSource, stats } = await this.templates.buildLayout(dto.studentProfileId, dto.termId, spine);
 
       const provenance = spine
         ? {
@@ -568,12 +762,23 @@ export class ReportCardService {
             resultSetRevision: spine.resultSet.revision,
             calculationVersion: spine.resultSet.calculationVersion,
           }
-        : { source: 'legacy_compute' as const, layoutSource };
+        : { source: 'live_spine' as const, layoutSource };
 
-      const gpa = spine?.term.gpa != null ? Number(spine.term.gpa) : legacy.gpa;
-      const rank = spine?.term.classRank ?? legacy.rank;
-      const meanPercent = spine?.term.meanPercent != null ? Number(spine.term.meanPercent) : legacy.meanPercent;
-      const totalMarks = spine ? spine.term.subjectsCount : legacy.totalMarks;
+      // P0-2: the headline comes from the same subject rows the body prints.
+      //
+      // It used to fall back to `computeTermGpa`, which reads `GradeEntry` — the
+      // table the B6 migration sealed read-only. After the seal it found nothing
+      // and returned zeros, so a card generated before its results were published
+      // printed a populated subject table beneath "GPA 0.00 / Mean 0.0%". One
+      // source for both halves makes that disagreement impossible.
+      //
+      // `rank` is the exception and stays null off the spine: a position is only
+      // meaningful against a frozen cohort, so it comes from a published
+      // ResultSet or not at all. The PDF already omits a null position.
+      const gpa = spine?.term.gpa != null ? Number(spine.term.gpa) : stats.gpa;
+      const rank = spine?.term.classRank ?? null;
+      const meanPercent = spine?.term.meanPercent != null ? Number(spine.term.meanPercent) : stats.meanPercent;
+      const totalMarks = spine ? spine.term.subjectsCount : stats.subjectsCount;
 
       // P0-A: carry persisted teacher/principal comments + competency levels
       // (if a card for this student+term already holds them) into the payload.
@@ -598,7 +803,8 @@ export class ReportCardService {
         rank,
         meanPercent,
         totalMarks,
-        division: spine?.term.division ?? null,
+        division: spine?.term.division ?? stats.division,
+        aggregate: spine?.term.aggregate ?? stats.aggregate,
         promotionRecommendation: spine?.term.promotionRecommendation ?? null,
         sections: layout.sections,
         summary: layout.summary,

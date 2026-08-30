@@ -138,7 +138,7 @@ export function SchoolExamResultsPage() {
         </div>
       </div>
 
-      <div className="print:hidden"><WorkflowSteps current={4} /></div>
+      <div className="print:hidden"><WorkflowSteps current={3} /></div>
 
       <Card className="print:hidden">
         <CardContent className="flex flex-wrap gap-3 pt-4">

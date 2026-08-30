@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { GradingService, type GradingSystem, type GradeBand } from './grading.service';
+import { isCompulsorySubject, isSubsidiarySubject } from '../assessment/subject-roles';
 
 /**
  * ReportCardTemplateService — produces a fully-templated report card
@@ -33,7 +34,26 @@ export interface SubjectResult {
   totalPercent: number;          // averaged across exam types
   finalGrade: string | null;     // e.g. "D1", "B", "Exceeding"
   finalPoints: number | null;     // UCE: 1..9, UACE: 5..11
+  /** Band GPA for this subject. Carried so a card built off live marks can
+   *  state a headline GPA without re-reading the retired GradeEntry table. */
+  finalGpa?: number | null;
   remark?: string | null;
+}
+
+/**
+ * Headline term figures for a report card, derived from the same subject rows
+ * the body prints — so the header and the table can never disagree (the
+ * invariant `result-computation.ts` states for the result kernel).
+ *
+ * `classRank` is deliberately absent: a position only means something against a
+ * frozen cohort, so it comes from a published ResultSet or not at all.
+ */
+export interface ReportCardTermStats {
+  gpa: number | null;
+  meanPercent: number | null;
+  subjectsCount: number;
+  aggregate: number | null;
+  division: string | null;
 }
 
 export interface ReportCardLayout {
@@ -88,7 +108,14 @@ export class ReportCardTemplateService {
     studentProfileId: string,
     termId: string,
     spine?: { subjects: any[] } | null,
-  ): Promise<{ layout: ReportCardLayout; layoutSource: 'result_spine' | 'spine_live' }> {
+  ): Promise<{
+    layout: ReportCardLayout;
+    layoutSource: 'result_spine' | 'spine_live';
+    /** The rows the layout was built from, so the caller can derive a headline
+     *  from the same source rather than a second one (P0-2). */
+    subjects: SubjectResult[];
+    stats: ReportCardTermStats;
+  }> {
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
       include: { currentClass: { include: { gradeLevel: true } } },
@@ -105,7 +132,12 @@ export class ReportCardTemplateService {
     // 1) A published ResultSet is the authoritative, frozen term result.
     if (spineSubjects.length > 0) {
       const subjects = await this.subjectsFromSpine(spineSubjects, system);
-      return { layout: this.layoutFor(system, subjects), layoutSource: 'result_spine' };
+      return {
+        layout: this.layoutFor(system, subjects),
+        layoutSource: 'result_spine',
+        subjects,
+        stats: this.termStats(subjects, system),
+      };
     }
 
     // 2) No published result for this term — but marks may still exist. Compute
@@ -113,17 +145,28 @@ export class ReportCardTemplateService {
     // result run uses, so a card built this way agrees with one published later.
     const live = await this.subjectsFromSpineLive(studentProfileId, termId, system);
     if (live.length > 0) {
-      return { layout: this.layoutFor(system, live), layoutSource: 'spine_live' };
+      return {
+        layout: this.layoutFor(system, live),
+        layoutSource: 'spine_live',
+        subjects: live,
+        stats: this.termStats(live, system),
+      };
     }
 
     // 3) Genuinely nothing: an empty card is the honest answer. (The legacy
     // GradeEntry fallback is gone — it only ever held exam marks and would
     // under-report a term that includes CATs, homework and projects.)
-    return { layout: this.layoutFor(system, []), layoutSource: 'spine_live' };
+    return {
+      layout: this.layoutFor(system, []),
+      layoutSource: 'spine_live',
+      subjects: [],
+      stats: this.termStats([], system),
+    };
   }
 
   private layoutFor(system: GradingSystem, subjects: SubjectResult[]): ReportCardLayout {
     switch (system) {
+      case 'PLE': return this.buildPLELayout(subjects);
       case 'UCE': return this.buildUCELayout(subjects);
       case 'UACE': return this.buildUACELayout(subjects);
       case 'CBC': return this.buildCBCLayout(subjects);
@@ -173,6 +216,7 @@ export class ReportCardTemplateService {
         totalPercent,
         finalGrade: ssr.grade ?? band?.grade ?? null,
         finalPoints: ssr.points ?? band?.points ?? null,
+        finalGpa: ssr.gradePoint != null ? Number(ssr.gradePoint) : (band?.gpa ?? null),
         remark: band?.remark ?? null,
       });
     }
@@ -277,10 +321,54 @@ export class ReportCardTemplateService {
         totalPercent,
         finalGrade: band?.grade ?? null,
         finalPoints: band?.points ?? null,
+        finalGpa: band?.gpa ?? null,
         remark: band?.remark ?? null,
       });
     }
     return out;
+  }
+
+  /**
+   * P0-2: the headline, computed from the very rows the body prints.
+   *
+   * This replaces a fallback that read `computeTermGpa` — which reads the
+   * `GradeEntry` table sealed read-only by the B6 migration. After the seal it
+   * found nothing and returned zeros, so a card generated before its results
+   * were published printed a real subject table under "GPA 0.00 / Mean 0.0% /
+   * Position —". Deriving both halves from one source makes that impossible.
+   */
+  termStats(subjects: SubjectResult[], system: GradingSystem): ReportCardTermStats {
+    const scored = subjects.filter((s) => s.finalGrade !== null);
+    if (scored.length === 0) {
+      return { gpa: null, meanPercent: null, subjectsCount: 0, aggregate: null, division: null };
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const meanPercent = round2(scored.reduce((t, s) => t + s.totalPercent, 0) / scored.length);
+    const withGpa = scored.filter((s) => s.finalGpa != null);
+    const gpa = withGpa.length ? round2(withGpa.reduce((t, s) => t + (s.finalGpa as number), 0) / withGpa.length) : null;
+
+    let aggregate: number | null = null;
+    let division: string | null = null;
+    if (system === 'UCE') {
+      const agg = this.grading.computeUCEAggregate(
+        scored.map((s) => ({ subject: s.subject, points: s.finalPoints, isCompulsory: s.isCompulsory })),
+      );
+      aggregate = agg.best8Aggregate;
+      division = this.grading.divisionUCE(agg.best8Aggregate, agg.eligible);
+    } else if (system === 'UACE') {
+      aggregate = this.grading.computeUACEAggregate(
+        scored.map((s) => ({ subject: s.subject, points: s.finalPoints, isPrincipal: s.isPrincipal })),
+      ).best3Aggregate;
+    } else if (system === 'PLE') {
+      const agg = this.grading.computePLEAggregate(
+        scored.map((s) => ({ subject: s.subject, subjectCode: s.subjectCode, points: s.finalPoints })),
+      );
+      aggregate = agg.best4Aggregate;
+      division = this.grading.divisionPLE(agg.best4Aggregate, agg.eligible);
+    }
+
+    return { gpa, meanPercent, subjectsCount: scored.length, aggregate, division };
   }
 
   private componentLabel(kind: string): string {
@@ -292,6 +380,38 @@ export class ReportCardTemplateService {
   }
 
   // ── Templates ──────────────────────────────────────────────────────────
+
+  /**
+   * PLE — the Ugandan primary leaving card. Four core papers drive the
+   * aggregate and the division; anything else the school teaches still prints
+   * but does not count.
+   */
+  private buildPLELayout(subjects: SubjectResult[]): ReportCardLayout {
+    const agg = this.grading.computePLEAggregate(
+      subjects.map((s) => ({ subject: s.subject, subjectCode: s.subjectCode, points: s.finalPoints })),
+    );
+    const division = this.grading.divisionPLE(agg.best4Aggregate, agg.eligible);
+    return {
+      system: 'PLE',
+      columnHeaders: ['Subject', 'Code', 'CA', 'End of Term', 'Grade', 'Aggregate', 'Remark'],
+      sections: [{ title: 'Subjects', subjects }],
+      summary: [
+        { label: 'Aggregate', value: agg.eligible ? `${agg.best4Aggregate} / 36 (best possible = 4)` : '—' },
+        { label: 'Division', value: division },
+        { label: 'Core Papers Sat', value: `${agg.core.length} of 4` },
+      ],
+      eligible: {
+        qualifies: agg.eligible,
+        reason: agg.eligible
+          ? `Division ${division} on an aggregate of ${agg.best4Aggregate}.`
+          : `Ungraded: no mark for ${agg.missing.join(', ')}.`,
+      },
+      footer: [
+        'Issued under the Uganda National Examinations Board (UNEB) PLE grading system.',
+        'Class teacher: ____________________   Head teacher: ____________________',
+      ],
+    };
+  }
 
   private buildUCELayout(subjects: SubjectResult[]): ReportCardLayout {
     const agg = this.grading.computeUCEAggregate(
@@ -379,35 +499,7 @@ export class ReportCardTemplateService {
   }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function isCompulsorySubject(name: string): boolean {
-  return /english|mathematics/i.test(name);
-}
-
-/**
- * P0-3 (C3): subsidiary detection.
- *
- * Under UACE, students take 3–4 principal subjects (their chosen
- * specialisation) and a small set of compulsory subsidiary subjects
- * (typically General Paper and Sub-ICT). Only principal subjects
- * count toward the "best 3" UACE aggregate.
- *
- * The school tags subsidiary subjects in `Subject.code` with the
- * `SUB-` prefix (e.g. `SUB-GP`, `SUB-ICT`). Names alone are
- * unreliable — many schools call their principal subjects "GP" too.
- *
- * Other grading systems (UCE, CBC, generic) have no concept of
- * subsidiary subjects, so the function always returns false there.
- *
- * Exported for unit testing.
- */
-export function isSubsidiarySubject(
-  name: string,
-  code: string | undefined,
-  system: GradingSystem | string,
-): boolean {
-  if (system !== 'UACE') return false;
-  if (!code) return false;
-  return /^sub-/i.test(code);
-}
+// Subject role helpers now live in `assessment/subject-roles.ts` so the result
+// kernel and a report card classify a subject identically. Re-exported here
+// because existing tests import `isSubsidiarySubject` from this module.
+export { isSubsidiarySubject } from '../assessment/subject-roles';

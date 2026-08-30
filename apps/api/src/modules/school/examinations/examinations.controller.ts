@@ -27,6 +27,7 @@ import {
   UpdateExamTypeDto,
   UpdateGradingScaleDto,
   UpdateReportCardCommentDto,
+  GenerateClassReportCardsDto,
 } from './dto.types';
 import { InvigilatorService } from './invigilator.service';
 import { CreateInvigilatorDto, UpdateInvigilatorDto, AssignInvigilatorDto } from './invigilator.dto';
@@ -248,10 +249,62 @@ export class ReportCardController {
     return this.service.generate(dto);
   }
 
+  /** Generate every card for a class in one action. */
+  @Post('generate-class')
+  @RequirePermissions(PERMISSIONS.school.computeResults)
+  generateClass(@Body() dto: GenerateClassReportCardsDto) {
+    return this.service.generateForClass(dto);
+  }
+
+  /** Who a class run would cover — shown before generating, so the count is not a surprise. */
+  @Get('class-roll')
+  @RequirePermissions(PERMISSIONS.school.read)
+  classRoll(
+    @Query('classId') classId: string,
+    @Query('termId') termId: string,
+    @Query('sectionId') sectionId?: string,
+    @Query('streamId') streamId?: string,
+  ) {
+    return this.service.classRoll({ classId, termId, sectionId, streamId });
+  }
+
+  /**
+   * One PDF for the whole class, ready for the printer.
+   *
+   * Only RELEASED cards are included: printing a class set is a distribution
+   * step, and a draft card must not reach a parent's hand any more than it
+   * reaches the portal.
+   */
+  @Get('class-pdf')
+  @RequirePermissions(PERMISSIONS.school.read)
+  async classPdf(
+    @Query('classId') classId: string,
+    @Query('termId') termId: string,
+    @Res({ passthrough: true }) res: Response,
+    @Query('sectionId') sectionId?: string,
+    @Query('streamId') streamId?: string,
+  ) {
+    const { ids, filename } = await this.service.publishedClassCardIds({ classId, termId, sectionId, streamId });
+    const buf = await this.pdf.generateClassPdf(ids);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buf.length,
+    });
+    return new StreamableFile(buf);
+  }
+
   @Post(':id/publish')
   @RequirePermissions(PERMISSIONS.school.publishResults)
   publish(@Param('id') id: string) {
     return this.service.publish(id);
+  }
+
+  /** Release every generated card for a class at once. */
+  @Post('publish-class')
+  @RequirePermissions(PERMISSIONS.school.publishResults)
+  publishClass(@Body() dto: GenerateClassReportCardsDto) {
+    return this.service.publishForClass(dto);
   }
 
   @Post(':id/unpublish')
@@ -273,10 +326,20 @@ export class ReportCardController {
     return this.service.byStudent(id);
   }
 
-  /** Download a generated report card as a PDF. */
+  /**
+   * Download a generated report card as a PDF.
+   *
+   * P0-8: an UNPUBLISHED card is a draft — it may hold marks still going
+   * through approval, and on the parent side `portal-documents.service.ts`
+   * refuses it outright. This route only checked `school:read`, so any holder
+   * of the broadest school permission could pull any pupil's draft card by id.
+   * Reading a released card stays open to staff; reading a draft now takes the
+   * permission that would let you release it in the first place.
+   */
   @Get(':id/pdf')
   @RequirePermissions(PERMISSIONS.school.read)
   async pdfDownload(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    await this.service.assertReadableAsDraft(id);
     const buf = await this.pdf.generatePdf(id);
     res.set({
       'Content-Type': 'application/pdf',

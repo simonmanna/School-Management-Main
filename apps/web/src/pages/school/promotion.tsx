@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   CheckCheck,
@@ -27,6 +28,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
+import { WorkflowSteps } from './_components/exam-workflow';
 import { cn } from '@/lib/utils';
 
 /**
@@ -61,6 +63,7 @@ interface RowState {
 }
 
 export function SchoolPromotionPage() {
+  const navigate = useNavigate();
   const { data: terms } = useTerms();
   const { data: classes } = useClasses();
   const { data: sections } = useSections();
@@ -162,9 +165,17 @@ export function SchoolPromotionPage() {
         fail++;
       }
     }
-    if (fail === 0) notify.success(`Applied promotions to ${ok} student(s).`);
-    else notify.error(`Applied ${ok}, failed ${fail}.`);
-    if (fail === 0) setRows({});
+    if (fail === 0) {
+      notify.success(`${ok} pupil${ok === 1 ? '' : 's'} moved up.`, {
+        description: 'Their new class list is ready.',
+        action: { label: 'View class lists', onClick: () => navigate('/school/students') },
+      });
+      setRows({});
+    } else {
+      notify.error(`Moved ${ok}, could not move ${fail}.`, {
+        description: 'Check that the target class and stream exist for the new term.',
+      });
+    }
   };
 
   // ── Whole-cohort rollover ──
@@ -187,8 +198,19 @@ export function SchoolPromotionPage() {
         skipped: res.counts.skipped, dryRun: false, committed: true,
         rows: [...(res.promote ?? []), ...(res.graduate ?? []), ...(res.skip ?? [])],
       });
-      notify.success(`Rollover committed — ${res.counts.promoted} promoted, ${res.counts.graduated} graduated`);
-    } catch { notify.error('Rollover failed'); }
+      notify.success(
+        `Whole school moved up — ${res.counts.promoted} promoted, ${res.counts.graduated} graduated`,
+        {
+          description: 'Everyone now sits in their new class for the new term.',
+          action: { label: 'View class lists', onClick: () => navigate('/school/students') },
+        },
+      );
+    } catch (e: any) {
+      notify.error(
+        'Could not move the school up',
+        { description: e?.response?.data?.message ?? 'Nothing was changed. Check the two terms and try again.' },
+      );
+    }
   };
 
   const filtersChosen = !!(yearId || termId || classId);
@@ -196,12 +218,15 @@ export function SchoolPromotionPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Promotion &amp; Rollover</h1>
-        <p className="text-sm text-muted-foreground">
-          Decide each student's next step, then commit. Promoting without a target class lets the
-          system pick the next grade. For a whole form, use the bulk actions or the cohort rollover below.
-        </p>
+      <div className="space-y-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Move pupils up a class</h1>
+          <p className="text-sm text-muted-foreground">
+            Decide each pupil’s next step, then commit. Leaving the target class blank moves them to
+            the next class up. For a whole class or the whole school, use the bulk actions below.
+          </p>
+        </div>
+        <WorkflowSteps current={7} />
       </div>
 
       {/* ── Filters ── */}

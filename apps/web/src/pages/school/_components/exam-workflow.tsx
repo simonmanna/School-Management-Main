@@ -3,23 +3,33 @@ import { Link, useLocation } from 'react-router-dom';
 import { Check } from 'lucide-react';
 
 /**
- * Shared furniture for the four-step exam workflow.
+ * Shared furniture for the termly academic workflow.
  *
  * The old screens were correct but unnavigable: eleven sibling pages, each
  * named after a domain noun, with no indication of what comes before or after.
  * Everything here exists to answer two questions the user kept asking — "where
  * am I?" and "what do I do next?".
+ *
+ * The rail used to stop at "Results", which is where the term actually gets
+ * hard: approving marks, releasing results, printing cards and moving pupils up
+ * were four unlinked screens an administrator had to already know about. It now
+ * covers the whole term.
  */
 
 export const STEPS = [
   { n: 1, label: 'Create exam', to: '/school/exam-workspace' },
   { n: 2, label: 'Choose classes', to: '/school/exam-workspace/classes' },
   { n: 3, label: 'Enter marks', to: '/school/enter-marks' },
-  { n: 4, label: 'Results', to: '/school/exam-results' },
+  { n: 4, label: 'Approve marks', to: '/school/approvals' },
+  { n: 5, label: 'Results', to: '/school/results' },
+  { n: 6, label: 'Report cards', to: '/school/report-cards' },
+  { n: 7, label: 'Promote', to: '/school/promotion' },
 ] as const;
 
+export type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
 /** The numbered rail across the top of every step. */
-export function WorkflowSteps({ current }: { current: 1 | 2 | 3 | 4 }) {
+export function WorkflowSteps({ current }: { current: StepNumber }) {
   const { search } = useLocation();
   return (
     <nav aria-label="Exam workflow" className="flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1.5">

@@ -101,6 +101,8 @@ export function useSchoolOverview() {
 export interface SchoolAdminDashboard {
   students: number;
   staff: number;
+  /** Teaching staff only — the denominator for a teacher:pupil ratio. */
+  teachers: number;
   campuses: number;
   classes: number;
   sections: number;
@@ -111,6 +113,60 @@ export function useSchoolAdminDashboard() {
   return useQuery({
     queryKey: ['school', 'reports', 'admin'],
     queryFn: async () => (await api.get<SchoolAdminDashboard>(`${S}/reports/admin`)).data,
+  });
+}
+
+/**
+ * The academic half of the dashboard.
+ *
+ * `/school/reports/academic`, `/attendance-today` and `/top-performers` all
+ * existed on the server with no client at all — which is why the dashboard a
+ * headteacher opens showed only money and headcount, and nothing about marks,
+ * approvals or attendance.
+ */
+export interface SchoolAcademicDashboard {
+  termId: string | null;
+  termName: string | null;
+  totalMarks: number;
+  approved: number;
+  passed: number;
+  passRate: number;
+  awaitingApproval: number;
+  draft: number;
+  rejected: number;
+}
+
+export function useSchoolAcademicDashboard() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'academic'],
+    queryFn: async () => (await api.get<SchoolAcademicDashboard>(`${S}/reports/academic`)).data,
+  });
+}
+
+export type AttendanceToday = Record<string, number>;
+
+export function useSchoolAttendanceToday() {
+  return useQuery({
+    queryKey: ['school', 'reports', 'attendance-today'],
+    queryFn: async () => (await api.get<AttendanceToday>(`${S}/reports/attendance-today`)).data,
+  });
+}
+
+export interface TopPerformer {
+  id: string;
+  admissionNo: string;
+  name: string | null;
+  className: string | null;
+  classRank: number | null;
+  gpa: number | null;
+  meanPercent: number | null;
+  division: string | null;
+}
+
+export function useSchoolTopPerformers(limit = 5) {
+  return useQuery({
+    queryKey: ['school', 'reports', 'top-performers', limit],
+    queryFn: async () => (await api.get<TopPerformer[]>(`${S}/reports/top-performers`, { params: { limit } })).data,
   });
 }
 
@@ -3602,6 +3658,72 @@ export function usePublishReportCard() {
   });
 }
 
+/* ── Class-wide report cards ────────────────────────────────────────────────
+ * A term ends for a whole class at once. Generating, releasing and printing one
+ * pupil at a time is the single biggest source of end-of-term clicking in the
+ * app, so each of those three has a class-scoped counterpart.
+ */
+
+export interface ClassRollEntry {
+  id: string;
+  name: string | null;
+  admissionNo: string | null;
+  rollNumber: string | null;
+}
+
+export interface ClassReportCardScope {
+  classId: string;
+  termId: string;
+  sectionId?: string;
+  streamId?: string;
+}
+
+/** Who a class run would cover, so the count is visible before committing to it. */
+export function useReportCardClassRoll(scope: Partial<ClassReportCardScope>) {
+  const { classId, termId, sectionId, streamId } = scope;
+  return useQuery({
+    queryKey: ['school', 'report-cards', 'class-roll', classId, termId, sectionId, streamId],
+    enabled: !!classId && !!termId,
+    queryFn: async () =>
+      (await api.get<ClassRollEntry[]>(`${S}/report-cards/class-roll`, {
+        params: { classId, termId, sectionId, streamId },
+      })).data,
+  });
+}
+
+export function useGenerateClassReportCards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: ClassReportCardScope) =>
+      (await api.post<{
+        generated: number;
+        skipped: Array<{ studentProfileId: string; name: string | null; reason: string }>;
+      }>(`${S}/report-cards/generate-class`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'report-cards'] }),
+  });
+}
+
+export function usePublishClassReportCards() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: ClassReportCardScope) =>
+      (await api.post<{ published: number; alreadyPublished: number; notGenerated: number }>(
+        `${S}/report-cards/publish-class`,
+        dto,
+      )).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'report-cards'] }),
+  });
+}
+
+/** One PDF for the whole class. Released cards only — printing is distribution. */
+export async function downloadClassReportCards(scope: ClassReportCardScope): Promise<Blob> {
+  const res = await api.get(`${S}/report-cards/class-pdf`, {
+    params: scope,
+    responseType: 'blob',
+  });
+  return res.data as Blob;
+}
+
 /* ───────────────────────── Meals (V1) ───────────────────────── */
 
 export interface MealProgram { id: string; name: string; kind: string; description?: string | null; isActive: boolean }
@@ -5835,11 +5957,17 @@ export function useMarkSheet(params: { examId?: string; classId?: string; subjec
  * patched in place by the caller so the input the user is typing in never
  * re-mounts under them.
  */
+/**
+ * Mark writes carry `expectedVersion` — the row version the marker had on
+ * screen. The server has always been able to refuse a stale write; no client
+ * ever sent the field, so two teachers on one paper silently overwrote each
+ * other. A 409 now comes back instead, and the sheet asks for a reload.
+ */
 export function useSaveMark() {
   return useMutation({
     mutationFn: async (dto: {
       examId: string; classId: string; subjectId: string; studentProfileId: string;
-      marks?: number | null; participation?: string; maxMarks?: number;
+      marks?: number | null; participation?: string; maxMarks?: number; expectedVersion?: number;
     }) => (await api.post(`${S}/marks/entry`, dto)).data,
   });
 }
@@ -6158,7 +6286,7 @@ export function useGradebookSheet(params: { classId?: string; termId?: string; s
 
 export function useGradebookCell() {
   return useMutation({
-    mutationFn: async (dto: { studentProfileId: string; assessmentId: string; marks?: number | null; participation?: string }) =>
+    mutationFn: async (dto: { studentProfileId: string; assessmentId: string; marks?: number | null; participation?: string; expectedVersion?: number }) =>
       (await api.post(`${S}/gradebook/cell`, dto)).data,
   });
 }
@@ -6536,7 +6664,7 @@ export function useBoardSheet(assessmentId?: string) {
  */
 export function useSaveBoardMark(assessmentId?: string) {
   return useMutation({
-    mutationFn: async (dto: { studentProfileId: string; marks: number | null; participation?: string }) =>
+    mutationFn: async (dto: { studentProfileId: string; marks: number | null; participation?: string; expectedVersion?: number }) =>
       (await api.post(`${S}/assessment-board/${assessmentId}/mark`, dto)).data,
   });
 }

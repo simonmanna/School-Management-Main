@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -51,6 +52,17 @@ export class SaveMarkDto {
   participation?: string;
 
   @IsOptional() @IsNumber() @Min(1) maxMarks?: number;
+
+  /**
+   * The version of the row the marker had on screen.
+   *
+   * `MarkingService.postMark` has always refused a stale write, but only when a
+   * caller passed this — and none of the mark-entry screens did, so two teachers
+   * on the same paper silently overwrote each other and the guard never once
+   * fired in production. Optional so an older client is not broken; every screen
+   * in this repo now sends it.
+   */
+  @IsOptional() @IsInt() @Min(0) expectedVersion?: number;
 }
 
 export class LockMarksDto {
