@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Send, CheckCircle2, XCircle, CalendarClock, LogOut, Mail, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Plus, ChevronDown, MoreHorizontal } from 'lucide-react';
 import {
   useAdmissions,
   useAdmissionAction,
@@ -21,6 +21,14 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
 import { notify } from '@/lib/notify';
 import { ACTION_LABELS, NEEDS_REASON, STAGE_LABELS, statusMeta } from './_components/admission-status';
 import { DecisionDialog } from './_components/DecisionDialog';
@@ -266,10 +274,13 @@ export function SchoolAdmissionsPage() {
                    * have dedicated endpoints (they create or settle an OfferLetter), so
                    * they route to their dialogs rather than the generic /review action.
                    */
+                  const specialActions = new Set(['issue_offer', 'accept_offer', 'decline_offer', 'enroll']);
+                  
+                  const isSpecialAction = (action: AdmissionAction) => specialActions.has(action);
+
                   const renderAction = (action: AdmissionAction, kind: 'required' | 'optional' | 'terminal') => {
                     const label = ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
-                    const variant = kind === 'terminal' ? 'ghost' : kind === 'required' ? 'default' : 'secondary';
-                    const onClick = () => {
+                    const onSelect = () => {
                       if (action === 'issue_offer') return openOffer(a);
                       if (action === 'accept_offer') return respondToOffer(a, true);
                       if (action === 'decline_offer') return respondToOffer(a, false);
@@ -277,26 +288,33 @@ export function SchoolAdmissionsPage() {
                       return runAction(a, action, NEEDS_REASON.includes(action));
                     };
                     return (
-                      <Button
+                      <DropdownMenuItem
                         key={kind + '-' + action}
-                        variant={variant as 'default' | 'secondary' | 'ghost'}
-                        size="sm"
                         disabled={busy || (action === 'enroll' && enroll.isPending)}
-                        title={kind === 'optional' ? 'Optional in this workflow' : undefined}
-                        onClick={onClick}
+                        onSelect={onSelect}
+                        className={kind === 'optional' ? 'opacity-80' : ''}
                       >
-                        {action === 'accept' && <CheckCircle2 className="h-3.5 w-3.5" />}
-                        {action === 'reject' && <XCircle className="h-3.5 w-3.5" />}
-                        {action === 'schedule_exam' && <CalendarClock className="h-3.5 w-3.5" />}
-                        {action === 'review' && <Send className="h-3.5 w-3.5" />}
-                        {action === 'withdraw' && <LogOut className="h-3.5 w-3.5" />}
-                        {action === 'issue_offer' && <Mail className="h-3.5 w-3.5" />}
-                        {action === 'accept_offer' && <ThumbsUp className="h-3.5 w-3.5" />}
-                        {action === 'decline_offer' && <ThumbsDown className="h-3.5 w-3.5" />}
-                        {action === 'enroll' && <CheckCircle2 className="h-3.5 w-3.5" />}
                         {label}
                         {kind === 'optional' && <span className="ml-1 opacity-60">(optional)</span>}
-                      </Button>
+                      </DropdownMenuItem>
+                    );
+                  };
+
+                  const renderDropdownAction = (action: AdmissionAction, kind: 'required' | 'optional' | 'terminal') => {
+                    const label = ACTION_LABELS[action] ?? action.replace(/_/g, ' ');
+                    const onSelect = () => {
+                      runAction(a, action, NEEDS_REASON.includes(action));
+                    };
+                    return (
+                      <DropdownMenuItem
+                        key={kind + '-' + action}
+                        disabled={busy}
+                        onSelect={onSelect}
+                        className={kind === 'optional' ? 'opacity-80' : ''}
+                      >
+                        {label}
+                        {kind === 'optional' && <span className="ml-1 opacity-60">(optional)</span>}
+                      </DropdownMenuItem>
                     );
                   };
 
@@ -312,13 +330,48 @@ export function SchoolAdmissionsPage() {
                         <Badge className={meta.cls}>{meta.label}</Badge>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <div className="flex flex-wrap items-center justify-end gap-1">
-                          {(wf?.requiredActions ?? []).map((action) => renderAction(action, 'required'))}
-                          {(wf?.optionalActions ?? []).map((action) => renderAction(action, 'optional'))}
-                          {(wf?.alwaysAvailable ?? [])
-                            .filter((action) => action !== 'request_documents')
-                            .map((action) => renderAction(action, 'terminal'))}
-                        </div>
+                        {(() => {
+                          const required = (wf?.requiredActions ?? []).filter((a) => !isSpecialAction(a));
+                          const optional = (wf?.optionalActions ?? []).filter((a) => !isSpecialAction(a));
+                          const terminal = (wf?.alwaysAvailable ?? [])
+                            .filter((action) => action !== 'request_documents' && !isSpecialAction(action));
+                          const dropdownActions = [...required, ...optional, ...terminal];
+                          
+                          const specialRequired = (wf?.requiredActions ?? []).filter(isSpecialAction);
+                          const specialOptional = (wf?.optionalActions ?? []).filter(isSpecialAction);
+                          const specialTerminal = (wf?.alwaysAvailable ?? [])
+                            .filter((action) => action !== 'request_documents' && isSpecialAction(action));
+                          const specialActionsList = [...specialRequired, ...specialOptional, ...specialTerminal];
+
+                          return (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" disabled={busy}>
+                                  <MoreHorizontal className="h-3.5 w-3.5 mr-1" /> Actions
+                                  <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" sideOffset={5}>
+                                <DropdownMenuLabel>Workflow Actions</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onSelect={() => navigate(`/school/applications/${a.id}`)}>
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => navigate(`/school/applications/${a.id}?mode=edit`)}>
+                                  Edit
+                                </DropdownMenuItem>
+                                {dropdownActions.map((action) => renderDropdownAction(action, 
+                                  (wf?.requiredActions ?? []).includes(action) ? 'required' :
+                                  (wf?.optionalActions ?? []).includes(action) ? 'optional' : 'terminal'
+                                ))}
+                                {specialActionsList.map((action) => renderAction(action, 
+                                  (wf?.requiredActions ?? []).includes(action) ? 'required' :
+                                  (wf?.optionalActions ?? []).includes(action) ? 'optional' : 'terminal'
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          );
+                        })()}
                       </td>
                     </tr>
                   );
