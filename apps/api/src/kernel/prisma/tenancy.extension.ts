@@ -492,6 +492,13 @@ export const ORG_SCOPED = new Set<string>([
   'ModerationSampleItem',
   'ReportDocument',
   'PromotionDecision',
+  // Statutory workflows (Phase 6). A candidate register is a list of children
+  // with their national identifiers, so a missing registration here would be
+  // the worst kind of cross-tenant read this file exists to prevent.
+  'StudentExamReference',
+  'StatutoryExportTemplate',
+  'StatutoryExportRun',
+  'AcademicReminderLog',
   // CBT engine (A5)
   'QuestionBank',
   'Question',
@@ -697,6 +704,12 @@ export const SOFT_DELETE = new Set<string>([
   // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
   'AcademicProgramme',
   'ClassCohort',
+
+  // Phase 6 — statutory. A withdrawn candidate reference and a retired export
+  // layout stay readable for enquiries, so both soft-delete rather than
+  // vanish. Export RUNS are evidence and never delete at all.
+  'StudentExamReference',
+  'StatutoryExportTemplate',
 
   // Registered by the tenancy-registration ratchet: these carry `deletedAt`
   // but were not filtered, so soft-deleted rows kept being returned.

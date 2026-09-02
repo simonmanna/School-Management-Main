@@ -7,17 +7,18 @@
     "apps/api/prisma/schema.prisma"
   ],
   "counts": {
-    "models": 86,
-    "endpoints": 599,
+    "models": 88,
+    "endpoints": 617,
     "markWrites": 54,
-    "currentClassFiles": 76,
-    "reportPaths": 87,
-    "jobs": 9,
+    "currentClassFiles": 81,
+    "reportPaths": 90,
+    "jobs": 11,
     "pages": 59
   },
   "models": [
     "AcademicMigrationException",
     "AcademicProgramme",
+    "AcademicReminderLog",
     "AcademicRoster",
     "AcademicRosterMember",
     "AcademicTranscript",
@@ -100,6 +101,7 @@
     "StudentAssessmentHistory",
     "StudentEnrollment",
     "StudentEnrollmentEvent",
+    "StudentExamReference",
     "StudentSubjectResult",
     "StudentTermResult"
   ],
@@ -3508,6 +3510,114 @@
     },
     {
       "method": "GET",
+      "route": "/school/statutory/candidates",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#listReferences",
+      "line": 38
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/candidates/missing",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#missingReferences",
+      "line": 56
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/candidates",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#upsertReference",
+      "line": 62
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/candidates/assign-numbers",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#assignNumbers",
+      "line": 68
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/candidates/import-index-numbers",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#importIndexNumbers",
+      "line": 74
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/candidates/:id/withdraw",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#withdrawReference",
+      "line": 80
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/candidates/reconcile/:examId",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#reconcile",
+      "line": 86
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/uneb-ca/readiness",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#caReadiness",
+      "line": 97
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/datasets",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#datasets",
+      "line": 114
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/templates",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#listTemplates",
+      "line": 120
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/templates/seed-defaults",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#seedDefaults",
+      "line": 126
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/templates",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#createTemplate",
+      "line": 132
+    },
+    {
+      "method": "PUT",
+      "route": "/school/statutory/templates/:id",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#updateTemplate",
+      "line": 138
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/exports/preview",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#preview",
+      "line": 145
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/exports/run",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#run",
+      "line": 155
+    },
+    {
+      "method": "GET",
+      "route": "/school/statutory/exports/runs",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#listRuns",
+      "line": 166
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/exports/runs/:id/submitted",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#markSubmitted",
+      "line": 172
+    },
+    {
+      "method": "POST",
+      "route": "/school/statutory/exports/download",
+      "handler": "apps/api/src/modules/school/statutory/statutory.controller.ts#download",
+      "line": 179
+    },
+    {
+      "method": "GET",
       "route": "/school/teaching/my-courses",
       "handler": "apps/api/src/modules/school/teaching/teaching.controller.ts#myCourses",
       "line": 40
@@ -4159,6 +4269,18 @@
       "occurrences": 3
     },
     {
+      "file": "apps/api/src/modules/school/statutory/candidate-reference.service.ts",
+      "occurrences": 6
+    },
+    {
+      "file": "apps/api/src/modules/school/statutory/statutory-export.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/statutory/uneb-ca.service.ts",
+      "occurrences": 1
+    },
+    {
       "file": "apps/api/test/integration/http-validation-contract.spec.ts",
       "occurrences": 2
     },
@@ -4263,6 +4385,10 @@
       "occurrences": 2
     },
     {
+      "file": "apps/api/test/integration/school-statutory-phase6.spec.ts",
+      "occurrences": 1
+    },
+    {
       "file": "apps/api/test/integration/school-teacher-ownership.spec.ts",
       "occurrences": 1
     },
@@ -4307,6 +4433,10 @@
       "occurrences": 4
     },
     {
+      "file": "apps/web/src/features/school/statutory-api.ts",
+      "occurrences": 1
+    },
+    {
       "file": "apps/web/src/pages/school/library.tsx",
       "occurrences": 1
     },
@@ -4341,6 +4471,7 @@
     "apps/api/src/modules/documents/dms.seed-data.ts",
     "apps/api/src/modules/school/analytics/analytics.controller.ts",
     "apps/api/src/modules/school/analytics/analytics.service.ts",
+    "apps/api/src/modules/school/assessment/academic-reminder.worker.ts",
     "apps/api/src/modules/school/assessment/assessment.controller.ts",
     "apps/api/src/modules/school/assessment/dto.types.ts",
     "apps/api/src/modules/school/assessment/gradebook.service.ts",
@@ -4377,6 +4508,8 @@
     "apps/api/src/modules/school/reporting/reporting.service.ts",
     "apps/api/src/modules/school/reporting/school-report-deps.ts",
     "apps/api/src/modules/school/reporting/school-reports.module.ts",
+    "apps/api/src/modules/school/statutory/statutory-export.service.ts",
+    "apps/api/src/modules/school/statutory/statutory.datasets.ts",
     "apps/api/test/integration/school-analytics.spec.ts",
     "apps/api/test/integration/school-certification.spec.ts",
     "apps/api/test/integration/school-exam-phase5.spec.ts",
@@ -4425,6 +4558,8 @@
     "apps/api/src/kernel/recurring/recurring.service.ts",
     "apps/api/src/modules/backup/backup.service.ts",
     "apps/api/src/modules/repair/repair-cron.worker.ts",
+    "apps/api/src/modules/school/assessment/academic-reminder.worker.ts",
+    "apps/api/src/modules/school/assessment/assessment.module.ts",
     "apps/api/src/modules/school/lms/moodle/maintenance/orphan-check.service.ts",
     "apps/api/src/modules/school/lms/moodle/notify/lms-notify.service.ts",
     "apps/api/src/modules/school/transport/transport.module.ts",

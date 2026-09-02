@@ -26,6 +26,7 @@ import { InventoryModule } from '../../src/modules/inventory/inventory.module';
 import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
+import { AssessmentWorkflowService } from '../../src/modules/school/assessment/assessment-workflow.service';
 import { CourseService } from '../../src/modules/school/lms/moodle/course/course.service';
 import { CourseModuleService } from '../../src/modules/school/lms/moodle/course/module.service';
 import { ViewEnvelopeService } from '../../src/modules/school/lms/moodle/course/view-envelope.service';
@@ -55,6 +56,8 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
 
   let termId = '', term2Id = '', classId = '', subjectId = '', yearId = '', curriculumId = '';
+  let gradeLevelId = '', programmeId = '';
+  let workflow: AssessmentWorkflowService;
   let studentProfileId = '', studentUserId = '';
   let offeringId = '', offering2Id = '', sectionId = '', assignModuleId = '';
 
@@ -96,7 +99,14 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     })).id;
 
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S3', order: 10 } });
+    gradeLevelId = grade.id;
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S3 E2E' } })).id;
+    programmeId = (await raw.academicProgramme.create({
+      data: {
+        organizationId, code: 'LOWER_SECONDARY', name: 'Lower Secondary (S1–S4)',
+        stage: 'LOWER_SECONDARY', curriculumAuthority: 'UNEB', effectiveFrom: new Date('2026-01-01'),
+      },
+    })).id;
     subjectId = (await raw.subject.create({ data: { organizationId, code: 'MTH', name: 'Mathematics' } })).id;
     curriculumId = (await raw.curriculum.create({
       data: { organizationId, academicYearId: yearId, classId, name: 'Maths S3', status: 'published' },
@@ -116,14 +126,37 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
       data: { organizationId, userId: studentUserId, subjectType: 'student', studentProfileId },
     });
 
+    // Phase 2's rule: an offering an assessment hangs off must be PUBLISHED or
+    // ACTIVE and must name a responsible teacher. The fixture predates it and
+    // left both at their defaults, so publishing an assessment was refused.
+    const teacherPartner = await raw.partner.create({
+      data: { organizationId, name: 'Mr Ochieng', code: `T-E2E-${Date.now()}`, isEmployee: true },
+    });
+    const teacherStaffId = (await raw.staffProfile.create({
+      data: { organizationId, partnerId: teacherPartner.id, employeeNo: `STF-E2E-${Date.now()}`, joinDate: new Date('2026-01-05') },
+    })).id;
+
     const mkOffering = (tId: string) => raw.courseOffering.create({
       data: {
         organizationId, academicYearId: yearId, termId: tId, subjectId, classId, curriculumId,
+        // Phase 2 gave an offering an operator-facing name; the fixture never set
+        // one, so the course page fell back to the "Course offering" default and
+        // the "shows a name, not a uuid" assertion had nothing to find.
+        name: 'Mathematics S3',
+        status: 'PUBLISHED',
         format: 'weeks', numSections: 4, visible: true, completionEnabled: true, showGradesToStudents: true,
       },
     });
     offeringId = (await mkOffering(termId)).id;
     offering2Id = (await mkOffering(term2Id)).id;
+    for (const oId of [offeringId, offering2Id]) {
+      await raw.courseOfferingTeacher.create({
+        data: {
+          organizationId, courseOfferingId: oId, teacherPartnerId: teacherStaffId,
+          role: 'LEAD', isResponsible: true, effectiveFrom: new Date('2026-01-05'),
+        },
+      });
+    }
 
     // The pupil is on the course. Enrolment records HOW they got in, so it needs
     // a method row — the same shape roster sync produces.
@@ -133,6 +166,27 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     await raw.courseEnrolment.create({
       data: { organizationId, courseOfferingId: offeringId, methodId: method.id, studentProfileId, status: 'active' },
     });
+
+    // `CourseEnrolment` above is the LMS's own record of HOW the pupil got onto
+    // the course. `CourseEnrollment` below is the canonical academic one, hung
+    // off the official StudentEnrollment — and since Phase 4 it is what the
+    // grade bridge freezes a roster from, so without it adding a gradable
+    // activity is refused ("Prepare official course enrollment…"). Two models,
+    // one letter apart, and the fixture only had the first.
+    const officialEnrollment = await raw.studentEnrollment.create({
+      data: {
+        organizationId, studentProfileId, academicYearId: yearId, programmeId, gradeLevelId,
+        admissionDate: new Date('2026-01-15'), status: 'ACTIVE',
+      },
+    });
+    for (const oId of [offeringId, offering2Id]) {
+      await raw.courseEnrollment.create({
+        data: {
+          organizationId, courseOfferingId: oId, studentEnrollmentId: officialEnrollment.id,
+          source: 'COMPULSORY', status: 'ENROLLED', startDate: new Date('2026-01-15'),
+        },
+      });
+    }
 
     moduleRef = await Test.createTestingModule({
       imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
@@ -145,6 +199,7 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     envelope = moduleRef.get(ViewEnvelopeService);
     learner = moduleRef.get(LearnerService);
     completion = moduleRef.get(CompletionService);
+    workflow = moduleRef.get(AssessmentWorkflowService);
     backup = moduleRef.get(CourseBackupService);
   });
 
@@ -179,7 +234,19 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     expect(assessments).toHaveLength(1);
     expect(Number(assessments[0].maxScore)).toBe(20);
 
-    // …and the enrolled pupil already has a row to be marked in.
+    // Adding the activity freezes a roster from the official course enrollment
+    // but leaves the assessment in DRAFT: since Phase 4, publication is the act
+    // that fans learners out, and it belongs to the Assessment Board rather than
+    // to whoever dropped an activity onto a course page.
+    expect(assessments[0].status).toBe('draft');
+    expect(assessments[0].rosterId).toBeTruthy();
+    const before = await raw.studentAssessment.count({ where: { organizationId, assessmentId: cm.assessmentId! } });
+    expect(before).toBe(0);
+
+    // Publishing it through the canonical path is what gives the enrolled pupil
+    // a row to be marked in.
+    await asStaff(() => workflow.transition(cm.assessmentId!, { action: 'publish', expectedVersion: assessments[0].version } as any));
+
     const rows = await raw.studentAssessment.findMany({
       where: { organizationId, assessmentId: cm.assessmentId!, studentProfileId },
     });
@@ -237,23 +304,36 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     // The score exists in the spine…
     expect(sa!.approvalStatus).not.toBe('approved');
 
-    // …but no reader shows it to the learner yet.
+    // …but no reader shows it to the learner yet. A newly minted LMS grade item
+    // is `hiddenFromStudents` (Moodle's behaviour, and the bridge's), so the
+    // envelope omits the grade block entirely rather than returning an unreleased
+    // one — a stronger guarantee than this case used to assert, and the reason it
+    // reads `?.` rather than a bare property.
     const cm = await raw.courseModule.findFirst({ where: { id: assignModuleId } });
     const [view] = await asStudent(() =>
       envelope.moduleViews([cm as any], { studentProfileId, showGrades: true }),
     );
-    expect(view.grade?.released).toBe(false);
-    expect(view.grade?.score).toBeNull();
+    expect(view.grade?.released ?? false).toBe(false);
+    expect(view.grade?.score ?? null).toBeNull();
 
     const recent = await asStudent(() => learner.recentGrades());
     expect(recent.find((g) => g.score === 17)).toBeUndefined();
   });
 
-  it('8. approving it releases the mark to every reader at once', async () => {
+  it('8. approving and releasing shows the mark to every reader at once', async () => {
     await raw.studentAssessment.updateMany({
       where: { organizationId, studentProfileId, assessment: { sourceRef: assignModuleId } },
       data: { approvalStatus: 'approved' },
     });
+
+    // Approval is not publication. `release_marks` is the deliberate second act
+    // that unhides the item and stamps `marksReleaseAt`, and it is what every
+    // reader keys off — so the release goes through the canonical path here
+    // rather than being simulated with a column update.
+    const assessment = await raw.assessment.findFirst({ where: { organizationId, sourceRef: assignModuleId } });
+    await asStaff(() =>
+      workflow.transition(assessment!.id, { action: 'release_marks', expectedVersion: assessment!.version } as any),
+    );
 
     const cm = await raw.courseModule.findFirst({ where: { id: assignModuleId } });
     const [view] = await asStudent(() =>

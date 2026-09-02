@@ -42,6 +42,10 @@ const PortalsPage = lazy(() => import('@/site/pages/portals'));
 const VerifyPage = lazy(() => import('@/site/pages/verify'));
 
 /* ── Signed-in workspaces ── */
+// Shared by all three audiences: the school's message history for whoever is
+// signed in. The subject is the token, not the route.
+const PortalNotices = lazy(() => import('@/routes/shared/notices'));
+
 const ParentHome = lazy(() => import('@/routes/parent/home'));
 const ParentFees = lazy(() => import('@/routes/parent/fees'));
 const ParentAttendance = lazy(() => import('@/routes/parent/attendance'));
@@ -99,6 +103,7 @@ export default function App() {
               <Route path="fees" element={<ParentFees />} />
               <Route path="attendance" element={<ParentAttendance />} />
               <Route path="results" element={<ParentResults />} />
+              <Route path="notices" element={<PortalNotices />} />
             </Route>
           </Route>
 
@@ -108,6 +113,7 @@ export default function App() {
               <Route path="courses" element={<StudentCourses />} />
               <Route path="results" element={<StudentResults />} />
               <Route path="attendance" element={<StudentAttendance />} />
+              <Route path="notices" element={<PortalNotices />} />
             </Route>
           </Route>
 
@@ -118,6 +124,7 @@ export default function App() {
               <Route path="register" element={<TeacherRegister />} />
               <Route path="marking" element={<TeacherMarking />} />
               <Route path="me" element={<TeacherMe />} />
+              <Route path="notices" element={<PortalNotices />} />
             </Route>
           </Route>
         </Route>

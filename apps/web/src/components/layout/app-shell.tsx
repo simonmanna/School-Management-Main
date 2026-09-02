@@ -92,6 +92,7 @@ import {
   ArrowLeftRight,
   Workflow,
   Coins,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -299,6 +300,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Examinations' },
       { to: '/school/exam-operations', label: 'Run an Examination', icon: ShieldCheck, permission: PERMISSIONS.school.runExamOperations, group: 'Examinations' },
       { to: '/school/exam-ops', label: 'Venues, Seating & Papers', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
+      // Phase 6 — what the school sends to UNEB, and whether it can yet.
+      { to: '/school/statutory', label: 'National Submissions', icon: FileSpreadsheet, permission: PERMISSIONS.school.readStatutory, group: 'Examinations' },
     ],
   },
   {

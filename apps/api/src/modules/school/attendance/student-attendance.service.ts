@@ -35,7 +35,11 @@ export class StudentAttendanceService {
   private async assertMayMarkClass(classId: string | null | undefined): Promise<void> {
     const perms: string[] = this.tenant.store?.permissions ?? [];
     if (perms.includes(PERMISSIONS.school.takeAttendance) || perms.includes('*')) return;
-    await this.dataScope.assertMayTouchClass(classId ?? undefined);
+    // Reaching here means the caller holds only `school:attendance:own`, which
+    // authorises nothing by itself — it is a claim that the class is theirs.
+    // `assertTeachesClass` makes them prove it, rather than asking what their
+    // role's data scope would have permitted.
+    await this.dataScope.assertTeachesClass(classId ?? undefined);
   }
 
   async mark(dto: BulkMarkAttendanceDto) {

@@ -110,6 +110,13 @@ export function admissionsReports(deps: SchoolReportDeps): ReportDefinition<any>
       paging: 'none',
       defaultSort: { key: 'stageOrder', order: 'asc' },
       columns: [
+        // The funnel only makes sense in pipeline order, and 'Submitted' does
+        // not sort before 'Under review' alphabetically — so the order is a
+        // numeric column. It is declared (rather than left as a bare row field)
+        // because `defaultSort` names it, and a sort key that is not a column
+        // sorts by nothing at all; it is hidden everywhere because the number
+        // itself means nothing to a reader.
+        { key: 'stageOrder', label: 'Order', type: 'int', width: 6, hideOn: ['screen', 'csv', 'xlsx', 'pdf'] },
         { key: 'stage', label: 'Stage', type: 'string', width: 24 },
         { key: 'count', label: 'Applications', type: 'int', width: 12, total: 'sum' },
         { key: 'conversionPct', label: 'Conversion %', type: 'percent', width: 14 },

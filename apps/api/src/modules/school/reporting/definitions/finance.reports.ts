@@ -168,13 +168,22 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       rowCapHint: 1_000,
       defaultSort: { key: 'sortOrder', order: 'asc' },
       columns: [
+        // A balance sheet read in alphabetical order is not a balance sheet.
+        // The statement order is carried as a numeric column so `defaultSort`
+        // has something real to sort by — a sort key that is not a column sorts
+        // by nothing — and hidden, because the number is scaffolding.
+        { key: 'sortOrder', label: 'Order', type: 'int', width: 6, hideOn: ['screen', 'csv', 'xlsx', 'pdf'] },
         { key: 'section', label: 'Section', type: 'string', width: 18 },
         { key: 'code', label: 'Code', type: 'string', width: 10 },
         { key: 'name', label: 'Account', type: 'string', width: 28 },
         { key: 'balance', label: 'Balance', type: 'money', format: '', width: 18, total: 'sum' },
       ],
       async run(ctx, params) {
-        const result = await deps.balanceSheet.balanceSheetDetailed(params.asOf);
+        // Match the sibling reports in this file: an omitted `asOf` means now.
+        // Passing it through undefined reached Prisma as an Invalid Date.
+        const result = await deps.balanceSheet.balanceSheetDetailed(
+          params.asOf ?? new Date().toISOString().slice(0, 10),
+        );
 
         const rows = (result.sections ?? []).flatMap((section: any) => [
           { section: section.label, code: '', name: section.label, balance: section.subtotal, isSubtotal: true, sortOrder: -1 },
@@ -446,14 +455,19 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       ],
       async run(ctx, params, opts) {
         const range = { from: params.dateFrom, to: params.dateTo };
+        // `status` and `postingDate` are columns on JournalEntry itself. They
+        // were wrapped in `entry: { … }` — the shape a JournalLine query takes —
+        // so Prisma rejected the whole report rather than filtering it.
         const where: any = {
-          entry: { status: { in: ['posted', 'reversed'] }, postingDate: deps.accounting['rangeFilter'](range) },
+          status: { in: ['posted', 'reversed'] },
+          postingDate: deps.accounting['rangeFilter'](range),
         };
 
         const [entries, total] = await Promise.all([
           (deps.accounting as any).prisma.client.journalEntry.findMany({
             where,
-            include: { lines: { include: { account: true } } },
+            // `journal` was read for the Journal column but never included.
+            include: { journal: true, lines: { include: { account: true } } },
             orderBy: { postingDate: 'desc' },
             skip: (opts.page - 1) * opts.pageSize,
             take: opts.pageSize,
@@ -466,7 +480,9 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           entryNumber: e.entryNumber,
           journalCode: e.journal?.code ?? '',
           description: e.description ?? '',
-          createdBy: e.createdBy?.name ?? e.createdById ?? '',
+          // `createdBy` is a plain user-id column, not a relation, and there is
+          // no `createdById` — so this printed blank for every row.
+          createdBy: e.createdBy ?? '',
           status: e.status,
           lineCount: e.lines.length,
           totalDebit: e.lines.reduce((s: number, l: any) => s + Number(l.baseDebit), 0),
@@ -505,20 +521,40 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           postingDate: deps.accounting['rangeFilter'](range),
         };
 
+        // `createdBy` and `reversedBy` were included as relations. Neither is
+        // one — `createdBy` and `postedBy` are plain user-id columns — so
+        // Prisma rejected the query and the report never ran.
         const entries = await (deps.accounting as any).prisma.client.journalEntry.findMany({
           where,
-          include: { lines: true, createdBy: true, reversedBy: true },
+          include: { lines: true },
           orderBy: { postingDate: 'desc' },
         });
 
-        const rows = entries.map((e: any) => ({
-          originalEntryNumber: e.entryNumber,
-          reversalEntryNumber: e.reversalEntryNumber ?? '',
-          originalDate: e.postingDate,
-          reversedAt: e.updatedAt,
-          reversedBy: e.reversedBy?.name ?? e.reversedById ?? '',
-          reason: e.reversalReason ?? '',
-        }));
+        // The reversal is a separate entry, reached by id. `reversalEntryNumber`,
+        // `reversedBy` and `reversalReason` were read straight off the original
+        // entry, where none of them exists, so all three printed blank. What the
+        // model actually records is the reversal entry's number, who posted it
+        // and its description.
+        const reversalIds = entries.map((e: any) => e.reversedEntryId).filter(Boolean);
+        const reversals = reversalIds.length
+          ? await (deps.accounting as any).prisma.client.journalEntry.findMany({
+              where: { id: { in: reversalIds } },
+              select: { id: true, entryNumber: true, postedBy: true, createdBy: true, description: true },
+            })
+          : [];
+        const reversalById = new Map<string, any>(reversals.map((r: any) => [r.id, r]));
+
+        const rows = entries.map((e: any) => {
+          const reversal = e.reversedEntryId ? reversalById.get(e.reversedEntryId) : null;
+          return {
+            originalEntryNumber: e.entryNumber,
+            reversalEntryNumber: reversal?.entryNumber ?? '',
+            originalDate: e.postingDate,
+            reversedAt: e.updatedAt,
+            reversedBy: reversal?.postedBy ?? reversal?.createdBy ?? '',
+            reason: reversal?.description ?? '',
+          };
+        });
 
         return {
           rows,

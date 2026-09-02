@@ -304,10 +304,18 @@ export class AdmissionsWorkflowService {
     for (const cfg of cfgs) {
       if (cfg.order >= targetCfg.order) continue;
       if (cfg.mode !== 'required') continue;
-      // An already-accepted applicant has cleared the decision stage; the OFFER and
-      // APPLICANT_ACCEPTANCE stages (if configured) are treated as satisfied so they
-      // can enroll directly without issuing/accepting an offer letter.
-      if ((cfg.stage === 'OFFER' || cfg.stage === 'APPLICANT_ACCEPTANCE') && app.status === 'accepted') continue;
+      // There is deliberately NO exemption here for an `accepted` applicant.
+      //
+      // There used to be one: OFFER and APPLICANT_ACCEPTANCE were treated as
+      // satisfied whenever the status was `accepted`, so a learner could be
+      // enrolled without an offer ever being issued. That made a stage a school
+      // had configured as REQUIRED unenforceable — a hard-coded condition
+      // overriding versioned configuration, which is the thing this workflow
+      // exists to remove.
+      //
+      // A school that runs no offer round configures one: the `simple` preset
+      // sets OFFER and APPLICANT_ACCEPTANCE to `skip`, and skipped stages never
+      // reach this loop. That is the supported way to say it.
       if (this.completeFor(app, cfg)) continue;
       throw new ConflictException(
         `Cannot proceed to ${STAGE_LABEL.get(target)}: the ${STAGE_LABEL.get(cfg.stage)} stage is ` +

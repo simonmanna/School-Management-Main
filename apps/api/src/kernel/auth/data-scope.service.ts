@@ -80,6 +80,20 @@ export class DataScopeService {
     const staffProfileId = await this.identity.staffProfileIdForCaller();
     if (!staffProfileId) return 'all'; // non-teaching staff with wide scope pass
 
+    const ids = await this.taughtClassIds(staffProfileId);
+    return ids.length > 0 ? ids : 'all';
+  }
+
+  /**
+   * The classes this staff member actually teaches — assignments plus timetable.
+   *
+   * Returns a DEFINITE list: empty means "teaches nothing", never "teaches
+   * everything". `classIds()` above still widens an empty result to `'all'`
+   * because it feeds report filtering, where a head of department with no
+   * personal timetable would otherwise see a blank dashboard. Authorization
+   * must not make that trade, so it reads this instead.
+   */
+  private async taughtClassIds(staffProfileId: string): Promise<string[]> {
     const [assigned, timetabled] = await Promise.all([
       this.db.teacherAssignment.findMany({
         where: { organizationId: this.tenant.organizationId, teacherPartnerId: staffProfileId },
@@ -92,16 +106,45 @@ export class DataScopeService {
     ]);
     const ids = new Set<string>();
     for (const r of [...assigned, ...timetabled]) if (r.classId) ids.add(r.classId);
-    return ids.size > 0 ? [...ids] : 'all';
+    return [...ids];
   }
 
   /** Throw unless the caller may act on this class under their scope. */
   async assertMayTouchClass(classId: string | null | undefined): Promise<void> {
     if (!classId) throw new ForbiddenException('A class id is required');
     const scope = await this.effective();
-    if (scope === 'school' || scope === 'own') return;
-    const allowed = await this.classIds();
-    if (allowed === 'all') return;
+    if (scope === 'school') return;
+
+    // `own` is the NARROWEST scope, and it used to return here alongside
+    // `school` — so a Subject Teacher, whose preset is `dataScope: 'own'`,
+    // could act on any class in the building. It must be at least as
+    // restrictive as `class`, so it falls through to the same check.
+    const staffProfileId = await this.identity.staffProfileIdForCaller();
+    if (!staffProfileId) {
+      throw new ForbiddenException('You may only act on classes you teach');
+    }
+    const allowed = await this.taughtClassIds(staffProfileId);
+    if (!allowed.includes(classId)) {
+      throw new ForbiddenException('You may only act on classes you teach');
+    }
+  }
+
+  /**
+   * Throw unless the caller personally teaches this class.
+   *
+   * Distinct from `assertMayTouchClass`, which asks what a role's data scope
+   * permits. This asks the narrower question a `:own` grant actually makes:
+   * the caller has claimed the class is theirs, so ownership is PROVED, never
+   * assumed. An account with no staff record teaches nothing and is refused —
+   * previously it fell through the role-scope default and was allowed.
+   */
+  async assertTeachesClass(classId: string | null | undefined): Promise<void> {
+    if (!classId) throw new ForbiddenException('A class id is required');
+    const staffProfileId = await this.identity.staffProfileIdForCaller();
+    if (!staffProfileId) {
+      throw new ForbiddenException('Only a member of teaching staff may act on a class');
+    }
+    const allowed = await this.taughtClassIds(staffProfileId);
     if (!allowed.includes(classId)) {
       throw new ForbiddenException('You may only act on classes you teach');
     }

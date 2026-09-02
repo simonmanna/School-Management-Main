@@ -15,6 +15,7 @@ import { LmsModule } from './lms/lms.module';
 import { LessonPlanningModule } from './lms/lesson-planning.module';
 import { LmsMoodleModule } from './lms/moodle/lms-moodle.module';
 import { ExaminationsModule } from './examinations/examinations.module';
+import { StatutoryModule } from './statutory/statutory.module';
 import { AssessmentModule } from './assessment/assessment.module';
 import { CbtModule } from './cbt/cbt.module';
 import { CertificationModule } from './certification/certification.module';
@@ -62,6 +63,10 @@ const advancedLmsImports = process.env.ENABLE_ADVANCED_LMS === 'true' ? [LmsMood
     ...advancedLmsImports,
     ExaminationsModule,
     AssessmentModule,
+    // Phase 6 — national submissions (UNEB CA readiness, candidate references,
+    // configurable statutory exports). Reads the academic core; writes only its
+    // own registry and provenance.
+    StatutoryModule,
     CbtModule,
     CertificationModule,
     AnalyticsModule,

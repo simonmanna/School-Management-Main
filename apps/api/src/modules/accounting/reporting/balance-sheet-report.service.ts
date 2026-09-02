@@ -39,8 +39,22 @@ export class BalanceSheetReportService {
     private readonly accounts: AccountResolverService,
   ) {}
 
+  /**
+   * The date a balance sheet is drawn at.
+   *
+   * A missing or unparseable `asOf` used to reach Prisma as `new Date(undefined)`
+   * — an Invalid Date — and surface as a validation error from inside a
+   * `groupBy`, which reads as a database fault rather than a missing parameter.
+   * A balance sheet with no date is as of now, which is what every accounting
+   * package does and what the sibling reports in the registry already assume.
+   */
+  private resolveAsOf(asOf: string | null | undefined): Date {
+    const d = asOf ? new Date(asOf) : new Date();
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  }
+
   async balanceSheet(asOf: string) {
-    const requested = new Date(asOf);
+    const requested = this.resolveAsOf(asOf);
     const snap = await this.findSnapshot(requested);
     if (snap) {
       const rows = await this.prisma.client.reportBalanceSheetSnapshot.findMany({
@@ -99,7 +113,7 @@ export class BalanceSheetReportService {
       where: {
         entry: {
           status: { in: [...BALANCE_AFFECTING_STATUSES] },
-          postingDate: { lte: new Date(asOf) },
+          postingDate: { lte: this.resolveAsOf(asOf) },
         },
       },
       _sum: { baseDebit: true, baseCredit: true },

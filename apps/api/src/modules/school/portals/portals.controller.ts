@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Res, StreamableFile } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -62,6 +63,25 @@ export class PortalsController {
     return this.portals.myContext();
   }
 
+  /**
+   * Phase 6: the caller's own notice history.
+   *
+   * Same grant as `me` and for the same reason — the subject is the token, not
+   * a parameter, so there is nothing here for a caller to edit into somebody
+   * else's inbox.
+   */
+  @Get('notifications')
+  @RequirePermissions(PERMISSIONS.school.portalSelf)
+  myNotifications(@Query('limit') limit?: string) {
+    return this.portals.myNotifications(limit ? Number(limit) : 50);
+  }
+
+  @Post('notifications/:id/read')
+  @RequirePermissions(PERMISSIONS.school.portalSelf)
+  markNotificationRead(@Param('id') id: string) {
+    return this.portals.markNotificationRead(id);
+  }
+
   @Get('parent/:studentProfileIds')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
   @ScopedToStudent('studentProfileIds')
@@ -92,6 +112,9 @@ export class PortalsController {
    * money until the provider confirms on the callback, which posts it through
    * the same writer a bursar's cash receipt uses.
    */
+  // Money leaves a phone here. A parent pays once; a loop is either a bug in the
+  // client or somebody probing the mobile-money bridge.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('parent/:studentProfileId/pay')
   @RequirePermissions(PERMISSIONS.school.parentPortal)
   @ScopedToStudent('studentProfileId')
@@ -168,6 +191,12 @@ export class PortalsController {
    */
   @Get('report-cards/:reportCardId/pdf')
   @RequirePermissions(PERMISSIONS.school.studentPortal)
+  // Phase 7. The global tier is 100 requests a minute, which is generous for a
+  // route that renders a PDF per call and returns a named child's marks: a
+  // family downloads two or three a term, and anything walking the id space is
+  // not a family. Ownership is already enforced in the service; this bounds the
+  // cost and the enumeration rate of getting it wrong.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async reportCardPdf(
     @Param('reportCardId') reportCardId: string,
     @Res({ passthrough: true }) res: Response,

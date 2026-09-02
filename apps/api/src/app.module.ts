@@ -46,16 +46,46 @@ const enabled = (flag: string): boolean => process.env[flag] === 'true';
       pinoHttp: {
         level: process.env.LOG_LEVEL ?? 'info',
         transport: process.env.NODE_ENV === 'production' ? undefined : { target: 'pino-pretty' },
+        // Phase 7 — personal data is excluded from logs.
+        //
+        // pino-http does not serialise a request body by default, so the
+        // `req.body.*` paths below are a belt-and-braces guard for the day
+        // somebody adds a body serialiser to debug an endpoint. The paths that
+        // matter TODAY are the query strings: a school's logs are read by
+        // whoever supports the server, and `?search=Nakato%20Sarah` puts a
+        // named child in a file that outlives the request.
+        //
+        // Ids are deliberately NOT redacted. A studentProfileId is meaningless
+        // without the database, and without it no incident can be traced.
         redact: {
           paths: [
+            // Credentials and session material.
             'req.headers.authorization',
             'req.headers.cookie',
+            'res.headers["set-cookie"]',
             'req.body.password',
             'req.body.refreshToken',
             'req.body.accessToken',
             'req.body.mfaSecret',
             'req.body.code',
             'req.body.newPassword',
+            'req.body.currentPassword',
+            'req.body.token',
+            'req.body.pin',
+            // Free-text search: the commonest way a learner's name reaches a log.
+            'req.query.search',
+            'req.query.q',
+            'req.query.name',
+            'req.query.phone',
+            // Personal data on the school and family records.
+            'req.body.phone',
+            'req.body.email',
+            'req.body.msisdn',
+            'req.body.dateOfBirth',
+            'req.body.nationalId',
+            'req.body.guardianPhone',
+            'req.body.indexNumber',
+            'req.body.candidateNumber',
           ],
           censor: '[REDACTED]',
         },

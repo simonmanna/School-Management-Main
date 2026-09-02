@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Suspense } from 'react';
 import {
   Home, Wallet, CalendarCheck, GraduationCap, BookOpen, ClipboardList,
-  LogOut, ChevronDown, School,
+  LogOut, ChevronDown, School, Bell,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { Skeleton } from '@/components/ui';
@@ -22,17 +22,20 @@ const NAV: Record<'parent' | 'student' | 'teacher', NavItem[]> = {
     { to: '/parent/fees', label: 'Fees', icon: Wallet },
     { to: '/parent/attendance', label: 'Attendance', icon: CalendarCheck },
     { to: '/parent/results', label: 'Results', icon: GraduationCap },
+    { to: '/parent/notices', label: 'Messages', icon: Bell },
   ],
   student: [
     { to: '/student', label: 'Today', icon: Home },
     { to: '/student/courses', label: 'Courses', icon: BookOpen },
     { to: '/student/results', label: 'Results', icon: GraduationCap },
     { to: '/student/attendance', label: 'Attendance', icon: CalendarCheck },
+    { to: '/student/notices', label: 'Messages', icon: Bell },
   ],
   teacher: [
     { to: '/teacher', label: 'Today', icon: Home },
     { to: '/teacher/register', label: 'Register', icon: ClipboardList },
     { to: '/teacher/marking', label: 'Marking', icon: GraduationCap },
+    { to: '/teacher/notices', label: 'Messages', icon: Bell },
     { to: '/teacher/me', label: 'Me', icon: School },
   ],
 };

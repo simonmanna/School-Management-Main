@@ -110,6 +110,7 @@ import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
 import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
 import { SchoolExamOperationsPage } from '@/pages/school/exam-operations';
+import { SchoolStatutoryPage } from '@/pages/school/statutory';
 import { SchoolCbtPage } from '@/pages/school/cbt';
 import { SchoolCertificationPage } from '@/pages/school/certification';
 import SchoolDocumentsPage from '@/pages/school/documents';
@@ -624,6 +625,7 @@ export function App() {
               candidates, custody, register, marking and moderation. The older
               exam-ops screen stays for venue/seating/question-paper setup. */}
           <Route path="/school/exam-operations" element={<SchoolExamOperationsPage />} />
+          <Route path="/school/statutory" element={<SchoolStatutoryPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
           <Route path="/school/lms/my" element={<SchoolLmsMyLearningPage />} />

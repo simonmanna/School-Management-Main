@@ -435,6 +435,19 @@ export const PERMISSIONS = {
     publishReportDocuments: 'school:reports:documents:publish',
     decidePromotion: 'school:promotion:decide',
     applyPromotion: 'school:promotion:apply',
+    // ── Statutory workflows (Phase 6). A national submission leaves the school
+    // and cannot be recalled, so producing the file is a different act from
+    // designing the layout, and both are separate from reading the readiness
+    // board. The Phase 6 migration backfills these onto the roles that already
+    // hold `exams:operate` / `results:publish`, because PermissionsGuard ANDs
+    // its requirements and an ungranted new grant 403s the exam office.
+    readStatutory: 'school:statutory:read',
+    manageStatutoryTemplates: 'school:statutory:write',
+    runStatutoryExports: 'school:statutory:export',
+    /// Candidate/index-number registry — the mapping a national result is
+    /// returned against. Wrong here means a learner's results are someone
+    /// else's, so it is not folded into `students:write`.
+    manageCandidateReferences: 'school:candidates:write',
     manageAssignments: 'school:assignments:write',
     gradeAssignments: 'school:assignments:grade',
     submitAssignments: 'school:assignments:submit',
@@ -1106,6 +1119,14 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:grades:approve',
       'school:results:approve',
       'school:results:publish',
+      // Phase 5/6: the head teacher is the final academic authority, so the
+      // document that goes home and the decision to move a learner up a class
+      // are theirs, and so is signing off a national return.
+      'school:reports:documents:publish',
+      'school:promotion:decide',
+      'school:promotion:apply',
+      'school:statutory:read',
+      'school:statutory:export',
       'school:lessonplans:review',
       'school:lessonplans:approve',
       'school:courses:write',
@@ -1144,7 +1165,12 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:fees:refund',
       'school:analytics:read',
       'invoice:read',
-      'invoice:write',
+      // `invoice:write` was listed here and is not a permission — the catalogue
+      // has create/update/post — so a freshly provisioned Bursar could read an
+      // invoice and never raise one. The grant did nothing and nothing said so.
+      'invoice:create',
+      'invoice:update',
+      'invoice:post',
       'payment:read',
       'payment:create',
       'cash_session:read',
@@ -1192,7 +1218,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
   },
   {
     name: 'Exams Officer',
-    description: 'Manages assessments and results; no fee authority.',
+    description: 'Runs the sitting, compiles results and files the national submission; approves neither marks nor results, and holds no fee authority.',
     dataScope: 'school',
     permissions: [
       'school:read',
@@ -1200,10 +1226,29 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:assessments:write',
       'school:grades:write',
       'school:results:compute',
-      'school:results:approve',
+      // `school:results:approve` is deliberately ABSENT. This preset also holds
+      // `school:grades:write`, so granting the approval would let the same
+      // person enter a mark and approve the result it feeds — the self-approval
+      // the Phase 4/5 chain exists to prevent. Approval sits with the Head
+      // Teacher and Deputy Head.
       'school:results:publish',
       'school:results:amend',
       'school:marks:moderate',
+      // Phase 5 examination operations. Without these the exam office cannot
+      // open the console that runs a sitting — holding the papers, allocating
+      // scripts and granting an access arrangement are each their own act.
+      'school:exams:operate',
+      'school:exams:custody',
+      'school:exams:allocate',
+      'school:exams:consideration',
+      'school:reports:documents:write',
+      // Phase 6 national submissions. The office that runs the sitting is the
+      // office that files the return, and designing the layout is separate from
+      // producing the file.
+      'school:statutory:read',
+      'school:statutory:write',
+      'school:statutory:export',
+      'school:candidates:write',
       'school:questionbank:write',
       'school:cbt:author',
       'school:cbt:proctor',
@@ -1256,6 +1301,12 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:lessonplans:review',
       'school:lessonplans:approve',
       'school:assessments:write',
+      // Approval authority the Exams Officer deliberately does not hold. A
+      // school with no deputy still has the Head Teacher; a school with one
+      // should not have to wait for the head to sign off every mark sheet.
+      'school:grades:approve',
+      'school:results:approve',
+      'school:promotion:decide',
       'school:analytics:read',
       'school:analytics:export',
       // Report centre (ADR-017). New grants do not reach existing tenants by

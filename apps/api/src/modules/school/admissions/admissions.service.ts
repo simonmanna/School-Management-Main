@@ -1927,8 +1927,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     const stages = this.workflow.stagesFor(app);
     const offerSkipped = stages.find((s) => s.stage === 'OFFER')?.mode === 'skip';
     const nextStage = this.workflow.nextRequiredStage(app, stages);
-    const blockedByStage =
-      nextStage !== 'ENROLLMENT' && !(app.status === 'accepted' && nextStage === 'OFFER');
+    // No exemption for `accepted`. See the note in
+    // AdmissionsWorkflowService.validateProgress: a school that runs no offer
+    // round configures OFFER as `skip` (the `simple` preset), and a school that
+    // configured it as REQUIRED gets it enforced.
+    const blockedByStage = nextStage !== 'ENROLLMENT';
     if (blockedByStage) {
       missing.push(
         nextStage
@@ -1939,10 +1942,8 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
 
     // Offer conditions apply only when this school's workflow actually routes through
     // an offer. Everything below — documents, fee, capacity — applies to every school
-    // and is never skippable by configuration. An already-accepted applicant has
-    // cleared the decision stage, so an offer letter is redundant; allow direct
-    // enroll from `accepted` (FSM permits accepted → enroll) without one.
-    if (!offerSkipped && app.status !== 'accepted') {
+    // and is never skippable by configuration.
+    if (!offerSkipped) {
       if (!app.offerLetter) missing.push('no offer on file');
       else if (app.offerLetter.status === 'withdrawn') missing.push('offer withdrawn');
       else if (app.offerLetter.expiresAt && app.offerLetter.expiresAt.getTime() < Date.now()) {

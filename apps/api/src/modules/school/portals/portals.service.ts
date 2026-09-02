@@ -556,6 +556,53 @@ export class PortalsService {
     }));
   }
 
+  /**
+   * Phase 6: the notice history for whoever is calling.
+   *
+   * A parent who was told by SMS that fees are due, or that results are out,
+   * has no way to look that message up again once the phone deletes it. The
+   * school's own record is the only durable copy, so the portal shows it.
+   *
+   * Scoped to the token's user id and nothing else. `payload` is deliberately
+   * NOT returned: it carries the internal ids a notification was built from,
+   * which are the school's plumbing rather than the family's business.
+   */
+  async myNotifications(limit = 50) {
+    const userId = this.tenant.userId;
+    if (!userId) return [];
+    // `limit` arrives as a query string, so a caller can send `?limit=abc` and
+    // hand this a NaN. Prisma rejects a NaN `take` with a 500; clamp to the
+    // default instead.
+    const take = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 200) : 50;
+    const rows = await this.prisma.client.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        id: true, channel: true, category: true, title: true, body: true,
+        status: true, readAt: true, sentAt: true, createdAt: true,
+      },
+    });
+    return rows;
+  }
+
+  /**
+   * Acknowledge one notice.
+   *
+   * `updateMany` with the user id in the WHERE is the point: an `update` by id
+   * would let a caller mark — and so confirm the existence of — another
+   * family's notification.
+   */
+  async markNotificationRead(notificationId: string) {
+    const userId = this.tenant.userId;
+    if (!userId) return { updated: 0 };
+    const res = await this.prisma.client.notification.updateMany({
+      where: { id: notificationId, userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+    return { updated: res.count };
+  }
+
   /** A8: issued certificates for the student (A6). */
   private async studentCertificates(studentProfileId: string) {
     return this.prisma.client.certificate.findMany({

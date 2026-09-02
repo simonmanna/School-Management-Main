@@ -19534,3 +19534,168 @@ model ModLessonAttempt {
   @@unique([lessonId, studentProfileId])
   @@index([organizationId, courseModuleId])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 6 — statutory workflows, candidate references and portal notice history
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Where a candidate reference stands with the board.
+///
+/// `provisional` is the school's own working number; `registered` means it was
+/// submitted; `confirmed` means the board returned it. The distinction matters
+/// because a CA submission keyed on a number the board has not confirmed is the
+/// commonest way a school's marks land against the wrong learner.
+enum ExamReferenceStatus {
+  provisional
+  registered
+  confirmed
+  withdrawn
+}
+
+/// A learner's national examination identity for one board, level and year.
+///
+/// Kept out of `StudentProfile` deliberately: a learner can sit PLE in one year
+/// and UCE four years later, under different centre numbers, and each of those
+/// is a separate registration with its own confirmation state. Flattening them
+/// onto the profile would keep only the last one, which is exactly the record a
+/// results enquiry needs years afterwards.
+///
+/// `ExamCandidateEntry.candidateNumber` stays what the exam was actually sat
+/// under — a frozen snapshot value. This model is the durable registry those
+/// snapshots are drawn from; the snapshot is never edited to match it.
+model StudentExamReference {
+  id               String              @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  /// 'UNEB' today. Named rather than enumerated because a school may sit
+  /// Cambridge or an internal board alongside it.
+  board            String              @default("UNEB")
+  /// 'PLE' | 'UCE' | 'UACE'.
+  level            String
+  /// The sitting year, not the academic year: a candidate registered in 2026
+  /// keeps that reference when the academic year rolls.
+  registrationYear Int
+  /// The examination centre the school sits under.
+  centreNumber     String?
+  /// The school's candidate number within the centre.
+  candidateNumber  String?
+  /// The board's index number, once issued.
+  indexNumber      String?
+  status           ExamReferenceStatus @default(provisional)
+  verifiedAt       DateTime?
+  verifiedById     String?
+  note             String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+
+  @@unique([organizationId, studentProfileId, board, level, registrationYear])
+  /// Two learners cannot hold the same index number at the same centre in the
+  /// same sitting. NULLs stay distinct in Postgres, so unissued numbers do not
+  /// collide with each other.
+  @@unique([organizationId, board, level, registrationYear, indexNumber])
+  @@index([organizationId])
+  @@index([organizationId, level, registrationYear])
+  @@index([organizationId, studentProfileId])
+}
+
+/// A configurable statutory export: which columns, in which order, under which
+/// header names.
+///
+/// Boards change their submission layout between sittings, and a school that
+/// must wait for a release to add a column will type the file by hand instead.
+/// Columns name a `source` from a fixed per-scope registry — the template
+/// chooses and renames known fields, it does not carry a query.
+model StatutoryExportTemplate {
+  id             String    @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  description    String?
+  /// 'UNEB' etc.
+  board          String    @default("UNEB")
+  /// 'PLE' | 'UCE' | 'UACE' | null for internal exports.
+  level          String?
+  /// Which dataset the columns are resolved against — see STATUTORY_DATASETS.
+  scope          String    @default("uneb_ca")
+  programmeId    String?
+  delimiter      String    @default(",")
+  includeHeader  Boolean   @default(true)
+  /// [{ header, source, required?, fallback?, transform? }]
+  columns        Json      @default("[]")
+  version        Int       @default(1)
+  isActive       Boolean   @default(true)
+  /// A published template is immutable: an edit mints the next version, so an
+  /// export run can always name the exact layout it was produced under.
+  publishedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  runs StatutoryExportRun[]
+
+  @@unique([organizationId, code, version])
+  @@index([organizationId])
+  @@index([organizationId, scope, isActive])
+}
+
+/// Provenance for one produced file. Answers, months later, which learners were
+/// in the submission, under which template version, and whether it was the file
+/// actually sent.
+model StatutoryExportRun {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  templateId          String
+  templateVersion     Int
+  scope               String
+  academicYearId      String?
+  termId              String?
+  examId              String?
+  programmeId         String?
+  /// Class ids the run was filtered to; empty means every class in scope.
+  classIds            Json      @default("[]")
+  rowCount            Int       @default(0)
+  /// SHA-256 of the rendered file, so a resend can be proved identical.
+  checksum            String
+  /// Readiness findings that did not block the run.
+  warnings            Json      @default("[]")
+  /// 'generated' | 'submitted' | 'superseded'
+  status              String    @default("generated")
+  submittedAt         DateTime?
+  submittedById       String?
+  submissionReference String?
+  generatedAt         DateTime  @default(now())
+  generatedById       String?
+
+  template StatutoryExportTemplate @relation(fields: [templateId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, scope, generatedAt])
+  @@index([templateId])
+}
+
+/// A deadline reminder that has already gone out.
+///
+/// Without it the nightly worker re-sends the same "marks due tomorrow" notice
+/// on every tick, and a teacher learns to ignore the channel. One row per
+/// (subject, recipient, milestone) is the idempotency key.
+model AcademicReminderLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  /// 'assessment_due' | 'marks_entry_due' | 'result_publication_due' | 'ca_submission_due'
+  kind           String
+  /// The thing the reminder is about — assessment id, exam id, term id.
+  subjectId      String
+  /// Which step of the ladder: e.g. 't-7', 't-1', 'overdue'.
+  milestone      String
+  /// Recipient user, when the notice was addressed to a person.
+  userId         String?
+  sentAt         DateTime @default(now())
+
+  @@unique([organizationId, kind, subjectId, milestone, userId])
+  @@index([organizationId, kind, sentAt])
+}

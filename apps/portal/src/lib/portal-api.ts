@@ -27,6 +27,42 @@ export function usePortalContext(enabled: boolean) {
   });
 }
 
+export interface PortalNotice {
+  id: string;
+  channel: string;
+  category: string;
+  title: string;
+  body: string;
+  status: string;
+  readAt: string | null;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+/**
+ * The notice history for whoever is signed in.
+ *
+ * A parent who was told by SMS that fees are due, or that results are out, has
+ * no copy once the phone deletes it. The school's own record is the only
+ * durable one, so the portal shows it. The subject is the token, not a
+ * parameter — there is nothing here for a caller to edit.
+ */
+export function useMyNotices(enabled: boolean) {
+  return useQuery({
+    queryKey: ['portal', 'notices'],
+    enabled,
+    queryFn: async () => (await api.get<PortalNotice[]>(`${S}/portals/notifications`, { params: { limit: 100 } })).data,
+  });
+}
+
+export function useMarkNoticeRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<{ updated: number }>(`${S}/portals/notifications/${id}/read`, {})).data,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['portal', 'notices'] }),
+  });
+}
+
 /* ────────────────────────────── Parent ────────────────────────────── */
 
 export interface ParentChildRow {

@@ -5,6 +5,7 @@ import type { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/jwt-token.service';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { NoPermissionRequired } from '../auth/decorators/no-permission-required.decorator';
 import { PushService } from './push.service';
 import { Public } from '../auth/decorators/public.decorator';
 
@@ -34,6 +35,17 @@ export class PushController {
     return { publicKey: this.svc.getPublicKey() };
   }
 
+  /**
+   * Registering a device for push.
+   *
+   * Session-only by design and not a coverage gap: a guardian's phone has no
+   * staff grant, and requiring one would mean families could never receive a
+   * results or fee notice. The handler does the authorization itself — a
+   * portal claim OR `notifications:write` — and a subscription is bound to
+   * the caller's own user id, so the worst a caller can do is register their
+   * own device.
+   */
+  @NoPermissionRequired('Portal families have no staff grant; the handler requires a portal claim or notifications:write and binds the subscription to the caller.')
   @Post('subscribe')
   async subscribe(@CurrentUser() user: AuthUser, @Req() req: Request, @Body() body: SubscribeBody) {
     // Allow staff with notifications:write OR portal users (student/guardian)

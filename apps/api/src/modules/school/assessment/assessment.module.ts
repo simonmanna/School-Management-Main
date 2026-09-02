@@ -16,6 +16,7 @@ import { SchoolEnrollmentModule } from '../enrollment/enrollment.module';
 import { CbtResultBridgeService } from './cbt-result-bridge.service';
 import { GradebookService } from './gradebook.service';
 import { GradebookController } from './gradebook.controller';
+import { AcademicReminderWorker } from './academic-reminder.worker';
 import {
   AcademicRosterController,
   AssessmentComponentController,
@@ -52,6 +53,9 @@ import {
     PromotionDecisionController,
   ],
   providers: [
+    // Phase 6 — deadline reminders. Off unless ACADEMIC_REMINDERS_ENABLED=true;
+    // registering the provider costs nothing when the flag is unset.
+    AcademicReminderWorker,
     AssessmentWorkflowService,
     AssessmentPolicyService,
     AssessmentComponentService,

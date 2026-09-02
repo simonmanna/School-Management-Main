@@ -92,5 +92,12 @@ jobs:
       - name: Test (Phase 5 examination operations and result integrity)
         run: pnpm test:academics:phase5
 
+      # Phase 6 also carries the authorization ratchets: route-permission
+      # coverage, the role-preset segregation-of-duty invariants, the permission
+      # catalogue and the tenancy registration. They are cheap and they are the
+      # ones that fail silently if nobody runs them.
+      - name: Test (Phase 6 statutory submissions and role privacy)
+        run: pnpm test:academics:phase6
+
       - name: Test (school cross-domain integration)
         run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine test/integration/school-admissions-attendance --runInBand --detectOpenHandles

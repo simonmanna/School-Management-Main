@@ -577,10 +577,57 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     );
   });
 
-  it('refuses to enroll an application whose offer is not accepted', async () => {
+  /**
+   * An `accepted` application is not enrollable under a workflow whose OFFER
+   * stage is REQUIRED — and these applications carry no snapshot, so they
+   * resolve to the built-in Standard workflow, where it is.
+   *
+   * The service used to exempt `accepted` from the OFFER and
+   * APPLICANT_ACCEPTANCE stages unconditionally, which made a stage a school
+   * had configured as required unenforceable. A school that runs no offer round
+   * says so in configuration — the `simple` preset sets both to `skip` — rather
+   * than relying on a hard-coded status check.
+   */
+  it('refuses to enroll an application whose offer round has not happened', async () => {
     const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'accepted' }));
-    await expect(service.enroll(enrollDto as any)).rejects.toThrow(BadRequestException);
+    // No offer letter at all. Completeness is judged on the EVIDENCE — an offer
+    // letter marked accepted completes both stages whatever `status` says — so
+    // the fixture has to be a genuinely incomplete offer round, not merely an
+    // application whose status lags its evidence.
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'accepted', offerLetter: null }));
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow();
+    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+  });
+
+  /**
+   * These two are refused by the WORKFLOW guard rather than the eligibility
+   * gate, because the enforcement order is workflow -> eligibility -> seat.
+   * What matters to a school is that nothing was created, so that is what is
+   * asserted; pinning the message would make the test a record of which guard
+   * happened to fire first.
+   */
+  it('refuses to enroll an application that has not reached a decision', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'submitted', offerLetter: null }));
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow();
+    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+  });
+
+  it('refuses to enroll on a withdrawn offer', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(
+      eligibleApp({ offerLetter: { id: 'offer_1', status: 'withdrawn', expiresAt: null } }),
+    );
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow();
+    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+  });
+
+  it('refuses to enroll on an expired offer', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue(
+      eligibleApp({ offerLetter: { id: 'offer_1', status: 'accepted', expiresAt: new Date(Date.now() - 86_400_000) } }),
+    );
+    await expect(service.enroll(enrollDto as any)).rejects.toThrow(/offer expired/);
     expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
   });
 

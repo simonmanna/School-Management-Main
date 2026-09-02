@@ -42,6 +42,11 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       paging: 'memory',
       defaultSort: { key: 'dayOfWeek', order: 'asc' },
       columns: [
+        // A timetable read in alphabetical day order starts on Friday. The sort
+        // is therefore on the numeric day, which must be a declared column —
+        // a sort key that is not a column sorts by nothing — and is hidden
+        // because the reader wants 'Monday', not '1'.
+        { key: 'dayOfWeek', label: 'Day order', type: 'int', width: 6, hideOn: ['screen', 'csv', 'xlsx', 'pdf'] },
         { key: 'dayName', label: 'Day', type: 'string', width: 12 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period Name', type: 'string', width: 14 },
@@ -112,6 +117,11 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       paging: 'memory',
       defaultSort: { key: 'dayOfWeek', order: 'asc' },
       columns: [
+        // A timetable read in alphabetical day order starts on Friday. The sort
+        // is therefore on the numeric day, which must be a declared column —
+        // a sort key that is not a column sorts by nothing — and is hidden
+        // because the reader wants 'Monday', not '1'.
+        { key: 'dayOfWeek', label: 'Day order', type: 'int', width: 6, hideOn: ['screen', 'csv', 'xlsx', 'pdf'] },
         { key: 'dayName', label: 'Day', type: 'string', width: 12 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period Name', type: 'string', width: 14 },
@@ -206,6 +216,9 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       paging: 'memory',
       defaultSort: { key: 'dayOfWeek', order: 'asc' },
       columns: [
+        // See the note on the class timetable above: the sort is on the numeric
+        // day, hidden from the reader.
+        { key: 'dayOfWeek', label: 'Day order', type: 'int', width: 6, hideOn: ['screen', 'csv', 'xlsx', 'pdf'] },
         { key: 'dayName', label: 'Day', type: 'string', width: 10 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period', type: 'string', width: 12 },
