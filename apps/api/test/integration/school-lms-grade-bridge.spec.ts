@@ -53,6 +53,8 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
   let classId = '';
   let subjectId = '';
   let studentProfileId = '';
+  let courseOfferingId = '';
+  let rosterId = '';
 
   const perms = ['school:read', 'school:grades:write', 'school:questionbank:write', 'school:cbt:author', 'school:cbt:take'];
   const asUser = <T>(fn: () => Promise<T>): Promise<T> =>
@@ -96,6 +98,26 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
       },
     })).id;
 
+    // Phase 4 made the teaching context and the frozen audience part of what an
+    // assessment IS, and the grade bridge now refuses to write into an activity
+    // that has neither. An LMS activity is a course activity, so the fixture
+    // gives it the course and the frozen roster it would have in production.
+    const offering = await raw.courseOffering.create({
+      data: {
+        organizationId, name: 'S2 Science', academicYearId: year.id, termId: term.id,
+        classId: cls.id, subjectId, status: 'ACTIVE',
+      },
+    });
+    courseOfferingId = offering.id;
+    const roster = await raw.academicRoster.create({
+      data: { organizationId, termId: term.id, scopeType: 'subject', classId: cls.id, subjectId, name: 'Bridge roster' },
+    });
+    await raw.academicRosterMember.create({
+      data: { organizationId, rosterId: roster.id, studentProfileId, classId: cls.id, gradeLevelId: grade.id },
+    });
+    await raw.academicRoster.update({ where: { id: roster.id }, data: { frozenAt: new Date() } });
+    rosterId = roster.id;
+
     moduleRef = await Test.createTestingModule({
       imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
     }).compile();
@@ -120,7 +142,8 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
     const assessment = await raw.assessment.create({
       data: {
         organizationId, subjectId, classId, termId, title, maxScore, kind: 'classwork',
-        sourceType: 'lms_activity', sourceRef: `cm-${Date.now()}-${Math.random()}`, status: 'draft',
+        courseOfferingId, rosterId,
+        sourceType: 'lms_activity', sourceRef: `cm-${Date.now()}-${Math.random()}`, status: 'published',
       },
     });
     const sa = await raw.studentAssessment.create({
@@ -154,16 +177,22 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
     expect(Number(afterRecompute!.percentage)).toBe(80);
   });
 
-  it('clamps an out-of-range plugin score rather than rejecting the sync', async () => {
-    const { sa } = await makeLmsGradeItem('Clamp activity', 50);
+  it('refuses an out-of-range plugin score instead of quietly clamping it', async () => {
+    const { sa } = await makeLmsGradeItem('Range activity', 50);
 
-    await asUser(() =>
-      raw.$transaction(async (tx: any) =>
-        bridge.setScore({ studentAssessmentId: sa.id, score: 999, source: 'plugin' }, tx)),
-    );
+    // A plugin reporting 999 out of 50 is a plugin bug. Recording 50 would hide
+    // it behind a mark that looks deliberate, so the sync is refused and the
+    // learner is left with no mark rather than a fabricated full one.
+    await expect(
+      asUser(() =>
+        raw.$transaction(async (tx: any) =>
+          bridge.setScore({ studentAssessmentId: sa.id, score: 999, source: 'plugin' }, tx)),
+      ),
+    ).rejects.toThrow(/out of range/i);
 
     const row = await raw.studentAssessment.findFirst({ where: { id: sa.id } });
-    expect(Number(row!.effectiveScore)).toBe(50);
+    expect(row!.effectiveScore).toBeNull();
+    expect(await raw.markEntry.count({ where: { studentAssessmentId: sa.id } })).toBe(0);
   });
 
   it('refuses to write into a locked grade item', async () => {

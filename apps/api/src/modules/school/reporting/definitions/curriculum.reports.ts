@@ -51,14 +51,22 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
           where: {
             organizationId: ctx.organizationId,
             academicYearId,
-            classId: { in: classIds },
+            ...(classIds?.length ? { classId: { in: classIds } } : {}),
             status: 'published',
           },
           include: {
-            class: { include: { gradeLevel: true } },
+            // `Curriculum` holds a loose `classId` with no Prisma relation, so
+            // asking for `class` here made the query invalid. The class is
+            // resolved separately below.
             topics: { orderBy: { order: 'asc' } },
           },
         });
+
+        const curriculumClasses = await (deps.timetable as any).prisma.client.schoolClass.findMany({
+          where: { id: { in: [...new Set(curricula.map((c: any) => c.classId))] } },
+          include: { gradeLevel: true },
+        });
+        const classById = new Map<string, any>((curriculumClasses as any[]).map((c: any) => [c.id, c]));
 
         if (curricula.length === 0) {
           return { rows: [], notes: ['No published curricula found for these classes.'] };
@@ -66,7 +74,7 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
 
         // Get timetable slots to know teacher assignments and period counts
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { classId: { in: classIds } },
+          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
           include: { subject: true, teacher: true, period: true },
         });
 
@@ -74,11 +82,13 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
         const lessonPlans = await (deps.timetable as any).prisma.client.lessonPlan.findMany({
           where: {
             organizationId: ctx.organizationId,
-            classId: { in: classIds },
+            ...(classIds?.length ? { classId: { in: classIds } } : {}),
             termId: termId ?? undefined,
             status: { in: ['approved', 'archived'] },
           },
-          include: { subject: true, class: true },
+          // `LessonPlan` has a `subject` relation but only a loose `classId`,
+          // so asking for `class` here made the whole query invalid.
+          include: { subject: true },
         });
 
         // Group lesson plans by class+subject
@@ -128,8 +138,8 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
 
             rows.push({
               classId: curriculum.classId,
-              className: curriculum.class?.name ?? '',
-              gradeLevelName: curriculum.class?.gradeLevel?.name ?? '',
+              className: classById.get(curriculum.classId)?.name ?? '',
+              gradeLevelName: classById.get(curriculum.classId)?.gradeLevel?.name ?? '',
               subjectId,
               subjectName: curriculumSubject?.subjectName ?? subjectId,
               teacherName: subjectInfo.teacherName,

@@ -49,15 +49,20 @@ export class MarkingService {
    * This is entry, never approval. `approveGrades` is a separate grant on a
    * separate route, so a teacher still cannot approve their own marks.
    */
-  private async assertMayMarkAssessment(assessmentId: string | null | undefined): Promise<void> {
+  async assertMayMarkAssessment(assessmentId: string | null | undefined): Promise<void> {
     const perms: string[] = this.tenant.store?.permissions ?? [];
     if (perms.includes(PERMISSIONS.school.enterGrades) || perms.includes('*')) return;
+    if (!perms.includes(PERMISSIONS.school.ownGrades) && !perms.includes(PERMISSIONS.school.gradeAssignments)) throw new ForbiddenException('Mark entry permission is required');
 
     if (!assessmentId) throw new ForbiddenException('You may only mark your own assessments');
     const assessment = await this.prisma.client.assessment.findFirst({
       where: { id: assessmentId, organizationId: this.tenant.organizationId },
-      select: { teacherPartnerId: true },
+      select: { teacherPartnerId: true, courseOfferingId: true },
     });
+    if (assessment?.courseOfferingId) {
+      await this.assertMayTeachOffering(assessment.courseOfferingId);
+      return;
+    }
     if (!assessment?.teacherPartnerId) {
       throw new ForbiddenException('You may only mark your own assessments');
     }
@@ -66,6 +71,33 @@ export class MarkingService {
     // matching staff profile passes; an office clerk without the broad grant
     // does not.
     await this.dataScope.assertOwnsStaffRecord(assessment.teacherPartnerId);
+  }
+
+  /** Course allocation, including effective-dated team teachers and substitutes. */
+  async assertMayTeachOffering(courseOfferingId: string): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.some((p) => ['*', PERMISSIONS.school.enterGrades, PERMISSIONS.school.manageAssessments].includes(p))) return;
+    if (!perms.includes(PERMISSIONS.school.ownGrades) && !perms.includes(PERMISSIONS.school.gradeAssignments)) throw new ForbiddenException('Assessment entry permission is required');
+    const teacherPartnerId = await this.employeeIdentity.staffProfileIdForCaller();
+    const now = new Date();
+    const allocation = teacherPartnerId && await this.prisma.client.courseOfferingTeacher.findFirst({
+      where: { courseOfferingId, teacherPartnerId, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] },
+    });
+    if (!allocation) throw new ForbiddenException('You may only assess courses you currently teach');
+  }
+
+  async readScope(): Promise<any> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.some((p) => ['*', PERMISSIONS.school.manageAssessments, PERMISSIONS.school.enterGrades, PERMISSIONS.school.approveGrades, PERMISSIONS.school.moderateMarks].includes(p))) return {};
+    const teacherPartnerId = await this.employeeIdentity.staffProfileIdForCaller();
+    if (!teacherPartnerId) throw new ForbiddenException('Assessment detail is restricted to authorised teaching staff');
+    const now = new Date();
+    return { OR: [{ courseOfferingId: null, teacherPartnerId }, { courseOffering: { teachers: { some: { teacherPartnerId, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] } } } }] };
+  }
+
+  async assertMayViewAssessment(id: string) {
+    const row = await this.prisma.client.assessment.findFirst({ where: { id, ...(await this.readScope()) } });
+    if (!row) throw new NotFoundException('Assessment not found or not assigned to you');
   }
 
   /**
@@ -80,10 +112,11 @@ export class MarkingService {
   ): Promise<void> {
     const sa = await tx.studentAssessment.findFirst({ where: { id: studentAssessmentId } });
     if (!sa) throw new NotFoundException(`StudentAssessment ${studentAssessmentId} not found`);
-    let [entries, adjustments] = await Promise.all([
+    const [storedEntries, adjustments] = await Promise.all([
       tx.markEntry.findMany({ where: { studentAssessmentId } }),
       tx.markAdjustment.findMany({ where: { studentAssessmentId } }),
     ]);
+    let entries = storedEntries;
 
     // `heal: false` says the empty ledger is INTENTIONAL — the caller just
     // cleared the round. Without it, the self-heal below cannot tell a
@@ -145,6 +178,11 @@ export class MarkingService {
   private async ensureRow(tx: any, assessmentId: string, studentProfileId: string, snapshot: Partial<StudentAssessment> = {}) {
     const assessment = await tx.assessment.findFirst({ where: { id: assessmentId } });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
+    if (assessment.rosterId) {
+      const member = await tx.academicRosterMember.findFirst({ where: { rosterId: assessment.rosterId, studentProfileId } });
+      if (!member) throw new BadRequestException('Learner is not on the frozen assessment roster');
+      snapshot = { ...snapshot, classId: member.classId, sectionId: member.sectionId, gradeLevelId: member.gradeLevelId };
+    }
     const existing = await tx.studentAssessment.findFirst({ where: { assessmentId, studentProfileId } });
     if (existing) return existing;
     return tx.studentAssessment.create({
@@ -221,22 +259,35 @@ export class MarkingService {
     }
 
     const assessment = await tx.assessment.findFirst({ where: { id: sa.assessmentId } });
+    if (assessment?.courseOfferingId) {
+      if (!assessment.rosterId || ['draft', 'scheduled', 'archived'].includes(assessment.status)) {
+        throw new ConflictException('Publish this assessment to its frozen roster before marking');
+      }
+      const roster = await tx.academicRoster.findFirst({ where: { id: assessment.rosterId } });
+      if (!roster?.frozenAt) throw new ConflictException('Assessment roster must be frozen before marking');
+    }
     if (assessment?.lockedAt) {
       // 409, not 400: a locked item is a STATE conflict, not a malformed
       // request, and the marks workspace already contracts on 409 for its own
       // lock check. Two codes for one condition made the web show two messages.
       throw new ConflictException('This grade item is locked. Unlock it before changing marks.');
     }
-    if (sa.approvalStatus === 'approved' && !input.allowWhenApproved) {
-      throw new BadRequestException('Marks are approved; reject them before recording new marks');
+    if (['approved', 'submitted'].includes(sa.approvalStatus) && !input.allowWhenApproved) {
+      throw new ConflictException('Submitted and approved marks are read-only. Return submitted marks or request an adjustment.');
     }
     // A stale editor loses. 409, like the lock check above: the request is
     // well-formed, the STATE has moved on.
     if (input.expectedVersion != null && sa.version !== input.expectedVersion) {
-      throw new ConflictException(
-        `These marks changed since you loaded them (version ${sa.version}, you have ${input.expectedVersion}). Reload and re-enter.`,
-      );
+      throw new ConflictException({ code: 'MARK_VERSION_CONFLICT', message: 'These marks changed since you loaded them. Compare the server value before retrying.', conflicts: [{ studentProfileId: sa.studentProfileId, studentAssessmentId: sa.id, expectedVersion: input.expectedVersion, version: sa.version, marks: sa.effectiveScore, participation: sa.participation }] });
     }
+
+    // Claim the version before changing the ledger. A read-then-compare alone
+    // lets two simultaneous transactions both pass with the same old version.
+    const claimed = await tx.studentAssessment.updateMany({
+      where: { id: sa.id, version: sa.version, approvalStatus: sa.approvalStatus },
+      data: { version: { increment: 1 } },
+    });
+    if (claimed.count === 0) throw new ConflictException({ code: 'MARK_VERSION_CONFLICT', message: 'This mark changed while saving. Reload to compare before retrying.', conflicts: [{ studentProfileId: sa.studentProfileId }] });
 
     if (input.score === null) {
       await tx.markEntry.deleteMany({ where: { studentAssessmentId: sa.id, round } });
@@ -287,6 +338,7 @@ export class MarkingService {
         // enteredById; now that submission records its own actor, the entry
         // time belongs to the write that actually entered the mark.
         enteredAt: new Date(),
+        ...(input.comment !== undefined ? { feedback: input.comment } : {}),
       },
     });
     await this.audit.recordInTx(tx, {
@@ -315,8 +367,8 @@ export class MarkingService {
     if (assessment?.lockedAt) {
       throw new ConflictException('This grade item is locked. Unlock it before changing marks.');
     }
-    if (sa.approvalStatus === 'approved') {
-      throw new BadRequestException('Marks are approved; reject them before recording new marks');
+    if (['approved', 'submitted'].includes(sa.approvalStatus)) {
+      throw new BadRequestException('Submitted and approved marks are read-only');
     }
   }
 
@@ -324,26 +376,42 @@ export class MarkingService {
     // Marking a pupil absent from a paper changes what their result means, so it
     // is held to the same ownership rule as entering the mark itself.
     await this.assertMayMarkAssessment(dto.assessmentId);
-    return this.prisma.client.$transaction(async (tx: any) => {
-      const row = await this.ensureRow(tx, dto.assessmentId, dto.studentProfileId, {
-        classId: dto.classId,
-        sectionId: dto.sectionId,
-        gradeLevelId: dto.gradeLevelId,
-        termId: dto.termId,
-      });
-      await this.assertAssessmentMutable(tx, row as any);
-      await tx.studentAssessment.updateMany({
-        where: { id: row.id },
-        data: { participation: dto.participation, version: { increment: 1 } },
-      });
-      await this.audit.recordInTx(tx, {
-        entity: 'StudentAssessment',
-        entityId: row.id,
-        action: 'update',
-        newValues: { participation: dto.participation },
-      });
-      return tx.studentAssessment.findFirst({ where: { id: row.id } });
+    return this.prisma.client.$transaction((tx: any) => this.setParticipationInTx(tx, dto));
+  }
+
+  /**
+   * The one participation writer, callable from another module's transaction.
+   *
+   * Phase 5 needs this: approving an aegrotat or an exemption is an exam-office
+   * act, decided under `school:exams:consideration`, that has to land on the
+   * learner's assessment row in the same transaction as the decision. Routing it
+   * back through `setParticipation` would have demanded a marking grant the exam
+   * officer has no reason to hold; duplicating the write would have created a
+   * second participation writer. Authorization is the CALLER's responsibility —
+   * `setParticipation` above still checks marking ownership before calling in.
+   */
+  async setParticipationInTx(
+    tx: any,
+    dto: SetParticipationDto & { reason?: string },
+  ): Promise<StudentAssessment> {
+    const row = await this.ensureRow(tx, dto.assessmentId, dto.studentProfileId, {
+      classId: dto.classId,
+      sectionId: dto.sectionId,
+      gradeLevelId: dto.gradeLevelId,
+      termId: dto.termId,
     });
+    await this.assertAssessmentMutable(tx, row as any);
+    await tx.studentAssessment.updateMany({
+      where: { id: row.id },
+      data: { participation: dto.participation, version: { increment: 1 } },
+    });
+    await this.audit.recordInTx(tx, {
+      entity: 'StudentAssessment',
+      entityId: row.id,
+      action: 'update',
+      newValues: { participation: dto.participation, ...(dto.reason ? { reason: dto.reason } : {}) },
+    });
+    return tx.studentAssessment.findFirst({ where: { id: row.id } });
   }
 
   /**
@@ -445,8 +513,17 @@ export class MarkingService {
       await this.assertMayMarkAssessment(dto.assessmentId);
     }
     return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe('SELECT id FROM "StudentAssessment" WHERE "assessmentId" = $1 AND "organizationId" = $2 ORDER BY id FOR UPDATE', dto.assessmentId, organizationId);
       const rows = await tx.studentAssessment.findMany({ where: { assessmentId: dto.assessmentId } });
       if (rows.length === 0) throw new NotFoundException(`No student assessments for assessment ${dto.assessmentId}`);
+      const assessment = await tx.assessment.findFirst({ where: { id: dto.assessmentId }, include: { roster: { include: { members: true } } } });
+      if (assessment?.courseOfferingId) {
+        if (!assessment.roster?.frozenAt || ['draft', 'scheduled', 'archived'].includes(assessment.status)) throw new BadRequestException('A published assessment and frozen roster are required');
+        const rosterIds = new Set(assessment.roster.members.map((m: any) => m.studentProfileId));
+        if (rosterIds.size !== rows.length || rows.some((r: any) => !rosterIds.has(r.studentProfileId))) throw new BadRequestException('Assessment learners do not match the frozen roster');
+        if (dto.action !== 'reject' && rows.some((r: any) => r.effectiveScore == null && !['absent', 'exempt', 'excused', 'malpractice', 'withdrawn', 'not_enrolled'].includes(r.participation))) throw new BadRequestException('Every learner needs a score or a resolved participation outcome');
+      }
+      if (dto.action === 'reject' && !dto.reason?.trim()) throw new BadRequestException('Give a reason for returning marks');
 
       if (dto.action === 'submit' || dto.action === 'resubmit') {
         // Resubmit is the second half of the reject loop: marks sent back are
@@ -466,6 +543,7 @@ export class MarkingService {
             submittedById: actorId,
             submittedAt: new Date(),
             rejectionReason: null,
+            version: { increment: 1 },
           },
         });
         await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'update', newValues: { action: dto.action, count: res.count } });
@@ -484,7 +562,7 @@ export class MarkingService {
         }
         const res = await tx.studentAssessment.updateMany({
           where: { assessmentId: dto.assessmentId, approvalStatus: 'submitted' },
-          data: { approvalStatus: 'approved', approvedById: actorId, approvedAt: new Date() },
+          data: { approvalStatus: 'approved', approvedById: actorId, approvedAt: new Date(), version: { increment: 1 } },
         });
         await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'approve', newValues: { count: res.count } });
         this.events.publish(EVENTS.SchoolMarksApproved, { organizationId, assessmentId: dto.assessmentId, approvedById: actorId ?? '', count: res.count });
@@ -494,7 +572,7 @@ export class MarkingService {
       // reject — the reason is part of the record, not a toast the marker missed
       const res = await tx.studentAssessment.updateMany({
         where: { assessmentId: dto.assessmentId, approvalStatus: 'submitted' },
-        data: { approvalStatus: 'rejected', rejectionReason: dto.reason ?? null },
+        data: { approvalStatus: 'rejected', rejectionReason: dto.reason ?? null, version: { increment: 1 } },
       });
       await this.audit.recordInTx(tx, { entity: 'StudentAssessment', entityId: dto.assessmentId, action: 'reject', newValues: { reason: dto.reason ?? null, count: res.count } });
       return { updated: res.count };
@@ -510,6 +588,7 @@ export class MarkingService {
    * by name rather than by id also puts the sheet in register order.
    */
   async byAssessment(assessmentId: string) {
+    await this.assertMayViewAssessment(assessmentId);
     const rows = await this.prisma.client.studentAssessment.findMany({
       where: { assessmentId },
       include: { markEntries: true, adjustments: { orderBy: { sequence: 'asc' } } },
@@ -536,7 +615,7 @@ export class MarkingService {
 
   async byStudent(studentProfileId: string, termId?: string) {
     return this.prisma.client.studentAssessment.findMany({
-      where: { studentProfileId, ...(termId ? { termId } : {}) },
+      where: { studentProfileId, ...(termId ? { termId } : {}), assessment: await this.readScope() },
       include: { assessment: true },
       orderBy: { createdAt: 'desc' },
     });

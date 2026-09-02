@@ -44,6 +44,7 @@ export function SchoolAssessmentsPage() {
 
   const kind = params.get('kind') ?? '';
   const stage = params.get('status') ?? '';
+  const courseOfferingId = params.get('courseOfferingId') ?? '';
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
@@ -65,13 +66,14 @@ export function SchoolAssessmentsPage() {
 
   const { data: board, isLoading } = useAssessmentBoard({
     termId: termId || undefined,
-    classId: classId || undefined,
-    subjectId: subjectId || undefined,
+    classId: courseOfferingId ? undefined : classId || undefined,
+    subjectId: courseOfferingId ? undefined : subjectId || undefined,
     kind: kind || undefined,
     status: stage || undefined,
+    courseOfferingId: courseOfferingId || undefined,
   });
   const submit = useSubmitAssessmentMarks();
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(params.get('new') === '1');
 
   const rows = board?.rows ?? [];
   const counts = board?.counts ?? {};
@@ -90,9 +92,9 @@ export function SchoolAssessmentsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Assessments</h1>
+          <h1 className="text-2xl font-semibold">Assessment Board</h1>
           <p className="text-sm text-muted-foreground">
-            Everything you assess — CATs, homework, projects, practicals and exams — in one list.
+            One workflow for coursework, exams and observations — from frozen roster to approved, released marks.
           </p>
         </div>
         <Button onClick={() => setCreating(true)}>
@@ -188,7 +190,7 @@ export function SchoolAssessmentsPage() {
                     <Link to={`/school/assessments/${r.assessmentId}/mark`} className="font-medium hover:underline">
                       {r.subject.name} — {r.title}
                     </Link>
-                    <div className="text-xs text-muted-foreground">{r.class.name}</div>
+                    <div className="text-xs text-muted-foreground">{r.courseOffering?.name ?? r.class.name}{!r.rosterFrozen && ' · Roster binding required'}</div>
                   </td>
                   <td className="px-3 py-2">
                     <Badge variant="outline">{KIND_LABEL[r.kind] ?? r.kind}</Badge>
@@ -206,7 +208,7 @@ export function SchoolAssessmentsPage() {
                       {/* Homework also collects submissions, which the board does
                           not model — so the row offers the screen that does. */}
                       {r.kind === 'homework' && (
-                        <Link to="/school/homework" className="text-xs text-muted-foreground hover:underline">
+                        <Link to={`/school/assessments/${r.assessmentId}/mark`} className="text-xs text-muted-foreground hover:underline">
                           Submissions
                         </Link>
                       )}
@@ -226,6 +228,7 @@ export function SchoolAssessmentsPage() {
           termId={termId}
           classId={classId}
           subjectId={subjectId}
+          courseOfferingId={courseOfferingId || undefined}
           onClose={() => setCreating(false)}
         />
       )}
@@ -283,6 +286,7 @@ function RowAction({
   row, onMark, onSubmit, submitting,
 }: { row: BoardRow; onMark: () => void; onSubmit: () => void; submitting: boolean }) {
   const s = stageOf(row);
+  if (row.status === 'draft') return <Button size="sm" variant="outline" onClick={onMark}>Review & publish</Button>;
   if (s === 'approved') {
     return <span className="flex items-center justify-end gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> Approved</span>;
   }

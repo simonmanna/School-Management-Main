@@ -262,7 +262,7 @@ export class ViewEnvelopeService {
     const assessmentIds = gradable.map((m) => m.assessmentId!);
     const assessments = await this.prisma.client.assessment.findMany({
       where: { id: { in: assessmentIds }, deletedAt: null },
-      select: { id: true, maxScore: true, hiddenFromStudents: true },
+      select: { id: true, maxScore: true, hiddenFromStudents: true, marksReleaseAt: true },
     });
     const byAssessment = new Map(assessments.map((a) => [a.id, a]));
 
@@ -278,7 +278,7 @@ export class ViewEnvelopeService {
       const a = byAssessment.get(m.assessmentId!);
       if (!a || a.hiddenFromStudents) continue;
       const mark = byMark.get(m.assessmentId!);
-      const released = mark?.approvalStatus === 'approved';
+      const released = mark?.approvalStatus === 'approved' && !!a.marksReleaseAt && a.marksReleaseAt <= new Date();
       out.set(m.id, {
         assessmentId: m.assessmentId!,
         maxScore: Number(a.maxScore ?? 100),

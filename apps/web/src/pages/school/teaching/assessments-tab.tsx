@@ -31,7 +31,7 @@ export function AssessmentsTab({ offeringId }: { offeringId: string }) {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="h-4 w-4" /> Assessments</CardTitle>
-            <Button size="sm" variant="outline" onClick={() => navigate('/school/assessments')}>New assessment</Button>
+            <Button size="sm" variant="outline" onClick={() => navigate(`/school/assessments?courseOfferingId=${offeringId}&new=1`)}>New assessment</Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-1.5">

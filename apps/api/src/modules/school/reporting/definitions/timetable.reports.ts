@@ -9,6 +9,23 @@ import type { SchoolReportDeps } from '../school-report-deps';
  * overlays. The grid structure is day × period; we flatten it for the table
  * renderer. A master timetable is the union of all class grids.
  */
+/**
+ * Attach the subject an override names.
+ *
+ * `TimetableOverride` carries loose `subjectId` / `teacherPartnerId` columns and
+ * declares no Prisma relations, so `include: { subject: true, ... }` made the
+ * query invalid — and the cells built from those overrides read `.subject.name`,
+ * which could never have been populated. Resolve the ids explicitly instead.
+ */
+async function withOverrideSubjects(deps: any, rows: any[]): Promise<any[]> {
+  const subjectIds = [...new Set(rows.map((o: any) => o.subjectId).filter(Boolean))] as string[];
+  const subjects = subjectIds.length
+    ? await deps.timetable.prisma.client.subject.findMany({ where: { id: { in: subjectIds } } })
+    : [];
+  const byId = new Map<string, any>((subjects as any[]).map((x: any) => [x.id, x]));
+  return rows.map((o: any) => ({ ...o, subject: o.subjectId ? byId.get(o.subjectId) ?? null : null }));
+}
+
 export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[] {
   return [
     {
@@ -60,8 +77,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
               startTime: slot?.period?.startTime ?? '',
               endTime: slot?.period?.endTime ?? '',
               subjectName: cell?.subject?.name ?? '',
-              teacherName: cell?.teacher?.name ?? '',
-              roomName: cell?.room?.name ?? '',
+              teacherName: cell?.teacher?.partner?.name ?? '',
+              roomName: cell?.teachingRoom?.name ?? cell?.room ?? '',
               overridden: cell?.overridden ?? false,
               overrideReason: cell?.overrideReason ?? '',
             });
@@ -114,11 +131,14 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
           where: { teacherPartnerId },
           include: {
-            class: { include: { gradeLevel: true } },
+            // The relation is `schoolClass`, and a slot's room is either the
+            // managed `teachingRoom` or the free-text `room` column — `class`
+            // and `room` as relations made Prisma reject the whole query.
+            schoolClass: { include: { gradeLevel: true } },
             section: true,
             subject: true,
             period: true,
-            room: true,
+            teachingRoom: true,
           },
           orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
         });
@@ -126,14 +146,13 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
-          overrides = await (deps.timetable as any).prisma.client.timetableOverride.findMany({
+          overrides = await withOverrideSubjects(deps, await (deps.timetable as any).prisma.client.timetableOverride.findMany({
             where: {
               teacherPartnerId,
               effectiveFrom: { lte: d },
               effectiveTo: { gte: d },
             },
-            include: { class: true, section: true, subject: true, period: true, room: true },
-          });
+          }));
         }
 
         const overrideMap = new Map<string, any>();
@@ -156,10 +175,10 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
             periodName: slot.period?.name ?? slot.periodId,
             startTime: slot.period?.startTime ?? '',
             endTime: slot.period?.endTime ?? '',
-            className: slot.class?.name ?? '',
+            className: slot.schoolClass?.name ?? '',
             sectionName: slot.section?.name ?? '',
             subjectName: cell?.subject?.name ?? '',
-            roomName: cell?.room?.name ?? '',
+            roomName: cell?.teachingRoom?.name ?? cell?.room ?? '',
             overridden: !!override,
             overrideReason: override?.reason ?? '',
           });
@@ -206,29 +225,28 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
 
         // Get all slots for the filtered classes
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { classId: { in: classIds } },
+          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
           include: {
-            class: { include: { gradeLevel: true } },
+            schoolClass: { include: { gradeLevel: true } },
             section: true,
             subject: true,
-            teacher: true,
+            teacher: { include: { partner: true } },
             period: true,
-            room: true,
+            teachingRoom: true,
           },
-          orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }, { class: { name: 'asc' } }],
+          orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }, { schoolClass: { name: 'asc' } }],
         });
 
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
-          overrides = await (deps.timetable as any).prisma.client.timetableOverride.findMany({
+          overrides = await withOverrideSubjects(deps, await (deps.timetable as any).prisma.client.timetableOverride.findMany({
             where: {
-              classId: { in: classIds },
+              ...(classIds?.length ? { classId: { in: classIds } } : {}),
               effectiveFrom: { lte: d },
               effectiveTo: { gte: d },
             },
-            include: { class: true, section: true, subject: true, teacher: true, period: true, room: true },
-          });
+          }));
         }
 
         // Build a lookup for the effective cell (override wins)
@@ -247,8 +265,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
             arr.push(cell);
             byTeacherPeriod.set(tpKey, arr);
           }
-          if (cell.roomId) {
-            const rpKey = `${cell.roomId}|${cell.dayOfWeek}|${cell.periodId}`;
+          if (cell.teachingRoomId) {
+            const rpKey = `${cell.teachingRoomId}|${cell.dayOfWeek}|${cell.periodId}`;
             const arr = byRoomPeriod.get(rpKey) ?? [];
             arr.push(cell);
             byRoomPeriod.set(rpKey, arr);
@@ -260,19 +278,19 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
 
         for (const cell of effective.values()) {
           const tpKey = `${cell.teacherPartnerId}|${cell.dayOfWeek}|${cell.periodId}`;
-          const rpKey = `${cell.roomId}|${cell.dayOfWeek}|${cell.periodId}`;
+          const rpKey = `${cell.teachingRoomId}|${cell.dayOfWeek}|${cell.periodId}`;
           const teacherClash = cell.teacherPartnerId && (byTeacherPeriod.get(tpKey)?.length ?? 0) > 1;
-          const roomClash = cell.roomId && (byRoomPeriod.get(rpKey)?.length ?? 0) > 1;
+          const roomClash = cell.teachingRoomId && (byRoomPeriod.get(rpKey)?.length ?? 0) > 1;
           const hasClash = teacherClash || roomClash;
 
           let details = '';
           if (teacherClash) {
             const others = byTeacherPeriod.get(tpKey)!.filter(c => c.classId !== cell.classId);
-            details += `Teacher in ${others.map(o => o.class?.name).join(', ')}; `;
+            details += `Teacher in ${others.map((o: any) => o.schoolClass?.name).join(', ')}; `;
           }
           if (roomClash) {
             const others = byRoomPeriod.get(rpKey)!.filter(c => c.classId !== cell.classId);
-            details += `Room used by ${others.map(o => o.class?.name).join(', ')}; `;
+            details += `Room used by ${others.map((o: any) => o.schoolClass?.name).join(', ')}; `;
           }
 
           rows.push({
@@ -282,11 +300,11 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
             periodName: cell.period?.name ?? cell.periodId,
             startTime: cell.period?.startTime ?? '',
             endTime: cell.period?.endTime ?? '',
-            className: cell.class?.name ?? '',
+            className: cell.schoolClass?.name ?? '',
             sectionName: cell.section?.name ?? '',
             subjectName: cell.subject?.name ?? '',
-            teacherName: cell.teacher?.name ?? '',
-            roomName: cell.room?.name ?? '',
+            teacherName: cell.teacher?.partner?.name ?? '',
+            roomName: cell.teachingRoom?.name ?? cell.room ?? '',
             clash: hasClash,
             clashDetails: details.slice(0, -2),
           });
@@ -331,31 +349,34 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
 
         // Get all slots for classes
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { classId: { in: classIds } },
-          include: { room: true, period: true },
+          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
+          include: { teachingRoom: true, period: true },
         });
 
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
           overrides = await (deps.timetable as any).prisma.client.timetableOverride.findMany({
-            where: { classId: { in: classIds }, effectiveFrom: { lte: d }, effectiveTo: { gte: d } },
-            include: { room: true, period: true },
+            where: {
+              ...(classIds?.length ? { classId: { in: classIds } } : {}),
+              effectiveFrom: { lte: d },
+              effectiveTo: { gte: d },
+            },
           });
         }
 
         const effectiveRoomSlots = new Map<string, Set<string>>();
         for (const s of slots) {
-          if (s.roomId) {
-            const key = `${s.roomId}|${s.dayOfWeek}|${s.periodId}`;
+          if (s.teachingRoomId) {
+            const key = `${s.teachingRoomId}|${s.dayOfWeek}|${s.periodId}`;
             const set = effectiveRoomSlots.get(key) ?? new Set();
             set.add(`${s.classId}|${s.sectionId ?? ''}`);
             effectiveRoomSlots.set(key, set);
           }
         }
         for (const o of overrides) {
-          if (o.roomId) {
-            const key = `${o.roomId}|${o.dayOfWeek}|${o.periodId}`;
+          if (o.teachingRoomId) {
+            const key = `${o.teachingRoomId}|${o.dayOfWeek}|${o.periodId}`;
             effectiveRoomSlots.set(key, new Set([`${o.classId}|${o.sectionId ?? ''}`]));
           }
         }

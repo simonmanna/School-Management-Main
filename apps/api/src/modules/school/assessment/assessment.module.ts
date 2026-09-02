@@ -5,10 +5,14 @@ import { MarkingService } from './marking.service';
 import { AssessmentMintService } from './assessment-mint.service';
 import { AssessmentBoardService } from './assessment-board.service';
 import { AssessmentBoardController } from './assessment-board.controller';
+import { AssessmentWorkflowService } from './assessment-workflow.service';
 import { AcademicRosterService } from './roster.service';
 import { RubricService } from './rubric.service';
 import { AssignmentService } from './assignment.service';
 import { ResultRunService } from './result-run.service';
+import { ResultIntegrityService } from './result-integrity.service';
+import { PromotionDecisionService } from './promotion-decision.service';
+import { SchoolEnrollmentModule } from '../enrollment/enrollment.module';
 import { CbtResultBridgeService } from './cbt-result-bridge.service';
 import { GradebookService } from './gradebook.service';
 import { GradebookController } from './gradebook.controller';
@@ -19,6 +23,7 @@ import {
   AssessmentPolicyController,
   AssignmentController,
   MarkingController,
+  PromotionDecisionController,
   ResultController,
   RubricController,
 } from './assessment.controller';
@@ -30,6 +35,9 @@ import {
  * CbtResultBridgeService lets the CBT module post quiz marks into this spine.
  */
 @Module({
+  // Phase 5 applies a promotion decision through the canonical placement
+  // spine rather than writing a placement itself — one writer, not two.
+  imports: [SchoolEnrollmentModule],
   controllers: [
     AssessmentPolicyController,
     AssessmentComponentController,
@@ -41,8 +49,10 @@ import {
     ResultController,
     GradebookController,
     AssessmentBoardController,
+    PromotionDecisionController,
   ],
   providers: [
+    AssessmentWorkflowService,
     AssessmentPolicyService,
     AssessmentComponentService,
     AssessmentService,
@@ -53,10 +63,13 @@ import {
     RubricService,
     AssignmentService,
     ResultRunService,
+    ResultIntegrityService,
+    PromotionDecisionService,
     CbtResultBridgeService,
     GradebookService,
   ],
   exports: [
+    AssessmentWorkflowService,
     AssessmentPolicyService,
     AssessmentComponentService,
     AssessmentService,
@@ -67,6 +80,8 @@ import {
     RubricService,
     AssignmentService,
     ResultRunService,
+    ResultIntegrityService,
+    PromotionDecisionService,
     CbtResultBridgeService,
     GradebookService,
   ],

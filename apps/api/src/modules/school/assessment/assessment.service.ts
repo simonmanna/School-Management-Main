@@ -72,10 +72,15 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
       const before = await tx.assessment.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`Assessment ${id} not found`);
       // Once graded/archived, structural edits are refused — the marks depend on it.
-      if (['graded', 'archived'].includes(before.status)) {
+      if (!['draft', 'scheduled'].includes(before.status)) {
         throw new BadRequestException(`Assessment ${id} is ${before.status} and cannot be edited`);
       }
       const { version, dueAt, ...rest } = dto;
+      if (before.courseOfferingId && version === undefined) throw new BadRequestException('An expected version is required');
+      if (dto.componentId) {
+        const component = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId }, include: { policy: true } });
+        if (!component || component.kind !== (dto.kind ?? before.kind) || (component.policy.subjectId && component.policy.subjectId !== before.subjectId) || (component.policy.classId && component.policy.classId !== before.classId) || (component.policy.termId && component.policy.termId !== before.termId)) throw new BadRequestException('Component does not match this assessment context');
+      }
       const res = await tx.assessment.updateMany({
         where: version === undefined ? { id } : { id, version },
         data: {
@@ -130,5 +135,12 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
       include: { component: true },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async remove(id: string): Promise<void> {
+    const row = await this.prisma.client.assessment.findFirst({ where: { id } });
+    if (!row) throw new NotFoundException('Assessment not found');
+    if (!['draft', 'scheduled'].includes(row.status)) throw new BadRequestException('Published assessment evidence cannot be deleted; archive the assessment instead');
+    return super.remove(id);
   }
 }

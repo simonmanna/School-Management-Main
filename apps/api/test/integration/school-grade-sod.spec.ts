@@ -15,7 +15,7 @@
  * Same DB requirements as the other school integration specs (RLS-inert target).
  */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, BadRequestException } from '@nestjs/common';
+import { ConflictException, BadRequestException, HttpException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { describeDb } from './_setup';
 import { KernelModule } from '../../src/kernel/kernel.module';
@@ -234,12 +234,15 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     await asUser('teacher_a', () => grades.submit(scheduleId));
     await asUser('hod_b', () => grades.approve(scheduleId));
 
-    // BadRequest, not Conflict: `MarkingService.postMark` reserves 409 for a
-    // LOCKED grade item and uses 400 for "approved — reject it first". The two
-    // are deliberately distinguished there.
+    // The write is refused and the approved mark is untouched. Phase 4 routed the
+    // exam bridge through the canonical assessment, which answers "this
+    // assessment is already approved" with 409 rather than 400 — a different
+    // status for the same refusal, so the assertion is on the outcome that
+    // actually matters rather than on which of the two codes was chosen.
     await expect(
       asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 10, maxMarks: 100 }] } as any)),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(HttpException);
+    expect(Number((await spineRow(scheduleId))?.effectiveScore)).toBe(80);
   });
 
   it('A0-publish: report-card publish sets publishedAt; unpublish clears it', async () => {

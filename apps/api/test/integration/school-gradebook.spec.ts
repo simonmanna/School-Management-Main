@@ -131,12 +131,17 @@ describeDb('integration: gradebook — one weighted total, editable columns', ()
     expect(abbo.finalPercent).toBe(66);
 
     // Independently: freeze a roster, run results, compare the subject percent.
+    // Membership is written BEFORE the freeze: Phase 4 added a database trigger
+    // that refuses any change to a frozen roster's membership, so seeding a
+    // roster as already-frozen and then adding a member is now rejected — which
+    // is exactly the guarantee the trigger exists to give.
     const roster = await raw.academicRoster.create({
-      data: { organizationId, termId, scopeType: 'class', classId, name: 'GB roster', frozenAt: new Date() },
+      data: { organizationId, termId, scopeType: 'class', classId, name: 'GB roster' },
     });
     await raw.academicRosterMember.create({
       data: { organizationId, rosterId: roster.id, studentProfileId: studentIds[0], classId, gradeLevelId },
     });
+    await raw.academicRoster.update({ where: { id: roster.id }, data: { frozenAt: new Date() } });
     // Approve the two StudentAssessments so the publish gate would pass; compute reads approved-or-terminal.
     await raw.studentAssessment.updateMany({
       where: { studentProfileId: studentIds[0], termId, assessment: { subjectId } },

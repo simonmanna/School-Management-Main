@@ -72,6 +72,9 @@ describeDb('integration: A3 result spine', () => {
     if (opts.approve) {
       await asUser('teacher', () => grades.submit(sched.id));
       await asUser('hod', () => grades.approve(sched.id)); // different user → SoD ok
+      // Approved marks close the paper. Phase 5's gate refuses to release a
+      // result computed from a paper someone could still be marking.
+      await raw.examSchedule.update({ where: { id: sched.id }, data: { marksLockedAt: new Date(), marksLockedById: 'hod' } });
     }
 
     const roster: any = await asUser('admin', () => rosters.capture({ termId, classId, source: 'derived_current_class' } as any));
@@ -88,6 +91,11 @@ describeDb('integration: A3 result spine', () => {
     const year = await raw.academicYear.create({ data: { organizationId, name: '2026', startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') } });
     termId = (await raw.term.create({ data: { organizationId, academicYearId: year.id, name: 'Term 1', startDate: new Date('2026-01-15'), endDate: new Date('2026-04-15'), isCurrent: true } })).id;
     subjectId = (await raw.subject.create({ data: { organizationId, code: 'MATH', name: 'Mathematics', isCore: true } })).id;
+    // Phase 5's publish gate checks that the numbers were produced under a
+    // signed-off rule: a subject with no policy, or a draft one, blocks release.
+    const policy = await raw.assessmentPolicy.create({ data: { organizationId, name: 'A3 Maths', subjectId, termId, passMark: 50 } });
+    await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Exam', kind: 'exam', weight: 100, aggregation: 'mean' } });
+    await raw.assessmentPolicy.update({ where: { id: policy.id }, data: { publishedAt: new Date() } });
 
     moduleRef = await Test.createTestingModule({
       imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],

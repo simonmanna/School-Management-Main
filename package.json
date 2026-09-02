@@ -26,7 +26,10 @@
     "typecheck": "pnpm -r typecheck",
     "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test",
     "academics:inventory": "node scripts/academic-inventory.mjs",
+    "academics:phase4:rehearse": "node scripts/academic-phase4-rehearsal.cjs",
+    "test:academics:phase4": "pnpm --filter @erp/api exec jest test/integration/school-assessment-phase4.spec.ts test/integration/school-assessment-unified.spec.ts test/integration/school-assessment-roster.spec.ts test/unit/assessment-phase4-contracts.spec.ts test/unit/teaching-phase3.spec.ts test/unit/marking-recompute.spec.ts test/unit/marks-workspace.spec.ts test/unit/lms-view-envelope.spec.ts --runInBand --detectOpenHandles",
     "academics:inventory:check": "pnpm academics:inventory && git diff --exit-code -- docs/architecture/academic-current-state-inventory.md docs/architecture/academic-current-state-inventory.json",
+    "test:academics:phase5": "pnpm --filter @erp/api exec jest test/integration/school-exam-phase5.spec.ts test/integration/school-result-integrity.spec.ts test/integration/school-exam-operations.spec.ts test/integration/school-exam-workspace.spec.ts test/integration/school-gradebook.spec.ts test/integration/school-grade-sod.spec.ts test/unit/exam-phase5-contracts.spec.ts --runInBand --detectOpenHandles",
     "test:academics": "pnpm --filter @erp/api exec jest test/unit/academic-fsm.spec.ts test/unit/marks-workspace.spec.ts test/unit/enrollment-grouping.spec.ts test/unit/course-offering-phase2.spec.ts test/integration/academics-foundation.spec.ts test/integration/school-enrollment-placement.spec.ts test/integration/school-assessment-core.spec.ts test/integration/school-assessment-roster.spec.ts test/integration/school-assessment-unified.spec.ts test/integration/school-gradeentry-parity.spec.ts test/integration/school-result-integrity.spec.ts --runInBand --detectOpenHandles"
   },
   "pnpm": {

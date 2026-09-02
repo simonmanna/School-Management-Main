@@ -102,7 +102,7 @@ export class GradebookService {
         // unapproved score must not appear here — a head of department may still
         // change it. `released: false` lets the UI say "not released yet" rather
         // than render a blank that reads as a zero.
-        const released = r?.approvalStatus === 'approved';
+        const released = r?.approvalStatus === 'approved' && !!a.marksReleaseAt && a.marksReleaseAt <= new Date();
         return {
           assessmentId: a.id,
           title: a.title,

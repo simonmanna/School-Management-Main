@@ -49,9 +49,11 @@ describeDb('integration: A2 rosters + assignments', () => {
   let subjectId = '';
 
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
-  const perms = ['school:assessments:write', 'school:assignments:write', 'school:assignments:grade', 'school:assignments:submit', 'school:students:write'];
+  const perms = ['school:grades:write', 'school:assessments:write', 'school:assignments:write', 'school:assignments:grade', 'school:assignments:submit', 'school:students:write'];
   const asUser = <T>(userId: string, fn: () => Promise<T>): Promise<T> =>
     tenant.run({ organizationId, userId, permissions: perms }, fn);
+  const asStudent = <T>(studentProfileId: string, fn: () => Promise<T>): Promise<T> =>
+    tenant.run({ organizationId, userId: 'student', permissions: ['school:assignments:submit'], portal: { kind: 'student', studentProfileId } }, fn);
 
   const makeStudent = (n: string) =>
     asUser('registrar', () => students.create({ name: `Student ${n}`, admissionNo: n, enrollmentDate: '2026-01-15', currentClassId: classId } as any)) as Promise<any>;
@@ -125,12 +127,12 @@ describeDb('integration: A2 rosters + assignments', () => {
     // allowLate=false, due yesterday → late submit blocked.
     const strict = await asUser('teacher', () => assignments.create({ subjectId, classId, termId, title: 'Strict', maxScore: 100, rosterId: roster.id, dueAt: new Date(Date.now() - 86400000).toISOString(), allowLate: false } as any)) as any;
     await asUser('teacher', () => assignments.publish(strict.id));
-    await expect(asUser('student', () => assignments.submit({ assignmentId: strict.id, studentProfileId: s.id } as any))).rejects.toBeInstanceOf(BadRequestException);
+    await expect(asStudent(s.id, () => assignments.submit({ assignmentId: strict.id, studentProfileId: s.id } as any))).rejects.toBeInstanceOf(BadRequestException);
 
     // allowLate=true, due yesterday → accepted and flagged late.
     const lenient = await asUser('teacher', () => assignments.create({ subjectId, classId, termId, title: 'Lenient', maxScore: 100, rosterId: roster.id, dueAt: new Date(Date.now() - 86400000).toISOString(), allowLate: true, latePenaltyPercent: 10 } as any)) as any;
     await asUser('teacher', () => assignments.publish(lenient.id));
-    const sub = await asUser('student', () => assignments.submit({ assignmentId: lenient.id, studentProfileId: s.id } as any)) as any;
+    const sub = await asStudent(s.id, () => assignments.submit({ assignmentId: lenient.id, studentProfileId: s.id } as any)) as any;
     expect(sub.isLate).toBe(true);
   });
 
@@ -142,7 +144,7 @@ describeDb('integration: A2 rosters + assignments', () => {
 
     const a = await asUser('teacher', () => assignments.create({ subjectId, classId, termId, title: 'HW', maxScore: 100, rosterId: roster.id, dueAt: new Date(Date.now() - 86400000).toISOString(), allowLate: true, latePenaltyPercent: 10 } as any)) as any;
     await asUser('teacher', () => assignments.publish(a.id));
-    await asUser('student', () => assignments.submit({ assignmentId: a.id, studentProfileId: s.id } as any));
+    await asStudent(s.id, () => assignments.submit({ assignmentId: a.id, studentProfileId: s.id } as any));
 
     // rawScore 80, late 10% → penalty 8 → effective 72.
     await asUser('teacher', () => assignments.grade({ assignmentId: a.id, studentProfileId: s.id, rawScore: 80 } as any));
@@ -168,7 +170,7 @@ describeDb('integration: A2 rosters + assignments', () => {
 
     const a = await asUser('teacher', () => assignments.create({ subjectId, classId, termId, title: 'Rubric essay', maxScore: 100, rosterId: roster.id, gradingMode: 'rubric', rubricId: rubric.id } as any)) as any;
     await asUser('teacher', () => assignments.publish(a.id));
-    await asUser('student', () => assignments.submit({ assignmentId: a.id, studentProfileId: s.id } as any));
+    await asStudent(s.id, () => assignments.submit({ assignmentId: a.id, studentProfileId: s.id } as any));
 
     // Content 8/10, Structure 6/10 → weighted fraction 0.7 → 70/100.
     await asUser('teacher', () => assignments.grade({

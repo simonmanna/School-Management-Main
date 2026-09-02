@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, GoneException, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { GradebookService } from './gradebook.service';
@@ -38,25 +38,25 @@ export class GradebookController {
   @Post('cell')
   @RequirePermissions(PERMISSIONS.school.enterGrades)
   cell(@Body() dto: GradebookCellDto) {
-    return this.service.cell(dto);
+    throw new GoneException('The legacy gradebook is read-only. Save drafts through the Assessment Board markbook.');
   }
 
   @Post('column')
   @RequirePermissions(PERMISSIONS.school.manageAssessments)
   createColumn(@Body() dto: GradebookColumnDto) {
-    return this.service.createColumn(dto);
+    throw new GoneException('Create assessments through /school/assessment-board with a course and frozen roster.');
   }
 
   @Patch('column/:id')
   @RequirePermissions(PERMISSIONS.school.manageAssessments)
   updateColumn(@Param('id') id: string, @Body() dto: UpdateGradebookColumnDto) {
-    return this.service.updateColumn(id, dto);
+    throw new GoneException('The legacy gradebook is read-only. Use the Assessment Board.');
   }
 
   @Delete('column/:id')
   @RequirePermissions(PERMISSIONS.school.manageAssessments)
   deleteColumn(@Param('id') id: string, @Query('force') force?: string) {
-    return this.service.deleteColumn(id, force === 'true');
+    throw new GoneException('Academic evidence is retained. Archive assessments through their canonical lifecycle.');
   }
 
   @Post('column/:id/lock')

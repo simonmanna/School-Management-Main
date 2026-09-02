@@ -8,7 +8,13 @@ import { MarkingService } from './marking.service';
 import { AcademicRosterService } from './roster.service';
 import { RubricService } from './rubric.service';
 import { AssignmentService } from './assignment.service';
+import { AssessmentWorkflowService } from './assessment-workflow.service';
+import { AssessmentLifecycleDto, CreateUnifiedAssessmentDto } from './assessment-board.dto';
 import { ResultRunService } from './result-run.service';
+import { ResultIntegrityService } from './result-integrity.service';
+import { PromotionDecisionService } from './promotion-decision.service';
+import { ApplyPromotionDto, DecidePromotionDto, ProposePromotionsDto } from './promotion-decision.dto';
+import { RejectAmendmentDto } from './dto.types';
 import {
   AppendAdjustmentDto,
   AssessmentTransitionDto,
@@ -34,6 +40,14 @@ import {
 @Controller('school/assessment-policies')
 export class AssessmentPolicyController {
   constructor(private readonly service: AssessmentPolicyService) {}
+
+  @Post(':id/publish')
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
+  publish(@Param('id') id: string) { return this.service.publish(id); }
+
+  @Post(':id/fork')
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
+  fork(@Param('id') id: string) { return this.service.fork(id); }
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -122,7 +136,7 @@ export class AssessmentComponentController {
 
 @Controller('school/assessments')
 export class AssessmentController {
-  constructor(private readonly service: AssessmentService) {}
+  constructor(private readonly service: AssessmentService, private readonly workflow: AssessmentWorkflowService) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -144,8 +158,8 @@ export class AssessmentController {
 
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageAssessments)
-  create(@Body() dto: CreateAssessmentDto) {
-    return this.service.create(dto);
+  async create(@Body() dto: CreateUnifiedAssessmentDto) {
+    return (await this.workflow.create(dto)).assessment;
   }
 
   @Patch(':id')
@@ -156,8 +170,8 @@ export class AssessmentController {
 
   @Post(':id/transition')
   @RequirePermissions(PERMISSIONS.school.manageAssessments)
-  transition(@Param('id') id: string, @Body() dto: AssessmentTransitionDto) {
-    return this.service.transition(id, dto.action);
+  transition(@Param('id') id: string, @Body() dto: AssessmentLifecycleDto) {
+    return this.workflow.transition(id, dto);
   }
 
   @Delete(':id')
@@ -311,7 +325,7 @@ export class RubricController {
 
 @Controller('school/assignments')
 export class AssignmentController {
-  constructor(private readonly service: AssignmentService) {}
+  constructor(private readonly service: AssignmentService, private readonly workflow: AssessmentWorkflowService) {}
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
@@ -327,37 +341,59 @@ export class AssignmentController {
 
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
-  create(@Body() dto: CreateAssignmentDto) {
-    return this.service.create(dto);
+  async create(@Body() dto: CreateUnifiedAssessmentDto) {
+    const result = await this.workflow.create({ ...dto, kind: dto.kind ?? 'assignment' });
+    return this.service.byAssessment(result.assessment.id);
   }
 
   @Post(':id/publish')
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
-  publish(@Param('id') id: string) {
-    return this.service.publish(id);
+  async publish(@Param('id') id: string, @Body() dto: AssessmentLifecycleDto) {
+    const assignment = await this.service.byId(id);
+    if (!assignment) return null;
+    return this.workflow.transition(assignment.assessmentId, { ...dto, action: 'publish' });
   }
 
   @Post('submit')
   @RequirePermissions(PERMISSIONS.school.submitAssignments)
   submit(@Body() dto: SubmitAssignmentDto) {
-    return this.service.submit(dto);
+    return this.service.submitCanonical(dto);
   }
 
+  @Post('record-received')
+  @RequirePermissions(PERMISSIONS.school.read)
+  recordReceived(@Body() dto: SubmitAssignmentDto) { return this.service.recordReceived(dto); }
+
   @Post('grade')
-  @RequirePermissions(PERMISSIONS.school.gradeAssignments)
+  @RequirePermissions(PERMISSIONS.school.read)
   grade(@Body() dto: GradeAssignmentDto) {
-    return this.service.grade(dto);
+    return this.service.gradeCanonical(dto);
   }
 }
 
 @Controller('school/results')
 export class ResultController {
-  constructor(private readonly service: ResultRunService) {}
+  constructor(
+    private readonly service: ResultRunService,
+    private readonly integrity: ResultIntegrityService,
+  ) {}
 
   @Post('compute')
   @RequirePermissions(PERMISSIONS.school.computeResults)
   compute(@Body() dto: ComputeResultsDto) {
     return this.service.compute(dto);
+  }
+
+  /**
+   * Every result set for a term.
+   *
+   * Declared BEFORE `:id` — Nest matches routes in declaration order, so a
+   * literal segment placed after a parameter segment is unreachable.
+   */
+  @Get('by-term/:termId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  byTerm(@Param('termId') termId: string, @Query('scopeId') scopeId?: string) {
+    return this.integrity.byTerm(termId, scopeId);
   }
 
   @Get('by-student/:studentProfileId/term/:termId')
@@ -366,16 +402,35 @@ export class ResultController {
     return this.service.latestPublished(termId, studentProfileId);
   }
 
+  @Get('amendments/queue')
+  @RequirePermissions(PERMISSIONS.school.read)
+  amendmentQueue(@Query('termId') termId?: string) {
+    return this.integrity.amendmentQueue(termId);
+  }
+
+  @Get('amendments/by-result-set/:id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  amendmentsByResultSet(@Param('id') id: string) {
+    return this.integrity.amendmentsByResultSet(id);
+  }
+
   @Get(':id/readiness')
   @RequirePermissions(PERMISSIONS.school.read)
   readiness(@Param('id') id: string) {
     return this.service.readiness(id);
   }
 
+  /** Why this learner's subject percentages are what they are (Phase 5). */
+  @Get(':id/explain/:studentProfileId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  explain(@Param('id') id: string, @Param('studentProfileId') studentProfileId: string) {
+    return this.integrity.explain(id, studentProfileId);
+  }
+
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
-  findOne(@Param('id') id: string) {
-    return this.service.findResultSet(id);
+  findOne(@Param('id') id: string, @Query('studentProfileId') studentProfileId?: string) {
+    return this.integrity.detail(id, studentProfileId);
   }
 
   @Post(':id/publish')
@@ -396,9 +451,51 @@ export class ResultController {
     return this.service.requestAmendment(dto);
   }
 
+  /** Approving recomputes into a new revision; the old one is archived, not edited. */
   @Post('amendments/:id/approve')
-  @RequirePermissions(PERMISSIONS.school.amendResults)
+  @RequirePermissions(PERMISSIONS.school.approveResults)
   approveAmendment(@Param('id') id: string) {
     return this.service.approveAmendment(id);
+  }
+
+  @Post('amendments/:id/reject')
+  @RequirePermissions(PERMISSIONS.school.approveResults)
+  rejectAmendment(@Param('id') id: string, @Body() dto: RejectAmendmentDto) {
+    return this.integrity.rejectAmendment(id, dto.decisionNote);
+  }
+}
+
+/**
+ * `/school/promotion-decisions` — Phase 5 promotion as three separate acts.
+ *
+ * Proposing is a computation, deciding is a judgement, and applying moves a
+ * child. They are three grants for that reason.
+ */
+@Controller('school/promotion-decisions')
+export class PromotionDecisionController {
+  constructor(private readonly service: PromotionDecisionService) {}
+
+  @Get('by-result-set/:resultSetId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  board(@Param('resultSetId') resultSetId: string) {
+    return this.service.board(resultSetId);
+  }
+
+  @Post('propose')
+  @RequirePermissions(PERMISSIONS.school.computeResults)
+  propose(@Body() dto: ProposePromotionsDto) {
+    return this.service.propose(dto);
+  }
+
+  @Post('decide')
+  @RequirePermissions(PERMISSIONS.school.decidePromotion)
+  decide(@Body() dto: DecidePromotionDto) {
+    return this.service.decide(dto);
+  }
+
+  @Post('apply')
+  @RequirePermissions(PERMISSIONS.school.applyPromotion)
+  apply(@Body() dto: ApplyPromotionDto) {
+    return this.service.apply(dto);
   }
 }

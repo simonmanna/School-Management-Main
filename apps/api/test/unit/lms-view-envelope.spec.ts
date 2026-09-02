@@ -87,7 +87,7 @@ describe('LMS view envelope', () => {
   });
 
   describe('grade release', () => {
-    const assessments = [{ id: 'a_1', maxScore: 20, hiddenFromStudents: false }];
+    const assessments = [{ id: 'a_1', maxScore: 20, hiddenFromStudents: false, marksReleaseAt: new Date('2026-01-01') }];
 
     it('withholds a mark that moderation has not approved', async () => {
       const { svc } = build({
@@ -111,6 +111,12 @@ describe('LMS view envelope', () => {
       });
       const [v] = await svc.moduleViews([MODULE], { studentProfileId: 'sp_1', showGrades: true });
       expect(v.grade).toMatchObject({ released: true, score: 17, percentage: 85, maxScore: 20 });
+    });
+
+    it('withholds approved marks until an explicit release', async () => {
+      const { svc } = build({ assessments: [{ ...assessments[0], marksReleaseAt: null }], marks: [{ assessmentId: 'a_1', effectiveScore: 17, percentage: 85, approvalStatus: 'approved' }] });
+      const [v] = await svc.moduleViews([MODULE], { studentProfileId: 'sp_1', showGrades: true });
+      expect(v.grade).toMatchObject({ released: false, score: null, percentage: null });
     });
 
     it('omits a column the teacher has hidden from students', async () => {

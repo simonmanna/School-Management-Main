@@ -145,7 +145,7 @@ export function roundDec(v: Dec, mode: RoundingModeName, dp: number): Dec {
  *   special_consideration/present → the effective percentage
  */
 export function assessmentPercent(d: AssessmentDatum, countsAbsentAsZero: boolean): Dec | null {
-  if (d.participation === 'exempt' || d.participation === 'excused') return null;
+  if (['exempt', 'excused', 'withdrawn', 'not_enrolled', 'missing'].includes(d.participation)) return null;
   if (d.participation === 'absent') return countsAbsentAsZero ? new D(0) : null;
   if (d.participation === 'malpractice') return new D(0);
   if (d.effectiveScore === null || d.effectiveScore === undefined) return null;

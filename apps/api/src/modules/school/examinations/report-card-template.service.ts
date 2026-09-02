@@ -256,6 +256,7 @@ export class ReportCardTemplateService {
     const bySubject = new Map<string, typeof rows>();
     for (const r of rows) {
       const sid = r.assessment.subjectId;
+      if (!sid) continue;
       const list = bySubject.get(sid) ?? [];
       list.push(r);
       bySubject.set(sid, list);

@@ -152,7 +152,7 @@ export class TeachingWorkspaceService {
       return { outcomes: [], totals: coverageTotals([]), scheme: null, unmapped: 'This offering has no subject, curriculum or competency to measure against.' };
     }
 
-    const [outcomes, planLinks, schemeItems, achievements, evidence] = await Promise.all([
+    const [outcomes, planLinks, schemeItems, achievements, evidence, assessmentEvidence] = await Promise.all([
       this.prisma.client.learningOutcome.findMany({ where: outcomeWhere, orderBy: [{ order: 'asc' }, { title: 'asc' }] }),
       this.prisma.client.lessonPlanOutcome.findMany({
         where: { lessonPlan: { courseOfferingId } },
@@ -173,11 +173,15 @@ export class TeachingWorkspaceService {
       }),
       this.prisma.client.studentOutcomeAchievement.groupBy({
         by: ['learningOutcomeId', 'level'],
-        where: { termId: offering.termId },
+        where: { termId: offering.termId, student: { academicEnrollments: { some: { courseEnrollments: { some: { courseOfferingId } } } } } },
         _count: { _all: true },
       }),
       this.prisma.client.lessonDeliveryEvidence.findMany({
         where: { lessonDelivery: { scheduledLesson: { courseOfferingId } }, learningOutcomeId: { not: null } },
+        select: { learningOutcomeId: true },
+      }),
+      this.prisma.client.assessmentOutcome.findMany({
+        where: { assessment: { courseOfferingId, status: { notIn: ['draft', 'scheduled'] }, studentAssessments: { some: { effectiveScore: { not: null } } } } },
         select: { learningOutcomeId: true },
       }),
     ]);
@@ -188,7 +192,7 @@ export class TeachingWorkspaceService {
         .filter((l: any) => l.lessonPlan.scheduledLessons.some((s: any) => s.status !== 'cancelled' && isTaught(s.delivery)))
         .map((l: any) => l.learningOutcomeId),
     );
-    const evidencedIds = new Set(evidence.map((e: any) => e.learningOutcomeId));
+    const evidencedIds = new Set([...evidence, ...assessmentEvidence].map((e: any) => e.learningOutcomeId));
     const achievedIds = new Set(
       achievements.filter((a: any) => ['met', 'exceeded'].includes(a.level)).map((a: any) => a.learningOutcomeId),
     );
@@ -307,15 +311,9 @@ export class TeachingWorkspaceService {
    */
   async assessments(courseOfferingId: string) {
     await this.access.assertMayView(courseOfferingId);
-    const offering = await this.access.offering(courseOfferingId);
-    const classId = offering.classId ?? offering.classCohort?.classId;
-    if (!offering.subjectId || !classId) return [];
     const rows = await this.prisma.client.assessment.findMany({
       where: {
-        subjectId: offering.subjectId,
-        classId,
-        termId: offering.termId,
-        ...(offering.sectionId ? { OR: [{ sectionId: offering.sectionId }, { sectionId: null }] } : {}),
+        courseOfferingId,
       },
       select: {
         id: true, title: true, kind: true, status: true, dueAt: true, maxScore: true,

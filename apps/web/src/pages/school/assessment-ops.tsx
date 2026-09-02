@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Plus, Lock, BookCheck } from 'lucide-react';
+import { Plus, Lock } from 'lucide-react';
 import {
-  useTerms, useClasses, useSubjects, useStudents,
+  useTerms, useClasses, useStudents,
   useRosters, useRosterMembers, useCaptureRoster, useFreezeRoster, useAddRosterMember, useRemoveRosterMember,
   useRubrics, useRubric, useCreateRubric, useForkRubric, useDeleteRubric,
-  useAssignments, useCreateAssignment, usePublishAssignment,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
+import { AssessmentReconciliation } from './_components/assessment-reconciliation';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 
@@ -27,10 +27,12 @@ export function SchoolAssessmentOpsPage() {
           <TabsTrigger value="rosters">Class lists</TabsTrigger>
           <TabsTrigger value="rubrics">Rubrics</TabsTrigger>
           <TabsTrigger value="assign">Assignments</TabsTrigger>
+          <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
         </TabsList>
         <TabsContent value="rosters" className="pt-4"><RostersTab /></TabsContent>
         <TabsContent value="rubrics" className="pt-4"><RubricsTab/></TabsContent>
         <TabsContent value="assign" className="pt-4"><AssignTab/></TabsContent>
+        <TabsContent value="reconciliation" className="pt-4"><AssessmentReconciliation /></TabsContent>
       </Tabs>
     </div>
   );
@@ -60,7 +62,7 @@ function RostersTab() {
         <CardContent className="space-y-2">
           {(rosters?.data ?? []).map((r) => (
             <button key={r.id} className="flex w-full items-center justify-between rounded border p-2 text-sm text-left hover:bg-accent" onClick={() => setRosterId(r.id)}>
-              <span>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`} <Badge variant="secondary">{r.status}</Badge></span>
+              <span>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`} <Badge variant="secondary">{r.frozenAt ? 'Frozen' : 'Draft'}</Badge></span>
               <span className="text-xs text-muted-foreground">{r.memberCount ?? '?'} members</span>
             </button>
           ))}
@@ -159,45 +161,4 @@ function RubricsTab() {
 }
 
 /* ── Assignments ── */
-function AssignTab() {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const { data: subjects } = useSubjects();
-  const { data: rubrics } = useRubrics();
-  const [termId, setTermId] = useState('');
-  const [classId, setClassId] = useState('');
-  const { data: assignments } = useAssignments(classId || undefined, termId || undefined);
-  const create = useCreateAssignment();
-  const publish = usePublishAssignment();
-  const [title, setTitle] = useState('');
-  const [subjectId, setSubjectId] = useState('');
-  const [rubricId, setRubricId] = useState('');
-  const [maxScore, setMaxScore] = useState('');
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <select className={sel + ' w-40'} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        <select className={sel + ' w-40'} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-      </div>
-      {(assignments ?? []).map((a) => (
-        <div key={a.id} className="flex items-center justify-between rounded border p-2 text-sm">
-          <span>{a.title} <Badge variant="secondary">{a.status}</Badge> {a.gradingMode && <span className="text-xs text-muted-foreground">· {a.gradingMode}</span>}</span>
-          {a.status !== 'published' && a.status !== 'closed' && <Button size="sm" variant="ghost" onClick={() => publish.mutate(a.id)}><BookCheck className="h-4 w-4" /> Publish → fan-out to roster</Button>}
-        </div>
-      ))}
-      {termId && classId && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">New assignment</CardTitle></CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <select className={sel + ' w-48'} value={subjectId} onChange={(e) => setSubjectId(e.target.value)}><option value="">Subject…</option>{(subjects?.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            <Input placeholder="Title" className="w-48" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <Input type="number" placeholder="max" className="w-20" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} />
-            <select className={sel + ' w-44'} value={rubricId} onChange={(e) => setRubricId(e.target.value)}><option value="">Grading: points</option>{(rubrics?.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name} (rubric)</option>)}</select>
-            <Button size="sm" disabled={!subjectId || !title || create.isPending} onClick={async () => { await create.mutateAsync({ subjectId, classId, termId, title, maxScore: maxScore?Number(maxScore):undefined, gradingMode: rubricId ? 'rubric' : 'points', rubricId: rubricId||undefined }); setTitle(''); notify.success('Assignment created'); }}> <Plus className="h-4 w-4" /> Create</Button>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
+function AssignTab() { return <Card><CardContent className="p-6"><p className="mb-4 text-sm text-muted-foreground">Assignments, homework and rubric marking now use the unified Assessment Board.</p><Button asChild><a href="/school/assessments?new=1">Create an assessment</a></Button></CardContent></Card>; }

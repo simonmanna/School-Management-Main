@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Assignment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -7,6 +7,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import { MarkingService } from './marking.service';
+import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
 import { latePenalty, rollupRubricFraction } from './assessment-math';
 import type { CreateAssignmentDto, GradeAssignmentDto, SubmitAssignmentDto } from './dto.types';
 
@@ -31,6 +32,7 @@ export class AssignmentService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly marking: MarkingService,
+    private readonly portalIdentity: PortalIdentityService,
   ) {}
 
   async create(dto: CreateAssignmentDto): Promise<Assignment> {
@@ -150,16 +152,49 @@ export class AssignmentService {
   }
 
   /** Student submits an attempt. Late is derived from the cutoff/due date. */
+  private async requireCanonicalBinding(id: string) {
+    const target = await this.prisma.client.assignment.findFirst({ where: { id }, include: { assessment: { include: { roster: true } } } });
+    if (!target) throw new NotFoundException('Assignment not found');
+    if (!target.assessment.courseOfferingId || !target.assessment.roster?.frozenAt) throw new ConflictException('Reconcile this legacy assignment to its course and frozen roster before recording new work');
+  }
+
+  async submitCanonical(dto: SubmitAssignmentDto) {
+    await this.requireCanonicalBinding(dto.assignmentId);
+    return this.submit(dto);
+  }
+
+  async gradeCanonical(dto: GradeAssignmentDto) {
+    await this.requireCanonicalBinding(dto.assignmentId);
+    return this.grade(dto);
+  }
+
+  async recordReceived(dto: SubmitAssignmentDto) {
+    const target = await this.prisma.client.assignment.findFirst({ where: { id: dto.assignmentId } });
+    if (!target) throw new NotFoundException('Assignment not found');
+    await this.marking.assertMayMarkAssessment(target.assessmentId);
+    return this.submitCanonical(dto);
+  }
+
   async submit(dto: SubmitAssignmentDto) {
+    if (!(await this.portalIdentity.canAccessStudent(dto.studentProfileId))) throw new ForbiddenException('You cannot submit work for this learner');
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
       const assignment = await tx.assignment.findFirst({ where: { id: dto.assignmentId }, include: { assessment: true } });
       if (!assignment) throw new NotFoundException(`Assignment ${dto.assignmentId} not found`);
 
+      const now = new Date();
+      if (!this.tenant.portal) await this.marking.assertMayMarkAssessment(assignment.assessmentId);
+      await tx.$queryRawUnsafe('SELECT id FROM "StudentAssessment" WHERE "assessmentId" = $1 AND "studentProfileId" = $2 AND "organizationId" = $3 FOR UPDATE', assignment.assessmentId, dto.studentProfileId, organizationId);
+      if (!['published', 'open'].includes(assignment.assessment.status)) throw new BadRequestException('This assignment is not open for submissions');
+      if (assignment.assessment.openAt && now < assignment.assessment.openAt) throw new BadRequestException('Submission window has not opened');
+      if (assignment.assessment.closeAt && now > assignment.assessment.closeAt) throw new BadRequestException('Submission window has closed');
+
       const sa = await tx.studentAssessment.findFirst({
         where: { assessmentId: assignment.assessmentId, studentProfileId: dto.studentProfileId },
       });
       if (!sa) throw new BadRequestException('Student is not on this assignment (roster not fanned out to them)');
+      if (['submitted', 'approved'].includes(sa.approvalStatus)) throw new ConflictException('This work is already in the approval chain');
+      await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))::text', `${organizationId}:submission:${sa.id}`);
 
       const priorCount = await tx.assignmentSubmission.count({
         where: { assignmentId: dto.assignmentId, studentAssessmentId: sa.id },
@@ -169,10 +204,19 @@ export class AssignmentService {
       }
       const attemptNo = priorCount + 1;
 
-      const due: Date | null = assignment.lateCutoffAt ?? assignment.assessment.dueAt ?? null;
+      const due: Date | null = assignment.assessment.dueAt ?? null;
       const isLate = !!due && new Date() > due;
+      if (assignment.lateCutoffAt && now > assignment.lateCutoffAt) throw new BadRequestException('The late submission cutoff has passed');
       if (isLate && !assignment.allowLate) {
         throw new BadRequestException('Past due date; late submissions are not allowed for this assignment');
+      }
+
+      // A new attempt is new work: an earlier draft grade must not be approved
+      // as though it marked this attempt. Prior submission snapshots stay intact.
+      if (priorCount > 0 && sa.effectiveScore != null) {
+        const cleared = await this.marking.postMark(tx, { studentAssessmentId: sa.id, score: null, source: 'assignment', expectedVersion: sa.version });
+        if (cleared.effectiveScore != null) throw new ConflictException('Moderated adjustments must be resolved before a new attempt can be graded');
+        await tx.assessmentRubricScore.deleteMany({ where: { studentAssessmentId: sa.id } });
       }
 
       await tx.assignmentSubmission.create({
@@ -189,7 +233,7 @@ export class AssignmentService {
       });
       await tx.studentAssessment.updateMany({
         where: { id: sa.id },
-        data: { status: attemptNo > 1 ? 'resubmitted' : 'submitted', version: { increment: 1 } },
+        data: { status: attemptNo > 1 ? 'resubmitted' : 'submitted', participation: 'present', version: { increment: 1 } },
       });
       this.events.publish(EVENTS.SchoolAssignmentSubmitted, {
         organizationId,
@@ -207,10 +251,14 @@ export class AssignmentService {
   /** Grade the latest submission. Score source depends on the grading mode. */
   async grade(dto: GradeAssignmentDto) {
     const organizationId = this.tenant.organizationId;
+    const target = await this.prisma.client.assignment.findFirst({ where: { id: dto.assignmentId } });
+    if (!target) throw new NotFoundException('Assignment not found');
+    await this.marking.assertMayMarkAssessment(target.assessmentId);
     return this.prisma.client.$transaction(async (tx: any) => {
       const assignment = await tx.assignment.findFirst({ where: { id: dto.assignmentId }, include: { assessment: true } });
       if (!assignment) throw new NotFoundException(`Assignment ${dto.assignmentId} not found`);
 
+      if (assignment.assessment.courseOfferingId && dto.expectedVersion === undefined) throw new BadRequestException('Reload the learner and send its expected version before grading');
       const sa = await tx.studentAssessment.findFirst({
         where: { assessmentId: assignment.assessmentId, studentProfileId: dto.studentProfileId },
       });
@@ -233,9 +281,18 @@ export class AssignmentService {
         }
         // Write canonical rubric scores, then roll up to a fraction of maxScore.
         const items: Array<{ score: number; maxScore: number; weight: number }> = [];
+        const criteria = await tx.rubricCriterion.findMany({ where: { rubricId: assignment.rubricId } });
+        if (new Set(dto.rubricScores.map((r) => r.criterionId)).size !== criteria.length || dto.rubricScores.length !== criteria.length) {
+          throw new BadRequestException('Score every rubric criterion exactly once');
+        }
         for (const rs of dto.rubricScores) {
           const criterion = await tx.rubricCriterion.findFirst({ where: { id: rs.criterionId } });
           if (!criterion) throw new NotFoundException(`RubricCriterion ${rs.criterionId} not found`);
+          if (criterion.rubricId !== assignment.rubricId || rs.score < 0 || rs.score > Number(criterion.maxScore)) throw new BadRequestException('Criterion score is outside this assignment rubric');
+          if (rs.levelId) {
+            const level = await tx.rubricLevel.findFirst({ where: { id: rs.levelId, criterionId: criterion.id } });
+            if (!level || Number(level.score) !== rs.score) throw new BadRequestException('Rubric level and score must match');
+          }
           await tx.assessmentRubricScore.upsert({
             where: { studentAssessmentId_criterionId: { studentAssessmentId: sa.id, criterionId: rs.criterionId } },
             create: {
@@ -290,7 +347,10 @@ export class AssignmentService {
         studentAssessmentId: sa.id,
         score: finalScore,
         source: 'assignment',
+        expectedVersion: dto.expectedVersion,
+        comment: dto.feedback,
       });
+      await tx.studentAssessment.updateMany({ where: { id: sa.id }, data: { participation: 'present' } });
 
       await this.audit.recordInTx(tx, {
         entity: 'AssignmentSubmission',
@@ -309,15 +369,22 @@ export class AssignmentService {
   }
 
   async byId(id: string) {
-    return this.prisma.client.assignment.findFirst({
+    const row = await this.prisma.client.assignment.findFirst({
       where: { id },
       include: { assessment: true, submissions: true },
     });
+    if (row) await this.marking.assertMayViewAssessment(row.assessmentId);
+    return row;
+  }
+
+  async byAssessment(assessmentId: string) {
+    await this.marking.assertMayViewAssessment(assessmentId);
+    return this.prisma.client.assignment.findFirst({ where: { assessmentId }, include: { assessment: true } });
   }
 
   async byClassTerm(classId: string, termId: string) {
     return this.prisma.client.assignment.findMany({
-      where: { assessment: { classId, termId } },
+      where: { assessment: { classId, termId, ...(await this.marking.readScope()) } },
       include: { assessment: true },
       orderBy: { createdAt: 'desc' },
     });

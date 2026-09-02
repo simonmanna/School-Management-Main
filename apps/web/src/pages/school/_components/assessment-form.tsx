@@ -1,242 +1,105 @@
-import { useEffect, useMemo, useState } from 'react';
-import { X } from 'lucide-react';
-import {
-  useAssessmentBoard, useClasses, useClassSubjects, useCreateAssessmentUnified,
-  useStaff, useTerms, useWorkspaceExams, ASSESSMENT_KINDS, KIND_LABEL,
-} from '@/features/school/api';
+import { useMemo, useState } from 'react';
+import { CheckCircle2, ClipboardList, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ASSESSMENT_KINDS, KIND_LABEL, useAssessmentBoard, useCreateAssessmentUnified, useRosters, useRosterMembers, useRubrics, useWorkspaceExams } from '@/features/school/api';
+import { useCanonicalCourseOfferings } from '@/features/school/course-offering-api';
+import { useCaptureCourseAssessmentRoster } from '@/features/school/assessment-phase4-api';
+import { useCourseCoverage } from '@/features/school/teaching-api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { notify } from '@/lib/notify';
-import { Picker, selectClass } from './exam-workflow';
+import { selectClass } from './exam-workflow';
 
-/**
- * One create form for every kind of assessment.
- *
- * The kind decides only the TAIL of the form. Everything above the divider is
- * identical whether the teacher is setting a CAT, a project or an end-of-term
- * paper, because from their side it is the same act — and making them choose a
- * subsystem first was the single biggest thing wrong with the old flow.
- *
- * Two kinds carry extra work behind them, and both are handled here rather than
- * on a separate screen:
- *   - exam: also creates the ExamSchedule rows, one per class ticked. This is
- *     what the old wizard's "choose classes" step was.
- *   - homework: also creates the HomeworkAssignment that collects submissions.
- */
-export function CreateAssessmentDialog({
-  termId: initialTerm,
-  classId: initialClass,
-  subjectId: initialSubject,
-  onClose,
-}: {
-  termId?: string;
-  classId?: string;
-  subjectId?: string;
-  onClose: () => void;
+/** Course → delivery → frozen audience. The same wizard for every assessment kind. */
+export function CreateAssessmentDialog({ termId, classId, subjectId, courseOfferingId, onClose }: {
+  termId?: string; classId?: string; subjectId?: string; courseOfferingId?: string; onClose: () => void;
 }) {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const { data: staff } = useStaff({ pageSize: 200 });
-  const create = useCreateAssessmentUnified();
-
+  const navigate = useNavigate();
+  const { data: offerings = [], isLoading } = useCanonicalCourseOfferings({ termId: courseOfferingId ? undefined : termId });
+  const choices = useMemo(() => offerings.filter((o) => ['PUBLISHED', 'ACTIVE'].includes(o.status)), [offerings]);
+  const [offeringId, setOfferingId] = useState(courseOfferingId ?? '');
+  const offering = choices.find((o) => o.id === offeringId);
+  const [step, setStep] = useState(0);
   const [kind, setKind] = useState('cat');
-  const [termId, setTermId] = useState(initialTerm ?? '');
-  const [classId, setClassId] = useState(initialClass ?? '');
-  const [subjectId, setSubjectId] = useState(initialSubject ?? '');
   const [title, setTitle] = useState('');
   const [maxScore, setMaxScore] = useState('100');
-  const [dueAt, setDueAt] = useState('');
-  const [componentId, setComponentId] = useState('');
-  const [teacherPartnerId, setTeacherPartnerId] = useState('');
   const [description, setDescription] = useState('');
+  const [openAt, setOpenAt] = useState('');
+  const [dueAt, setDueAt] = useState('');
+  const [closeAt, setCloseAt] = useState('');
+  const [componentId, setComponentId] = useState('');
+  const [gradingMode, setGradingMode] = useState<'points' | 'rubric' | 'complete_incomplete'>('points');
+  const [rubricId, setRubricId] = useState('');
+  const [allowLate, setAllowLate] = useState(false);
+  const [penalty, setPenalty] = useState('0');
+  const [attempts, setAttempts] = useState('1');
   const [examId, setExamId] = useState('');
-  const [classIds, setClassIds] = useState<string[]>([]);
+  const [outcomes, setOutcomes] = useState<string[]>([]);
+  const [rosterId, setRosterId] = useState('');
+  const [capturedCount, setCapturedCount] = useState<number | null>(null);
+  const { data: board } = useAssessmentBoard({ termId: offering?.termId, classId: offering?.classId ?? undefined, subjectId: offering?.subjectId ?? undefined });
+  const { data: coverage } = useCourseCoverage(offeringId);
+  const { data: rosters } = useRosters();
+  const { data: members } = useRosterMembers(rosterId || undefined);
+  const { data: rubrics } = useRubrics();
+  const { data: exams } = useWorkspaceExams(offering ? { termId: offering.termId } : {});
+  const capture = useCaptureCourseAssessmentRoster();
+  const create = useCreateAssessmentUnified();
+  const rosterChoices = (rosters?.data ?? []).filter((r) => r.frozenAt && r.termId === offering?.termId && (!r.classId || r.classId === offering?.classId) && (!r.subjectId || r.subjectId === offering?.subjectId));
+  const count = members?.length ?? capturedCount;
+  const validScore = Number.isFinite(Number(maxScore)) && Number(maxScore) > 0;
+  const ready = !!offering && !!title.trim() && validScore && (kind !== 'exam' || !!examId) && (gradingMode !== 'rubric' || !!rubricId);
+  const components = (board?.policy?.components ?? []).filter((c) => c.kind === kind);
+  const selectedComponent = components.find((c) => c.id === componentId);
+  const toDate = (value: string) => value ? new Date(value).toISOString() : undefined;
 
-  const { data: subjects } = useClassSubjects(classId || undefined);
-  const { data: exams } = useWorkspaceExams(termId ? { termId } : {});
-  // The board already resolves the policy for this class+subject, so the
-  // component list here is the same one the list screen shows — no second
-  // notion of "which buckets exist".
-  const { data: board } = useAssessmentBoard({ termId, classId, subjectId });
-  const components = board?.policy?.components ?? [];
-
-  // Pre-select the weighting bucket that matches the kind, so a teacher who does
-  // not think in buckets still lands in the right one.
-  useEffect(() => {
-    const match = components.find((c) => c.kind === kind);
-    setComponentId(match?.id ?? '');
-  }, [kind, components.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (classId && !classIds.includes(classId)) setClassIds([classId]);
-  }, [classId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const termList = terms?.data ?? [];
-  const classList = classes?.data ?? [];
-  const staffList = useMemo(() => staff?.data ?? [], [staff]);
-
-  const ready = termId && classId && subjectId && title.trim()
-    && (kind !== 'exam' || examId)
-    && (kind !== 'homework' || teacherPartnerId);
-
-  async function onSubmit() {
+  async function captureRoster() {
+    try { const r = await capture.mutateAsync(offeringId); setRosterId(r.id); setCapturedCount(r.memberCount); notify.success(`Frozen snapshot captured: ${r.memberCount} learners`); }
+    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not capture the course roster'); }
+  }
+  async function createDraft() {
+    if (!offering) return;
     try {
-      const res: any = await create.mutateAsync({
-        kind,
-        classId,
-        subjectId,
-        termId,
-        title: title.trim(),
-        maxScore: Number(maxScore) || 100,
-        componentId: componentId || undefined,
-        dueAt: dueAt || undefined,
-        description: description || undefined,
-        teacherPartnerId: teacherPartnerId || undefined,
-        examId: kind === 'exam' ? examId : undefined,
-        classIds: kind === 'exam' ? classIds : undefined,
+      const result: any = await create.mutateAsync({
+        kind, courseOfferingId: offering.id, rosterId, classId: offering.classId ?? undefined, subjectId: offering.subjectId ?? undefined, termId: offering.termId,
+        title: title.trim(), maxScore: Number(maxScore), description: description || undefined, componentId: componentId || undefined,
+        openAt: toDate(openAt), dueAt: toDate(dueAt), closeAt: toDate(closeAt), learningOutcomeIds: outcomes,
+        gradingMode: kind === 'exam' ? 'points' : gradingMode, rubricId: gradingMode === 'rubric' ? rubricId : undefined,
+        allowLate, latePenaltyPercent: Number(penalty), maxAttempts: Number(attempts), examId: kind === 'exam' ? examId : undefined,
       });
-      notify.success(
-        kind === 'exam'
-          ? `Paper created for ${res?.created ?? 1} class(es).`
-          : `"${title.trim()}" created.`,
-      );
-      onClose();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Could not create this assessment.');
-    }
+      notify.success('Assessment draft created. Review and publish it when ready.'); onClose();
+      navigate(`/school/assessments/${result.assessment.id}/mark`);
+    } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not create this assessment'); }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-card shadow-lg">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h2 className="text-lg font-semibold">New assessment</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 hover:bg-accent">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="space-y-4 p-4">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">What are you setting?</label>
-            <div className="flex flex-wrap gap-1.5">
-              {ASSESSMENT_KINDS.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  aria-pressed={kind === k}
-                  onClick={() => setKind(k)}
-                  className={[
-                    'rounded-full border px-3 py-1.5 text-sm transition',
-                    kind === k ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent',
-                  ].join(' ')}
-                >
-                  {KIND_LABEL[k] ?? k}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Picker label="Term" value={termId} onChange={setTermId} className=""
-              options={termList.map((t) => ({ value: t.id, label: t.name }))} />
-            <Picker label="Class" value={classId} onChange={setClassId} className=""
-              options={classList.map((c) => ({ value: c.id, label: c.name }))} />
-            <Picker label="Subject" value={subjectId} onChange={setSubjectId} className=""
-              options={(subjects ?? []).map((s) => ({ value: s.id, label: s.name }))} />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Title</label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)}
-                placeholder={kind === 'exam' ? 'Mid-Term Examination' : kind === 'homework' ? 'Algebra exercise 3' : 'CAT 1'} />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Out of</label>
-              <Input inputMode="numeric" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {kind === 'homework' ? 'Due date' : 'Date'}
-              </label>
-              <Input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
-            </div>
-            <Picker
-              label="Counts toward"
-              value={componentId}
-              onChange={setComponentId}
-              placeholder="Not weighted"
-              className=""
-              options={components.map((c) => ({ value: c.id, label: `${c.name} · ${c.weight}%` }))}
-            />
-          </div>
-
-          {/* ── the kind-specific tail ── */}
-          {kind === 'exam' && (
-            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <Picker label="Which exam?" value={examId} onChange={setExamId} className=""
-                options={(exams ?? []).map((e) => ({ value: e.id, label: e.name }))} />
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                  Which classes sit it? One paper is created per class.
-                </label>
-                <div className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
-                  {classList.map((c) => {
-                    const on = classIds.includes(c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => setClassIds((ids) => (on ? ids.filter((x) => x !== c.id) : [...ids, c.id]))}
-                        className={[
-                          'rounded-md border px-2 py-1 text-xs transition',
-                          on ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent',
-                        ].join(' ')}
-                      >
-                        {c.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {kind === 'homework' && (
-            <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">Set by</label>
-                <select className={selectClass} value={teacherPartnerId} onChange={(e) => setTeacherPartnerId(e.target.value)}>
-                  <option value="">Select a teacher…</option>
-                  {staffList.map((s: any) => (
-                    <option key={s.id} value={s.id}>{s.partner?.name ?? s.employeeNo}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">Instructions (optional)</label>
-                <textarea
-                  className="min-h-[70px] w-full rounded-md border bg-card p-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 border-t px-4 py-3">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={!ready || create.isPending} onClick={onSubmit}>
-            {create.isPending ? 'Creating…' : 'Create'}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+  return <Dialog open onOpenChange={(open) => { if (!open && !create.isPending) onClose(); }}><DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle>New assessment</DialogTitle><DialogDescription>Set work in its teaching context, define how it is assessed, then confirm the frozen learner list.</DialogDescription></DialogHeader>
+    <ol className="grid grid-cols-3 gap-2 text-sm">{['Course & purpose', 'Delivery & scoring', 'Audience & review'].map((label, i) => <li key={label} className={`rounded border px-3 py-2 ${step === i ? 'border-primary bg-primary/5 font-medium' : 'text-muted-foreground'}`}><span className="mr-2">{i < step ? '✓' : i + 1}</span>{label}</li>)}</ol>
+    {step === 0 && <div className="space-y-4">
+      <label className="block space-y-1 text-sm"><span>Course offering</span><select className={selectClass} value={offeringId} onChange={(e) => { setOfferingId(e.target.value); setRosterId(''); setOutcomes([]); setComponentId(''); }}><option value="">{isLoading ? 'Loading courses…' : 'Select a published course…'}</option>{choices.map((o) => <option key={o.id} value={o.id}>{o.name}{o.classId === classId && o.subjectId === subjectId ? ' · current context' : ''}</option>)}</select></label>
+      {!isLoading && !choices.length && <p className="rounded border p-3 text-sm text-muted-foreground">Publish a staffed course with an enrolled audience in Curriculum & Courses before creating an assessment.</p>}
+      {offering && <p className="text-xs text-muted-foreground">{offering.programme?.name} · {offering.term?.name} · {offering.subject?.name} · {offering.teachers.map((t) => t.teacher?.partner?.name).filter(Boolean).join(', ')}</p>}
+      <fieldset><legend className="mb-2 text-sm">Assessment kind</legend><div className="flex flex-wrap gap-2">{ASSESSMENT_KINDS.map((k) => <button type="button" key={k} aria-pressed={kind === k} className={`rounded-full border px-3 py-1.5 text-sm ${kind === k ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent'}`} onClick={() => { setKind(k); setComponentId(''); }}>{KIND_LABEL[k]}</button>)}</div></fieldset>
+      <label className="block space-y-1 text-sm"><span>Title</span><Input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Fractions — weekly learning check" /></label>
+      {!!coverage?.outcomes.length && <fieldset className="space-y-2"><legend className="text-sm">Curriculum outcomes (optional)</legend><div className="max-h-36 space-y-2 overflow-auto rounded border p-3">{coverage.outcomes.map((o) => <label key={o.id} className="flex gap-2 text-sm"><input type="checkbox" checked={outcomes.includes(o.id)} onChange={(e) => setOutcomes((ids) => e.target.checked ? [...ids, o.id] : ids.filter((id) => id !== o.id))} />{o.title}</label>)}</div></fieldset>}
+    </div>}
+    {step === 1 && <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-sm"><span>Maximum score</span><Input type="number" min="1" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} /></label><label className="space-y-1 text-sm"><span>Counts toward</span><select className={selectClass} value={componentId} onChange={(e) => setComponentId(e.target.value)}><option value="">Formative — not weighted in results</option>{components.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.weight}%</option>)}</select></label></div>
+      {kind === 'exam' ? <label className="block space-y-1 text-sm"><span>Exam event</span><select className={selectClass} value={examId} onChange={(e) => setExamId(e.target.value)}><option value="">Select exam event…</option>{(exams ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label> : <>
+        <label className="block space-y-1 text-sm"><span>{kind === 'observation' ? 'Observation checklist / marking method' : 'Marking method'}</span><select className={selectClass} value={gradingMode} onChange={(e) => setGradingMode(e.target.value as typeof gradingMode)}><option value="points">Points</option><option value="rubric">Rubric / observation checklist</option><option value="complete_incomplete">Complete / incomplete</option></select></label>
+        {gradingMode === 'rubric' && <label className="block space-y-1 text-sm"><span>Versioned rubric</span><select className={selectClass} value={rubricId} onChange={(e) => setRubricId(e.target.value)}><option value="">Select rubric…</option>{(rubrics?.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>}
+      </>}
+      <label className="block space-y-1 text-sm"><span>Instructions / evidence requirements</span><textarea className="min-h-24 w-full rounded border bg-card p-2 text-sm" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Explain what learners should submit or what the observer should record." /></label>
+      <div className="grid gap-3 sm:grid-cols-3">{[['Opens', openAt, setOpenAt], ['Due', dueAt, setDueAt], ['Closes', closeAt, setCloseAt]].map(([label, value, setter]) => <label key={label as string} className="space-y-1 text-sm"><span>{label as string}</span><Input type="datetime-local" value={value as string} onChange={(e) => (setter as (v: string) => void)(e.target.value)} /></label>)}</div>
+      {kind !== 'exam' && <div className="flex flex-wrap items-end gap-4 rounded border p-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLate} onChange={(e) => setAllowLate(e.target.checked)} />Allow late submissions</label><label className="space-y-1 text-sm"><span>Late penalty %</span><Input className="w-24" type="number" min="0" max="100" disabled={!allowLate} value={penalty} onChange={(e) => setPenalty(e.target.value)} /></label><label className="space-y-1 text-sm"><span>Attempts</span><Input className="w-24" type="number" min="1" max="20" value={attempts} onChange={(e) => setAttempts(e.target.value)} /></label></div>}
+    </div>}
+    {step === 2 && <div className="space-y-4">
+      <div className="rounded-lg border bg-muted/20 p-4"><p className="font-medium">{title}</p><p className="text-sm text-muted-foreground">{offering?.name} · {KIND_LABEL[kind]} · {maxScore} points</p><p className="mt-2 text-xs text-muted-foreground">{selectedComponent ? `${selectedComponent.name} — ${selectedComponent.weight}% component` : 'Formative assessment — no term-result weighting'} · {outcomes.length} curriculum outcome(s)</p></div>
+      <label className="block space-y-1 text-sm"><span>Frozen assessment roster</span><select className={selectClass} value={rosterId} onChange={(e) => { setRosterId(e.target.value); setCapturedCount(null); }}><option value="">Choose a frozen snapshot…</option>{rosterChoices.map((r) => <option key={r.id} value={r.id}>{r.name ?? r.id}</option>)}</select></label>
+      <Button variant="outline" disabled={capture.isPending} onClick={() => void captureRoster()}><ClipboardList className="mr-2 h-4 w-4" />{capture.isPending ? 'Capturing…' : 'Capture & freeze current course roster'}</Button>
+      {rosterId && <p className="flex items-center gap-2 text-sm text-emerald-700"><Lock className="h-4 w-4" />{count ?? 'Loading'} learner(s) in the frozen snapshot</p>}
+      <p className="text-sm text-muted-foreground">Learners who later move class or withdraw remain in this assessment’s history. This creates a draft; publication, submission and release are separate, explicit actions.</p>
+    </div>}
+    <div className="flex justify-between border-t pt-4"><Button variant="ghost" onClick={() => step ? setStep(step - 1) : onClose()} disabled={create.isPending}>{step ? 'Back' : 'Cancel'}</Button>{step < 2 ? <Button disabled={step === 0 ? !offering || !title.trim() : !ready} onClick={() => setStep(step + 1)}>Continue</Button> : <Button disabled={!ready || !rosterId || create.isPending} onClick={() => void createDraft()}><CheckCircle2 className="mr-2 h-4 w-4" />{create.isPending ? 'Creating…' : 'Create assessment draft'}</Button>}</div>
+  </DialogContent></Dialog>;
 }

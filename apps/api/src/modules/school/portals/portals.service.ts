@@ -274,7 +274,7 @@ export class PortalsService {
     const allSubjectIds = [
       ...new Set([
         ...subjectIds,
-        ...dueSoon.map((a) => a.subjectId),
+        ...dueSoon.map((a) => a.subjectId).filter((id): id is string => !!id),
         ...returnedToMe.map((sa) => sa.assessment?.subjectId).filter(Boolean) as string[],
       ]),
     ];
@@ -291,7 +291,7 @@ export class PortalsService {
     const needsMarkingRows = needsMarking
       .map((g) => {
         const a = markAssessments.find((x) => x.id === g.assessmentId);
-        return a ? { assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId) ?? '', classId: a.classId, count: g._count._all } : null;
+        return a ? { assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId ?? '') ?? '', classId: a.classId, count: g._count._all } : null;
       })
       .filter(Boolean);
 
@@ -305,13 +305,13 @@ export class PortalsService {
       })),
       needsMarking: needsMarkingRows,
       dueSoon: dueSoon.map((a) => ({
-        assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId) ?? '', classId: a.classId,
+        assessmentId: a.id, title: a.title, subject: subjectName.get(a.subjectId ?? '') ?? '', classId: a.classId,
         dueAt: a.dueAt, overdue: a.dueAt != null && a.dueAt < now,
       })),
       awaitingApproval,
       returnedToMe: returnedToMe.map((sa) => ({
         studentAssessmentId: sa.id, assessmentId: sa.assessmentId,
-        title: sa.assessment?.title ?? '', subject: sa.assessment ? subjectName.get(sa.assessment.subjectId) ?? '' : '',
+        title: sa.assessment?.title ?? '', subject: sa.assessment ? subjectName.get(sa.assessment.subjectId ?? '') ?? '' : '',
       })),
       examPapers: examCoverage,
       lessonPlans: lessonPlanCounts,
@@ -487,6 +487,7 @@ export class PortalsService {
         deletedAt: null,
         approvalStatus: 'approved',
         effectiveScore: { not: null },
+        assessment: { hiddenFromStudents: false, marksReleaseAt: { lte: new Date() } },
       },
       orderBy: { updatedAt: 'desc' },
       take: 10,
@@ -512,20 +513,27 @@ export class PortalsService {
       percentage: r.percentage != null ? String(r.percentage) : null,
       termId: r.termId,
       recordedAt: r.approvedAt ?? r.updatedAt,
-      subject: r.assessment ? { name: subjectName.get(r.assessment.subjectId) ?? 'Subject' } : null,
+      subject: r.assessment ? { name: subjectName.get(r.assessment.subjectId ?? '') ?? 'Learning activity' } : null,
       assessment: r.assessment ? { id: r.assessment.id, title: r.assessment.title } : null,
     }));
   }
 
   private async studentAssignments(studentProfileId: string) {
-    const profile = await this.prisma.client.studentProfile.findFirst({ where: { id: studentProfileId } });
-    if (!profile?.currentClassId) return [];
-    const assignments = await this.prisma.client.homeworkAssignment.findMany({
-      where: { classId: profile.currentClassId },
-      orderBy: { dueDate: 'asc' },
-      include: { subject: true, submissions: { where: { studentProfileId } } },
+    const now = new Date();
+    const rows = await this.prisma.client.studentAssessment.findMany({
+      where: { studentProfileId, assessment: { status: { notIn: ['draft', 'scheduled'] }, assignment: { isNot: null } } },
+      include: { assessment: { include: { courseOffering: { include: { subject: true } }, assignment: true } }, assignmentSubmissions: { orderBy: { attemptNo: 'desc' } } },
+      orderBy: { createdAt: 'desc' }, take: 100,
     });
-    return assignments;
+    return rows.map((row) => {
+      const a = row.assessment;
+      const feedbackReleased = !!a.feedbackReleaseAt && a.feedbackReleaseAt <= now && row.approvalStatus === 'approved';
+      const marksReleased = !!a.marksReleaseAt && a.marksReleaseAt <= now && !a.hiddenFromStudents && row.approvalStatus === 'approved';
+      return { id: a.assignment!.id, assessmentId: a.id, title: a.title, description: a.assignment!.instructions,
+        dueDate: a.dueAt, openAt: a.openAt, closeAt: a.closeAt, subject: a.courseOffering?.subject ?? null, maxScore: a.maxScore,
+        submissions: row.assignmentSubmissions.map((s) => ({ id: s.id, attemptNo: s.attemptNo, content: s.content, attachments: s.attachments, submittedAt: s.submittedAt, status: row.status,
+          score: marksReleased ? row.effectiveScore : null, feedback: feedbackReleased ? row.feedback : null })) };
+    });
   }
 
   /** A8: the student's published term results from the A3 result spine. */

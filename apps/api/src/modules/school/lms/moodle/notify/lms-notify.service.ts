@@ -132,7 +132,7 @@ export class LmsNotifyService {
     if (!cm?.assessmentId) return;
     const [assessment, mark] = await Promise.all([
       this.prisma.client.assessment.findFirst({
-        where: { id: cm.assessmentId }, select: { title: true, maxScore: true, hiddenFromStudents: true },
+        where: { id: cm.assessmentId }, select: { title: true, maxScore: true, hiddenFromStudents: true, marksReleaseAt: true },
       }),
       this.prisma.client.studentAssessment.findFirst({
         where: { assessmentId: cm.assessmentId, studentProfileId },
@@ -144,7 +144,7 @@ export class LmsNotifyService {
     const userId = await this.portalUserFor(this.org, studentProfileId);
     if (!userId) return;
 
-    const released = mark?.approvalStatus === 'approved';
+    const released = mark?.approvalStatus === 'approved' && !!assessment.marksReleaseAt && assessment.marksReleaseAt <= new Date();
     await this.notifications
       .send({
         organizationId: this.org,

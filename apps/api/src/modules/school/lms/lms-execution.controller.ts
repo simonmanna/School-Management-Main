@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, GoneException, Param, Post, Put, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { LmsExecutionService } from './lms-execution.service';
@@ -61,13 +61,13 @@ export class LmsExecutionController {
   @Post('homework/submit')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
   submitHomework(@Body() dto: any) {
-    return this.svc.submitHomework(dto);
+    throw new GoneException('Legacy homework is read-only. Submit through /school/assignments/submit.');
   }
 
   @Post('homework/grade')
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
   gradeHomework(@Body() dto: any) {
-    return this.svc.gradeHomework(dto);
+    throw new GoneException('Legacy homework is read-only. Grade through the unified Assessment Board.');
   }
 
   // ── Phase 4: Evidence + mastery ──

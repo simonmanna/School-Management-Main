@@ -282,7 +282,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Reports' },
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
       { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
-      { to: '/school/results', label: 'Result Runs', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Reports' },
+      { to: '/school/results', label: 'Results & Reports', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Reports' },
       { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Reports' },
       { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Reports' },
 
@@ -297,7 +297,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/exam-workspace', label: 'Exam Scheduling', icon: CalendarDays, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
       { to: '/school/enter-marks', label: 'Exam Mark Entry', icon: ClipboardList, permission: PERMISSIONS.school.enterGrades, group: 'Examinations' },
       { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Examinations' },
-      { to: '/school/exam-ops', label: 'Exam Operations', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
+      { to: '/school/exam-operations', label: 'Run an Examination', icon: ShieldCheck, permission: PERMISSIONS.school.runExamOperations, group: 'Examinations' },
+      { to: '/school/exam-ops', label: 'Venues, Seating & Papers', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
     ],
   },
   {

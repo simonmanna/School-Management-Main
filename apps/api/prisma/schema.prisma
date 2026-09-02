@@ -12622,6 +12622,7 @@ model CourseOffering {
   groups             LmsGroup[]
   groupings          LmsGrouping[]
   completionCriteria CourseCompletionCriteria[]
+  assessments        Assessment[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -13539,10 +13540,14 @@ enum AssessmentKind {
   exam
   cat
   homework
+  assignment
   classwork
+  quiz
   practical
   project
   oral
+  observation
+  activity_of_integration
   attendance
 }
 
@@ -13575,6 +13580,9 @@ enum ParticipationStatus {
   present
   absent
   exempt
+  missing
+  withdrawn
+  not_enrolled
   excused
   malpractice
   special_consideration
@@ -13704,26 +13712,42 @@ model ExamType {
 }
 
 model Exam {
-  id             String     @id @default(uuid())
-  organizationId String
-  termId         String
-  examTypeId     String
-  name           String
-  startDate      DateTime
-  endDate        DateTime
+  id                   String             @id @default(uuid())
+  organizationId       String
+  termId               String
+  examTypeId           String
+  name                 String
+  startDate            DateTime
+  endDate              DateTime
   /// DEPRECATED (A4): class IDs as a JSON array. Superseded by ExamRegistration
   /// (a real candidate row). Kept for backfill provenance; new code uses
   /// registrations. Do not read this for coverage.
-  classes        Json       @default("[]")
-  status         ExamStatus @default(draft)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  deletedAt      DateTime?
+  classes              Json               @default("[]")
+  status               ExamStatus         @default(draft)
+  /// Phase 5 operational lifecycle. `status` stays the coarse legacy flag the
+  /// old screens read; this is the state machine the exam office works through.
+  lifecycleState       ExamLifecycleState @default(draft)
+  /// The frozen candidate list this exam is being run against.
+  activeSnapshotId     String?
+  /// Default marking mode for papers created under this exam.
+  markingMode          MarkingMode        @default(single)
+  candidatesLockedAt   DateTime?
+  candidatesLockedById String?
+  resultsReadyAt       DateTime?
+  closedAt             DateTime?
+  /// Optimistic-concurrency guard for lifecycle transitions.
+  version              Int                @default(0)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  deletedAt            DateTime?
 
-  term          Term               @relation(fields: [termId], references: [id])
-  examType      ExamType           @relation(fields: [examTypeId], references: [id])
-  schedules     ExamSchedule[]
-  registrations ExamRegistration[]
+  term               Term                    @relation(fields: [termId], references: [id])
+  examType           ExamType                @relation(fields: [examTypeId], references: [id])
+  schedules          ExamSchedule[]
+  registrations      ExamRegistration[]
+  candidateSnapshots ExamCandidateSnapshot[]
+  incidents          ExamIncident[]
+  considerations     SpecialConsideration[]
 
   @@index([organizationId])
   @@index([termId])
@@ -13735,29 +13759,35 @@ model Exam {
 /// resit, venue) live here rather than in a separate table, to keep the A1
 /// GradeEntry adapter and A3 result flow (which key on examScheduleId) intact.
 model ExamSchedule {
-  id              String    @id @default(uuid())
-  organizationId  String
-  examId          String
-  classId         String
-  subjectId       String
-  date            DateTime
-  startTime       String // 'HH:mm'
-  durationMinutes Int       @default(60)
-  invigilatorId   String?
-  maxMarks        Decimal   @default(100) @db.Decimal(8, 2)
+  id                 String      @id @default(uuid())
+  organizationId     String
+  examId             String
+  classId            String
+  subjectId          String
+  date               DateTime
+  startTime          String // 'HH:mm'
+  durationMinutes    Int         @default(60)
+  invigilatorId      String?
+  maxMarks           Decimal     @default(100) @db.Decimal(8, 2)
   // A4 session detail (all additive/optional).
-  paperNumber     Int?
+  paperNumber        Int?
   /// 'morning' | 'afternoon'.
-  sitting         String?
-  isResit         Boolean   @default(false)
-  venueId         String?
+  sitting            String?
+  isResit            Boolean     @default(false)
+  venueId            String?
   /// Marks lock — an admin freezes entry for this paper. Distinct from the
   /// GradeEntry approval workflow (which is SoD-guarded); this is the plain
   /// "no more edits" switch the exam office actually asks for.
-  marksLockedAt   DateTime?
-  marksLockedById String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  marksLockedAt      DateTime?
+  marksLockedById    String?
+  // Phase 5 marking configuration. `single` keeps the existing one-marker flow.
+  markingMode        MarkingMode @default(single)
+  /// Absolute mark difference two independent markers may differ by before the
+  /// script must be reconciled by a third read.
+  markToleranceMarks Decimal     @default(5) @db.Decimal(8, 2)
+  moderationRequired Boolean     @default(false)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   exam                   Exam                    @relation(fields: [examId], references: [id], onDelete: Cascade)
   schoolClass            SchoolClass             @relation(fields: [classId], references: [id])
@@ -13766,6 +13796,11 @@ model ExamSchedule {
   gradeEntries           GradeEntry[]
   invigilatorAssignments InvigilatorAssignment[]
   questionPapers         QuestionPaper[]
+  attendance             ExamAttendance[]
+  incidents              ExamIncident[]
+  considerations         SpecialConsideration[]
+  scriptAllocations      ScriptAllocation[]
+  moderationSamples      ModerationSample[]
 
   @@unique([examId, classId, subjectId])
   @@index([organizationId])
@@ -13946,7 +13981,8 @@ model QuestionPaper {
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
 
-  examSchedule ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  examSchedule  ExamSchedule                @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  custodyEvents QuestionPaperCustodyEvent[]
 
   @@index([organizationId])
   @@index([examScheduleId])
@@ -14106,6 +14142,10 @@ model AssessmentPolicy {
   rankingPolicy     Json         @default("{}")
   aggregationPolicy Json         @default("{}")
   isActive          Boolean      @default(true)
+  /// Business revision. Publishing freezes this row; later changes fork a new row.
+  revision          Int          @default(1)
+  publishedAt       DateTime?
+  supersedesId      String?
   /// Optimistic concurrency guard — see kernel/common/optimistic-update.ts.
   version           Int          @default(0)
   createdAt         DateTime     @default(now())
@@ -14156,8 +14196,12 @@ model Assessment {
   /// Nullable: an adapter-projected exam mark is unattached until a policy maps
   /// it to a weighting bucket. Manual/assignment/quiz assessments attach on create.
   componentId        String?
-  subjectId          String
-  classId            String
+  /// Canonical teaching context. Nullable only for migrated legacy rows.
+  courseOfferingId   String?
+  /// Frozen learner snapshot used for publication and all mark-sheet reads.
+  rosterId           String?
+  subjectId          String?
+  classId            String?
   /// Stream/section, when the assessment is narrower than the whole class.
   sectionId          String?
   termId             String
@@ -14185,7 +14229,12 @@ model Assessment {
   /// FK-less link to the origin row (examScheduleId, assignmentId, quizId).
   sourceRef          String?
   status             AssessmentStatus     @default(draft)
+  description        String?
+  openAt             DateTime?
   dueAt              DateTime?
+  closeAt            DateTime?
+  feedbackReleaseAt  DateTime?
+  marksReleaseAt     DateTime?
   /// Moodle grade-item hide/lock (ADR-014 §3.5).
   hiddenFromStudents Boolean              @default(false)
   lockedAt           DateTime?
@@ -14200,8 +14249,11 @@ model Assessment {
   deletedAt          DateTime?
 
   component          AssessmentComponent? @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  courseOffering     CourseOffering?      @relation(fields: [courseOfferingId], references: [id], onDelete: Restrict)
+  roster             AcademicRoster?      @relation(fields: [rosterId], references: [id], onDelete: Restrict)
   studentAssessments StudentAssessment[]
   assignment         Assignment?
+  outcomes           AssessmentOutcome[]
 
   /// One assessment per origin row — makes the GradeEntry adapter idempotent.
   @@unique([organizationId, sourceType, sourceRef])
@@ -14210,6 +14262,23 @@ model Assessment {
   @@index([organizationId, termId, kind])
   @@index([organizationId, teacherPartnerId])
   @@index([componentId])
+  @@index([courseOfferingId])
+  @@index([rosterId])
+}
+
+/// Outcomes evidenced by an assessment. Relational so curriculum coverage is queryable.
+model AssessmentOutcome {
+  id                String   @id @default(uuid())
+  organizationId    String
+  assessmentId      String
+  learningOutcomeId String
+  createdAt         DateTime @default(now())
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, learningOutcomeId])
+  @@index([organizationId])
+  @@index([learningOutcomeId])
 }
 
 /// One student's participation + canonical score on one assessment.
@@ -14248,6 +14317,8 @@ model StudentAssessment {
   /// spine can own the whole approval workflow.
   rejectionReason  String?
   version          Int                     @default(0)
+  /// Teacher feedback is released independently from numeric marks.
+  feedback         String?
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
   deletedAt        DateTime?
@@ -14332,7 +14403,8 @@ model AcademicRoster {
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
 
-  members AcademicRosterMember[]
+  members     AcademicRosterMember[]
+  assessments Assessment[]
 
   @@index([organizationId])
   @@index([organizationId, termId, classId])
@@ -14443,6 +14515,7 @@ model Assignment {
   id                 String                @id @default(uuid())
   organizationId     String
   assessmentId       String                @unique
+  legacyHomeworkId   String?               @unique
   rosterId           String?
   instructions       String?
   allowLate          Boolean               @default(false)
@@ -14468,24 +14541,25 @@ model Assignment {
 /// A student's submitted work for an assignment. Participation truth lives on
 /// StudentAssessment; this is the artefact + per-attempt scoring.
 model AssignmentSubmission {
-  id                  String    @id @default(uuid())
-  organizationId      String
-  assignmentId        String
-  studentAssessmentId String
-  attemptNo           Int       @default(1)
-  submittedAt         DateTime?
-  isLate              Boolean   @default(false)
-  content             String?
-  attachments         Json      @default("[]")
+  id                         String    @id @default(uuid())
+  organizationId             String
+  assignmentId               String
+  studentAssessmentId        String
+  legacyHomeworkSubmissionId String?   @unique
+  attemptNo                  Int       @default(1)
+  submittedAt                DateTime?
+  isLate                     Boolean   @default(false)
+  content                    String?
+  attachments                Json      @default("[]")
   /// Raw marker score before the late penalty.
-  rawScore            Decimal?  @db.Decimal(8, 2)
+  rawScore                   Decimal?  @db.Decimal(8, 2)
   /// Points deducted for lateness (rawScore − penaltyApplied lands as the mark).
-  penaltyApplied      Decimal?  @db.Decimal(8, 2)
+  penaltyApplied             Decimal?  @db.Decimal(8, 2)
   /// Snapshot of the rubric scores at grade time, for historical rendering.
-  rubricSnapshot      Json?
-  version             Int       @default(0)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  rubricSnapshot             Json?
+  version                    Int       @default(0)
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 
   assignment        Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   studentAssessment StudentAssessment @relation(fields: [studentAssessmentId], references: [id], onDelete: Cascade)
@@ -14561,10 +14635,11 @@ model ResultSet {
   updatedAt             DateTime        @updatedAt
   deletedAt             DateTime?
 
-  run            ResultProcessingRun?   @relation(fields: [runId], references: [id], onDelete: SetNull)
-  subjectResults StudentSubjectResult[]
-  termResults    StudentTermResult[]
-  amendments     AmendmentRequest[]
+  run                ResultProcessingRun?   @relation(fields: [runId], references: [id], onDelete: SetNull)
+  subjectResults     StudentSubjectResult[]
+  termResults        StudentTermResult[]
+  amendments         AmendmentRequest[]
+  promotionDecisions PromotionDecision[]
 
   @@index([organizationId])
   @@index([organizationId, termId, scopeType, scopeId])
@@ -14644,6 +14719,11 @@ model AmendmentRequest {
   status         AmendmentStatus @default(requested)
   requestedById  String?
   reviewedById   String?
+  reviewedAt     DateTime?
+  /// Why the reviewer approved or rejected. A rejection with no reason is not a decision.
+  decisionNote   String?
+  /// Supporting evidence references for the requested correction.
+  evidence       Json            @default("[]")
   newResultSetId String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
@@ -14651,6 +14731,473 @@ model AmendmentRequest {
   resultSet ResultSet @relation(fields: [resultSetId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
+  @@index([resultSetId])
+}
+
+// ═══════════════════ Phase 5 — examination & result integrity ═══════════════
+// The examination is an operation with custody, attendance, incidents and
+// moderated marking; the result is a controlled calculation over it. Nothing
+// here becomes a second grade store: scripts carry marker rounds, and the
+// canonical score still lands on StudentAssessment via MarkingService.
+
+enum ExamLifecycleState {
+  draft
+  setup
+  scheduled
+  candidates_locked
+  in_progress
+  marking
+  moderation
+  results_ready
+  closed
+  archived
+}
+
+enum ExamAttendanceStatus {
+  present
+  absent
+  late
+  excused
+  malpractice
+  withdrawn
+}
+
+enum ExamIncidentType {
+  malpractice
+  illness
+  disruption
+  missing_script
+  late_arrival
+  material_error
+  other
+}
+
+enum ExamIncidentStatus {
+  open
+  under_review
+  resolved
+  dismissed
+}
+
+enum SpecialConsiderationType {
+  extra_time
+  separate_room
+  reader
+  scribe
+  rest_breaks
+  enlarged_print
+  alternative_format
+  aegrotat
+  exemption
+  other
+}
+
+enum SpecialConsiderationStatus {
+  requested
+  approved
+  rejected
+  withdrawn
+}
+
+/// How many independent markers a paper needs. `blind_double` additionally hides
+/// the candidate identity and the other marker's score until reconciliation.
+enum MarkingMode {
+  single
+  double
+  blind_double
+}
+
+enum ScriptMarkRole {
+  first
+  second
+  moderator
+  reconciliation
+}
+
+enum ScriptAllocationStatus {
+  allocated
+  in_progress
+  submitted
+  reconciled
+  void
+}
+
+/// Question-paper chain of custody. Append-only: an error is corrected by a new
+/// event, never by editing a previous one.
+enum CustodyAction {
+  authored
+  moderated
+  approved
+  printed
+  sealed
+  stored
+  dispatched
+  received
+  opened
+  distributed
+  collected
+  returned
+  archived
+  destroyed
+  incident
+}
+
+enum ModerationSampleStatus {
+  drawn
+  in_review
+  agreed
+  adjusted
+  escalated
+}
+
+enum ReportDocumentType {
+  term_report
+  competency_report
+  exam_result_slip
+  transcript
+  promotion_notice
+}
+
+enum ReportDocumentStatus {
+  draft
+  generated
+  published
+  superseded
+  void
+}
+
+enum PromotionDecisionStatus {
+  proposed
+  approved
+  rejected
+  applied
+}
+
+/// A frozen candidate list for one exam — the examination equivalent of
+/// AcademicRoster. `ExamRegistration` stays the working list; a snapshot is the
+/// version the exam was actually sat under, and it is never edited. Re-freezing
+/// creates revision n+1 and supersedes the previous one.
+model ExamCandidateSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  examId         String
+  revision       Int      @default(1)
+  /// sha256 over the ordered entry tuples — proves the list did not drift.
+  checksum       String
+  candidateCount Int      @default(0)
+  reason         String?
+  frozenAt       DateTime @default(now())
+  frozenById     String?
+  supersedesId   String?
+  createdAt      DateTime @default(now())
+
+  exam    Exam                 @relation(fields: [examId], references: [id], onDelete: Cascade)
+  entries ExamCandidateEntry[]
+
+  @@unique([examId, revision])
+  @@index([organizationId])
+  @@index([examId])
+}
+
+model ExamCandidateEntry {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  snapshotId         String
+  studentProfileId   String
+  examRegistrationId String?
+  classId            String?
+  sectionId          String?
+  streamId           String?
+  /// School candidate number, and the national index number where one exists.
+  candidateNumber    String?
+  indexNumber        String?
+  venueId            String?
+  seatNumber         String?
+  createdAt          DateTime @default(now())
+
+  snapshot ExamCandidateSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, studentProfileId])
+  @@index([organizationId])
+  @@index([snapshotId])
+  @@index([organizationId, studentProfileId])
+}
+
+/// Who actually sat which paper. Distinct from `ExamRegistration.status`, which
+/// is the whole-exam candidate state: a candidate can be registered for the exam
+/// and absent from one paper.
+model ExamAttendance {
+  id               String               @id @default(uuid())
+  organizationId   String
+  examScheduleId   String
+  studentProfileId String
+  status           ExamAttendanceStatus @default(present)
+  arrivedAt        DateTime?
+  leftAt           DateTime?
+  venueId          String?
+  seatNumber       String?
+  /// Anonymised script identifier handed to markers under blind marking.
+  scriptNumber     String?
+  note             String?
+  recordedById     String?
+  recordedAt       DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  examSchedule ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([examScheduleId, studentProfileId])
+  @@index([organizationId])
+  @@index([examScheduleId])
+  @@index([organizationId, studentProfileId])
+}
+
+/// A recorded examination-hall event. Malpractice, illness, a disrupted sitting
+/// or a missing script — the record an appeal is later decided on.
+model ExamIncident {
+  id               String             @id @default(uuid())
+  organizationId   String
+  examId           String
+  examScheduleId   String?
+  studentProfileId String?
+  type             ExamIncidentType
+  status           ExamIncidentStatus @default(open)
+  /// 'low' | 'medium' | 'high'.
+  severity         String             @default("medium")
+  description      String
+  occurredAt       DateTime           @default(now())
+  reportedById     String?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  resolution       String?
+  evidence         Json               @default("[]")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examSchedule ExamSchedule? @relation(fields: [examScheduleId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([examId])
+  @@index([examScheduleId])
+  @@index([organizationId, studentProfileId])
+}
+
+/// An access arrangement or exemption granted to one candidate. Approval is a
+/// separate act from the request, and only an approved consideration may change
+/// how a paper is sat or how a missing mark is treated.
+model SpecialConsideration {
+  id                String                     @id @default(uuid())
+  organizationId    String
+  examId            String
+  studentProfileId  String
+  /// Null = every paper in the exam.
+  examScheduleId    String?
+  type              SpecialConsiderationType
+  status            SpecialConsiderationStatus @default(requested)
+  extraTimeMinutes  Int?
+  reason            String
+  evidence          Json                       @default("[]")
+  /// When true, an approved consideration marks the learner's assessment
+  /// `exempt` rather than leaving it missing — never silently a zero.
+  exemptsFromResult Boolean                    @default(false)
+  requestedById     String?
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examSchedule ExamSchedule? @relation(fields: [examScheduleId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([examId])
+  @@index([organizationId, studentProfileId])
+}
+
+/// Append-only chain of custody for a question paper. `chainHash` links each
+/// event to the previous one, so a deleted or reordered event is detectable.
+model QuestionPaperCustodyEvent {
+  id              String        @id @default(uuid())
+  organizationId  String
+  questionPaperId String
+  examScheduleId  String?
+  action          CustodyAction
+  occurredAt      DateTime      @default(now())
+  actorId         String?
+  actorName       String?
+  /// Who holds the papers after this event.
+  custodianId     String?
+  custodianName   String?
+  sealNumber      String?
+  copies          Int?
+  location        String?
+  note            String?
+  previousEventId String?
+  chainHash       String
+  createdAt       DateTime      @default(now())
+
+  questionPaper QuestionPaper @relation(fields: [questionPaperId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([questionPaperId, occurredAt])
+}
+
+/// One marker's independent read of one candidate's script. Double and blind
+/// marking produce two rows; reconciliation produces a third, and only that
+/// agreed score is posted to the canonical StudentAssessment.
+model ScriptAllocation {
+  id               String                 @id @default(uuid())
+  organizationId   String
+  examScheduleId   String
+  studentProfileId String
+  /// The code the marker sees instead of a name under blind marking.
+  anonymousCode    String
+  markerId         String
+  role             ScriptMarkRole         @default(first)
+  status           ScriptAllocationStatus @default(allocated)
+  maxScore         Decimal                @db.Decimal(8, 2)
+  score            Decimal?               @db.Decimal(8, 2)
+  comment          String?
+  allocatedById    String?
+  allocatedAt      DateTime               @default(now())
+  submittedAt      DateTime?
+  version          Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  examSchedule ExamSchedule @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([examScheduleId, studentProfileId, role])
+  @@index([organizationId])
+  @@index([examScheduleId])
+  @@index([organizationId, markerId])
+}
+
+/// A drawn sample of scripts a moderator re-marks. The draw is reproducible
+/// (method + seed) so "how were these chosen?" has an answer.
+model ModerationSample {
+  id             String                 @id @default(uuid())
+  organizationId String
+  examScheduleId String
+  /// 'random' | 'stratified' | 'boundary' | 'manual'.
+  method         String                 @default("stratified")
+  seed           String?
+  sampleSize     Int                    @default(0)
+  toleranceMarks Decimal                @default(5) @db.Decimal(8, 2)
+  status         ModerationSampleStatus @default(drawn)
+  drawnById      String?
+  drawnAt        DateTime               @default(now())
+  moderatorId    String?
+  reviewedAt     DateTime?
+  outcome        Json                   @default("{}")
+  note           String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  examSchedule ExamSchedule           @relation(fields: [examScheduleId], references: [id], onDelete: Cascade)
+  items        ModerationSampleItem[]
+
+  @@index([organizationId])
+  @@index([examScheduleId])
+}
+
+model ModerationSampleItem {
+  id               String   @id @default(uuid())
+  organizationId   String
+  sampleId         String
+  studentProfileId String
+  anonymousCode    String?
+  originalScore    Decimal? @db.Decimal(8, 2)
+  moderatedScore   Decimal? @db.Decimal(8, 2)
+  delta            Decimal? @db.Decimal(8, 2)
+  withinTolerance  Boolean?
+  comment          String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sample ModerationSample @relation(fields: [sampleId], references: [id], onDelete: Cascade)
+
+  @@unique([sampleId, studentProfileId])
+  @@index([organizationId])
+  @@index([sampleId])
+}
+
+/// A reproducible published document. A report card's JSON payload alone cannot
+/// answer "which results and which template produced this?" — this record can,
+/// and it supersedes rather than overwrites.
+model ReportDocument {
+  id                String               @id @default(uuid())
+  organizationId    String
+  studentProfileId  String
+  termId            String
+  documentType      ReportDocumentType   @default(term_report)
+  resultSetId       String?
+  resultSetRevision Int?
+  reportCardId      String?
+  templateVersionId String?
+  templateKey       String?
+  revision          Int                  @default(1)
+  status            ReportDocumentStatus @default(generated)
+  payload           Json                 @default("{}")
+  payloadChecksum   String
+  pdfUrl            String?
+  generatedAt       DateTime             @default(now())
+  generatedById     String?
+  publishedAt       DateTime?
+  publishedById     String?
+  supersedesId      String?
+  supersededById    String?
+  voidReason        String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@unique([studentProfileId, termId, documentType, resultSetId, templateVersionId, revision])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
+  @@index([organizationId, termId, documentType])
+  @@index([resultSetId])
+}
+
+/// The end-of-year decision for one learner, derived from a published result set
+/// and then explicitly decided by a human. Applying it is what writes the next
+/// year's placement — the recommendation alone never moves a child.
+model PromotionDecision {
+  id                    String                   @id @default(uuid())
+  organizationId        String
+  studentProfileId      String
+  resultSetId           String
+  termId                String
+  academicYearId        String?
+  fromGradeLevelId      String?
+  fromClassId           String?
+  recommendation        PromotionRecommendation  @default(review)
+  decision              PromotionRecommendation?
+  toGradeLevelId        String?
+  toClassId             String?
+  /// The exact grouping the learner takes up next year. A class organised into
+  /// sections or streams needs the subdivision named here, not guessed at the
+  /// moment the placement is written (ADR-019).
+  toSectionId           String?
+  toStreamId            String?
+  status                PromotionDecisionStatus  @default(proposed)
+  /// The numbers the recommendation was derived from, frozen at proposal time.
+  basis                 Json                     @default("{}")
+  reason                String?
+  proposedById          String?
+  decidedById           String?
+  decidedAt             DateTime?
+  appliedAt             DateTime?
+  appliedById           String?
+  enrollmentPlacementId String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  resultSet ResultSet @relation(fields: [resultSetId], references: [id], onDelete: Cascade)
+
+  @@unique([resultSetId, studentProfileId])
+  @@index([organizationId])
+  @@index([organizationId, studentProfileId])
   @@index([resultSetId])
 }
 

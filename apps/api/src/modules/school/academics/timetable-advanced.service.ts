@@ -50,16 +50,42 @@ export class TimetableAdvancedService {
   async classGridWithOverrides(classId: string, sectionId: string | null, date?: string) {
     const slots = await (this.prisma.client as any).timetableSlot.findMany({
       where: { classId, sectionId: sectionId ?? null },
-      include: { subject: true, teacher: true } as any,
+      // `period` and the teacher's Partner are read by every caller that renders
+      // a grid — the period order and the teacher's name. Leaving them out made
+      // those columns silently blank rather than failing.
+      include: {
+        subject: true,
+        teacher: { include: { partner: true } },
+        period: true,
+        teachingRoom: true,
+      } as any,
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
     });
     let overrides: any[] = [];
     if (date) {
       const d = new Date(date);
-    overrides = await (this.prisma.client as any).timetableOverride.findMany({
+      // `TimetableOverride` holds loose `subjectId` / `teacherPartnerId` ids with
+      // no Prisma relations, so the `include` this used to pass made the whole
+      // query invalid — and the cells it fed read `ov.subject` / `ov.teacher`,
+      // which could never have been populated. Resolve them explicitly instead.
+      const rows = await (this.prisma.client as any).timetableOverride.findMany({
         where: { classId, sectionId: sectionId ?? null, effectiveFrom: { lte: d }, effectiveTo: { gte: d } },
-        include: { subject: true, teacher: true } as any,
       });
+      const subjectIds = [...new Set(rows.map((o: any) => o.subjectId).filter(Boolean))] as string[];
+      const teacherIds = [...new Set(rows.map((o: any) => o.teacherPartnerId).filter(Boolean))] as string[];
+      const [subjects, teachers] = await Promise.all([
+        subjectIds.length ? (this.prisma.client as any).subject.findMany({ where: { id: { in: subjectIds } } }) : [],
+        teacherIds.length
+          ? (this.prisma.client as any).staffProfile.findMany({ where: { id: { in: teacherIds } }, include: { partner: true } })
+          : [],
+      ]);
+      const subjectById = new Map<string, any>((subjects as any[]).map((x: any) => [x.id, x]));
+      const teacherById = new Map<string, any>((teachers as any[]).map((x: any) => [x.id, x]));
+      overrides = rows.map((o: any) => ({
+        ...o,
+        subject: o.subjectId ? subjectById.get(o.subjectId) ?? null : null,
+        teacher: o.teacherPartnerId ? teacherById.get(o.teacherPartnerId) ?? null : null,
+      }));
     }
     const grid: Record<number, Record<string, any>> = {};
     for (const s of slots as any[]) {

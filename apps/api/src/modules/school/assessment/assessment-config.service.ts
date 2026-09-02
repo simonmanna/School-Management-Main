@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AssessmentComponent, AssessmentPolicy } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -59,6 +59,7 @@ export class AssessmentPolicyService extends BaseCrudService<
     return this.prisma.client.$transaction(async (tx: any) => {
       const before = await tx.assessmentPolicy.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`AssessmentPolicy ${id} not found`);
+      if (before.publishedAt) throw new BadRequestException('Published policies are immutable. Fork a new revision.');
       const { version, ...rest } = dto;
       const res = await tx.assessmentPolicy.updateMany({
         where: version === undefined ? { id } : { id, version },
@@ -99,8 +100,47 @@ export class AssessmentPolicyService extends BaseCrudService<
     if (matches.length === 0) return null;
     const specificity = (p: AssessmentPolicy) =>
       (p.subjectId ? 8 : 0) + (p.classId ? 4 : 0) + (p.gradeLevelId ? 2 : 0) + (p.termId ? 1 : 0);
-    matches.sort((a, b) => specificity(b) - specificity(a));
+    matches.sort((a, b) => specificity(b) - specificity(a) || Number(!!b.publishedAt) - Number(!!a.publishedAt) || b.revision - a.revision);
     return matches[0] as AssessmentPolicy & { components: AssessmentComponent[] };
+  }
+
+  async publish(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe('SELECT id FROM "AssessmentPolicy" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE', id, this.tenant.organizationId);
+      const p = await tx.assessmentPolicy.findFirst({ where: { id }, include: { components: true } });
+      if (!p) throw new NotFoundException('Policy not found');
+      if (p.publishedAt) return p;
+      const total = p.components.reduce((n: Prisma.Decimal, c: any) => n.add(c.weight), new Prisma.Decimal(0));
+      if (!p.components.length || !total.equals(100)) throw new BadRequestException('Policy components must total exactly 100% before publication');
+      await tx.assessmentPolicy.updateMany({ where: { id, publishedAt: null }, data: { publishedAt: new Date(), version: { increment: 1 } } });
+      await this.audit.recordInTx(tx, { entity: 'AssessmentPolicy', entityId: id, action: 'update', newValues: { action: 'publish', revision: p.revision } });
+      return tx.assessmentPolicy.findFirst({ where: { id }, include: { components: true } });
+    });
+  }
+
+  async fork(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe('SELECT id FROM "AssessmentPolicy" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE', id, this.tenant.organizationId);
+      const p = await tx.assessmentPolicy.findFirst({ where: { id }, include: { components: true } });
+      if (!p) throw new NotFoundException('Policy not found');
+      if (!p.publishedAt) throw new BadRequestException('Publish this revision before forking it');
+      const existing = await tx.assessmentPolicy.findFirst({ where: { supersedesId: id, publishedAt: null } });
+      if (existing) return existing;
+      const { id: _id, components, createdAt, updatedAt, createdBy, updatedBy, version, publishedAt, deletedAt, ...fields } = p;
+      const next = await tx.assessmentPolicy.create({ data: { ...fields, revision: p.revision + 1, supersedesId: id, createdBy: this.tenant.userId } });
+      for (const c of components) {
+        const { id: _componentId, policyId, createdAt: _created, updatedAt: _updated, version: _version, deletedAt: _deleted, ...data } = c;
+        await tx.assessmentComponent.create({ data: { ...data, policyId: next.id } });
+      }
+      await this.audit.recordInTx(tx, { entity: 'AssessmentPolicy', entityId: next.id, action: 'create', newValues: { supersedesId: id, revision: next.revision } });
+      return next;
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    const p = await this.prisma.client.assessmentPolicy.findFirst({ where: { id } });
+    if (p?.publishedAt) throw new BadRequestException('Published policy revisions cannot be deleted');
+    return super.remove(id);
   }
 }
 
@@ -132,6 +172,7 @@ export class AssessmentComponentService extends BaseCrudService<
     return this.prisma.client.$transaction(async (tx: any) => {
       const policy = await tx.assessmentPolicy.findFirst({ where: { id: dto.policyId } });
       if (!policy) throw new NotFoundException(`AssessmentPolicy ${dto.policyId} not found`);
+      if (policy.publishedAt) throw new BadRequestException('Published policy components are immutable. Fork the policy first.');
       const row = await tx.assessmentComponent.create({ data: { ...dto } });
       await this.audit.recordInTx(tx, {
         entity: 'AssessmentComponent',
@@ -147,6 +188,8 @@ export class AssessmentComponentService extends BaseCrudService<
     return this.prisma.client.$transaction(async (tx: any) => {
       const before = await tx.assessmentComponent.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`AssessmentComponent ${id} not found`);
+      const policy = await tx.assessmentPolicy.findFirst({ where: { id: before.policyId } });
+      if (policy?.publishedAt) throw new BadRequestException('Published policy components are immutable. Fork the policy first.');
       const { version, ...rest } = dto;
       const res = await tx.assessmentComponent.updateMany({
         where: version === undefined ? { id } : { id, version },
@@ -172,6 +215,12 @@ export class AssessmentComponentService extends BaseCrudService<
       where: { policyId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     });
+  }
+
+  async remove(id: string): Promise<void> {
+    const c = await this.prisma.client.assessmentComponent.findFirst({ where: { id }, include: { policy: true } });
+    if (c?.policy.publishedAt) throw new BadRequestException('Published policy components cannot be deleted');
+    return super.remove(id);
   }
 
   /**

@@ -261,6 +261,25 @@ export const EVENTS = {
   SchoolResultsPublished: 'school.results.published',
   SchoolResultsLocked: 'school.results.locked',
   SchoolResultsAmended: 'school.results.amended',
+  SchoolResultsAmendmentRejected: 'school.results.amendment_rejected',
+  // Examination operations + result integrity (Phase 5)
+  SchoolExamLifecycleChanged: 'school.exam.lifecycle_changed',
+  SchoolExamCandidatesFrozen: 'school.exam.candidates_frozen',
+  SchoolExamAttendanceRecorded: 'school.exam.attendance_recorded',
+  SchoolExamIncidentRaised: 'school.exam.incident_raised',
+  SchoolExamIncidentResolved: 'school.exam.incident_resolved',
+  SchoolSpecialConsiderationDecided: 'school.exam.special_consideration_decided',
+  SchoolQuestionPaperCustodyRecorded: 'school.exam.custody_recorded',
+  SchoolScriptsAllocated: 'school.exam.scripts_allocated',
+  SchoolScriptReconciled: 'school.exam.script_reconciled',
+  SchoolModerationSampleDrawn: 'school.exam.moderation_sample_drawn',
+  SchoolModerationCompleted: 'school.exam.moderation_completed',
+  SchoolReportDocumentGenerated: 'school.report_document.generated',
+  SchoolReportDocumentPublished: 'school.report_document.published',
+  SchoolReportDocumentSuperseded: 'school.report_document.superseded',
+  SchoolPromotionProposed: 'school.promotion.proposed',
+  SchoolPromotionDecided: 'school.promotion.decided',
+  SchoolPromotionApplied: 'school.promotion.applied',
   // CBT engine (A5)
   SchoolQuizAttemptStarted: 'school.quiz.attempt.started',
   SchoolQuizAttemptSubmitted: 'school.quiz.attempt.submitted',
@@ -827,6 +846,124 @@ export interface DomainEventMap {
     resultSetId: string;
     previousResultSetId: string;
     revision: number;
+  };
+  'school.results.amendment_rejected': {
+    organizationId: string;
+    amendmentId: string;
+    resultSetId: string;
+  };
+  // ── Examination operations + result integrity (Phase 5) ──
+  'school.exam.lifecycle_changed': {
+    organizationId: string;
+    examId: string;
+    from: string;
+    to: string;
+    reason: string | null;
+  };
+  'school.exam.candidates_frozen': {
+    organizationId: string;
+    examId: string;
+    snapshotId: string;
+    revision: number;
+    candidateCount: number;
+  };
+  'school.exam.attendance_recorded': {
+    organizationId: string;
+    examId: string;
+    examScheduleId: string;
+    recorded: number;
+  };
+  'school.exam.incident_raised': {
+    organizationId: string;
+    examId: string;
+    incidentId: string;
+    type: string;
+    severity: string;
+  };
+  'school.exam.incident_resolved': {
+    organizationId: string;
+    examId: string;
+    incidentId: string;
+    status: string;
+  };
+  'school.exam.special_consideration_decided': {
+    organizationId: string;
+    examId: string;
+    considerationId: string;
+    status: string;
+    studentProfileId: string;
+    papersExempted: number;
+  };
+  'school.exam.custody_recorded': {
+    organizationId: string;
+    examId: string | null;
+    questionPaperId: string;
+    action: string;
+  };
+  'school.exam.scripts_allocated': {
+    organizationId: string;
+    examId: string;
+    examScheduleId: string;
+    markingMode: string;
+    created: number;
+  };
+  'school.exam.script_reconciled': {
+    organizationId: string;
+    examId: string;
+    examScheduleId: string;
+    agreed: number;
+    blocked: number;
+  };
+  'school.exam.moderation_sample_drawn': {
+    organizationId: string;
+    examId: string;
+    examScheduleId: string;
+    sampleId: string;
+    sampleSize: number;
+  };
+  'school.exam.moderation_completed': {
+    organizationId: string;
+    examScheduleId: string;
+    sampleId: string;
+    status: string;
+    outsideTolerance: number;
+    adjusted: number;
+  };
+  'school.report_document.generated': {
+    organizationId: string;
+    reportDocumentId: string;
+    studentProfileId: string;
+    termId: string;
+    resultSetId: string | null;
+  };
+  'school.report_document.published': {
+    organizationId: string;
+    reportDocumentId: string;
+    studentProfileId: string;
+    termId: string;
+  };
+  'school.report_document.superseded': {
+    organizationId: string;
+    reportDocumentId: string;
+    supersededById: string;
+    reason: string | null;
+  };
+  'school.promotion.proposed': {
+    organizationId: string;
+    resultSetId: string;
+    termId: string;
+    proposed: number;
+    refreshed: number;
+  };
+  'school.promotion.decided': {
+    organizationId: string;
+    count: number;
+  };
+  'school.promotion.applied': {
+    organizationId: string;
+    resultSetId: string;
+    applied: number;
+    skipped: number;
   };
   'school.quiz.attempt.started': {
     organizationId: string;

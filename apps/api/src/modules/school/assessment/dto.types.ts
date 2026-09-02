@@ -16,11 +16,11 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const ASSESSMENT_KIND = ['exam', 'cat', 'homework', 'classwork', 'practical', 'project', 'oral', 'attendance'] as const;
+const ASSESSMENT_KIND = ['exam', 'cat', 'homework', 'assignment', 'quiz', 'classwork', 'practical', 'project', 'oral', 'observation', 'activity_of_integration', 'attendance'] as const;
 const AGGREGATION = ['mean', 'sum', 'best_n', 'last', 'weighted_mean'] as const;
 const ROUNDING = ['half_up', 'half_even', 'floor', 'ceil'] as const;
 const SOURCE_TYPE = ['manual', 'assignment', 'exam_session', 'quiz'] as const;
-const PARTICIPATION = ['present', 'absent', 'exempt', 'excused', 'malpractice', 'special_consideration'] as const;
+const PARTICIPATION = ['present', 'absent', 'exempt', 'missing', 'withdrawn', 'not_enrolled', 'excused', 'malpractice', 'special_consideration'] as const;
 const MARK_ROUND = ['first', 'second_blind', 'reconciliation'] as const;
 const ADJUSTMENT_KIND = ['moderation', 'scaling', 'late_penalty', 'special_consideration', 'correction'] as const;
 
@@ -233,6 +233,8 @@ export class GradeAssignmentDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
   @IsOptional() @IsNumber() @Min(0) rawScore?: number;
   @IsOptional() @IsBoolean() complete?: boolean;
+  @IsOptional() @IsInt() @Min(0) expectedVersion?: number;
+  @IsOptional() @IsString() feedback?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => RubricScoreDto) rubricScores?: RubricScoreDto[];
 }
 
@@ -252,4 +254,9 @@ export class RequestAmendmentDto {
   @IsString() @IsNotEmpty() resultSetId!: string;
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() detail?: unknown;
+}
+
+/** A refusal is a decision too, and it carries a reason on the record. */
+export class RejectAmendmentDto {
+  @IsString() @IsNotEmpty() decisionNote!: string;
 }

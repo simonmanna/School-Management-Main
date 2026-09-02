@@ -17,6 +17,14 @@ import { LearningOutcomeService } from './outcomes.service';
 import { QuestionPaperService } from './question-paper.service';
 import { ReportCardSettingsService } from './report-card-settings.service';
 import { MarksWorkspaceService } from './marks-workspace.service';
+import { ExamOperationsService } from './exam-operations.service';
+import { ExamSessionService } from './exam-session.service';
+import { ExamMarkingService } from './exam-marking.service';
+import { QuestionPaperCustodyService } from './question-paper-custody.service';
+import { MarkerDirectoryService } from './marker-directory.service';
+import { ReportDocumentService } from './report-document.service';
+import { ExamOperationsController } from './exam-operations.controller';
+import { ReportDocumentController } from './report-document.controller';
 import {
   ExamController,
   ExamScheduleController,
@@ -48,6 +56,8 @@ import { MarksWorkspaceController } from './marks-workspace.controller';
     QuestionPaperController,
     ReportCardSettingsController,
     MarksWorkspaceController,
+    ExamOperationsController,
+    ReportDocumentController,
   ],
   providers: [
     ExamTypeService,
@@ -66,6 +76,12 @@ import { MarksWorkspaceController } from './marks-workspace.controller';
     QuestionPaperService,
     ReportCardSettingsService,
     MarksWorkspaceService,
+    ExamOperationsService,
+    ExamSessionService,
+    ExamMarkingService,
+    QuestionPaperCustodyService,
+    MarkerDirectoryService,
+    ReportDocumentService,
   ],
   exports: [
     ExamTypeService,
@@ -83,6 +99,11 @@ import { MarksWorkspaceController } from './marks-workspace.controller';
     LearningOutcomeService,
     QuestionPaperService,
     MarksWorkspaceService,
+    ExamOperationsService,
+    ExamSessionService,
+    ExamMarkingService,
+    QuestionPaperCustodyService,
+    ReportDocumentService,
   ],
 })
 export class ExaminationsModule {}

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, GoneException, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -48,32 +48,32 @@ export class HomeworkController {
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
   create(@Body() dto: CreateHomeworkDto) {
-    return this.assignments.create(dto);
+    throw new GoneException('Legacy homework is read-only. Create homework through the Assessment Board.');
   }
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
   update(@Param('id') id: string, @Body() dto: UpdateHomeworkDto) {
-    return this.assignments.update(id, dto);
+    throw new GoneException('Legacy homework is read-only. Use the canonical assignment linked to its assessment.');
   }
 
   @Post('submit')
   @RequirePermissions(PERMISSIONS.school.submitAssignments)
   submit(@Body() dto: SubmitHomeworkDto) {
-    return this.assignments.submit(dto);
+    throw new GoneException('Use /school/assignments/submit with the migrated canonical assignment id.');
   }
 
   @Post('grade')
   @RequirePermissions(PERMISSIONS.school.gradeAssignments)
   grade(@Body() dto: GradeSubmissionDto) {
-    return this.assignments.grade(dto);
+    throw new GoneException('Use the Assessment Board markbook or canonical assignment grading endpoint.');
   }
 
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
   remove(@Param('id') id: string) {
-    return this.assignments.remove(id);
+    throw new GoneException('Legacy homework is retained as read-only migration provenance.');
   }
 }
 

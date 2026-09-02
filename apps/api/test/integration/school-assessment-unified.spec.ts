@@ -23,6 +23,7 @@ import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { AssessmentBoardService } from '../../src/modules/school/assessment/assessment-board.service';
 import { GradebookService } from '../../src/modules/school/assessment/gradebook.service';
+import { AssessmentWorkflowService } from '../../src/modules/school/assessment/assessment-workflow.service';
 
 describeDb('integration: assessments — one door, every kind', () => {
   const rawUrl = (() => {
@@ -35,6 +36,9 @@ describeDb('integration: assessments — one door, every kind', () => {
   let tenant: TenantContextService;
   let board: AssessmentBoardService;
   let gradebook: GradebookService;
+  let workflow: AssessmentWorkflowService;
+  let courseOfferingId: string;
+  let rosterId: string;
 
   const organizationId = `org_ub_${Date.now()}`;
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
@@ -95,6 +99,15 @@ describeDb('integration: assessments — one door, every kind', () => {
     await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Homework', kind: 'homework', weight: 10, aggregation: 'mean' } });
     await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Projects', kind: 'project', weight: 10, aggregation: 'mean' } });
     await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Exams', kind: 'exam', weight: 50, aggregation: 'mean' } });
+    await raw.assessmentPolicy.update({ where: { id: policy.id }, data: { publishedAt: new Date() } });
+    const programme = await raw.academicProgramme.create({ data: { organizationId, code: 'SEC', name: 'Secondary', effectiveFrom: year.startDate } });
+    const course = await raw.courseOffering.create({ data: { organizationId, name: 'S2 Mathematics', academicYearId: year.id, termId, classId, subjectId, status: 'ACTIVE' } });
+    courseOfferingId = course.id;
+    await raw.courseOfferingTeacher.create({ data: { organizationId, courseOfferingId, teacherPartnerId, effectiveFrom: year.startDate, isResponsible: true } });
+    for (const studentProfileId of studentIds) {
+      const e = await raw.studentEnrollment.create({ data: { organizationId, studentProfileId, programmeId: programme.id, academicYearId: year.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
+      await raw.courseEnrollment.create({ data: { organizationId, courseOfferingId, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
+    }
 
     const examType = await raw.examType.create({ data: { organizationId, name: 'End of Term', weight: 50, isFinal: true } });
     examId = (await raw.exam.create({
@@ -108,6 +121,8 @@ describeDb('integration: assessments — one door, every kind', () => {
     tenant = moduleRef.get(TenantContextService);
     board = moduleRef.get(AssessmentBoardService);
     gradebook = moduleRef.get(GradebookService);
+    workflow = moduleRef.get(AssessmentWorkflowService);
+    rosterId = (await asUser('teacher', () => workflow.captureRoster(courseOfferingId))).id;
   });
 
   afterAll(async () => {
@@ -119,19 +134,19 @@ describeDb('integration: assessments — one door, every kind', () => {
 
   it('creates a CAT, a homework, a project and an exam paper through ONE form', async () => {
     const cat = await asUser('teacher', () => board.createUnified({
-      kind: 'cat', classId, subjectId, termId, title: 'CAT 1', maxScore: 20,
+      kind: 'cat', courseOfferingId, rosterId, classId, subjectId, termId, title: 'CAT 1', maxScore: 20,
       componentId: catComponentId, teacherPartnerId,
     } as any));
     const homework = await asUser('teacher', () => board.createUnified({
-      kind: 'homework', classId, subjectId, termId, title: 'Algebra exercise', maxScore: 10,
+      kind: 'homework', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Algebra exercise', maxScore: 10,
       teacherPartnerId, dueAt: '2026-02-20',
     } as any));
     const project = await asUser('teacher', () => board.createUnified({
-      kind: 'project', classId, subjectId, termId, title: 'Statistics project', maxScore: 25,
+      kind: 'project', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Statistics project', maxScore: 25,
       teacherPartnerId,
     } as any));
     const exam = await asUser('exams_officer', () => board.createUnified({
-      kind: 'exam', classId, subjectId, termId, title: 'Paper 1', maxScore: 100,
+      kind: 'exam', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Paper 1', maxScore: 100,
       examId, classIds: [classId],
     } as any));
 
@@ -146,7 +161,7 @@ describeDb('integration: assessments — one door, every kind', () => {
 
     // Homework carries a real HomeworkAssignment, and exactly one — the old
     // grade-time upsert could mint a second Assessment behind the first.
-    const hw = await raw.homeworkAssignment.findMany({ where: { organizationId } });
+    const hw = await raw.assignment.findMany({ where: { organizationId, assessmentId: created.homework } });
     expect(hw).toHaveLength(1);
     expect(hw[0].assessmentId).toBe(created.homework);
 
@@ -156,6 +171,7 @@ describeDb('integration: assessments — one door, every kind', () => {
     expect(schedules).toHaveLength(1);
     const examAssessment = rows.find((r) => r.kind === 'exam')!;
     expect(examAssessment.sourceRef).toBe(schedules[0].id);
+    for (const id of Object.values(created)) await asUser('teacher', () => workflow.transition(id, { action: 'publish', expectedVersion: 0 }));
   });
 
   it('lists all four in one board, with progress and the weighting policy', async () => {

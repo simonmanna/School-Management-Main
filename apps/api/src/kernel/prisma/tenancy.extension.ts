@@ -457,6 +457,7 @@ export const ORG_SCOPED = new Set<string>([
   'AssessmentPolicy',
   'AssessmentComponent',
   'Assessment',
+  'AssessmentOutcome',
   'StudentAssessment',
   'MarkEntry',
   'MarkAdjustment',
@@ -475,6 +476,22 @@ export const ORG_SCOPED = new Set<string>([
   'StudentSubjectResult',
   'StudentTermResult',
   'AmendmentRequest',
+  // Examination operations + result integrity (Phase 5). None of these carry a
+  // deletedAt: a candidate snapshot, an attendance record, an incident, a
+  // custody event, a marked script, a moderation sample, a published report
+  // document and a promotion decision are all evidence — they are superseded or
+  // voided in place, never soft-deleted out of view.
+  'ExamCandidateSnapshot',
+  'ExamCandidateEntry',
+  'ExamAttendance',
+  'ExamIncident',
+  'SpecialConsideration',
+  'QuestionPaperCustodyEvent',
+  'ScriptAllocation',
+  'ModerationSample',
+  'ModerationSampleItem',
+  'ReportDocument',
+  'PromotionDecision',
   // CBT engine (A5)
   'QuestionBank',
   'Question',

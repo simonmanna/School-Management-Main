@@ -33,5 +33,6 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [025](./ADR-025-report-document-provenance.md) | Report-Document Provenance | Proposed |
 | [026](./ADR-026-lms-academic-core-boundary.md) | LMS as a Consumer of the Academic Core | Proposed |
 | [027](./ADR-027-legacy-academic-retirement.md) | Legacy Academic Retirement Strategy | Proposed |
+| [028](./ADR-028-examination-operations-integrity.md) | Examination Operations and Result Integrity | Proposed |
 
 Template: **Context → Decision → Consequences → Alternatives considered.**

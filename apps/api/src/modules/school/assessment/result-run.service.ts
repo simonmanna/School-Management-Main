@@ -26,6 +26,9 @@ interface PublishConflict {
   detail: string;
 }
 
+/** Participation values that RESOLVE a learner row without a score. */
+const TERMINAL_PARTICIPATION = ['exempt', 'excused', 'absent', 'malpractice', 'withdrawn', 'not_enrolled'];
+
 const sha = (v: unknown): string => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
 
 /**
@@ -317,6 +320,80 @@ export class ResultRunService {
       conflicts.push({ code: 'MISSING_CHECKSUM', detail: 'result set is missing input/output checksums' });
     }
 
+    // 5. Phase 5 — every contributing row has an OUTCOME.
+    //
+    // Approval alone was not enough. A learner row that is approved but carries
+    // neither a score nor a terminal participation is an unanswered question:
+    // aggregation treats it as nothing, and "nothing" silently deflates the
+    // subject percent without anyone being told. Blank is not zero, and it is
+    // not a pass either — it has to be resolved before publication.
+    for (const sa of contributing) {
+      if (sa.effectiveScore == null && !TERMINAL_PARTICIPATION.includes(sa.participation)) {
+        conflicts.push({
+          code: 'PARTICIPATION_UNRESOLVED',
+          studentProfileId: sa.studentProfileId,
+          detail: `student assessment ${sa.id} has no mark and no recorded absence or exemption`,
+        });
+      }
+    }
+
+    // 6. Phase 5 — the weighting actually adds up.
+    //
+    // `AssessmentPolicy.publish` enforces 100% at publication, but a result set
+    // can resolve an unpublished draft policy, or none at all. Either way the
+    // subject percent would be produced under a rule nobody signed off.
+    const subjectIds = [...new Set((rs.subjectResults ?? []).map((r: any) => r.subjectId))] as string[];
+    const sampleMember = roster.members[0];
+    for (const subjectId of subjectIds) {
+      const policy: any = await this.policies.resolve({
+        subjectId,
+        classId: sampleMember?.classId ?? undefined,
+        gradeLevelId: sampleMember?.gradeLevelId ?? undefined,
+        termId: rs.termId,
+      });
+      if (!policy) {
+        conflicts.push({ code: 'NO_ASSESSMENT_POLICY', subjectId, detail: 'no weighting policy applies to this subject' });
+        continue;
+      }
+      const components = policy.components ?? [];
+      const total = components.reduce((n: number, c: any) => n + Number(c.weight), 0);
+      if (!components.length || Math.abs(total - 100) > 0.001) {
+        conflicts.push({
+          code: 'COMPONENT_WEIGHTS_INVALID',
+          subjectId,
+          detail: `the weighting components for this subject total ${total}%, not 100%`,
+        });
+      }
+      if (!policy.publishedAt) {
+        conflicts.push({ code: 'POLICY_NOT_PUBLISHED', subjectId, detail: 'this subject is scored under an unpublished draft policy' });
+      }
+    }
+
+    // 7. Phase 5 — an exam paper still open for mark entry must not be published from.
+    const assessmentIds = [...new Set(contributing.map((sa: any) => sa.assessmentId))] as string[];
+    if (assessmentIds.length) {
+      const examAssessments = await this.prisma.client.assessment.findMany({
+        where: { id: { in: assessmentIds }, sourceType: 'exam_session', deletedAt: null },
+        select: { id: true, sourceRef: true },
+      });
+      const scheduleIds = examAssessments.map((a: any) => a.sourceRef).filter(Boolean) as string[];
+      const schedules = scheduleIds.length
+        ? await this.prisma.client.examSchedule.findMany({
+            where: { id: { in: scheduleIds } },
+            include: { exam: { select: { id: true, name: true, lifecycleState: true } } },
+          })
+        : [];
+      for (const schedule of schedules as any[]) {
+        const state = schedule.exam?.lifecycleState;
+        if (!schedule.marksLockedAt && !['results_ready', 'closed', 'archived'].includes(state)) {
+          conflicts.push({
+            code: 'EXAM_PAPER_UNLOCKED',
+            detail: `${schedule.exam?.name ?? 'an examination'} is '${state}' and this paper is still open for mark entry`,
+          });
+        }
+      }
+    }
+
     return conflicts;
   }
 
@@ -390,6 +467,9 @@ export class ResultRunService {
       marksTotal: number;
       sodViolations: number;
       hasChecksums: boolean;
+      participationUnresolved: number;
+      weightingValid: boolean;
+      examPapersLocked: boolean;
     };
   }> {
     // termResults is REQUIRED here: runPublishGate() reads rs.termResults to
@@ -397,9 +477,14 @@ export class ResultRunService {
     // readiness checklist — the screen that exists to explain why a publish is
     // blocked — answered every request with a 500. publish() already includes
     // it, which is why the gate worked there and only this caller was broken.
+    // `subjectResults` joins the include for the same reason `termResults` did:
+    // the Phase 5 component-weight check reads the subjects this set actually
+    // scored, so loading the set without them skipped the check on this screen
+    // while `publish()` still applied it — readiness would say ready and the
+    // publish would then refuse.
     const rs = await this.prisma.client.resultSet.findFirst({
       where: { id: resultSetId },
-      include: { termResults: true },
+      include: { termResults: true, subjectResults: true },
     });
     if (!rs) throw new NotFoundException(`ResultSet ${resultSetId} not found`);
 
@@ -426,6 +511,11 @@ export class ResultRunService {
       (sa: any) => sa.approvedById && sa.enteredById && sa.approvedById === sa.enteredById,
     ).length;
 
+    const unresolved = contributing.filter(
+      (sa: any) => sa.effectiveScore == null && !TERMINAL_PARTICIPATION.includes(sa.participation),
+    ).length;
+    const weightCodes = ['COMPONENT_WEIGHTS_INVALID', 'NO_ASSESSMENT_POLICY', 'POLICY_NOT_PUBLISHED'];
+
     return {
       ready: conflicts.length === 0,
       conflicts,
@@ -437,6 +527,9 @@ export class ResultRunService {
         marksTotal: contributing.length,
         sodViolations: sod,
         hasChecksums: !!rs.inputChecksum && !!rs.outputChecksum,
+        participationUnresolved: unresolved,
+        weightingValid: !conflicts.some((c) => weightCodes.includes(c.code)),
+        examPapersLocked: !conflicts.some((c) => c.code === 'EXAM_PAPER_UNLOCKED'),
       },
     };
   }
@@ -494,6 +587,7 @@ export class ResultRunService {
       const bySubject = new Map<string, any[]>();
       for (const r of mine) {
         const subjectId = r.assessment.subjectId;
+        if (!subjectId) continue; // Non-subject evidence is not a subject-result column.
         if (!bySubject.has(subjectId)) bySubject.set(subjectId, []);
         bySubject.get(subjectId)!.push(r);
       }

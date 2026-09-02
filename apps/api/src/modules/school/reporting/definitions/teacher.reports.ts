@@ -321,13 +321,22 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const classIds = ctx.resolved.classIds;
         const organizationId = ctx.organizationId;
 
-        // Get all timetable slots for classes in scope
+        // `resolved.classIds` is absent when no class filter narrowed the scope,
+        // and `{ in: undefined }` is a Prisma validation error rather than "all
+        // classes" — which is why this report threw for an unfiltered run. Omit
+        // the predicate entirely in that case; the tenancy extension still scopes
+        // the query to the organization.
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { classId: { in: classIds } },
+          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
           include: {
-            teacher: true,
+            // `teacher` is a StaffProfile, whose display name lives on its
+            // Partner — reading `teacher.name` returned undefined, so every row
+            // printed a blank teacher. The relation to the class is
+            // `schoolClass`, not `class`; asking for `class` made Prisma reject
+            // the whole query.
+            teacher: { include: { partner: true, department: true } },
             subject: true,
-            class: { include: { gradeLevel: true } },
+            schoolClass: { include: { gradeLevel: true } },
             period: true,
           },
         });
@@ -339,17 +348,17 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           if (!tpId) continue;
           const entry = byTeacher.get(tpId) ?? {
             teacherPartnerId: tpId,
-            teacherName: slot.teacher?.name ?? '',
-            staffNumber: slot.teacher?.staffNumber ?? '',
-            department: slot.teacher?.department ?? '',
+            teacherName: slot.teacher?.partner?.name ?? '',
+            staffNumber: slot.teacher?.employeeNo ?? '',
+            department: slot.teacher?.department?.name ?? '',
             subjects: new Set<string>(),
             classes: new Set<string>(),
             classDetails: new Map<string, string>(),
             periodCount: 0,
           };
           entry.subjects.add(slot.subject?.name ?? '');
-          entry.classes.add(slot.class?.name ?? '');
-          entry.classDetails.set(slot.class?.name ?? '', slot.subject?.name ?? '');
+          entry.classes.add(slot.schoolClass?.name ?? '');
+          entry.classDetails.set(slot.schoolClass?.name ?? '', slot.subject?.name ?? '');
           entry.periodCount += 1;
           byTeacher.set(tpId, entry);
         }

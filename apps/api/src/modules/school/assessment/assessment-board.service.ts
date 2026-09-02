@@ -1,15 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
-import { AuditService } from '../../../kernel/audit/audit.service';
 import { AssessmentPolicyService } from './assessment-config.service';
-import { AssessmentMintService } from './assessment-mint.service';
 import { MarkingService } from './marking.service';
+import { AssessmentWorkflowService, hasOutcome, RESOLVED_WITHOUT_SCORE } from './assessment-workflow.service';
 import { kindOf } from './assessment-math';
 import type { AssessmentBoardQuery, CreateUnifiedAssessmentDto } from './assessment-board.dto';
 
 /** Participation values that mean "resolved, but no numeric mark". */
-const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice', 'special_consideration']);
+const NON_SCORING = new Set(RESOLVED_WITHOUT_SCORE);
 
 /**
  * AssessmentBoardService — the one list a teacher starts from, and the one form
@@ -25,18 +24,16 @@ const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice', 'spec
  *
  * Nothing here is a new store. Rows are `Assessment` + `StudentAssessment`, the
  * same spine the gradebook and the result run read; creating an exam still
- * creates an `ExamSchedule` and creating homework still creates a
- * `HomeworkAssignment`. Only the front door is unified.
+ * creates an `ExamSchedule`; other delivery uses the canonical `Assignment`.
  */
 @Injectable()
 export class AssessmentBoardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
-    private readonly audit: AuditService,
     private readonly policies: AssessmentPolicyService,
-    private readonly mint: AssessmentMintService,
     private readonly marking: MarkingService,
+    private readonly workflow: AssessmentWorkflowService,
   ) {}
 
   private get org() {
@@ -54,7 +51,13 @@ export class AssessmentBoardService {
    * visiting four of them.
    */
   async board(q: AssessmentBoardQuery) {
+    if (q.courseOfferingId) {
+      const course = await this.prisma.client.courseOffering.findFirst({ where: { id: q.courseOfferingId } });
+      if (!course) throw new NotFoundException('Course offering not found');
+      q = { ...q, termId: course.termId, classId: course.classId ?? undefined, subjectId: course.subjectId ?? undefined };
+    }
     const where: any = {
+      ...(await this.marking.readScope()),
       organizationId: this.org,
       termId: q.termId,
       deletedAt: null,
@@ -62,11 +65,13 @@ export class AssessmentBoardService {
       ...(q.subjectId ? { subjectId: q.subjectId } : {}),
       ...(q.kind ? { kind: q.kind } : {}),
       ...(q.teacherPartnerId ? { teacherPartnerId: q.teacherPartnerId } : {}),
+      ...(q.courseOfferingId ? { courseOfferingId: q.courseOfferingId } : {}),
+      ...(q.sectionId ? { sectionId: q.sectionId } : {}),
     };
 
     const assessments = await this.prisma.client.assessment.findMany({
       where,
-      include: { component: true },
+      include: { component: true, courseOffering: { select: { id: true, name: true } }, roster: { select: { frozenAt: true, _count: { select: { members: true } } } } },
       orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
     });
     if (assessments.length === 0) {
@@ -83,10 +88,9 @@ export class AssessmentBoardService {
       this.namesOf('schoolClass', [...new Set(assessments.map((a) => a.classId))]),
     ]);
 
-    // Class sizes are the denominator: a marksheet is derived from the ROSTER,
+    // Frozen roster members are the denominator: a marksheet is derived from the ROSTER,
     // never from the rows that happen to exist, or a student with no mark yet
     // silently drops out of "how many are left".
-    const sizes = await this.classSizes([...new Set(assessments.map((a) => a.classId))]);
 
     const byAssessment = new Map<string, typeof marks>();
     for (const m of marks) {
@@ -100,14 +104,14 @@ export class AssessmentBoardService {
       const marked = mine.filter(
         (m) => m.effectiveScore !== null || NON_SCORING.has(String(m.participation)),
       ).length;
-      const total = Math.max(sizes.get(a.classId) ?? 0, mine.length);
+      const total = a.roster?._count.members ?? mine.length;
       return {
         assessmentId: a.id,
         title: a.title,
         kind: kindOf(a),
         sequence: a.sequence ?? 1,
-        subject: { id: a.subjectId, name: subjects.get(a.subjectId) ?? '' },
-        class: { id: a.classId, name: classes.get(a.classId) ?? '' },
+        subject: { id: a.subjectId ?? '', name: subjects.get(a.subjectId ?? '') ?? '' },
+        class: { id: a.classId ?? '', name: classes.get(a.classId ?? '') ?? '' },
         component: a.component
           ? { id: a.component.id, name: a.component.name, weight: Number(a.component.weight) }
           : null,
@@ -117,6 +121,12 @@ export class AssessmentBoardService {
         approvalStatus: this.rollup(mine.map((m) => String(m.approvalStatus))),
         locked: a.lockedAt != null,
         sourceType: a.sourceType,
+        courseOffering: a.courseOffering,
+        rosterId: a.rosterId,
+        rosterFrozen: !!a.roster?.frozenAt,
+        version: a.version,
+        feedbackReleaseAt: a.feedbackReleaseAt,
+        marksReleaseAt: a.marksReleaseAt,
         marked,
         total,
       };
@@ -184,23 +194,13 @@ export class AssessmentBoardService {
     return { id: policy.id, components, totalWeight: total, valid: Math.abs(total - 100) < 0.001 };
   }
 
-  private async namesOf(model: 'subject' | 'schoolClass', ids: string[]) {
+  private async namesOf(model: 'subject' | 'schoolClass', ids: Array<string | null>) {
     if (ids.length === 0) return new Map<string, string>();
     const rows = await (this.prisma.client as any)[model].findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids.filter(Boolean) } },
       select: { id: true, name: true },
     });
     return new Map<string, string>(rows.map((r: any) => [r.id, r.name]));
-  }
-
-  private async classSizes(classIds: string[]) {
-    if (classIds.length === 0) return new Map<string, number>();
-    const grouped = await this.prisma.client.studentProfile.groupBy({
-      by: ['currentClassId'],
-      where: { currentClassId: { in: classIds }, status: 'active' },
-      _count: { _all: true },
-    });
-    return new Map<string, number>(grouped.map((g: any) => [g.currentClassId, g._count._all]));
   }
 
   /* ──────────────────────────── One create form ──────────────────────────── */
@@ -210,152 +210,13 @@ export class AssessmentBoardService {
    *
    * The kind decides only the TAIL of the work: an exam also gets its
    * `ExamSchedule` rows (one per class), homework also gets its
-   * `HomeworkAssignment`. Everything else is identical, which is the whole point
+   * `Assignment`. Everything else is identical, which is the whole point
    * — a teacher answers the same five questions whatever they are setting.
    */
   async createUnified(dto: CreateUnifiedAssessmentDto) {
-    const [klass, subject, term] = await Promise.all([
-      this.prisma.client.schoolClass.findFirst({ where: { id: dto.classId } }),
-      this.prisma.client.subject.findFirst({ where: { id: dto.subjectId } }),
-      this.prisma.client.term.findFirst({ where: { id: dto.termId } }),
-    ]);
-    if (!klass) throw new NotFoundException(`Class ${dto.classId} not found`);
-    if (!subject) throw new NotFoundException(`Subject ${dto.subjectId} not found`);
-    if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
-
-    if (dto.kind === 'exam' && !dto.examId) {
-      throw new BadRequestException('An exam assessment needs an exam to belong to. Pick or create one first.');
-    }
-
-    return this.prisma.client.$transaction(async (tx: any) => {
-      if (dto.kind === 'exam') return this.createExam(tx, dto);
-      if (dto.kind === 'homework') return this.createHomework(tx, dto);
-      return this.createPlain(tx, dto);
-    });
+    return this.workflow.create(dto);
   }
 
-  /** CAT, classwork, practical, project, oral — a gradebook column and nothing else. */
-  private async createPlain(tx: any, dto: CreateUnifiedAssessmentDto) {
-    const component = await this.componentFor(tx, dto);
-    const created = await tx.assessment.create({
-      data: {
-        organizationId: this.org,
-        componentId: component?.id ?? null,
-        subjectId: dto.subjectId,
-        classId: dto.classId,
-        sectionId: dto.sectionId ?? null,
-        termId: dto.termId,
-        teacherPartnerId: dto.teacherPartnerId ?? null,
-        title: dto.title,
-        maxScore: dto.maxScore ?? 100,
-        kind: dto.kind as any,
-        sequence: dto.sequence ?? 1,
-        sourceType: 'manual',
-        status: 'open',
-        dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
-        createdBy: this.tenant.userId ?? null,
-      },
-    });
-    await this.audit.recordInTx(tx, {
-      entity: 'Assessment',
-      entityId: created.id,
-      action: 'create',
-      newValues: { kind: dto.kind, title: dto.title, classId: dto.classId, subjectId: dto.subjectId },
-    });
-    return { assessment: created, created: 1 };
-  }
-
-  /**
-   * An exam paper, fanned out across the chosen classes.
-   *
-   * This is what the old four-step wizard's steps 1 and 2 did, collapsed into
-   * the same dialog: the office no longer picks classes on a separate screen
-   * from the one where it named the exam.
-   */
-  private async createExam(tx: any, dto: CreateUnifiedAssessmentDto) {
-    const exam = await tx.exam.findFirst({ where: { id: dto.examId } });
-    if (!exam) throw new NotFoundException(`Exam ${dto.examId} not found`);
-
-    const classIds = dto.classIds?.length ? dto.classIds : [dto.classId];
-    const made: any[] = [];
-    for (const classId of classIds) {
-      const existing = await tx.examSchedule.findFirst({
-        where: { examId: dto.examId, classId, subjectId: dto.subjectId },
-      });
-      const schedule =
-        existing ??
-        (await tx.examSchedule.create({
-          data: {
-            organizationId: this.org,
-            examId: dto.examId,
-            classId,
-            subjectId: dto.subjectId,
-            date: dto.dueAt ? new Date(dto.dueAt) : exam.startDate,
-            startTime: '09:00',
-            durationMinutes: 120,
-            maxMarks: dto.maxScore ?? 100,
-            paperNumber: dto.sequence ?? 1,
-          },
-        }));
-      made.push(await this.mint.forExamSchedule(tx, schedule.id));
-    }
-
-    await this.audit.recordInTx(tx, {
-      entity: 'Assessment',
-      entityId: made[0]?.id ?? dto.examId!,
-      action: 'create',
-      newValues: { kind: 'exam', examId: dto.examId, classIds, created: made.length },
-    });
-    return { assessment: made[0] ?? null, created: made.length };
-  }
-
-  /** Homework — an assessment that also accepts submissions. */
-  private async createHomework(tx: any, dto: CreateUnifiedAssessmentDto) {
-    if (!dto.teacherPartnerId) {
-      throw new BadRequestException('Homework needs the teacher who set it.');
-    }
-    const homework = await tx.homeworkAssignment.create({
-      data: {
-        organizationId: this.org,
-        teacherPartnerId: dto.teacherPartnerId,
-        classId: dto.classId,
-        sectionId: dto.sectionId ?? null,
-        subjectId: dto.subjectId,
-        termId: dto.termId,
-        title: dto.title,
-        description: dto.description ?? null,
-        dueDate: dto.dueAt ? new Date(dto.dueAt) : new Date(),
-        maxScore: dto.maxScore ?? 100,
-        attachments: [],
-      },
-    });
-    const assessment = await this.mint.forHomework(tx, homework);
-    await this.audit.recordInTx(tx, {
-      entity: 'HomeworkAssignment',
-      entityId: homework.id,
-      action: 'create',
-      newValues: { kind: 'homework', title: dto.title, assessmentId: assessment.id },
-    });
-    return { assessment, homework, created: 1 };
-  }
-
-  private async componentFor(tx: any, dto: CreateUnifiedAssessmentDto) {
-    if (dto.componentId) {
-      const c = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId } });
-      if (!c) throw new NotFoundException(`Component ${dto.componentId} not found`);
-      return c;
-    }
-    // Fall back to the policy component that matches the kind, so a teacher who
-    // does not think in weighting buckets still lands in the right one.
-    const klass = await tx.schoolClass.findFirst({ where: { id: dto.classId } });
-    const policy = await this.policies.resolve({
-      subjectId: dto.subjectId,
-      classId: dto.classId,
-      gradeLevelId: klass?.gradeLevelId ?? undefined,
-      termId: dto.termId,
-    });
-    return (policy?.components ?? []).find((c: any) => c.kind === dto.kind) ?? null;
-  }
 
   /* ──────────────────────────── One marksheet ──────────────────────────── */
 
@@ -368,26 +229,19 @@ export class AssessmentBoardService {
    * return `StudentAssessment` rows.
    */
   async sheet(assessmentId: string) {
+    await this.marking.assertMayViewAssessment(assessmentId);
     const assessment = await this.prisma.client.assessment.findFirst({
       where: { id: assessmentId, deletedAt: null },
-      include: { component: true },
+      include: { component: true, courseOffering: true, roster: { include: { members: true } }, assignment: true, outcomes: true },
     });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
 
-    const [roster, marks, subject, klass] = await Promise.all([
-      this.prisma.client.studentProfile.findMany({
-        where: {
-          currentClassId: assessment.classId,
-          status: 'active',
-          ...(assessment.sectionId ? { currentSectionId: assessment.sectionId } : {}),
-        },
-        include: { partner: true },
-      }),
-      this.prisma.client.studentAssessment.findMany({
-        where: { assessmentId, deletedAt: null },
-      }),
-      this.prisma.client.subject.findFirst({ where: { id: assessment.subjectId }, select: { name: true } }),
-      this.prisma.client.schoolClass.findFirst({ where: { id: assessment.classId }, select: { name: true } }),
+    const marks = await this.prisma.client.studentAssessment.findMany({ where: { assessmentId, deletedAt: null }, include: { markEntries: true } });
+    const learnerIds = assessment.roster ? assessment.roster.members.map((m) => m.studentProfileId) : marks.map((m) => m.studentProfileId);
+    const [roster, subject, klass] = await Promise.all([
+      this.prisma.client.studentProfile.findMany({ where: { id: { in: learnerIds } }, include: { partner: true } }),
+      assessment.subjectId ? this.prisma.client.subject.findFirst({ where: { id: assessment.subjectId }, select: { name: true } }) : null,
+      assessment.classId ? this.prisma.client.schoolClass.findFirst({ where: { id: assessment.classId }, select: { name: true } }) : null,
     ]);
 
     const byStudent = new Map(marks.map((m) => [m.studentProfileId, m]));
@@ -403,6 +257,9 @@ export class AssessmentBoardService {
           percentage: m?.percentage != null ? Number(m.percentage) : null,
           participation: String(m?.participation ?? 'present'),
           approvalStatus: String(m?.approvalStatus ?? 'draft'),
+          version: m?.version ?? 0,
+          comment: m?.feedback ?? m?.markEntries.find((entry) => entry.round === 'first')?.comment ?? '',
+          rejectionReason: m?.rejectionReason ?? null,
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -420,8 +277,17 @@ export class AssessmentBoardService {
         dueAt: assessment.dueAt,
         locked: assessment.lockedAt != null,
         status: assessment.status,
-        subject: { id: assessment.subjectId, name: subject?.name ?? '' },
-        class: { id: assessment.classId, name: klass?.name ?? '' },
+        version: assessment.version,
+        courseOfferingId: assessment.courseOfferingId,
+        courseName: assessment.courseOffering?.name ?? null,
+        rosterId: assessment.rosterId,
+        rosterFrozen: !!assessment.roster?.frozenAt,
+        assignmentId: assessment.assignment?.id ?? null,
+        gradingMode: assessment.assignment?.gradingMode ?? 'points',
+        feedbackReleaseAt: assessment.feedbackReleaseAt,
+        marksReleaseAt: assessment.marksReleaseAt,
+        subject: { id: assessment.subjectId ?? '', name: subject?.name ?? '' },
+        class: { id: assessment.classId ?? '', name: klass?.name ?? '' },
         component: assessment.component
           ? { id: assessment.component.id, name: assessment.component.name, weight: Number(assessment.component.weight) }
           : null,
@@ -447,7 +313,9 @@ export class AssessmentBoardService {
     marks: number | null;
     participation?: string;
     expectedVersion?: number;
+    comment?: string;
   }) {
+    await this.marking.assertMayMarkAssessment(dto.assessmentId);
     const assessment = await this.prisma.client.assessment.findFirst({
       where: { id: dto.assessmentId, deletedAt: null },
     });
@@ -463,12 +331,13 @@ export class AssessmentBoardService {
         score: clearing ? null : dto.marks,
         source: 'manual',
         snapshot: {
-          classId: assessment.classId,
+          classId: assessment.classId ?? undefined,
           sectionId: assessment.sectionId ?? undefined,
           termId: assessment.termId,
         },
         // Refuse a stale write rather than letting the later save win.
         expectedVersion: dto.expectedVersion,
+        comment: dto.comment,
       });
       await tx.studentAssessment.updateMany({
         where: { id: sa.id },
@@ -479,6 +348,7 @@ export class AssessmentBoardService {
         marks: sa.effectiveScore != null ? Number(sa.effectiveScore) : null,
         percentage: sa.percentage != null ? Number(sa.percentage) : null,
         participation,
+        version: sa.version,
       };
     });
   }
@@ -527,8 +397,8 @@ export class AssessmentBoardService {
           assessmentId: a.id,
           title: a.title,
           kind: kindOf(a),
-          subject: subjects.get(a.subjectId) ?? '',
-          class: classes.get(a.classId) ?? '',
+          subject: subjects.get(a.subjectId ?? '') ?? '',
+          class: classes.get(a.classId ?? '') ?? '',
           submittedBy: a.teacherPartnerId ? staff.get(a.teacherPartnerId) ?? null : null,
           students: mine.length,
           average: average === null ? null : Math.round(average * 10) / 10,
@@ -554,6 +424,13 @@ export class AssessmentBoardService {
     action: 'submit' | 'resubmit' | 'approve' | 'reject',
     reason?: string,
   ) {
+    const sheet = await this.sheet(assessmentId);
+    if (action === 'reject' && !reason?.trim()) throw new BadRequestException('A reason is required when returning marks');
+    if (action === 'submit' || action === 'resubmit') {
+      if (!sheet.assessment.rosterFrozen) throw new BadRequestException('A frozen assessment roster is required');
+      if (!sheet.students.length || sheet.students.some((s) => !hasOutcome(s))) throw new BadRequestException('Every learner needs a score or a resolved participation outcome before submission');
+      if (sheet.students.some((s) => s.approvalStatus === 'rejected')) action = 'resubmit';
+    }
     return this.marking.markingApproval({ assessmentId, action, reason } as any);
   }
 }

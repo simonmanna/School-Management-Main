@@ -420,6 +420,21 @@ export const PERMISSIONS = {
     approveResults: 'school:results:approve',
     publishResults: 'school:results:publish',
     amendResults: 'school:results:amend',
+    // ── Examination operations (Phase 5). The exam office is a distinct role
+    // from whoever teaches or approves marks: running a sitting, holding the
+    // question papers and allocating scripts are separate acts, and the school
+    // that cannot separate them still sees which grant was used.
+    runExamOperations: 'school:exams:operate',
+    manageExamCustody: 'school:exams:custody',
+    allocateScripts: 'school:exams:allocate',
+    markScripts: 'school:exams:mark',
+    grantSpecialConsideration: 'school:exams:consideration',
+    // Report provenance + promotion. Generating a document is not publishing it,
+    // and recommending a promotion is not deciding one.
+    manageReportDocuments: 'school:reports:documents:write',
+    publishReportDocuments: 'school:reports:documents:publish',
+    decidePromotion: 'school:promotion:decide',
+    applyPromotion: 'school:promotion:apply',
     manageAssignments: 'school:assignments:write',
     gradeAssignments: 'school:assignments:grade',
     submitAssignments: 'school:assignments:submit',

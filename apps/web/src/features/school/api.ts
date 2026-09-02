@@ -4078,7 +4078,7 @@ const RC = `${S}/report-cards`;
 
 /* ── A1 Assessment policy + components + instances ────────────────────────── */
 
-export interface AssessmentPolicy { id: string; name: string; gradeLevelId?: string | null; classId?: string | null; subjectId?: string | null; termId?: string | null; passMark?: number | null; caCap?: number | null; roundingMode?: string; decimalPlaces?: number | null; isActive: boolean; version: number }
+export interface AssessmentPolicy { id: string; name: string; gradeLevelId?: string | null; classId?: string | null; subjectId?: string | null; termId?: string | null; passMark?: number | null; caCap?: number | null; roundingMode?: string; decimalPlaces?: number | null; isActive: boolean; version: number; revision: number; publishedAt: string | null; supersedesId: string | null }
 export interface AssessmentComponent { id: string; policyId: string; name: string; kind: string; weight: number; aggregation?: string | null; bestN?: number | null; countsAbsentAsZero?: boolean; examTypeId?: string | null; order?: number | null }
 export interface Assessment { id: string; subjectId: string; classId: string; termId: string; componentId?: string | null; title: string; maxScore?: number | null; weightInComponent?: number | null; sourceType?: string; status: string; component?: { name: string; kind: string } | null }
 
@@ -4112,7 +4112,7 @@ export function useValidateComponents(policyId: string | undefined) {
   return useQuery({
     queryKey: ['school', 'assessment-components-validate', policyId],
     enabled: !!policyId,
-    queryFn: async () => (await api.get<{ valid: boolean; totalWeight: number; message?: string }>(`${AC}/validate/${policyId}`)).data,
+    queryFn: async () => { const { data } = await api.get<{ ok: boolean; sum: string }>(`${AC}/validate/${policyId}`); return { valid: data.ok, totalWeight: Number(data.sum) }; },
   });
 }
 export function useCreateAssessmentComponent() {
@@ -4210,7 +4210,7 @@ export function useMarkingApproval() {
 
 /* ── A2 Rosters ───────────────────────────────────────────────────────────── */
 
-export interface Roster { id: string; termId: string; name?: string | null; scopeType: string; classId?: string | null; sectionId?: string | null; subjectId?: string | null; status: string; memberCount?: number | null }
+export interface Roster { id: string; termId: string; name?: string | null; scopeType: string; classId?: string | null; sectionId?: string | null; subjectId?: string | null; status: string; frozenAt?: string | null; memberCount?: number | null }
 export interface RosterMember { studentProfileId: string; name: string; admissionNo?: string | null; status: string; classId?: string | null; sectionId?: string | null }
 
 export function useRosters() {
@@ -4327,7 +4327,7 @@ export function useSubmitAssignment() {
 export function useGradeAssignment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; rawScore?: number; complete?: boolean; rubricScores?: Array<{ criterionId: string; levelId?: string; score: number; comment?: string }> }) =>
+    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; rawScore?: number; complete?: boolean; feedback?: string; expectedVersion?: number; rubricScores?: Array<{ criterionId: string; levelId?: string; score: number; comment?: string }> }) =>
       (await api.post(`${ASG}/grade`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assignments'] }),
   });
@@ -4340,6 +4340,10 @@ export interface ResultSet {
   status: string; revision: number; computedAt?: string | null; publishedAt?: string | null;
   coveragePct?: number | null; allApproved?: boolean | null; weightsSum100?: boolean | null;
   studentCount?: number | null; checksum?: string | null;
+  // Phase 5 provenance: what the run was computed from and what it produced.
+  // Shown so "can this be reproduced?" has an answer on the screen.
+  calculationVersion?: string | null; gradingSystem?: string | null; roundingMode?: string | null;
+  inputChecksum?: string | null; outputChecksum?: string | null;
 }
 export interface StudentSubjectResult { subjectId: string; subjectName?: string | null; caScore?: number | null; examScore?: number | null; finalPercent?: number | null; grade?: string | null; position?: number | null }
 export interface StudentTermResult { studentProfileId: string; studentName?: string | null; admissionNo?: string | null; meanPercent?: number | null; gpa?: number | null; classRank?: number | null; eligible?: boolean; promotionRecommendation?: string | null }
@@ -6531,7 +6535,7 @@ export function useSubmitHomeworkOnBehalf() {
  * ------------------------------------------------------------------------- */
 
 export const ASSESSMENT_KINDS = [
-  'cat', 'homework', 'project', 'practical', 'exam', 'oral', 'classwork',
+  'cat', 'homework', 'assignment', 'quiz', 'project', 'practical', 'exam', 'oral', 'classwork', 'observation', 'activity_of_integration',
 ] as const;
 export type AssessmentKind = (typeof ASSESSMENT_KINDS)[number];
 
@@ -6539,6 +6543,7 @@ export type AssessmentKind = (typeof ASSESSMENT_KINDS)[number];
 export const KIND_LABEL: Record<string, string> = {
   cat: 'CAT', homework: 'Homework', project: 'Project', practical: 'Practical',
   exam: 'Exam', oral: 'Oral', classwork: 'Classwork', attendance: 'Attendance',
+  assignment: 'Assignment', quiz: 'Quiz', observation: 'Observation', activity_of_integration: 'Activity of Integration',
 };
 
 export const BOARD_STAGES = ['draft', 'open', 'marking', 'submitted', 'approved', 'returned'] as const;
@@ -6565,6 +6570,12 @@ export interface BoardRow {
   sourceType: string;
   marked: number;
   total: number;
+  version: number;
+  courseOffering: { id: string; name: string } | null;
+  rosterId: string | null;
+  rosterFrozen: boolean;
+  feedbackReleaseAt: string | null;
+  marksReleaseAt: string | null;
 }
 
 export interface BoardPolicy {
@@ -6582,7 +6593,7 @@ export interface AssessmentBoard {
 }
 
 export function useAssessmentBoard(q: {
-  termId?: string; classId?: string; subjectId?: string; kind?: string; status?: string;
+  termId?: string; classId?: string; subjectId?: string; kind?: string; status?: string; courseOfferingId?: string; sectionId?: string;
 }) {
   return useQuery({
     queryKey: ['school', 'assessment-board', q],
@@ -6622,8 +6633,8 @@ export function useApprovalQueue(termId?: string, classId?: string) {
 
 export interface CreateAssessmentInput {
   kind: string;
-  classId: string;
-  subjectId: string;
+  classId?: string;
+  subjectId?: string;
   termId: string;
   title: string;
   maxScore?: number;
@@ -6634,6 +6645,16 @@ export interface CreateAssessmentInput {
   dueAt?: string;
   examId?: string;
   classIds?: string[];
+  courseOfferingId: string;
+  rosterId: string;
+  openAt?: string;
+  closeAt?: string;
+  learningOutcomeIds?: string[];
+  gradingMode?: 'points' | 'rubric' | 'complete_incomplete';
+  rubricId?: string;
+  allowLate?: boolean;
+  latePenaltyPercent?: number;
+  maxAttempts?: number;
 }
 
 export function useCreateAssessmentUnified() {
@@ -6678,6 +6699,9 @@ export interface BoardSheetStudent {
   percentage: number | null;
   participation: string;
   approvalStatus: string;
+  version: number;
+  comment: string;
+  rejectionReason: string | null;
 }
 
 export interface BoardSheet {
@@ -6689,6 +6713,15 @@ export interface BoardSheet {
     dueAt: string | null;
     locked: boolean;
     status: string;
+    version: number;
+    courseOfferingId: string | null;
+    courseName: string | null;
+    rosterId: string | null;
+    rosterFrozen: boolean;
+    assignmentId: string | null;
+    gradingMode: string;
+    feedbackReleaseAt: string | null;
+    marksReleaseAt: string | null;
     subject: { id: string; name: string };
     class: { id: string; name: string };
     component: { id: string; name: string; weight: number } | null;

@@ -72,6 +72,7 @@ describeDb('integration: school reporting', () => {
   let classBId = '';
   let termId = '';
   let cashRegisterId = '';
+  let staffProfileId = '';
 
   // Every grant, so the runner's per-report check never masks a real failure
   // here. Scope and permission filtering get their own assertions below.
@@ -127,6 +128,11 @@ describeDb('integration: school reporting', () => {
     termId = term.id;
 
     const gradeLevel = await raw.gradeLevel.create({ data: { organizationId, name: 'P1', order: 1 } });
+    // One teacher, so the per-staff reports have a subject to run against.
+    const staffPartner = await raw.partner.create({ data: { organizationId, name: 'Nakato Sarah', code: `RPT-T-${Date.now()}` } });
+    staffProfileId = (await raw.staffProfile.create({
+      data: { organizationId, partnerId: staffPartner.id, employeeNo: `RPT-${Date.now()}`, joinDate: new Date('2026-01-05') },
+    })).id;
     classAId = (await raw.schoolClass.create({
       data: { organizationId, gradeLevelId: gradeLevel.id, name: 'P1 East', capacity: 3 },
     })).id;
@@ -375,6 +381,10 @@ describeDb('integration: school reporting', () => {
       dateFrom: '2026-01-15',
       dateTo: '2026-04-15',
       studentProfileId: students[1].id,
+      // `timetable.teacher` requires a staff member. Without one in `supply` the
+      // smoke test refused the report on a missing filter and never reached its
+      // query — which is exactly the class of breakage this test exists to catch.
+      staffProfileId: staffProfileId,
       resultSetId: undefined,
     };
 

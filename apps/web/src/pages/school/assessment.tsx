@@ -1,252 +1,54 @@
-import { useEffect, useState } from 'react';
-import { Plus, Save, Send, ShieldCheck } from 'lucide-react';
-import {
-  useTerms, useClasses, useSubjects, useClassRoster,
-  useAssessmentPolicies, useCreateAssessmentPolicy,
-  useResolvePolicy, useAssessmentComponents, useValidateComponents, useCreateAssessmentComponent,
-  useAssessments, useCreateAssessment, useAssessmentTransition,
-  useMarksByAssessment, useRecordMark, useSubmitMarks, useMarkingApproval, useAppendAdjustment,
-} from '@/features/school/api';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Copy, Lock, Plus, ShieldCheck } from 'lucide-react';
+import { ASSESSMENT_KINDS, KIND_LABEL, useTerms, useClasses, useSubjects, useAssessmentPolicies, useCreateAssessmentPolicy, useAssessmentComponents, useValidateComponents, useCreateAssessmentComponent } from '@/features/school/api';
+import { usePolicyRevisionAction } from '@/features/school/assessment-phase4-api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
+import { api } from '@/lib/api';
 
-const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
-
+const select = 'h-10 w-full rounded border bg-card px-3 text-sm';
 export function SchoolAssessmentPage() {
-  return (
-    <div className="space-y-4 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">Assessment setup</h1>
-        <p className="text-sm text-muted-foreground">How each subject’s mark is made up — coursework, tests and exam weightings — and who may enter and approve marks.</p>
-      </div>
-      <Tabs defaultValue="policy">
-        <TabsList>
-          <TabsTrigger value="policy">Policy & weights</TabsTrigger>
-          <TabsTrigger value="assess">Assessments</TabsTrigger>
-          <TabsTrigger value="mark">Marks</TabsTrigger>
-        </TabsList>
-        <TabsContent value="policy" className="pt-4"><PolicyTab /></TabsContent>
-        <TabsContent value="assess" className="pt-4"><AssessTab/></TabsContent>
-        <TabsContent value="mark" className="pt-4"><MarkTab/></TabsContent>
-      </Tabs>
-    </div>
-  );
+  const { data: terms } = useTerms(); const { data: classes } = useClasses(); const { data: subjects } = useSubjects();
+  const { data: policies } = useAssessmentPolicies(); const createPolicy = useCreateAssessmentPolicy();
+  const [policyId, setPolicyId] = useState(''); const policy = policies?.data.find((p) => p.id === policyId);
+  const components = useAssessmentComponents(policyId || undefined); const validate = useValidateComponents(policyId || undefined);
+  const createComponent = useCreateAssessmentComponent(); const revision = usePolicyRevisionAction();
+  const [name, setName] = useState(''); const [termId, setTermId] = useState(''); const [classId, setClassId] = useState(''); const [subjectId, setSubjectId] = useState('');
+  const [componentName, setComponentName] = useState(''); const [kind, setKind] = useState('cat'); const [weight, setWeight] = useState(''); const [absentZero, setAbsentZero] = useState(false);
+  async function addPolicy() {
+    try { const p = await createPolicy.mutateAsync({ name: name.trim(), termId: termId || undefined, classId: classId || undefined, subjectId: subjectId || undefined }); setPolicyId(p.id); setName(''); notify.success('Draft policy created'); }
+    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not create policy'); }
+  }
+  async function addComponent() {
+    try { await createComponent.mutateAsync({ policyId, name: componentName.trim(), kind, weight: Number(weight), countsAbsentAsZero: absentZero }); setComponentName(''); setWeight(''); notify.success('Component added'); void validate.refetch(); }
+    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not add component'); }
+  }
+  async function act(action: 'publish' | 'fork') {
+    try { const p: any = await revision.mutateAsync({ id: policyId, action }); if (action === 'fork') setPolicyId(p.id); notify.success(action === 'publish' ? 'Policy revision published and frozen' : 'New draft revision created'); }
+    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not update policy revision'); }
+  }
+  async function changeWeight(id: string, weight: number) {
+    try { await api.patch(`/school/assessment-components/${id}`, { weight }); await Promise.all([components.refetch(), validate.refetch()]); notify.success('Draft component updated'); }
+    catch (e: any) { notify.error(e.response?.data?.message ?? 'Could not update component'); }
+  }
+  return <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Assessment policies</h1><p className="text-sm text-muted-foreground">Versioned weighting rules. Published revisions and their components cannot be edited.</p></div><Link to="/school/assessments" className="text-sm underline">Open Assessment Board</Link></div>
+    <div className="grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle className="text-base">Policy revisions</CardTitle></CardHeader><CardContent className="space-y-4"><div className="max-h-64 space-y-2 overflow-auto">{(policies?.data ?? []).map((p) => <button key={p.id} onClick={() => setPolicyId(p.id)} className={`flex w-full items-center justify-between rounded border p-3 text-left text-sm ${policyId === p.id ? 'border-primary bg-primary/5' : ''}`}><span>{p.name}<span className="block text-xs text-muted-foreground">Revision {p.revision ?? 1} · {(terms?.data ?? []).find((t) => t.id === p.termId)?.name ?? 'All terms'}</span></span><Badge variant="outline">{p.publishedAt ? 'Published' : 'Draft'}</Badge></button>)}</div>
+      <fieldset className="space-y-3 border-t pt-3"><legend className="px-1 text-sm font-medium">Create a draft policy</legend><Input aria-label="Policy name" placeholder="Policy name" value={name} onChange={(e) => setName(e.target.value)} /><select aria-label="Policy term" className={select} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">All terms</option>{terms?.data.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><select aria-label="Policy class" className={select} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">All classes</option>{classes?.data.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select><select aria-label="Policy subject" className={select} value={subjectId} onChange={(e) => setSubjectId(e.target.value)}><option value="">All subjects</option>{subjects?.data.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><Button disabled={!name.trim() || createPolicy.isPending} onClick={() => void addPolicy()}><Plus className="mr-2 h-4 w-4" />Create policy</Button></fieldset>
+    </CardContent></Card><Card><CardHeader><CardTitle className="text-base">{policy ? `${policy.name} · revision ${policy.revision ?? 1}` : 'Select a policy'}</CardTitle></CardHeader><CardContent className="space-y-4">{policy ? <>
+      {policy.publishedAt && <p className="flex items-center gap-2 rounded border bg-muted/20 p-3 text-sm"><Lock className="h-4 w-4" />This revision is immutable. Fork it to change the weighting rules.</p>}
+      {(components.data ?? []).map((c) => <div key={c.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>{c.name}<span className="block text-xs text-muted-foreground">{KIND_LABEL[c.kind] ?? c.kind} · {c.countsAbsentAsZero ? 'Absence counts as zero' : 'Absence excluded'}</span></span>{policy.publishedAt ? <Badge variant="secondary">{Number(c.weight)}%</Badge> : <ComponentWeight key={`${c.id}:${c.weight}`} value={Number(c.weight)} name={c.name} onSave={(w) => changeWeight(c.id, w)} />}</div>)}
+      <p className={`text-sm ${validate.data?.valid ? 'text-emerald-700' : 'text-amber-700'}`}>Total weight: {validate.data?.totalWeight ?? 0}%{validate.data?.valid ? ' — ready to publish' : ' — must equal 100%'}</p>
+      {!policy.publishedAt && <fieldset className="space-y-3"><legend className="mb-2 text-sm font-medium">Add component</legend><Input aria-label="Component name" placeholder="Component name" value={componentName} onChange={(e) => setComponentName(e.target.value)} /><div className="grid grid-cols-2 gap-2"><select aria-label="Component kind" className={select} value={kind} onChange={(e) => setKind(e.target.value)}>{ASSESSMENT_KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select><Input aria-label="Weight percent" type="number" min="0" max="100" placeholder="Weight %" value={weight} onChange={(e) => setWeight(e.target.value)} /></div><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={absentZero} onChange={(e) => setAbsentZero(e.target.checked)} />Count absence as zero (explicit policy choice)</label><Button variant="outline" disabled={!componentName.trim() || weight === '' || Number(weight) < 0 || Number(weight) > 100 || createComponent.isPending} onClick={() => void addComponent()}>Add component</Button></fieldset>}
+      <div className="border-t pt-3">{policy.publishedAt ? <Button variant="outline" disabled={revision.isPending} onClick={() => void act('fork')}><Copy className="mr-2 h-4 w-4" />Fork next revision</Button> : <Button disabled={!validate.data?.valid || revision.isPending} onClick={() => void act('publish')}><ShieldCheck className="mr-2 h-4 w-4" />Publish revision</Button>}</div>
+    </> : <p className="text-sm text-muted-foreground">Select or create a policy, add its components, then publish it when the weights total 100%.</p>}</CardContent></Card></div>
+  </div>;
 }
 
-/* ── Policy & components ── */
-function PolicyTab() {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const { data: subjects } = useSubjects();
-  const { data: policies } = useAssessmentPolicies();
-  const createPolicy = useCreateAssessmentPolicy();
-  const [name, setName] = useState('');
-  const [termId, setTermId] = useState('');
-  const [classId, setClassId] = useState('');
-  const [subjectId, setSubjectId] = useState('');
-  const policy = useResolvePolicy(subjectId || undefined, classId || undefined, undefined, termId || undefined);
-  const components = useAssessmentComponents(policy.data?.id);
-  const validate = useValidateComponents(policy.data?.id);
-  const createComp = useCreateAssessmentComponent();
-  const [cName, setCName] = useState('');
-  const [cKind, setCKind] = useState('cat');
-  const [cWeight, setCWeight] = useState('');
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader><CardTitle className="text-base">Policies</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {(policies?.data ?? []).map((p) => (
-            <div key={p.id} className="rounded border p-2 text-sm">{p.name}
-              {p.termId && <span className="ml-2 text-muted-foreground">term {p.termId.slice(0,6)}</span>}
-              {p.isActive ? <Badge className="ml-2">active</Badge> : <Badge variant="secondary" className="ml-2">inactive</Badge>}
-            </div>
-          ))}
-          <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-          <select className={sel} value={subjectId} onChange={(e) => setSubjectId(e.target.value)}><option value="">Subject…</option>{(subjects?.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          <Input placeholder="Policy name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button size="sm" disabled={!name || createPolicy.isPending} onClick={async () => { await createPolicy.mutateAsync({ name, termId: termId||undefined, classId: classId||undefined, subjectId: subjectId||undefined }); setName(''); notify.success('Policy created'); }}> <Plus className="h-4 w-4" /> Add policy</Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Components (weights must sum to 100)</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {policy.data && (
-            <>
-              <p className="text-xs text-muted-foreground">Resolved policy: <span className="font-mono">{policy.data.id}</span></p>
-              {(components.data ?? []).map((c) => <div key={c.id} className="flex items-center justify-between rounded border p-2 text-sm"><span>{c.name} · {c.kind}</span><Badge>w {Number(c.weight)}</Badge></div>)}
-              {validate.data && <Badge variant={validate.data.valid ? 'default' : 'destructive'}>{validate.data.valid ? `weights ✓ ${validate.data.totalWeight}` : `weights ${validate.data.totalWeight} ✗ ${validate.data.message ?? ''}`}</Badge>}
-              <div className="flex gap-2">
-                <Input placeholder="Component name" value={cName} onChange={(e) => setCName(e.target.value)} />
-                <select className={sel + ' w-32'} value={cKind} onChange={(e) => setCKind(e.target.value)}>
-                  {['cat','exam','homework','classwork','practical','project','oral','attendance'].map((k) => <option key={k} value={k}>{k}</option>)}
-                </select>
-                <Input type="number" placeholder="weight" className="w-20" value={cWeight} onChange={(e) => setCWeight(e.target.value)} />
-              </div>
-              <Button size="sm" disabled={!cName || !cWeight || createComp.isPending} onClick={async () => { await createComp.mutateAsync({ policyId: policy.data!.id, name: cName, kind: cKind, weight: Number(cWeight) }); setCName(''); setCWeight(''); notify.success('Component added'); }}> <Plus className="h-4 w-4" /> Add component</Button>
-            </>
-          )}
-          {!policy.data && <p className="text-sm text-muted-foreground">Pick a term/class/subject to resolve (or create) a policy first.</p>}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/* ── Assessment instances ── */
-function AssessTab() {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const { data: subjects } = useSubjects();
-  const [termId, setTermId] = useState('');
-  const [classId, setClassId] = useState('');
-  const { data: assessments } = useAssessments(classId || undefined, termId || undefined);
-  const create = useCreateAssessment();
-  const transition = useAssessmentTransition();
-  const [title, setTitle] = useState('');
-  const [subjectId, setSubjectId] = useState('');
-  const [maxScore, setMaxScore] = useState('100');
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <select className={sel + ' w-40'} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        <select className={sel + ' w-40'} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-      </div>
-      {(assessments ?? []).map((a) => (
-        <Card key={a.id}>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">{a.title} <Badge>{a.status}</Badge> {a.component ? <span className="text-xs text-muted-foreground">· {a.component.name}</span> : null}</CardTitle>
-            <div className="flex gap-1">
-              {['schedule','publish','open','close','grade','archive'].map((act) => (
-                <Button key={act} size="sm" variant="ghost" disabled={transition.isPending} onClick={() => transition.mutate({ id: a.id, action: act as any })}>{act}</Button>
-              ))}
-            </div>
-          </CardHeader>
-        </Card>
-      ))}
-      {termId && classId && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">New assessment</CardTitle></CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <select className={sel + ' w-48'} value={subjectId} onChange={(e) => setSubjectId(e.target.value)}><option value="">Subject…</option>{(subjects?.data ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-            <Input placeholder="Title" className="w-48" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <Input type="number" placeholder="max" className="w-20" value={maxScore} onChange={(e) => setMaxScore(e.target.value)} />
-            <Button size="sm" disabled={!subjectId || !title || create.isPending} onClick={async () => { await create.mutateAsync({ subjectId, classId, termId, title, maxScore: Number(maxScore) }); setTitle(''); notify.success('Assessment created'); }}> <Plus className="h-4 w-4" /> Create</Button>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-/* ── Marks ── */
-function MarkTab() {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const [termId, setTermId] = useState('');
-  const [classId, setClassId] = useState('');
-  const { data: assessments } = useAssessments(classId || undefined, termId || undefined);
-  const [assessmentId, setAssessmentId] = useState('');
-  useClassRoster(assessments?.find((a) => a.id === assessmentId)?.classId);
-  const { data: marks } = useMarksByAssessment(assessmentId || undefined);
-  const recordMark = useRecordMark();
-  const submit = useSubmitMarks();
-  const approve = useMarkingApproval();
-  const appendAdj = useAppendAdjustment();
-  const [modSa, setModSa] = useState('');
-  const [modKind, setModKind] = useState('moderation');
-  const [modDelta, setModDelta] = useState('');
-  const [modReplace, setModReplace] = useState('');
-  const [modReason, setModReason] = useState('');
-  const [vals, setVals] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const m of marks ?? []) { const cur = m.effectiveScore ?? m.originalScore; if (cur != null) next[m.id] = String(cur); }
-    setVals(next);
-  }, [marks, assessmentId]);
-
-  const save = async () => {
-    const entries = (marks ?? []).filter((m) => vals[m.id] !== undefined && vals[m.id] !== '')
-      .map((m) => recordMark.mutateAsync({ studentAssessmentId: m.id, score: Number(vals[m.id]) }));
-    try { await Promise.all(entries); notify.success('Marks saved'); } catch { notify.error('Save failed'); }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <select className={sel + ' w-40'} value={termId} onChange={(e) => { setTermId(e.target.value); setAssessmentId(''); }}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        <select className={sel + ' w-40'} value={classId} onChange={(e) => { setClassId(e.target.value); setAssessmentId(''); }}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-        <select className={sel + ' w-64'} value={assessmentId} onChange={(e) => setAssessmentId(e.target.value)}><option value="">Assessment…</option>{(assessments ?? []).map((a) => <option key={a.id} value={a.id}>{a.title} · {a.status}</option>)}</select>
-        {assessmentId && <Badge variant="secondary">Marks must be approved by someone other than whoever entered them</Badge>}
-      </div>
-      {assessmentId && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Mark entry</CardTitle>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={save} disabled={recordMark.isPending}><Save className="h-4 w-4" /> Save</Button>
-              <Button size="sm" variant="ghost" onClick={() => submit.mutate(assessmentId)} disabled={submit.isPending}><Send className="h-4 w-4" /> Submit</Button>
-              <Button size="sm" variant="ghost" onClick={() => approve.mutate({ assessmentId, action: 'approve' })} disabled={approve.isPending}><ShieldCheck className="h-4 w-4" /> Approve</Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Pupil</th><th className="px-4 py-2">Participation</th><th className="px-4 py-2">Score</th><th className="px-4 py-2">Status</th></tr></thead>
-              <tbody>
-                {(marks ?? []).map((m) => (
-                  <tr key={m.id} className="border-b last:border-0">
-                    <td className="px-4 py-2">{m.studentName ?? m.admissionNo ?? '—'}</td>
-                    <td className="px-4 py-2">{m.participation}</td>
-                    <td className="px-4 py-2">
-                      <Input type="number" className="h-8 w-24" value={vals[m.id] ?? ''} onChange={(e) => setVals({ ...vals, [m.id]: e.target.value })} />
-                    </td>
-                    <td className="px-4 py-2"><Badge variant="secondary">{m.status}</Badge></td>
-                  </tr>
-                ))}
-                {(marks ?? []).length === 0 && <tr><td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">No mark sheet yet — it is built from the class list attached to this assessment.</td></tr>}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
-
-      {marks && marks.length > 0 && (
-          <Card>
-            <CardHeader><CardTitle className="text-base">Moderation & adjustments (audit-logged)</CardTitle></CardHeader>
-            <CardContent className="flex flex-wrap items-end gap-2">
-              <select className={sel + ' w-56'} value={modSa} onChange={(e) => setModSa(e.target.value)}>
-                <option value="">Student…</option>
-                {(marks ?? []).map((m) => <option key={m.id} value={m.id}>{m.studentName ?? m.admissionNo ?? 'Pupil'} · {m.participation}</option>)}
-              </select>
-              <select className={sel} value={modKind} onChange={(e) => setModKind(e.target.value)}>
-                {['moderation', 'scaling', 'late_penalty', 'special_consideration', 'correction'].map((k) => <option key={k} value={k}>{k.replace('_', ' ')}</option>)}
-              </select>
-              <Input type="number" className="w-24" placeholder="Δ score" value={modDelta} onChange={(e) => setModDelta(e.target.value)} />
-              <Input type="number" className="w-28" placeholder="or replace" value={modReplace} onChange={(e) => setModReplace(e.target.value)} />
-              <Input className="w-56" placeholder="Reason (required)" value={modReason} onChange={(e) => setModReason(e.target.value)} />
-              <Button size="sm" variant="outline" disabled={!modSa || !modReason || appendAdj.isPending}
-                onClick={async () => {
-                  try {
-                    await appendAdj.mutateAsync({
-                      studentAssessmentId: modSa, kind: modKind, reason: modReason,
-                      delta: modDelta ? Number(modDelta) : undefined,
-                      replacementScore: modReplace ? Number(modReplace) : undefined,
-                    });
-                    notify.success('Adjustment recorded'); setModDelta(''); setModReplace(''); setModReason('');
-                  } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Failed'); }
-                }}><Plus className="h-4 w-4" /> Apply</Button>
-            </CardContent>
-          </Card>
-        )}
-    </div>
-  );
+function ComponentWeight({ value, name, onSave }: { value: number; name: string; onSave: (weight: number) => Promise<void> }) {
+  const [draft, setDraft] = useState(String(value)); const [busy, setBusy] = useState(false);
+  return <div className="flex items-center gap-2"><Input aria-label={`Weight for ${name}`} className="w-20" type="number" min={0} max={100} value={draft} onChange={(e) => setDraft(e.target.value)} /><span>%</span><Button size="sm" variant="outline" disabled={busy || !draft || !Number.isFinite(Number(draft)) || Number(draft) < 0 || Number(draft) > 100 || Number(draft) === value} onClick={async () => { setBusy(true); try { await onSave(Number(draft)); } finally { setBusy(false); } }}>Save</Button></div>;
 }

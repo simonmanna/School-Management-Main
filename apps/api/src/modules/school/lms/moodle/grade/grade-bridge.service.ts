@@ -60,12 +60,10 @@ export class LmsGradeBridgeService {
       }
       return existing.id;
     }
-    if (!offering.subjectId || !offering.classId) {
-      throw new BadRequestException('Only subject/class offerings can create numerical LMS assessments.');
-    }
     const created = await db.assessment.create({
       data: {
         organizationId: this.org,
+        courseOfferingId: offering.id,
         subjectId: offering.subjectId,
         classId: offering.classId,
         termId: offering.termId,
@@ -79,6 +77,10 @@ export class LmsGradeBridgeService {
         sourceType: 'lms_activity',
         sourceRef: cm.id,
         status: 'draft',
+        hiddenFromStudents: true,
+        openAt: cm.openAt,
+        dueAt: cm.dueAt,
+        closeAt: cm.cutoffAt,
         createdBy: this.tenant.userId ?? null,
       },
     });
@@ -92,10 +94,22 @@ export class LmsGradeBridgeService {
     const assessment = await db.assessment.findFirst({ where: { id: assessmentId, organizationId: this.org } });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
 
-    const enrolments = await db.courseEnrolment.findMany({
-      where: { organizationId: this.org, courseOfferingId: cm.courseOfferingId, status: 'active', studentProfileId: { not: null } },
-      select: { studentProfileId: true },
-    });
+    if (!assessment.courseOfferingId) throw new BadRequestException('Reconcile this legacy LMS assessment in the Assessment Board first');
+    let rosterId = assessment.rosterId;
+    if (!rosterId) {
+      const now = new Date();
+      const enrollments = await db.courseEnrollment.findMany({ where: { courseOfferingId: cm.courseOfferingId, status: 'ENROLLED', startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] }, include: { studentEnrollment: true } });
+      if (!enrollments.length) throw new BadRequestException('Prepare official course enrollment before adding a graded activity');
+      const roster = await db.academicRoster.create({ data: { organizationId: this.org, termId: assessment.termId, classId: assessment.classId, subjectId: assessment.subjectId, name: `LMS ${cm.id}`, source: 'enrollment', scopeType: 'subject' } });
+      await db.academicRosterMember.createMany({ data: enrollments.map((e) => ({ organizationId: this.org, rosterId: roster.id, studentProfileId: e.studentEnrollment.studentProfileId, classId: assessment.classId, gradeLevelId: e.studentEnrollment.gradeLevelId, effectiveFrom: now, joinReason: `course:${cm.courseOfferingId}` })) });
+      await db.academicRoster.update({ where: { id: roster.id }, data: { frozenAt: now, frozenById: this.tenant.userId } });
+      await db.assessment.update({ where: { id: assessment.id }, data: { rosterId: roster.id } });
+      rosterId = roster.id;
+    }
+    // Module creation prepares a draft, never silently publishes academic work.
+    // The unified board owns publication and the learner fanout.
+    if (['draft', 'scheduled'].includes(assessment.status)) return 0;
+    const enrolments = await db.academicRosterMember.findMany({ where: { rosterId }, select: { studentProfileId: true } });
     let n = 0;
     for (const e of enrolments) {
       if (!e.studentProfileId) continue;
@@ -124,16 +138,23 @@ export class LmsGradeBridgeService {
    * row with a score but no MarkEntry behind it is blanked by the next
    * `recompute`, because the derived columns are computed from the ledger and
    * an empty ledger means "no mark". Delegating to `postMark` puts the score in
-   * the ledger where it belongs; clamping is preserved via `onOutOfRange`.
+   * the ledger where it belongs.
+   *
+   * Out-of-range scores are REFUSED, not clamped. A plugin reporting 999 out of
+   * 50 is a plugin bug; silently recording 50 would hide it behind a mark that
+   * looks deliberate, and the learner would carry a full score nobody awarded.
    */
   async setScore(input: { studentAssessmentId: string; score: number; source: string }, tx: Tx): Promise<void> {
+    const row = await tx.studentAssessment.findFirst({ where: { id: input.studentAssessmentId }, include: { assessment: true } });
+    if (!row?.assessment.courseOfferingId || !row.assessment.rosterId) throw new BadRequestException('Publish or reconcile this activity in the Assessment Board before grading');
     await this.marking.postMark(tx, {
       studentAssessmentId: input.studentAssessmentId,
       score: input.score,
       source: 'lms',
       comment: input.source,
-      onOutOfRange: 'clamp',
+      onOutOfRange: 'throw',
     });
+    await tx.studentAssessment.updateMany({ where: { id: input.studentAssessmentId }, data: { participation: 'present' } });
   }
 
   /** Manual override with a reason (Moodle grade override). */

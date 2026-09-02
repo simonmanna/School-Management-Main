@@ -162,7 +162,7 @@ export class LearnerService {
   async recentGrades(asStudent?: string, limit = 10) {
     const studentProfileId = await this.subject(asStudent);
     const rows = await this.prisma.client.studentAssessment.findMany({
-      where: { organizationId: this.org, studentProfileId, approvalStatus: 'approved', deletedAt: null },
+      where: { organizationId: this.org, studentProfileId, approvalStatus: 'approved', deletedAt: null, assessment: { hiddenFromStudents: false, marksReleaseAt: { lte: new Date() } } },
       orderBy: { updatedAt: 'desc' },
       take: limit,
       select: {

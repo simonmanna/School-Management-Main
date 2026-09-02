@@ -86,5 +86,11 @@ jobs:
       - name: Test (academic integration)
         run: pnpm test:academics
 
+      - name: Test (Phase 4 assessment contracts and workflows)
+        run: pnpm test:academics:phase4
+
+      - name: Test (Phase 5 examination operations and result integrity)
+        run: pnpm test:academics:phase5
+
       - name: Test (school cross-domain integration)
         run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine test/integration/school-admissions-attendance --runInBand --detectOpenHandles

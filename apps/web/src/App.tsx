@@ -103,14 +103,13 @@ import { SchoolExamWorkspacePage } from '@/pages/school/exam-workspace';
 import { SchoolExamClassesPage } from '@/pages/school/exam-classes';
 import { SchoolEnterMarksPage } from '@/pages/school/enter-marks';
 import { SchoolExamResultsPage } from '@/pages/school/exam-results';
-import { SchoolGradebookPage } from '@/pages/school/gradebook';
 import { SchoolTeachingPage } from '@/pages/school/teaching';
 import { SchoolTeachingWorkspacePage } from '@/pages/school/teaching/workspace';
-import { SchoolHomeworkPage } from '@/pages/school/homework';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
 import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
+import { SchoolExamOperationsPage } from '@/pages/school/exam-operations';
 import { SchoolCbtPage } from '@/pages/school/cbt';
 import { SchoolCertificationPage } from '@/pages/school/certification';
 import SchoolDocumentsPage from '@/pages/school/documents';
@@ -599,7 +598,7 @@ export function App() {
           <Route path="/school/exam-workspace/classes" element={<SchoolExamClassesPage />} />
           <Route path="/school/enter-marks" element={<SchoolEnterMarksPage />} />
           <Route path="/school/exam-results" element={<SchoolExamResultsPage />} />
-          <Route path="/school/gradebook" element={<SchoolGradebookPage />} />
+          <Route path="/school/gradebook" element={<Navigate to="/school/assessments" replace />} />
           <Route path="/school/teaching" element={<SchoolTeachingPage />} />
           <Route path="/school/teaching/:offeringId" element={<SchoolTeachingWorkspacePage />} />
           {/* The unified front door: every kind of assessment in one list, and
@@ -610,7 +609,7 @@ export function App() {
           <Route path="/school/approvals" element={<SchoolApprovalsPage />} />
           {/* Homework keeps its own screen: it collects and returns SUBMISSIONS,
               which the assessment board does not model. The board links into it. */}
-          <Route path="/school/homework" element={<SchoolHomeworkPage />} />
+          <Route path="/school/homework" element={<Navigate to="/school/assessments?kind=homework" replace />} />
           <Route path="/school/assessment" element={<SchoolAssessmentPage />} />
           {/* P6: My Marking → the teacher workspace, which finds the work for you. */}
           <Route path="/school/my-marking" element={<Navigate to="/school/teaching" replace />} />
@@ -621,6 +620,10 @@ export function App() {
           <Route path="/school/results" element={<SchoolResultsPage />} />
           <Route path="/school/grading-scales" element={<SchoolGradingScalePage />} />
           <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
+          {/* Phase 5: the examination is run from one console — lifecycle,
+              candidates, custody, register, marking and moderation. The older
+              exam-ops screen stays for venue/seating/question-paper setup. */}
+          <Route path="/school/exam-operations" element={<SchoolExamOperationsPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />
           <Route path="/school/competency-report" element={<SchoolCompetencyReportPage />} />
           <Route path="/school/lms/my" element={<SchoolLmsMyLearningPage />} />
