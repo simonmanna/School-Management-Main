@@ -38,8 +38,6 @@ export function admissionsReports(deps: SchoolReportDeps): ReportDefinition<any>
       ],
       async run(ctx, params) {
         const { organizationId } = ctx;
-        const { PrismaClient, AdmissionApplication } = await import('@prisma/client');
-        const db = new PrismaClient() as any;
 
         // Delegate to the canonical service for the workflow resolution, but
         // we need to filter ourselves since listWithWorkflow doesn't take

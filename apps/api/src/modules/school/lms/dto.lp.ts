@@ -61,14 +61,23 @@ export class LessonPlanDifferentiationDto {
 }
 
 export class CreateLessonPlanDto {
-  @IsOptional() @IsString() courseOfferingId?: string;
+  /**
+   * Phase 3: a plan belongs to a teaching context. Subject, class, term and
+   * curriculum version are read from the offering when they are not sent, and
+   * are rejected when they contradict it.
+   */
+  @IsString() @IsNotEmpty() courseOfferingId!: string;
   @IsOptional() @IsString() curriculumVersionId?: string;
-  @IsString() @IsNotEmpty() subjectId!: string;
+  @IsOptional() @IsString() subjectId?: string;
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() termId?: string;
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsString() @IsNotEmpty() title!: string;
   @IsOptional() @IsString() weekOf?: string; // ISO date
+  /** Scheme-of-work week this plan delivers. */
+  @IsOptional() @IsString() schemeOfWorkWeekId?: string;
+  /** Curriculum outcomes this plan covers. */
+  @IsOptional() @IsArray() @IsString({ each: true }) learningOutcomeIds?: string[];
   @IsOptional() @IsString() objectives?: string;
   @IsOptional() @IsString() materials?: string;
   @IsOptional() @IsString() unitId?: string;
@@ -83,6 +92,8 @@ export class CreateLessonPlanDto {
 
 export class UpdateLessonPlanDto {
   @IsOptional() @IsString() courseOfferingId?: string;
+  @IsOptional() @IsString() schemeOfWorkWeekId?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) learningOutcomeIds?: string[];
   @IsOptional() @IsString() curriculumVersionId?: string;
   @IsOptional() @IsString() subjectId?: string;
   @IsOptional() @IsString() classId?: string;

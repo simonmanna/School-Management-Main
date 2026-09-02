@@ -60,6 +60,9 @@ export class LmsGradeBridgeService {
       }
       return existing.id;
     }
+    if (!offering.subjectId || !offering.classId) {
+      throw new BadRequestException('Only subject/class offerings can create numerical LMS assessments.');
+    }
     const created = await db.assessment.create({
       data: {
         organizationId: this.org,

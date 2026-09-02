@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PermissionResolverService } from '../permission-resolver.service';
 import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { NO_PERMISSION_REQUIRED_KEY } from '../decorators/no-permission-required.decorator';
@@ -20,6 +20,11 @@ import type { AuthUser } from '../jwt-token.service';
  *     JWT stays the cache, the DB is the source of truth.
  *
  * Wire via env flag `PERMISSIONS_DB_LOOKUP`. Default is DB mode for the beta.
+ *
+ * The lookup itself lives in PermissionResolverService so that code running
+ * behind this guard (the reporting runner, which can only carry a blanket route
+ * permission and must check the per-report grant itself) resolves permissions
+ * from the same source under the same mode.
  */
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -28,7 +33,7 @@ export class PermissionsGuard implements CanActivate {
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
+    private readonly resolver: PermissionResolverService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -54,7 +59,7 @@ export class PermissionsGuard implements CanActivate {
 
     let granted: string[];
     if (this.dbMode) {
-      granted = await this.lookupPermissions(request.auth.sub);
+      granted = await this.resolver.lookupPermissions(request.auth.sub);
     } else {
       granted = request.auth.permissions ?? [];
     }
@@ -64,19 +69,5 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException(`Missing required permission(s): ${required.join(', ')}`);
     }
     return true;
-  }
-
-  /** Re-read the user's role permissions from Postgres. */
-  private async lookupPermissions(userId: string): Promise<string[]> {
-    const user = await this.prisma.client.user.findFirst({
-      where: { id: userId },
-      include: { roles: true },
-    });
-    if (!user) return [];
-    const all = new Set<string>();
-    for (const role of user.roles as any[]) {
-      for (const p of role.permissions ?? []) all.add(p);
-    }
-    return [...all];
   }
 }

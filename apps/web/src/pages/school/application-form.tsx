@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Save, Send, ArrowLeft, User, Plus, Trash2, Clock, ShieldCheck, ChevronRight, ChevronLeft } from 'lucide-react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Save, Send, ArrowLeft, User, Plus, Trash2, Clock, ShieldCheck, ChevronRight, ChevronLeft, Pencil } from 'lucide-react';
 import {
   useAdmission,
   useCreateAdmission,
@@ -17,6 +17,7 @@ import {
   type CreateAdmissionInput,
   type UpdateAdmissionInput,
   type AdmissionGuardianInput,
+  type AdmissionApplication,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -43,7 +44,12 @@ const emptyGuardian = (): AdmissionGuardianInput => ({ firstName: '', lastName: 
 
 export function SchoolApplicationFormPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const isEdit = !!id;
+  // Read-only view when an id is present and the URL asks for view (default for
+  // row-click / View button). Explicit ?mode=edit enables editing. New
+  // applications (?no id) are always editable.
+  const viewOnly = isEdit && searchParams.get('mode') !== 'edit';
   const navigate = useNavigate();
 
   const { data: existing } = useAdmission(id);
@@ -213,7 +219,22 @@ export function SchoolApplicationFormPage() {
   const busy = create.isPending || update.isPending || submit.isPending;
   const isDraft = !isEdit || existing?.status === 'draft';
 
-  const className = (cid?: string) => (cid ? (classes?.data ?? []).find((c: any) => c.id === cid)?.name ?? '—' : '—');
+  const className = (cid?: string | null) => (cid ? (classes?.data ?? []).find((c: any) => c.id === cid)?.name ?? '—' : '—');
+
+  if (viewOnly) {
+    if (!existing) {
+      return (
+        <div className="space-y-5 p-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/school/applications')}><ArrowLeft className="h-4 w-4" /> Back</Button>
+            <h1 className="text-xl font-semibold">Application</h1>
+          </div>
+          <Card><CardContent className="p-8 text-center text-muted-foreground">{existing ? 'Application not found.' : 'Loading…'}</CardContent></Card>
+        </div>
+      );
+    }
+    return <ViewApplication app={existing} years={years?.data ?? []} studentCategories={studentCategories ?? []} history={history ?? []} committee={committee} onEdit={() => navigate(`/school/applications/${id}?mode=edit`)} onBack={() => navigate('/school/applications')} classNameFor={className} />;
+  }
 
   return (
     <div className="space-y-5 p-6">
@@ -227,6 +248,11 @@ export function SchoolApplicationFormPage() {
         </div>
         <div className="flex items-center gap-2">
           {isEdit && existing && <Badge className={statusMeta(existing.status).cls}>{statusMeta(existing.status).label}</Badge>}
+          {viewOnly && (
+            <Button size="sm" onClick={() => navigate(`/school/applications/${id}?mode=edit`)}>
+              <Pencil className="h-4 w-4" /> Edit
+            </Button>
+          )}
         </div>
       </div>
 
@@ -441,6 +467,135 @@ export function SchoolApplicationFormPage() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Read-only display of a submitted application's filled-in details. */
+function ViewApplication({
+  app,
+  years,
+  studentCategories,
+  history,
+  committee,
+  onEdit,
+  onBack,
+  classNameFor,
+}: {
+  app: AdmissionApplication;
+  years: any[];
+  studentCategories: any[];
+  history: any[];
+  committee: any;
+  onEdit: () => void;
+  onBack: () => void;
+  classNameFor: (cid?: string | null) => string;
+}) {
+  const cf = (app.customFields ?? {}) as Record<string, any>;
+  const name = (s?: string | null) => s || '—';
+  const yearName = years.find((y: any) => y.id === app.academicYearId)?.name ?? '—';
+  const categoryName =
+    (studentCategories ?? []).find((c: any) => c.id === app.studentCategoryId)?.name ??
+    (app.studentCategoryId ? 'Previously selected' : '—');
+  const guardians = (app.guardians ?? []) as Array<{
+    firstName: string; lastName?: string | null; relationship: string; phone?: string | null;
+    altPhone?: string | null; email?: string | null; occupation?: string | null; address?: string | null;
+  }>;
+
+  return (
+    <div className="space-y-5 p-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Back</Button>
+          <div>
+            <h1 className="text-xl font-semibold">Application {app.applicationNumber}</h1>
+            <p className="text-sm text-muted-foreground">Read-only view of the applicant's details.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge className={statusMeta(app.status).cls}>{statusMeta(app.status).label}</Badge>
+          <Button size="sm" onClick={onEdit}><Pencil className="h-4 w-4" /> Edit</Button>
+        </div>
+      </div>
+
+      <Card><CardContent className="p-5">
+        <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold"><User className="h-4 w-4" /> Student Information</h3>
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2 lg:grid-cols-3">
+          <ViewRow k="Application no." v={app.applicationNumber} />
+          <ViewRow k="Academic year" v={yearName} />
+          <ViewRow k="Surname" v={name(app.applicantLastName)} />
+          <ViewRow k="Other names" v={name(app.applicantFirstName)} />
+          <ViewRow k="Date of birth" v={app.applicantDob ? String(app.applicantDob).slice(0, 10) : '—'} />
+          <ViewRow k="Gender" v={name(app.applicantGender)} />
+          <ViewRow k="Nationality" v={name(app.nationality)} />
+          <ViewRow k="Entry status" v={name(app.entryStatus)} />
+          <ViewRow k="Residential status" v={name(app.residenceType)} />
+          <ViewRow k="Student category" v={categoryName} />
+          <ViewRow k="Applying for class" v={classNameFor(app.applyingForClassId)} />
+          <ViewRow k="Religion" v={cf.religion ? String(cf.religion) : '—'} />
+          <ViewRow k="NIN" v={name((app as any).nin)} />
+          <ViewRow k="Learner ID" v={cf.learnerId ? String(cf.learnerId) : '—'} />
+          <ViewRow k="School pay code" v={cf.schoolPayCode ? String(cf.schoolPayCode) : '—'} />
+          <ViewRow k="Former school" v={cf.formerSchool ? String(cf.formerSchool) : '—'} />
+          <ViewRow k="Home address" v={name(app.address)} />
+          <ViewRow k="Source of enquiry" v={name((app as any).sourceOfEnquiry)} />
+        </dl>
+      </CardContent></Card>
+
+      {guardians.length === 0 ? (
+        <Card><CardContent className="p-5 text-sm text-muted-foreground">No guardians recorded.</CardContent></Card>
+      ) : (
+        guardians.map((g, i) => (
+          <Card key={i}><CardContent className="p-5">
+            <h4 className="mb-3 text-sm font-semibold">{i === 0 ? 'Guardian 1' : `Guardian ${i + 1}`}{g.relationship ? ` · ${g.relationship}` : ''}</h4>
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2 lg:grid-cols-3">
+              <ViewRow k="Surname" v={name(g.lastName)} />
+              <ViewRow k="Other names" v={name(g.firstName)} />
+              <ViewRow k="Relationship" v={name(g.relationship)} />
+              <ViewRow k="Phone" v={name(g.phone)} />
+              <ViewRow k="Alt phone" v={name(g.altPhone)} />
+              <ViewRow k="Email" v={name(g.email)} />
+              <ViewRow k="Occupation" v={name(g.occupation)} />
+              <ViewRow k="Address" v={name(g.address)} />
+            </dl>
+          </CardContent></Card>
+        ))
+      )}
+
+      {committee && committee.assigned > 0 && (
+        <Card><CardContent className="p-5">
+          <h3 className="mb-3 text-sm font-semibold">Committee</h3>
+          <p className="text-sm text-muted-foreground">{committee.completed}/{committee.assigned} reviews in</p>
+          {committee.leaning && <p className="mt-1 text-sm">Leaning: <span className="font-medium capitalize">{committee.leaning}</span></p>}
+          {committee.averageScore != null && <p className="text-sm">Avg score: <span className="font-medium">{committee.averageScore}</span></p>}
+        </CardContent></Card>
+      )}
+
+      <Card><CardContent className="p-5">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold"><Clock className="h-4 w-4" /> Timeline</h3>
+        <div className="space-y-3">
+          {(history ?? []).map((h: any) => (
+            <div key={h.id} className="flex gap-3 text-sm">
+              <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-indigo-400" />
+              <div>
+                <p className="font-medium capitalize">{h.action.replace(/_/g, ' ')}</p>
+                <p className="text-xs text-muted-foreground">{statusMeta(h.toStatus).label} · {new Date(h.changedAt).toLocaleString()}</p>
+                {h.reason && <p className="text-xs text-muted-foreground">{h.reason}</p>}
+              </div>
+            </div>
+          ))}
+          {(history ?? []).length === 0 && <p className="text-sm text-muted-foreground">No history yet.</p>}
+        </div>
+      </CardContent></Card>
+    </div>
+  );
+}
+
+function ViewRow({ k, v }: { k: string; v?: string | null }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{k}</dt>
+      <dd className="mt-0.5 font-medium">{v || '—'}</dd>
     </div>
   );
 }

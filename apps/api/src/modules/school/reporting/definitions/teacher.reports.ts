@@ -359,7 +359,7 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           where: { organizationId },
           orderBy: { order: 'asc' },
         });
-        const periodMinutes = periods.reduce((sum, p) => sum + (Number(p.durationMinutes) || 40), 0);
+        const periodMinutes = periods.reduce((sum: number, p: any) => sum + (Number(p.durationMinutes) || 40), 0);
         const avgPeriodMin = periods.length > 0 ? periodMinutes / periods.length : 40;
 
         const rows = Array.from(byTeacher.values()).map((t) => ({
@@ -371,14 +371,14 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           subjectsTaught: t.subjects.size,
           periodsPerWeek: t.periodCount,
           teachingHours: Math.round((t.periodCount * avgPeriodMin) / 60),
-          classDetails: Array.from(t.classDetails.entries())
-            .map(([cls, subj]) => `${cls} (${subj})`)
+          classDetails: (Array.from(t.classDetails.entries()) as [string, string][])
+            .map((entry: [string, string]) => `${entry[0]} (${entry[1]})`)
             .join(', '),
         }));
 
         return {
           rows,
-          caption: `Teacher workload for ${rows.length} teacher(s) · ${classIds.length} class(es) in scope`,
+          caption: `Teacher workload for ${rows.length} teacher(s) · ${classIds?.length ?? 0} class(es) in scope`,
         };
       },
     },

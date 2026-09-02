@@ -955,7 +955,12 @@ export class AdvancedFinanceService {
        ) w ON w."studentProfileId" = sp."id"
        WHERE d."organizationId" = $2
          AND d."documentType" = 'sales_invoice'
-         AND d."status" = ANY($3::text[])
+         -- status is the DocumentStatus ENUM, not text. Without the cast
+         -- Postgres refuses the comparison outright ("operator does not exist:
+         -- DocumentStatus = text"), which made every caller of this helper --
+         -- feeDefaulters, badDebtors and writeOffBadDebt -- throw at runtime.
+         -- sourceType below needs no cast; it really is a String column.
+         AND d."status"::text = ANY($3::text[])
          AND d."paymentStatus" IN ('not_paid','partial')
          AND d."amountResidual" > 0
          AND d."sourceType" = ANY($4::text[])

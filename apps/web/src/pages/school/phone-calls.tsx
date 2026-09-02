@@ -17,6 +17,30 @@ import { notify } from '@/lib/notify';
 const timeOf = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const dateOf = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '');
 
+// Combine a date + hour/minute/AM-PM into an ISO string for the server.
+function buildTimestamp(date: string, hour: string, minute: string, ampm: string): string | undefined {
+  if (!date) return undefined;
+  const h = Number(hour);
+  const m = Number(minute);
+  if (!h || h < 1 || h > 12 || m < 0 || m > 59) return undefined;
+  let hh = h % 12;
+  if (ampm === 'PM') hh += 12;
+  const d = new Date(`${date}T00:00:00`);
+  d.setHours(hh, m, 0, 0);
+  return d.toISOString();
+}
+function splitTimestamp(iso?: string) {
+  if (!iso) return { date: '', hour: '', minute: '', ampm: 'AM' };
+  const d = new Date(iso);
+  const date = d.toISOString().slice(0, 10);
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return { date, hour: String(h), minute: String(d.getMinutes()).padStart(2, '0'), ampm };
+}
+const hourOptions = Array.from({ length: 12 }, (_, i) => String(i + 1));
+const minuteOptions = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
 const dirIcon = (d: CallDirection) => d === 'inbound' ? <PhoneIncoming className="h-4 w-4 text-green-600" /> : <PhoneOutgoing className="h-4 w-4 text-blue-600" />;
 const statusBadge = (s: CallStatus) => {
   const variants: Record<CallStatus, string> = {
@@ -61,6 +85,10 @@ export function PhoneCallsPage() {
     notes: '',
     durationSec: '',
     status: 'completed' as CallStatus,
+    callDate: '',
+    callHour: '',
+    callMinute: '',
+    callAmPm: 'AM' as 'AM' | 'PM',
   });
 
   const filtered = (calls.data ?? []).filter((c) =>
@@ -70,16 +98,29 @@ export function PhoneCallsPage() {
     c.outcome?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const resetForm = () => setForm({ partnerId: '', direction: 'inbound', contactName: '', phone: '', subject: '', outcome: '', notes: '', durationSec: '', status: 'completed' });
+  const resetForm = () => setForm({ partnerId: '', direction: 'inbound', contactName: '', phone: '', subject: '', outcome: '', notes: '', durationSec: '', status: 'completed', callDate: '', callHour: '', callMinute: '', callAmPm: 'AM' });
 
   const handleSubmit = async () => {
     if (!form.contactName || !form.phone) { notify.error('Contact name and phone required'); return; }
+    const callAt = buildTimestamp(form.callDate, form.callHour, form.callMinute, form.callAmPm);
+    const dto = {
+      partnerId: form.partnerId || undefined,
+      direction: form.direction,
+      contactName: form.contactName,
+      phone: form.phone,
+      subject: form.subject || undefined,
+      outcome: form.outcome || undefined,
+      notes: form.notes || undefined,
+      durationSec: form.durationSec ? Number(form.durationSec) : undefined,
+      status: form.status,
+      callAt,
+    };
     try {
       if (editing) {
-        await update.mutateAsync({ id: editing.id, ...form, durationSec: form.durationSec ? Number(form.durationSec) : undefined });
+        await update.mutateAsync({ id: editing.id, ...dto });
         notify.success('Call updated');
       } else {
-        await create.mutateAsync({ ...form, durationSec: form.durationSec ? Number(form.durationSec) : undefined });
+        await create.mutateAsync(dto);
         notify.success('Call logged');
       }
       resetForm(); setEditing(null); setOpen(false);
@@ -88,6 +129,7 @@ export function PhoneCallsPage() {
 
   const edit = (c: PhoneCall) => {
     setEditing(c);
+    const ts = splitTimestamp(c.callAt);
     setForm({
       partnerId: c.partnerId ?? '',
       direction: c.direction,
@@ -98,6 +140,10 @@ export function PhoneCallsPage() {
       notes: c.notes ?? '',
       durationSec: c.durationSec?.toString() ?? '',
       status: c.status,
+      callDate: ts.date,
+      callHour: ts.hour,
+      callMinute: ts.minute,
+      callAmPm: ts.ampm as 'AM' | 'PM',
     });
     setOpen(true);
   };
@@ -221,6 +267,28 @@ export function PhoneCallsPage() {
                   {(['completed', 'missed', 'voicemail', 'scheduled', 'cancelled'] as const).map((s) => <SelectItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Call time (optional)</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input type="date" value={form.callDate} onChange={(e) => setForm({ ...form, callDate: e.target.value })} className="w-auto" />
+                <Select value={form.callHour} onValueChange={(v) => setForm({ ...form, callHour: v })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="Hr" /></SelectTrigger>
+                  <SelectContent>{hourOptions.map((h) => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-muted-foreground">:</span>
+                <Select value={form.callMinute} onValueChange={(v) => setForm({ ...form, callMinute: v })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="Min" /></SelectTrigger>
+                  <SelectContent>{minuteOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={form.callAmPm} onValueChange={(v) => setForm({ ...form, callAmPm: v as 'AM' | 'PM' })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="AM/PM" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
           <DialogFooter>

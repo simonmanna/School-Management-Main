@@ -81,6 +81,8 @@ describeDb('integration: teacher owner-scoped writes', () => {
   let bobPupilSaId = '';
   let subjectId = '';
   let termId = '';
+  let aliceOfferingId = '';
+  let bobOfferingId = '';
 
   const as = <T>(userId: string, permissions: string[], fn: () => Promise<T>): Promise<T> =>
     tenant.run({ organizationId, userId, permissions }, fn);
@@ -168,6 +170,26 @@ describeDb('integration: teacher owner-scoped writes', () => {
     await raw.teacherAssignment.create({
       data: { organizationId, teacherPartnerId: bobStaffId, subjectId, classId: bobClassId, termId },
     });
+
+    // Phase 3: a lesson plan must belong to a course offering, so each teacher
+    // gets the offering their class is taught through.
+    const makeOffering = async (classId: string, label: string) =>
+      (
+        await raw.courseOffering.create({
+          data: {
+            organizationId,
+            code: `OFF-${label}-${Date.now()}`,
+            name: `Mathematics ${label}`,
+            academicYearId: year.id,
+            termId,
+            subjectId,
+            classId,
+            effectiveFrom: new Date('2026-01-01'),
+          },
+        })
+      ).id;
+    aliceOfferingId = await makeOffering(aliceClassId, 'A');
+    bobOfferingId = await makeOffering(bobClassId, 'B');
 
     // One pupil in each class, and one assessment per teacher.
     const makePupilAndAssessment = async (label: string, classId: string, teacherStaffId: string) => {
@@ -334,6 +356,7 @@ describeDb('integration: teacher owner-scoped writes', () => {
     it('lets a teacher write a plan for themselves', async () => {
       const plan = await as(aliceUserId, TEACHER, () =>
         lessonPlans.createLessonPlan({
+          courseOfferingId: aliceOfferingId,
           subjectId,
           classId: aliceClassId,
           termId,
@@ -349,6 +372,7 @@ describeDb('integration: teacher owner-scoped writes', () => {
       await expect(
         as(aliceUserId, TEACHER, () =>
           lessonPlans.createLessonPlan({
+            courseOfferingId: bobOfferingId,
             subjectId,
             classId: bobClassId,
             termId,
@@ -362,6 +386,7 @@ describeDb('integration: teacher owner-scoped writes', () => {
     it("BLOCKS a teacher editing a colleague's plan", async () => {
       const bobPlan = await as(bobUserId, TEACHER, () =>
         lessonPlans.createLessonPlan({
+          courseOfferingId: bobOfferingId,
           subjectId,
           classId: bobClassId,
           termId,

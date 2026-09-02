@@ -25,7 +25,7 @@ export class SectionService extends BaseCrudService<Section, CreateSectionDto, U
   protected readonly entityName = 'Section';
   protected readonly searchFields = ['name'];
   protected readonly defaultInclude = { 
-    schoolClass: { include: { gradeLevel: true } },
+    schoolClass: { include: { gradeLevel: true, homeroomTeacher: { include: { partner: true } } } },
     classTeacher: { include: { partner: true } }
   };
 

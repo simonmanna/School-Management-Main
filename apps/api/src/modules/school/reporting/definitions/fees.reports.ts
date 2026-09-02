@@ -446,7 +446,7 @@ export function feesReports(deps: SchoolReportDeps): ReportDefinition<any>[] {
 
         // Filter by class scope
         const rows = aging.rows
-          .filter((r: any) => classIds.length === 0 || classIds.some((id: string) => r.documentNumber.includes(id))) // approximation
+          .filter((r: any) => (classIds?.length ?? 0) === 0 || (classIds ?? []).some((id: string) => r.documentNumber.includes(id))) // approximation
           .map((r: any) => ({
             studentProfileId: r.studentProfileId ?? '',
             admissionNo: r.admissionNo ?? '',

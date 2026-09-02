@@ -113,23 +113,18 @@ export class EnrolmentService {
       create: { organizationId: this.org, courseOfferingId, method: 'roster_sync', enabled: true },
       update: { enabled: true },
     });
-    const roster = await this.prisma.client.enrollment.findMany({
-      where: {
-        organizationId: this.org,
-        classId: offering.classId,
-        status: 'enrolled',
-        ...(offering.sectionId ? { sectionId: offering.sectionId } : {}),
-      },
-      select: { studentProfileId: true },
+    const roster = await this.prisma.client.courseEnrollment.findMany({
+      where: { organizationId: this.org, courseOfferingId, status: 'ENROLLED' },
+      select: { studentEnrollment: { select: { studentProfileId: true } } },
     });
     let n = 0;
     for (const r of roster) {
       await this.prisma.client.courseEnrolment.upsert({
-        where: { courseOfferingId_studentProfileId_userId: { courseOfferingId, studentProfileId: r.studentProfileId, userId: null } as any },
-        create: { organizationId: this.org, courseOfferingId, methodId: method.id, studentProfileId: r.studentProfileId, status: 'active', startedAt: new Date() },
+        where: { courseOfferingId_studentProfileId_userId: { courseOfferingId, studentProfileId: r.studentEnrollment.studentProfileId, userId: null } as any },
+        create: { organizationId: this.org, courseOfferingId, methodId: method.id, studentProfileId: r.studentEnrollment.studentProfileId, status: 'active', startedAt: new Date() },
         update: { status: 'active' },
       });
-      await this.roles.assignAtCourse({ courseOfferingId, roleShortname: 'student', studentProfileId: r.studentProfileId, sourceComponent: 'enrol_roster' });
+      await this.roles.assignAtCourse({ courseOfferingId, roleShortname: 'student', studentProfileId: r.studentEnrollment.studentProfileId, sourceComponent: 'enrol_roster' });
       n++;
     }
     // Team teachers become editingteacher automatically.

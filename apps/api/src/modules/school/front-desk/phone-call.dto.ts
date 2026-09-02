@@ -11,6 +11,7 @@ export class CreatePhoneCallDto {
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsInt() @Min(0) durationSec?: number;
   @IsOptional() @IsEnum(CallStatus) status?: CallStatus;
+  @IsOptional() @IsString() callAt?: string;
 }
 
 export class UpdatePhoneCallDto {
@@ -22,4 +23,5 @@ export class UpdatePhoneCallDto {
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsInt() @Min(0) durationSec?: number;
   @IsOptional() @IsEnum(CallStatus) status?: CallStatus;
+  @IsOptional() @IsString() callAt?: string;
 }

@@ -43,13 +43,13 @@ export class ViewEnvelopeService {
    */
   async courseHeader(offering: CourseOffering): Promise<CourseHeader> {
     const [subject, klass, term, year] = await Promise.all([
-      this.prisma.client.subject.findFirst({ where: { id: offering.subjectId }, select: { name: true } }),
-      this.prisma.client.schoolClass.findFirst({ where: { id: offering.classId }, select: { name: true } }),
+      offering.subjectId ? this.prisma.client.subject.findFirst({ where: { id: offering.subjectId }, select: { name: true } }) : Promise.resolve(null),
+      offering.classId ? this.prisma.client.schoolClass.findFirst({ where: { id: offering.classId }, select: { name: true } }) : Promise.resolve(null),
       this.prisma.client.term.findFirst({ where: { id: offering.termId }, select: { name: true } }),
       this.prisma.client.academicYear.findFirst({ where: { id: offering.academicYearId }, select: { name: true } }),
     ]);
     const parts = [subject?.name, klass?.name].filter(Boolean).join(' — ');
-    const name = [parts || 'Course', term?.name ? `(${term.name})` : ''].filter(Boolean).join(' ');
+    const name = [offering.name || parts || 'Course', term?.name ? `(${term.name})` : ''].filter(Boolean).join(' ');
     return {
       id: offering.id,
       name,

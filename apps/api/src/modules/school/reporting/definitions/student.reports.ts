@@ -103,12 +103,12 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
     {
       key: 'student.profile',
       title: 'Student Profile',
-      description: 'A single pupil's full profile: personal data, current enrolment, contacts, and photo.',
+      description: "A single pupil's full profile: personal data, current enrolment, contacts, and photo.",
       domain: 'student',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['studentId', 'academicYearId', 'termId'],
-      requiredFilters: ['studentId'],
+      filters: ['studentProfileId', 'academicYearId', 'termId'],
+      requiredFilters: ['studentProfileId'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'none',
@@ -123,8 +123,8 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         // joins StudentProfile → Student → Person → User and picks the current
         // enrolment for the resolved term.
         const profile = await deps.resolver.studentDirectory(
-          [params.studentId],
-        ).then((map: any) => map.get(params.studentId));
+          [params.studentProfileId],
+        ).then((map: any) => map.get(params.studentProfileId));
 
         if (!profile) {
           return {

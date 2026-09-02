@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 
 /**
  * ReportingService — aggregation queries that power the four school dashboards:
@@ -10,13 +10,19 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
  *   - Finance (collections this month / term, revenue vs budget, outstanding by class)
  *   - Operational (staff count, teacher workload, enrollment trend)
  *
- * All queries are org-scoped via the tenancy extension.
+ * All queries are org-scoped via the tenancy extension. Money figures are NOT
+ * computed here — they delegate to SchoolFinanceQueryService, the single site of
+ * the AR identity.
  */
 @Injectable()
 export class ReportingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    // Every money figure on these dashboards routes through the canonical query
+    // service. Re-deriving one here is what let the dashboard and the statement
+    // disagree (FINANCIAL_INVARIANTS.md, "cached projection, never an input").
+    private readonly finance: SchoolFinanceQueryService,
   ) {}
 
   /** Single call that powers the admin dashboard tile. */
@@ -90,16 +96,25 @@ export class ReportingService {
   async financeDashboard() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const [collectionsThisMonth, outstanding] = await Promise.all([
-      this.prisma.client.payment.aggregate({
-        where: { direction: 'inbound', paymentDate: { gte: startOfMonth } },
+    const [collectionsThisMonth, totals] = await Promise.all([
+      // Collections = allocated money, not raw Payment rows. A `Payment` may be
+      // cancelled, or sit unallocated; PaymentAllocation is the authoritative
+      // record of value actually applied to a fee document.
+      this.prisma.client.paymentAllocation.aggregate({
+        where: {
+          status: { not: 'reversed' },
+          payment: { direction: 'inbound', status: { not: 'cancelled' }, paymentDate: { gte: startOfMonth } },
+        },
         _sum: { amount: true },
       }),
-      this.outstandingFeesTotal(),
+      this.finance.outstandingTotal(),
     ]);
     return {
       collectionsThisMonth: Number(collectionsThisMonth._sum.amount ?? 0),
-      outstanding,
+      outstanding: totals.outstanding,
+      creditBalance: totals.creditBalance,
+      billed: totals.billed,
+      owingCount: totals.owingCount,
     };
   }
 
@@ -114,59 +129,64 @@ export class ReportingService {
     return { staff, teacherAssignments: totalAssignments, avgPeriodsPerWeek: Math.round(Number(avgPeriods) * 100) / 100 };
   }
 
-  // Every school-sourced AR document a student still owes on. The old filter was
-  // paymentStatus in ['partial','paid'], which excluded 'not_paid' — i.e. a
-  // freshly-billed, entirely-unpaid invoice (the largest arrears) was dropped
-  // and 'paid' (zero residual) added nothing. The open set is
-  // ['not_paid','partial'] with a positive residual.
-  private static readonly OPEN_FEE_WHERE: Prisma.DocumentWhereInput = {
-    sourceType: { in: ['school_fee', 'school_penalty', 'library_fine', 'school_meal'] },
-    paymentStatus: { in: ['not_paid', 'partial'] },
-    amountResidual: { gt: 0 },
-  };
-
-  /** Total outstanding across all open fee invoices. */
+  /**
+   * Total outstanding across the school.
+   *
+   * Delegates to SchoolFinanceQueryService. It used to sum
+   * `Document.amountResidual` here directly, which FINANCIAL_INVARIANTS.md names
+   * as a CACHED PROJECTION and never an independent input — the dashboard could
+   * therefore print a different figure from the pupil's own statement whenever
+   * the projection had drifted, which is precisely the failure
+   * `reconcileCachedProjections()` exists to detect.
+   *
+   * The canonical identity is: billed − collected − waived − credited + adjusted.
+   */
   async outstandingFeesTotal(): Promise<number> {
-    const docs = await this.prisma.client.document.findMany({
-      where: ReportingService.OPEN_FEE_WHERE,
-      select: { amountResidual: true },
-    });
-    return docs.reduce((s, d) => s + Number(d.amountResidual), 0);
+    const totals = await this.finance.outstandingTotal();
+    return totals.outstanding;
   }
 
-  /** Outstanding fees grouped by class. */
+  /** Outstanding fees grouped by class, from the canonical per-pupil balance. */
   async outstandingByClass() {
-    const docs = await this.prisma.client.document.findMany({
-      where: ReportingService.OPEN_FEE_WHERE,
-      select: { partnerId: true, amountResidual: true },
-    });
-    if (docs.length === 0) return [];
-
-    // Resolve partner → class in one query instead of two per document.
-    const partnerIds = [...new Set(docs.map((d) => d.partnerId).filter(Boolean) as string[])];
     const students = await this.prisma.client.studentProfile.findMany({
-      where: { partnerId: { in: partnerIds } },
-      include: { currentClass: { include: { gradeLevel: true } } },
+      where: { status: 'active', deletedAt: null, currentClassId: { not: null } },
+      select: {
+        id: true,
+        currentClassId: true,
+        currentClass: { select: { id: true, name: true } },
+      },
     });
-    const classByPartner = new Map(students.map((s) => [s.partnerId, s.currentClass]));
+    if (students.length === 0) return [];
 
-    const byClass: Record<string, { className: string; outstanding: number; studentCount: number }> = {};
-    for (const d of docs) {
-      const c = d.partnerId ? classByPartner.get(d.partnerId) : null;
-      if (!c) continue;
-      if (!byClass[c.id]) byClass[c.id] = { className: c.name, outstanding: 0, studentCount: 0 };
-      byClass[c.id].outstanding += Number(d.amountResidual);
+    const balances = await this.finance.studentBalances(students.map((s) => s.id));
+
+    const byClass = new Map<string, { className: string; outstanding: number; studentCount: number; owingCount: number }>();
+    for (const s of students) {
+      const classId = s.currentClassId!;
+      if (!byClass.has(classId)) {
+        byClass.set(classId, {
+          className: s.currentClass?.name ?? classId,
+          outstanding: 0,
+          studentCount: 0,
+          owingCount: 0,
+        });
+      }
+      const bucket = byClass.get(classId)!;
+      bucket.studentCount += 1;
+      const balance = balances.get(s.id)?.balance ?? 0;
+      // Only debit balances are "outstanding" — a pupil in credit must not pay
+      // down a classmate's arrears in the total.
+      if (balance > 0) {
+        bucket.outstanding += balance;
+        bucket.owingCount += 1;
+      }
     }
 
-    const counts = await this.prisma.client.studentProfile.groupBy({
-      by: ['currentClassId'],
-      where: { currentClassId: { in: Object.keys(byClass) }, status: 'active' },
-      _count: true,
-    });
-    for (const gc of counts) {
-      if (gc.currentClassId && byClass[gc.currentClassId]) byClass[gc.currentClassId].studentCount = gc._count;
-    }
-    return Object.entries(byClass).map(([id, v]) => ({ classId: id, ...v }));
+    return [...byClass.entries()].map(([classId, v]) => ({
+      classId,
+      ...v,
+      outstanding: Number(v.outstanding.toFixed(2)),
+    }));
   }
 
   /** Attendance summary (today) for the admin dashboard. */

@@ -80,9 +80,28 @@ export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryK
     setForm(base);
     setCreating(true);
   };
+  const formatDateForInput = (iso: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString().split('T')[0];
+  };
+
+  const formatDateForDisplay = (iso: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString();
+  };
+
   const openEdit = (row: any) => {
     const base: Record<string, any> = {};
-    for (const f of fields) base[f.name] = row[f.name] ?? (f.type === 'boolean' ? false : '');
+    for (const f of fields) {
+      const val = row[f.name];
+      base[f.name] = f.type === 'date' || f.type === 'datetime'
+        ? formatDateForInput(val)
+        : val ?? (f.type === 'boolean' ? false : '');
+    }
     setForm(base);
     setEditing(row);
   };
@@ -163,9 +182,13 @@ export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryK
             <tbody>
               {rows.map((row: any) => (
                 <tr key={row.id} className="border-b last:border-0 hover:bg-muted/40">
-                  {columns.map((c) => (
-                    <td key={c.key} className="px-4 py-2">{c.render ? c.render(row) : row[c.key]}</td>
-                  ))}
+                  {columns.map((c) => {
+                    let val = c.render ? c.render(row) : row[c.key];
+                    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+                      val = formatDateForDisplay(val);
+                    }
+                    return <td key={c.key} className="px-4 py-2">{val}</td>;
+                  })}
                   <td className="px-4 py-2 text-right">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(row)} aria-label="Edit">
                       <Pencil className="h-4 w-4" />

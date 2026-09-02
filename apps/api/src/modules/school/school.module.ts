@@ -5,6 +5,9 @@ import { PERMISSIONS } from '@erp/shared';
 
 import { FoundationModule } from './foundation/foundation.module';
 import { PeopleModule } from './people/people.module';
+import { SchoolEnrollmentModule } from './enrollment/enrollment.module';
+import { CourseOfferingModule } from './course-offerings/course-offering.module';
+import { TeachingModule } from './teaching/teaching.module';
 import { AdmissionsModule } from './admissions/admissions.module';
 import { AcademicsModule } from './academics/academics.module';
 import { AttendanceModule } from './attendance/attendance.module';
@@ -24,10 +27,16 @@ import { HostelModule } from './hostel/hostel.module';
 import { CafeteriaModule } from './cafeteria/cafeteria.module';
 import { MealsModule } from './meals/meals.module';
 import { ReportingModule } from './reporting/reporting.module';
+import { SchoolReportsModule } from './reporting/school-reports.module';
 import { SchoolDocumentsModule } from './documents/school-documents.module';
 import { FrontDeskModule } from './front-desk/front-desk.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
+
+// The advanced Moodle-shaped delivery layer is unfinished and fail-closed.
+// Core offerings, lesson plans, assignments and the canonical assessment spine
+// remain available because they are not optional LMS concerns.
+const advancedLmsImports = process.env.ENABLE_ADVANCED_LMS === 'true' ? [LmsMoodleModule] : [];
 
 /**
  * School Vertical (ADR-011) — built on the reusable core.
@@ -42,12 +51,15 @@ import { SchoolController } from './school.controller';
   imports: [
     FoundationModule,
     PeopleModule,
+    SchoolEnrollmentModule,
+    CourseOfferingModule,
+    TeachingModule,
     AdmissionsModule,
     AcademicsModule,
     AttendanceModule,
     LmsModule,
     LessonPlanningModule,
-    LmsMoodleModule,
+    ...advancedLmsImports,
     ExaminationsModule,
     AssessmentModule,
     CbtModule,
@@ -65,6 +77,9 @@ import { SchoolController } from './school.controller';
     CafeteriaModule,
     MealsModule,
     ReportingModule,
+    // The registry-driven report centre (ADR-017). Mounted alongside the
+    // dashboard-tile ReportingModule, which the web dashboard still consumes.
+    SchoolReportsModule,
     SchoolDocumentsModule,
     FrontDeskModule,
   ],

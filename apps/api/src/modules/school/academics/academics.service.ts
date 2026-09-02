@@ -264,21 +264,31 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
 
   /**
    * Resolve the canonical CourseOffering for a slot (class+section+subject+term),
-   * so timetable rows hang off the teaching-instance spine. Best-effort: returns
-   * null when no matching offering exists yet (caller may create one via LMS).
+   * so every lesson row hangs off the teaching-instance spine. Explicit ids are
+   * validated; implicit resolution succeeds only when the context is unambiguous.
    */
   private async resolveCourseOffering(
     tx: any,
-    slot: { classId: string; sectionId?: string | null; subjectId: string },
+    slot: { classId: string; sectionId?: string | null; streamId?: string | null; subjectId: string; courseOfferingId?: string | null },
   ): Promise<string | null> {
+    if (slot.courseOfferingId) {
+      const explicit = await tx.courseOffering.findFirst({ where: { id: slot.courseOfferingId, organizationId: this.tenant.organizationId } });
+      if (!explicit || ['CLOSED', 'ARCHIVED'].includes(explicit.status) || explicit.classId !== slot.classId || explicit.subjectId !== slot.subjectId || (explicit.sectionId ?? null) !== (slot.sectionId ?? null) || (explicit.streamId ?? null) !== (slot.streamId ?? null)) {
+        throw new BadRequestException('Course offering does not match the timetable class, grouping and subject.');
+      }
+      return explicit.id;
+    }
     const where: Record<string, unknown> = {
       organizationId: this.tenant.organizationId,
       classId: slot.classId,
       sectionId: slot.sectionId ?? null,
+      streamId: slot.streamId ?? null,
       subjectId: slot.subjectId,
+      status: { notIn: ['CLOSED', 'ARCHIVED'] },
     };
-    const offering = await tx.courseOffering.findFirst({ where });
-    return offering?.id ?? null;
+    const offerings = await tx.courseOffering.findMany({ where, take: 2, orderBy: { createdAt: 'desc' } });
+    if (offerings.length > 1) throw new BadRequestException('More than one course offering matches this lesson. Select the offering explicitly.');
+    return offerings[0]?.id ?? null;
   }
 
   /**
@@ -375,13 +385,16 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     if (conflicts.length > 0) {
       throw new BadRequestException(`Timetable conflicts: ${conflicts.join('; ')}`);
     }
-    // Hang the slot off the canonical CourseOffering spine (best-effort).
+    if (dto.type === 'break' || dto.type === 'free') return super.create(dto);
     const courseOfferingId = await this.resolveCourseOffering(this.prisma.client, {
       classId: dto.classId,
       sectionId: dto.sectionId ?? null,
+      streamId: (dto as any).streamId ?? null,
       subjectId: dto.subjectId,
+      courseOfferingId: dto.courseOfferingId,
     });
-    return super.create({ ...dto, courseOfferingId: courseOfferingId ?? undefined });
+    if (!courseOfferingId) throw new BadRequestException('A lesson timetable slot requires a valid course offering. Create the offering first.');
+    return super.create({ ...dto, courseOfferingId });
   }
 
   /**
@@ -397,6 +410,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     const merged: CreateTimetableSlotDto = {
       classId: dto.classId ?? existing.classId,
       sectionId: dto.sectionId ?? existing.sectionId ?? undefined,
+      streamId: dto.streamId ?? existing.streamId ?? undefined,
       dayOfWeek: dto.dayOfWeek ?? existing.dayOfWeek,
       periodId: dto.periodId ?? existing.periodId,
       subjectId: dto.subjectId ?? existing.subjectId,
@@ -404,6 +418,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
       campusId: dto.campusId ?? existing.campusId ?? undefined,
       room: dto.room ?? existing.room ?? undefined,
       courseOfferingId: existing.courseOfferingId ?? undefined,
+      type: dto.type ?? existing.type,
     };
 
     const conflicts = await this.detectConflicts(merged, id);
@@ -413,6 +428,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
 
     // Re-resolve the spine if the class/section/subject changed.
     const courseOfferingId = await this.resolveCourseOffering(this.prisma.client, merged);
+    if ((merged.type ?? existing.type) === 'lesson' && !courseOfferingId) throw new BadRequestException('A lesson timetable slot requires a valid course offering.');
     const updateData: UpdateTimetableSlotDto = { ...dto };
     if (courseOfferingId) (updateData as any).courseOfferingId = courseOfferingId;
     return super.update(id, updateData);
@@ -460,8 +476,13 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
         const courseOfferingId = await this.resolveCourseOffering(tx, {
           classId: dto.classId,
           sectionId: dto.sectionId ?? null,
+          streamId: slot.streamId ?? null,
           subjectId: slot.subjectId,
+          courseOfferingId: slot.courseOfferingId,
         });
+        if ((slot.type ?? 'lesson') === 'lesson' && !courseOfferingId) {
+          throw new BadRequestException(`No course offering for timetable subject ${slot.subjectId}.`);
+        }
         created.push(
           await tx.timetableSlot.create({
             data: {

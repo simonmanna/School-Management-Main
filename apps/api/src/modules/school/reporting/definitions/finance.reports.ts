@@ -1,6 +1,7 @@
 import { PERMISSIONS } from '@erp/shared';
 import type { ReportDefinition } from '../../../core/reporting/report.types';
 import type { SchoolReportDeps } from '../school-report-deps';
+import { Prisma } from '@prisma/client';
 
 /**
  * Phase 3 — Financial/Control Reports.
@@ -31,7 +32,7 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       permission: PERMISSIONS.school.readReports,
       alsoRequires: FINANCE,
       shape: 'table',
-      filters: ['dateFrom', 'dateTo', 'accountId', 'journalCode'],
+      filters: ['dateFrom', 'dateTo'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'service',
@@ -70,7 +71,7 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       permission: PERMISSIONS.school.readReports,
       alsoRequires: FINANCE,
       shape: 'table',
-      filters: ['asOf', 'accountId'],
+      filters: ['asOf'],
       classBasisDefault: 'current',
       asOfMode: 'as-of',
       paging: 'memory',
@@ -90,13 +91,8 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const range = { to: params.asOf };
         const result = await deps.accounting.trialBalance(range);
 
-        let rows = result.rows;
-        if (params.accountId) {
-          rows = rows.filter((r: any) => r.accountId === params.accountId);
-        }
-
         return {
-          rows,
+          rows: result.rows,
           totals: {
             debit: result.totals.debit,
             credit: result.totals.credit,
@@ -278,7 +274,7 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const aging = await deps.advancedFinance.aging(asOf.toISOString().slice(0, 10));
 
         const rows = aging.rows
-          .filter((r: any) => classIds.length === 0 || classIds.some((id: string) => r.documentNumber.includes(id)))
+          .filter((r: any) => (classIds?.length ?? 0) === 0 || (classIds ?? []).some((id: string) => r.documentNumber.includes(id)))
           .map((r: any) => ({
             studentProfileId: r.studentProfileId ?? '',
             admissionNo: r.admissionNo ?? '',
@@ -431,7 +427,7 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       permission: PERMISSIONS.school.readReports,
       alsoRequires: FINANCE,
       shape: 'table',
-      filters: ['dateFrom', 'dateTo', 'userId', 'journalCode', 'status'],
+      filters: ['dateFrom', 'dateTo'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'service',
@@ -448,13 +444,11 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         { key: 'totalDebit', label: 'Total Debit', type: 'money', format: '', width: 14, total: 'sum' },
         { key: 'totalCredit', label: 'Total Credit', type: 'money', format: '', width: 14, total: 'sum' },
       ],
-      async run(ctx, params) {
+      async run(ctx, params, opts) {
         const range = { from: params.dateFrom, to: params.dateTo };
         const where: any = {
           entry: { status: { in: ['posted', 'reversed'] }, postingDate: deps.accounting['rangeFilter'](range) },
         };
-        if (params.journalCode) where.entry.journal = { code: params.journalCode };
-        if (params.userId) where.entry.createdById = params.userId;
 
         const [entries, total] = await Promise.all([
           (deps.accounting as any).prisma.client.journalEntry.findMany({

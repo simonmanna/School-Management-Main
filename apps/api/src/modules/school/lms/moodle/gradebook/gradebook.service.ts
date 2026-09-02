@@ -53,7 +53,7 @@ export class GradebookService {
     // and the report card show. This used to be an unweighted mean of the LMS
     // activity percentages — a second, disagreeing formula. `computeSubject` is
     // now the only one, so a student reads one number everywhere.
-    const totals = offering
+    const totals = offering?.classId && offering.subjectId
       ? await this.gradebook
           .sheet({ classId: offering.classId, termId: offering.termId, subjectId: offering.subjectId })
           .then((sheet) => new Map(sheet.students.map((st) => [st.studentProfileId, st.finalPercent])))

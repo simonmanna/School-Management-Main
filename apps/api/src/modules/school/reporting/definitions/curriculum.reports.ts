@@ -146,7 +146,7 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
 
         return {
           rows,
-          caption: `Curriculum coverage for ${curricula.length} published curricula · ${classIds.length} class(es)`,
+          caption: `Curriculum coverage for ${curricula.length} published curricula · ${classIds?.length ?? 0} class(es)`,
         };
       },
     },

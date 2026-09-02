@@ -38,8 +38,8 @@ export interface Student {
 
 export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean }
 export interface Term { id: string; academicYearId: string; name: string; isCurrent: boolean }
-export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null }
-export interface Section { id: string; classId: string; name: string; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string } | null }
+export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null }
+export interface Section { id: string; classId: string; name: string; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null } | null }
 
 export interface Guardian {
   id: string;
@@ -357,6 +357,21 @@ export interface AdmissionApplication {
    * demand by the Enroll dialog.
    */
   workflow?: Omit<AdmissionWorkflowState, 'applicationId' | 'status' | 'workflow' | 'stages' | 'eligibility'>;
+  /** Structured guardians, included by GET /:id. Populated for read-only view. */
+  guardians?: Array<{
+    id: string;
+    firstName: string;
+    lastName?: string | null;
+    relationship: string;
+    phone?: string | null;
+    altPhone?: string | null;
+    email?: string | null;
+    occupation?: string | null;
+    address?: string | null;
+    isPrimary?: boolean;
+    isEmergency?: boolean;
+    financiallyResponsible?: boolean;
+  }> | null;
 }
 
 export interface AdmissionOffer {
@@ -5300,12 +5315,12 @@ export function usePhoneCall(id?: string) {
 
 export function useCreatePhoneCall() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (dto: { partnerId?: string; direction: CallDirection; contactName: string; phone: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus }) => (await api.post<PhoneCall>(PC, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
+  return useMutation({ mutationFn: async (dto: { partnerId?: string; direction: CallDirection; contactName: string; phone: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus; callAt?: string }) => (await api.post<PhoneCall>(PC, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
 }
 
 export function useUpdatePhoneCall() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; direction?: CallDirection; contactName?: string; phone?: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus }) => (await api.put<PhoneCall>(`${PC}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
+  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; partnerId?: string; direction?: CallDirection; contactName?: string; phone?: string; subject?: string; outcome?: string; notes?: string; durationSec?: number; status?: CallStatus; callAt?: string }) => (await api.put<PhoneCall>(`${PC}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'phone-calls'] }) });
 }
 
 export function useDeletePhoneCall() {
@@ -5353,12 +5368,12 @@ export function useComplaint(id?: string) {
 
 export function useCreateComplaint() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (dto: { partnerId?: string; category: ComplaintCategory; subject: string; description: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string }) => (await api.post<Complaint>(CP, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
+  return useMutation({ mutationFn: async (dto: { partnerId?: string; category: ComplaintCategory; subject: string; description: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string; receivedAt?: string }) => (await api.post<Complaint>(CP, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
 }
 
 export function useUpdateComplaint() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; category?: ComplaintCategory; subject?: string; description?: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string }) => (await api.put<Complaint>(`${CP}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
+  return useMutation({ mutationFn: async ({ id, ...dto }: { id: string; partnerId?: string; category?: ComplaintCategory; subject?: string; description?: string; status?: ComplaintStatus; priority?: ComplaintPriority; assignedToId?: string; resolution?: string; receivedAt?: string }) => (await api.put<Complaint>(`${CP}/${id}`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
 }
 
 export function useDeleteComplaint() {

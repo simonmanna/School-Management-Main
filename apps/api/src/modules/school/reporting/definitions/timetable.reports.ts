@@ -18,7 +18,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       description: 'Weekly grid for one class (optionally section), with overrides applied.',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['classId', 'sectionId', 'termId', 'date'],
+      filters: ['classId', 'sectionId', 'termId', 'dateFrom'],
       requiredFilters: ['classId'],
       classBasisDefault: 'current',
       asOfMode: 'live',
@@ -28,8 +28,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'dayName', label: 'Day', type: 'string', width: 12 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period Name', type: 'string', width: 14 },
-        { key: 'startTime', label: 'Start', type: 'time', width: 10 },
-        { key: 'endTime', label: 'End', type: 'time', width: 10 },
+        { key: 'startTime', label: 'Start', type: 'datetime', width: 10 },
+        { key: 'endTime', label: 'End', type: 'datetime', width: 10 },
         { key: 'subjectName', label: 'Subject', type: 'string', width: 18 },
         { key: 'teacherName', label: 'Teacher', type: 'string', width: 20 },
         { key: 'roomName', label: 'Room', type: 'string', width: 12 },
@@ -39,15 +39,16 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       async run(ctx, params) {
         const classId = params.classId;
         const sectionId = params.sectionId ?? null;
-        const date = params.date;
+        const date = params.dateFrom;
 
         const { grid, slots } = await deps.timetable.classGridWithOverrides(classId, sectionId, date);
 
         const rows: any[] = [];
         const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const gridMap = grid as Record<string, any>;
 
-        for (const dayOfWeek of Object.keys(grid).sort((a, b) => Number(a) - Number(b))) {
-          const dayGrid = grid[dayOfWeek];
+        for (const dayOfWeek of Object.keys(gridMap).sort((a, b) => Number(a) - Number(b))) {
+          const dayGrid = gridMap[dayOfWeek];
           for (const periodId of Object.keys(dayGrid).sort()) {
             const cell = dayGrid[periodId];
             const slot = (slots as any[]).find(s => s.dayOfWeek === Number(dayOfWeek) && s.periodId === periodId);
@@ -87,8 +88,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       description: 'Weekly schedule for one teacher across all their classes.',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['teacherPartnerId', 'termId', 'date'],
-      requiredFilters: ['teacherPartnerId'],
+      filters: ['staffProfileId', 'termId', 'dateFrom'],
+      requiredFilters: ['staffProfileId'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'memory',
@@ -97,8 +98,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'dayName', label: 'Day', type: 'string', width: 12 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period Name', type: 'string', width: 14 },
-        { key: 'startTime', label: 'Start', type: 'time', width: 10 },
-        { key: 'endTime', label: 'End', type: 'time', width: 10 },
+        { key: 'startTime', label: 'Start', type: 'datetime', width: 10 },
+        { key: 'endTime', label: 'End', type: 'datetime', width: 10 },
         { key: 'className', label: 'Class', type: 'string', width: 14 },
         { key: 'sectionName', label: 'Section', type: 'string', width: 10 },
         { key: 'subjectName', label: 'Subject', type: 'string', width: 18 },
@@ -106,8 +107,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'overridden', label: 'Override', type: 'bool', width: 8 },
       ],
       async run(ctx, params) {
-        const teacherPartnerId = params.teacherPartnerId;
-        const date = params.date;
+        const teacherPartnerId = params.staffProfileId;
+        const date = params.dateFrom;
 
         // Get all slots where this teacher is assigned
         const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
@@ -180,7 +181,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       permission: PERMISSIONS.school.readReports,
       alsoRequires: [PERMISSIONS.school.readAnalytics],
       shape: 'table',
-      filters: ['campusId', 'gradeLevelId', 'termId', 'date'],
+      filters: ['campusId', 'gradeLevelId', 'termId', 'dateFrom'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'memory',
@@ -189,8 +190,8 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'dayName', label: 'Day', type: 'string', width: 10 },
         { key: 'periodOrder', label: 'Period', type: 'int', width: 8 },
         { key: 'periodName', label: 'Period', type: 'string', width: 12 },
-        { key: 'startTime', label: 'Start', type: 'time', width: 10 },
-        { key: 'endTime', label: 'End', type: 'time', width: 10 },
+        { key: 'startTime', label: 'Start', type: 'datetime', width: 10 },
+        { key: 'endTime', label: 'End', type: 'datetime', width: 10 },
         { key: 'className', label: 'Class', type: 'string', width: 14 },
         { key: 'sectionName', label: 'Section', type: 'string', width: 10 },
         { key: 'subjectName', label: 'Subject', type: 'string', width: 18 },
@@ -200,7 +201,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'clashDetails', label: 'Details', type: 'string', width: 22 },
       ],
       async run(ctx, params) {
-        const date = params.date;
+        const date = params.dateFrom;
         const classIds = ctx.resolved.classIds;
 
         // Get all slots for the filtered classes
@@ -294,7 +295,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         const clashCount = rows.filter(r => r.clash).length;
         return {
           rows,
-          caption: `Master timetable · ${classIds.length} class(es) · ${date ? `for ${date}` : 'current grid'}`,
+          caption: `Master timetable · ${classIds?.length ?? 0} class(es) · ${date ? `for ${date}` : 'current grid'}`,
           notes: clashCount > 0 ? [`${clashCount} clash(es) detected — review before publishing`] : [],
         };
       },
@@ -307,7 +308,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
       description: 'How often each teaching room is booked across the week.',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['campusId', 'termId', 'date'],
+      filters: ['campusId', 'termId', 'dateFrom'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'memory',
@@ -321,7 +322,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         { key: 'periods', label: 'Periods Used', type: 'string', width: 40 },
       ],
       async run(ctx, params) {
-        const date = params.date;
+        const date = params.dateFrom;
         const classIds = ctx.resolved.classIds;
 
         // Get all rooms

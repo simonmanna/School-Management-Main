@@ -1,0 +1,40 @@
+# Overlay: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
+services:
+  db:
+    container_name: school-staging-db
+    ports: []
+  redis:
+    container_name: school-staging-redis
+    ports: []
+  api:
+    container_name: school-staging-api
+    environment:
+      NODE_ENV: production
+      ENABLE_SCHOOL: "true"
+      ENABLE_ADVANCED_LMS: "false"
+      LOG_LEVEL: info
+      CORS_ORIGINS: ${STAGING_CORS_ORIGINS:?set STAGING_CORS_ORIGINS}
+      SMTP_HOST: ${STAGING_SMTP_HOST:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+    ports:
+      - "127.0.0.1:3100:3000"
+  web:
+    container_name: school-staging-web
+    build:
+      args:
+        VITE_API_URL: ${STAGING_API_URL:?set STAGING_API_URL}
+        VITE_ENABLE_SCHOOL: "true"
+        VITE_ENABLE_ADVANCED_LMS: "false"
+    ports:
+      - "127.0.0.1:5176:80"
+  portal:
+    container_name: school-staging-portal
+    build:
+      args:
+        VITE_API_URL: ${STAGING_API_URL:?set STAGING_API_URL}
+        VITE_ORG_CODE: ${STAGING_ORG_CODE:-DEMO}
+        VITE_SCHOOL_NAME: ${STAGING_SCHOOL_NAME:-School Staging}
+    ports:
+      - "127.0.0.1:5177:80"
+  adminer:
+    profiles: ["operator-tools"]

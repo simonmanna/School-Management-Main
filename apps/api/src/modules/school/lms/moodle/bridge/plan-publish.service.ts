@@ -57,14 +57,17 @@ export class PlanPublishService {
     const offering = await this.prisma.client.courseOffering.findFirst({ where: { id: courseOfferingId, organizationId: this.org } });
     if (!offering) throw new NotFoundException('Course not found');
     const plans = await this.prisma.client.lessonPlan.findMany({
-      where: { organizationId: this.org, subjectId: offering.subjectId, classId: offering.classId },
+      where: { organizationId: this.org, OR: [
+        { courseOfferingId },
+        ...(offering.subjectId && offering.classId ? [{ subjectId: offering.subjectId, classId: offering.classId }] : []),
+      ] },
       include: { learningObjectives: true },
     });
     const modules = await this.prisma.client.courseModule.findMany({
       where: { organizationId: this.org, courseOfferingId, deletedAt: null },
       select: { id: true, activityType: true, assessmentId: true },
     });
-    const plannedObjectives = new Set(plans.flatMap((p) => p.learningObjectives.map((o) => o.learningObjectiveId)));
+    const plannedObjectives = new Set(plans.flatMap((p) => p.learningObjectives.map((o: any) => o.learningObjectiveId)));
     return {
       plannedObjectiveCount: plannedObjectives.size,
       deliveredModuleCount: modules.length,

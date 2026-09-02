@@ -18,6 +18,30 @@ import { notify } from '@/lib/notify';
 const timeOf = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const dateOf = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '');
 
+// Combine a date + hour/minute/AM-PM into an ISO string for the server.
+function buildTimestamp(date: string, hour: string, minute: string, ampm: string): string | undefined {
+  if (!date) return undefined;
+  const h = Number(hour);
+  const m = Number(minute);
+  if (!h || h < 1 || h > 12 || m < 0 || m > 59) return undefined;
+  let hh = h % 12;
+  if (ampm === 'PM') hh += 12;
+  const d = new Date(`${date}T00:00:00`);
+  d.setHours(hh, m, 0, 0);
+  return d.toISOString();
+}
+function splitTimestamp(iso?: string) {
+  if (!iso) return { date: '', hour: '', minute: '', ampm: 'AM' };
+  const d = new Date(iso);
+  const date = d.toISOString().slice(0, 10);
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return { date, hour: String(h), minute: String(d.getMinutes()).padStart(2, '0'), ampm };
+}
+const hourOptions = Array.from({ length: 12 }, (_, i) => String(i + 1));
+const minuteOptions = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
 const categoryIcon = (c: ComplaintCategory) => {
   const icons: Record<ComplaintCategory, string> = {
     academic: '📚', behavior: '⚠️', facilities: '🏢', staff_conduct: '👤',
@@ -77,6 +101,10 @@ export function ComplaintsPage() {
     priority: 'medium' as ComplaintPriority,
     assignedToId: '',
     resolution: '',
+    receivedDate: '',
+    receivedHour: '',
+    receivedMinute: '',
+    receivedAmPm: 'AM' as 'AM' | 'PM',
   });
 
   const filtered = (complaints.data ?? []).filter((c) =>
@@ -85,16 +113,28 @@ export function ComplaintsPage() {
     c.resolution?.toLowerCase().includes(search.toLowerCase())
   );
 
-  const resetForm = () => setForm({ partnerId: '', category: 'other', subject: '', description: '', status: 'open', priority: 'medium', assignedToId: '', resolution: '' });
+  const resetForm = () => setForm({ partnerId: '', category: 'other', subject: '', description: '', status: 'open', priority: 'medium', assignedToId: '', resolution: '', receivedDate: '', receivedHour: '', receivedMinute: '', receivedAmPm: 'AM' });
 
   const handleSubmit = async () => {
     if (!form.subject || !form.description) { notify.error('Subject and description required'); return; }
+    const receivedAt = buildTimestamp(form.receivedDate, form.receivedHour, form.receivedMinute, form.receivedAmPm);
+    const dto = {
+      partnerId: form.partnerId || undefined,
+      category: form.category,
+      subject: form.subject,
+      description: form.description,
+      status: form.status,
+      priority: form.priority,
+      assignedToId: form.assignedToId || undefined,
+      resolution: form.resolution || undefined,
+      receivedAt,
+    };
     try {
       if (editing) {
-        await update.mutateAsync({ id: editing.id, ...form });
+        await update.mutateAsync({ id: editing.id, ...dto });
         notify.success('Complaint updated');
       } else {
-        await create.mutateAsync({ ...form });
+        await create.mutateAsync(dto);
         notify.success('Complaint logged');
       }
       resetForm(); setEditing(null); setOpen(false);
@@ -103,6 +143,7 @@ export function ComplaintsPage() {
 
   const edit = (c: Complaint) => {
     setEditing(c);
+    const ts = splitTimestamp(c.receivedAt);
     setForm({
       partnerId: c.partnerId ?? '',
       category: c.category,
@@ -112,6 +153,10 @@ export function ComplaintsPage() {
       priority: c.priority,
       assignedToId: c.assignedToId ?? '',
       resolution: c.resolution ?? '',
+      receivedDate: ts.date,
+      receivedHour: ts.hour,
+      receivedMinute: ts.minute,
+      receivedAmPm: ts.ampm as 'AM' | 'PM',
     });
     setOpen(true);
   };
@@ -240,6 +285,28 @@ export function ComplaintsPage() {
             </Select>
             <Input placeholder="Assigned to staff ID (optional)" value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })} />
             <Textarea placeholder="Resolution details" value={form.resolution} onChange={(e) => setForm({ ...form, resolution: e.target.value })} rows={3} />
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Received time (optional)</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input type="date" value={form.receivedDate} onChange={(e) => setForm({ ...form, receivedDate: e.target.value })} className="w-auto" />
+                <Select value={form.receivedHour} onValueChange={(v) => setForm({ ...form, receivedHour: v })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="Hr" /></SelectTrigger>
+                  <SelectContent>{hourOptions.map((h) => <SelectItem key={h} value={h}>{h}</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-muted-foreground">:</span>
+                <Select value={form.receivedMinute} onValueChange={(v) => setForm({ ...form, receivedMinute: v })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="Min" /></SelectTrigger>
+                  <SelectContent>{minuteOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={form.receivedAmPm} onValueChange={(v) => setForm({ ...form, receivedAmPm: v as 'AM' | 'PM' })}>
+                  <SelectTrigger className="w-20"><SelectValue placeholder="AM/PM" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => { resetForm(); setEditing(null); setOpen(false); }}>Cancel</Button>

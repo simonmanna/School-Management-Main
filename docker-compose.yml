@@ -62,6 +62,8 @@ services:
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /app/var/uploads
       BODY_LIMIT: 5mb
+      ENABLE_SCHOOL: ${ENABLE_SCHOOL:-false}
+      ENABLE_ADVANCED_LMS: ${ENABLE_ADVANCED_LMS:-false}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -78,6 +80,8 @@ services:
       dockerfile: infra/docker/Dockerfile.web
       args:
         VITE_API_URL: http://localhost:3000
+        VITE_ENABLE_SCHOOL: ${VITE_ENABLE_SCHOOL:-false}
+        VITE_ENABLE_ADVANCED_LMS: ${VITE_ENABLE_ADVANCED_LMS:-false}
     container_name: cafe-pos-web
     restart: unless-stopped
     depends_on:

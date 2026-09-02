@@ -1,0 +1,410 @@
+/**
+ * Reporting layer — integration proof (ADR-017).
+ *
+ * Two jobs:
+ *
+ * 1. THE MONEY PROOF. Every fee figure the report centre and the dashboards show
+ *    must equal the canonical per-pupil balance, to the cent. This is the
+ *    regression test for the defect this work fixed: `ReportingService` summed
+ *    `Document.amountResidual` — a cached projection FINANCIAL_INVARIANTS.md
+ *    forbids as an input — so the dashboard could print a different figure from
+ *    the pupil's own statement. The batch `studentBalances` added to
+ *    SchoolFinanceQueryService must also agree exactly with the per-pupil
+ *    `studentBalance` it replaces in bulk.
+ *
+ * 2. THE SMOKE TEST. Iterate the WHOLE registry and run every definition. Without
+ *    this, a definition whose canonical service changed signature throws only
+ *    when a head teacher clicks it. It is cheap now and gets cheaper per report
+ *    as the catalogue grows past 200.
+ */
+/**
+ * Resolve grants from the tenant context rather than re-reading roles from the
+ * database. PermissionResolverService defaults to DB mode (matching the guard),
+ * which is right in production but means a synthetic spec user with no User row
+ * resolves to NO permissions — correctly failing closed, and masking everything
+ * this suite is actually here to test. Must be set before the module is built,
+ * since the mode is read once at construction.
+ */
+process.env.PERMISSIONS_DB_LOOKUP = 'false';
+
+import { Test, TestingModule } from '@nestjs/testing';
+import { PrismaClient } from '@prisma/client';
+import { describeDb } from './_setup';
+import { ensureAccountCategories, makeAccountFactory } from './_accounts';
+import { KernelModule } from '../../src/kernel/kernel.module';
+import { DocumentsModule } from '../../src/modules/documents/documents.module';
+import { CoreModule } from '../../src/modules/core/core.module';
+import { AccountingModule } from '../../src/modules/accounting/accounting.module';
+import { InventoryModule } from '../../src/modules/inventory/inventory.module';
+import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
+import { SchoolModule } from '../../src/modules/school/school.module';
+import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
+import { BillingService, SchoolPaymentService } from '../../src/modules/school/fees/billing.service';
+import { AdvancedFinanceService } from '../../src/modules/school/fees/advanced.service';
+import { SchoolFinanceQueryService } from '../../src/modules/school/fees/school-finance-query.service';
+import { ReportingService } from '../../src/modules/school/reporting/reporting.service';
+import { ReportRegistryService } from '../../src/modules/core/reporting/report-registry.service';
+import { ReportRunnerService } from '../../src/modules/core/reporting/report-runner.service';
+import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+
+describeDb('integration: school reporting', () => {
+  const rawUrl = (() => {
+    const u = process.env.DATABASE_URL ?? '';
+    return u.includes('connection_limit=') ? u : `${u}${u.includes('?') ? '&' : '?'}connection_limit=1`;
+  })();
+  const raw = new PrismaClient({ datasources: { db: { url: rawUrl } } });
+
+  let moduleRef: TestingModule;
+  let tenant: TenantContextService;
+  let billing: BillingService;
+  let payments: SchoolPaymentService;
+  let advanced: AdvancedFinanceService;
+  let finance: SchoolFinanceQueryService;
+  let dashboards: ReportingService;
+  let registry: ReportRegistryService;
+  let runner: ReportRunnerService;
+
+  const organizationId = `org_rpt_${Date.now()}`;
+  const TUITION = 1_000_000;
+
+  const students: Array<{ id: string; admissionNo: string }> = [];
+  let classAId = '';
+  let classBId = '';
+  let termId = '';
+  let cashRegisterId = '';
+
+  // Every grant, so the runner's per-report check never masks a real failure
+  // here. Scope and permission filtering get their own assertions below.
+  const ALL_GRANTS = [
+    'school:read', 'school:reports:read', 'school:reports:export',
+    'school:reports:finance:read', 'school:analytics:read',
+  ];
+
+  const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
+  const asUser = <T>(fn: () => Promise<T>, permissions = ALL_GRANTS): Promise<T> =>
+    tenant.run({ organizationId, userId: 'head', permissions }, fn);
+
+  beforeAll(async () => {
+    await raw.$connect();
+    await raw.currency.upsert({
+      where: { code: 'UGX' },
+      update: {},
+      create: { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling', decimalPlaces: 0 },
+    });
+    await setOrg(organizationId);
+    await raw.organization.create({
+      data: { id: organizationId, code: `RPT-${Date.now()}`, name: 'Reporting School', currencyCode: 'UGX' },
+    });
+
+    const mk = makeAccountFactory(raw, await ensureAccountCategories(raw));
+    const cashAccountId = (await mk(organizationId, 'RPT-1100', 'Cash', 'cash')).id;
+    const arAccountId = (await mk(organizationId, 'RPT-1300', 'Fees Receivable', 'receivable')).id;
+    const revenueAccountId = (await mk(organizationId, 'RPT-4100', 'Tuition Revenue', 'revenue')).id;
+    for (const [code, name, type] of [
+      ['SALES', 'Sales', 'sales'], ['CASH', 'Cash', 'cash'], ['GEN', 'General', 'general'],
+    ] as const) {
+      await raw.journal.create({ data: { organizationId, code, name, journalType: type } });
+    }
+    for (const [key, accountId] of [
+      ['default_cash', cashAccountId], ['accounts_receivable', arAccountId],
+    ] as const) {
+      await raw.accountMapping.create({ data: { organizationId, key, accountId } });
+    }
+
+    const category = await raw.productCategory.create({
+      data: { organizationId, name: 'School Fees', incomeAccountId: revenueAccountId },
+    });
+    const product = await raw.product.create({
+      data: { organizationId, code: 'TUITION', name: 'Tuition', productType: 'service', categoryId: category.id, salesPrice: TUITION },
+    });
+
+    const year = await raw.academicYear.create({
+      data: { organizationId, name: '2026', startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') },
+    });
+    const term = await raw.term.create({
+      data: { organizationId, academicYearId: year.id, name: 'Term 1', startDate: new Date('2026-01-15'), endDate: new Date('2026-04-15'), isCurrent: true },
+    });
+    termId = term.id;
+
+    const gradeLevel = await raw.gradeLevel.create({ data: { organizationId, name: 'P1', order: 1 } });
+    classAId = (await raw.schoolClass.create({
+      data: { organizationId, gradeLevelId: gradeLevel.id, name: 'P1 East', capacity: 3 },
+    })).id;
+    classBId = (await raw.schoolClass.create({
+      data: { organizationId, gradeLevelId: gradeLevel.id, name: 'P1 West', capacity: 40 },
+    })).id;
+
+    // Four pupils: three in P1 East, one in P1 West. Enough for a class total,
+    // a school total, and a class that is over capacity.
+    const seed = [
+      { adm: 'ADM-001', name: 'Ada Pupil', classId: classAId, gender: 'female' },
+      { adm: 'ADM-002', name: 'Brian Pupil', classId: classAId, gender: 'male' },
+      { adm: 'ADM-003', name: 'Carol Pupil', classId: classAId, gender: 'female' },
+      { adm: 'ADM-004', name: 'Derrick Pupil', classId: classBId, gender: 'male' },
+    ];
+    for (const s of seed) {
+      const partner = await raw.partner.create({
+        data: { organizationId, code: `STU-${s.adm}`, name: s.name, isCustomer: true, receivableAccountId: arAccountId },
+      });
+      const student = await raw.studentProfile.create({
+        data: {
+          organizationId, partnerId: partner.id, admissionNo: s.adm,
+          enrollmentDate: new Date('2026-01-10'), currentClassId: s.classId,
+          status: 'active', gender: s.gender, residenceType: 'day',
+        },
+      });
+      students.push({ id: student.id, admissionNo: s.adm });
+      await raw.enrollment.create({
+        data: {
+          organizationId, studentProfileId: student.id, classId: s.classId,
+          termId, rollNumber: s.adm, status: 'enrolled',
+        },
+      });
+    }
+
+    const feeStructure = await raw.feeStructure.create({
+      data: {
+        organizationId, name: 'Standard Term Fees', academicYearId: year.id, status: 'published',
+        components: [{ code: 'TUITION', productId: product.id, amount: TUITION }],
+        applicableTo: { classIds: [classAId, classBId] },
+      },
+    });
+    // Billing prices from the immutable published version, never the mutable
+    // `components` JSON (P1-G).
+    const feeVersion = await raw.feeStructureVersion.create({
+      data: { organizationId, feeStructureId: feeStructure.id, versionNo: 1, isImmutable: true, publishedAt: new Date() },
+    });
+    await raw.feeItem.create({
+      data: {
+        organizationId, feeStructureVersionId: feeVersion.id, code: 'TUITION', name: 'Tuition',
+        productId: product.id, amount: TUITION, isOptional: false, frequency: 'termly', appliesTo: {},
+      },
+    });
+    await raw.feeStructure.update({ where: { id: feeStructure.id }, data: { currentVersionId: feeVersion.id } });
+    await raw.feeSchedule.create({
+      data: { organizationId, feeStructureId: feeStructure.id, termId, dueDate: new Date('2026-02-15') },
+    });
+
+    cashRegisterId = (await raw.cashRegister.create({
+      data: { organizationId, code: 'REG-1', name: 'Bursar Drawer', defaultAccountId: cashAccountId },
+    })).id;
+
+    moduleRef = await Test.createTestingModule({
+      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
+    }).compile();
+    await moduleRef.init();
+
+    tenant = moduleRef.get(TenantContextService);
+    billing = moduleRef.get(BillingService);
+    payments = moduleRef.get(SchoolPaymentService);
+    advanced = moduleRef.get(AdvancedFinanceService);
+    finance = moduleRef.get(SchoolFinanceQueryService);
+    dashboards = moduleRef.get(ReportingService);
+    registry = moduleRef.get(ReportRegistryService);
+    runner = moduleRef.get(ReportRunnerService);
+
+    // Bill everyone, then make the four pupils differ from one another: one
+    // fully paid, one part paid, one waived, one untouched.
+    await asUser(() => billing.generateForTerm({ termId }));
+    const session = await asUser(() => cashSession());
+
+    await asUser(() => payments.collect({
+      studentProfileId: students[0].id, amount: TUITION,
+      paymentMethod: 'cash', cashSessionId: session,
+    } as any));
+    await asUser(() => payments.collect({
+      studentProfileId: students[1].id, amount: 400_000,
+      paymentMethod: 'cash', cashSessionId: session,
+    } as any));
+
+    const waiver = await asUser(() => advanced.createWaiver({
+      studentProfileId: students[2].id, code: 'BURSARY-1',
+      name: 'Bursary', amount: 250_000, reason: 'Hardship',
+    }));
+    // Maker-checker: applying forgiveness requires an approved waiver (A4).
+    await raw.waiver.update({ where: { id: (waiver as any).id }, data: { status: 'approved' } });
+    await asUser(() => advanced.applyWaiver((waiver as any).id));
+  });
+
+  async function cashSession(): Promise<string> {
+    const svc = moduleRef.get(CashSessionService);
+    const s = await svc.open({ cashRegisterId, openingFloat: 0 } as any);
+    return (s as any).id;
+  }
+
+  afterAll(async () => {
+    await moduleRef?.close();
+    await raw.$disconnect();
+  });
+
+  /* ── The money proof ──────────────────────────────────────────────────── */
+
+  it('batch studentBalances agrees exactly with per-pupil studentBalance', async () => {
+    // The batch form is a second implementation of the AR identity. If the two
+    // ever drift, every class-wide and school-wide fee figure drifts with it.
+    const ids = students.map((s) => s.id);
+    const batch = await asUser(() => finance.studentBalances(ids));
+    for (const id of ids) {
+      const single = await asUser(() => finance.studentBalance(id));
+      const b = batch.get(id)!;
+      expect(b.billed).toBeCloseTo(single.billed, 2);
+      expect(b.collected).toBeCloseTo(single.collected, 2);
+      expect(b.waived).toBeCloseTo(single.waived, 2);
+      expect(b.credited).toBeCloseTo(single.credited, 2);
+      expect(b.adjusted).toBeCloseTo(single.adjusted, 2);
+      expect(b.balance).toBeCloseTo(single.balance, 2);
+      expect(b.invoiceCount).toBe(single.invoiceCount);
+    }
+  });
+
+  it('the seeded pupils have the balances the events imply', async () => {
+    const balances = await asUser(() => finance.studentBalances(students.map((s) => s.id)));
+    expect(balances.get(students[0].id)!.balance).toBeCloseTo(0, 2);              // paid in full
+    expect(balances.get(students[1].id)!.balance).toBeCloseTo(600_000, 2);        // part paid
+    expect(balances.get(students[2].id)!.balance).toBeCloseTo(750_000, 2);        // waived 250k
+    expect(balances.get(students[3].id)!.balance).toBeCloseTo(TUITION, 2);        // untouched
+  });
+
+  it('a waiver forgives the balance without moving collected (P0-3)', async () => {
+    const b = await asUser(() => finance.studentBalance(students[2].id));
+    expect(b.waived).toBeCloseTo(250_000, 2);
+    // The defect this guards: a waiver that credits amountPaid makes the school
+    // look like it received money it never did.
+    expect(b.collected).toBeCloseTo(0, 2);
+  });
+
+  it('outstandingTotal equals the sum of POSITIVE canonical balances', async () => {
+    const balances = await asUser(() => finance.studentBalances(students.map((s) => s.id)));
+    const expected = [...balances.values()]
+      .filter((b) => b.balance > 0)
+      .reduce((t, b) => t + b.balance, 0);
+
+    const totals = await asUser(() => finance.outstandingTotal());
+    expect(totals.outstanding).toBeCloseTo(expected, 2);
+    expect(totals.owingCount).toBe(3);
+    expect(totals.studentCount).toBe(4);
+  });
+
+  it('the dashboard tile agrees with the canonical total (AR canon regression)', async () => {
+    // Before the fix this summed Document.amountResidual and could disagree with
+    // the pupil's own statement whenever the cached projection had drifted.
+    const dashboardFigure = await asUser(() => dashboards.outstandingFeesTotal());
+    const canonical = await asUser(() => finance.outstandingTotal());
+    expect(dashboardFigure).toBeCloseTo(canonical.outstanding, 2);
+  });
+
+  it('outstandingByClass sums to the school total and attributes to the right class', async () => {
+    const byClass = await asUser(() => dashboards.outstandingByClass());
+    const total = byClass.reduce((t, c) => t + c.outstanding, 0);
+    const canonical = await asUser(() => finance.outstandingTotal());
+    expect(total).toBeCloseTo(canonical.outstanding, 2);
+
+    const east = byClass.find((c) => c.classId === classAId)!;
+    expect(east.studentCount).toBe(3);
+    expect(east.owingCount).toBe(2);                       // Ada is settled
+    expect(east.outstanding).toBeCloseTo(1_350_000, 2);    // 600k + 750k
+  });
+
+  it('the fee reports agree with the canonical balance', async () => {
+    const clearance = await asUser(() => runner.run('fees.class-clearance', {
+      page: 1, pageSize: 100, filters: { classId: classAId },
+    } as any, true));
+    const clearanceTotal = clearance.data.reduce((t, r) => t + Number(r.outstanding ?? 0), 0);
+
+    const outstanding = await asUser(() => runner.run('fees.outstanding-by-student', {
+      page: 1, pageSize: 100, filters: { classId: classAId },
+    } as any, true));
+    const outstandingTotal = outstanding.data.reduce((t, r) => t + Number(r.outstanding ?? 0), 0);
+
+    const balances = await asUser(() => finance.studentBalances(students.slice(0, 3).map((s) => s.id)));
+    const canonical = [...balances.values()].reduce((t, b) => t + Math.max(0, b.balance), 0);
+
+    expect(clearanceTotal).toBeCloseTo(canonical, 2);
+    expect(outstandingTotal).toBeCloseTo(canonical, 2);
+    // The zero-balance pupil is not "outstanding fees".
+    expect(outstanding.data).toHaveLength(2);
+  });
+
+  /* ── Engine behaviour against real data ───────────────────────────────── */
+
+  it('the student register reads enrolment, not currentClassId', async () => {
+    const out = await asUser(() => runner.run('student.register', {
+      page: 1, pageSize: 100, filters: { termId, classId: classAId },
+    } as any));
+    expect(out.data).toHaveLength(3);
+    expect(out.caption).toMatch(/Class basis: enrollment/);
+    expect(out.data.map((r) => r.admissionNo).sort()).toEqual(['ADM-001', 'ADM-002', 'ADM-003']);
+  });
+
+  it('the enrolment summary reports capacity and flags an over-subscribed class', async () => {
+    const out = await asUser(() => runner.run('enrollment.by-class', {
+      page: 1, pageSize: 100, filters: { termId },
+    } as any));
+    const east = out.data.find((r) => r.className === 'P1 East')!;
+    expect(east.enrolled).toBe(3);
+    expect(east.capacity).toBe(3);
+    expect(east.utilisation).toBeCloseTo(100, 1);
+    expect(east.available).toBe(0);
+  });
+
+  it('an unknown filter is refused rather than silently ignored', async () => {
+    await expect(asUser(() => runner.run('enrollment.by-class', {
+      page: 1, pageSize: 25, filters: { studentProfileId: students[0].id },
+    } as any))).rejects.toThrow(/does not accept filter/);
+  });
+
+  it('a caller without the finance grant cannot see or run a fee report', async () => {
+    const withoutFinance = ['school:reports:read'];
+    const visible = registry.catalog(withoutFinance, 'school').map((c) => c.key);
+    expect(visible.some((k) => k.startsWith('fees.'))).toBe(false);
+    expect(visible).toContain('student.register');
+
+    await expect(
+      asUser(() => runner.run('fees.defaulters', { page: 1, pageSize: 25, filters: {} } as any), withoutFinance),
+    ).rejects.toThrow(/Missing required permission/);
+  });
+
+  /* ── Catalogue smoke ──────────────────────────────────────────────────── */
+
+  it('every registered report runs without throwing', async () => {
+    // Plausible values for whatever each definition requires. A report whose
+    // canonical service changed signature fails HERE, not in front of a user.
+    const supply: Record<string, unknown> = {
+      termId,
+      classId: classAId,
+      dateFrom: '2026-01-15',
+      dateTo: '2026-04-15',
+      studentProfileId: students[1].id,
+      resultSetId: undefined,
+    };
+
+    const defs = registry.all().filter((d) => {
+      // Result-set reports need a published result set; this suite seeds fees
+      // and enrolment, not marks. school-analytics.spec.ts covers those.
+      return !(d.requiredFilters ?? []).includes('resultSetId');
+    });
+    expect(defs.length).toBeGreaterThan(0);
+
+    for (const def of defs) {
+      const filters: Record<string, unknown> = {};
+      for (const f of def.requiredFilters ?? []) filters[f] = supply[f];
+      // Offer the optional ones the definition declares too, so the filter path
+      // is exercised rather than only the empty case.
+      for (const f of def.filters) {
+        if (filters[f] === undefined && supply[f] !== undefined && f !== 'classBasis') {
+          filters[f] = supply[f];
+        }
+      }
+
+      const out = await asUser(() => runner.run(def.key, {
+        page: 1, pageSize: 25, filters,
+      } as any));
+
+      expect(Array.isArray(out.data)).toBe(true);
+      expect(Array.isArray(out.columns)).toBe(true);
+      expect(out.columns.length).toBeGreaterThan(0);
+      expect(out.meta.total).toBeGreaterThanOrEqual(0);
+      expect(out.key).toBe(def.key);
+    }
+  });
+});

@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from '@/components/protected-route';
 import { AppShell } from '@/components/layout/app-shell';
 import { LoginPage } from '@/pages/login';
-import { DashboardPage } from '@/pages/dashboard';
 import { PartnersPage } from '@/pages/partners';
 import { CustomersPage, CustomerDetailPage } from '@/pages/customers';
 import { SuppliersPage, SupplierDetailPage } from '@/pages/suppliers';
@@ -74,9 +73,14 @@ import { FrontDeskPage } from '@/pages/school/front-desk';
 import { PhoneCallsPage } from '@/pages/school/phone-calls';
 import { ComplaintsPage } from '@/pages/school/complaints';
 import { SchoolStaff360Page } from '@/pages/school/staff-360';
+import SchoolReportsPage from '@/pages/school/reports';
+import RunReportPage from '@/pages/school/reports/run';
 import { SchoolReportCardsPage } from '@/pages/school/report-cards';
 import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-settings';
 import { SchoolPromotionPage } from '@/pages/school/promotion';
+import { SchoolEnrollmentWorkspacePage } from '@/pages/school/enrollment/workspace';
+import { SchoolProgrammesPage } from '@/pages/school/enrollment/programmes';
+import { SchoolEnrollmentMigrationPage } from '@/pages/school/enrollment/migration';
 import { SchoolMessagingPage } from '@/pages/school/messaging';
 import { SchoolMealsPage } from '@/pages/school/meals';
 import { SchoolAdmissionsPage } from '@/pages/school/admissions';
@@ -101,6 +105,7 @@ import { SchoolEnterMarksPage } from '@/pages/school/enter-marks';
 import { SchoolExamResultsPage } from '@/pages/school/exam-results';
 import { SchoolGradebookPage } from '@/pages/school/gradebook';
 import { SchoolTeachingPage } from '@/pages/school/teaching';
+import { SchoolTeachingWorkspacePage } from '@/pages/school/teaching/workspace';
 import { SchoolHomeworkPage } from '@/pages/school/homework';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
@@ -122,7 +127,6 @@ import { SchoolStreamsPage } from '@/pages/school/streams';
 import { SchoolStudentCategoriesPage } from '@/pages/school/student-categories';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
-import { SchoolTeachingLoadPage } from '@/pages/school/teaching-load';
 import { SchoolTeacherCoverPage } from '@/pages/school/teacher-cover';
 import { SchoolCalendarPage } from '@/pages/school/calendar';
 import { SchoolEventsPage } from '@/pages/school/events';
@@ -306,7 +310,7 @@ export function App() {
         {/* KDS — full-screen kitchen monitor, chrome-less (no sidebar/header). */}
         <Route path="/pos/kds" element={<KdsPage />} />
         <Route element={<AppShell />}>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<SchoolDashboardPage />} />
           {/* POS terminal — full-screen cashier UI. Renders outside the app shell. */}
           <Route path="/pos/terminal" element={<TerminalPage />} />
           <Route path="/pos/reports" element={<ReportsPage />} />
@@ -498,7 +502,6 @@ export function App() {
           <Route path="/tasks/:id/edit" element={<TaskEditPage />} />
           {/* CRM — static segments before /crm/deals/:id */}
           <Route path="/crm" element={<CrmDashboardPage />} />
-          <Route path="/school" element={<SchoolDashboardPage />} />
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
@@ -536,9 +539,17 @@ export function App() {
           <Route path="/school/timetable/student" element={<StudentTimetablePage />} />
           {/* P6: the classic exam page is superseded by the numbered workspace. */}
           <Route path="/school/exams" element={<Navigate to="/school/exam-workspace" replace />} />
+          {/* Report centre (ADR-017). The runner takes a wildcard because report
+              keys are dotted — 'fees.student-statement'. `/reports` is already
+              the accounting/POS report centre, hence the /school prefix. */}
+          <Route path="/school/reports" element={<SchoolReportsPage />} />
+          <Route path="/school/reports/*" element={<RunReportPage />} />
           <Route path="/school/report-cards" element={<SchoolReportCardsPage />} />
           <Route path="/school/report-card-settings" element={<SchoolReportCardSettingsPage />} />
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
+          <Route path="/school/enrollment" element={<SchoolEnrollmentWorkspacePage />} />
+          <Route path="/school/enrollment/programmes" element={<SchoolProgrammesPage />} />
+          <Route path="/school/enrollment/migration" element={<SchoolEnrollmentMigrationPage />} />
           <Route path="/school/messaging" element={<SchoolMessagingPage />} />
           <Route path="/school/meals" element={<SchoolMealsPage />} />
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />
@@ -561,7 +572,7 @@ export function App() {
           <Route path="/school/management/student-categories" element={<SchoolStudentCategoriesPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
-          <Route path="/school/teaching-load" element={<SchoolTeachingLoadPage />} />
+          <Route path="/school/teaching-load" element={<Navigate to="/school/course-offerings" replace />} />
           <Route path="/school/teacher-cover" element={<SchoolTeacherCoverPage />} />
           <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
           <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />
@@ -590,6 +601,7 @@ export function App() {
           <Route path="/school/exam-results" element={<SchoolExamResultsPage />} />
           <Route path="/school/gradebook" element={<SchoolGradebookPage />} />
           <Route path="/school/teaching" element={<SchoolTeachingPage />} />
+          <Route path="/school/teaching/:offeringId" element={<SchoolTeachingWorkspacePage />} />
           {/* The unified front door: every kind of assessment in one list, and
               one marking screen behind it. Homework and the numbered exam steps
               are filters/views of this, not separate systems. */}
@@ -620,7 +632,8 @@ export function App() {
           <Route path="/school/lms/courses/:id" element={<SchoolLmsCoursePage />} />
           <Route path="/school/lms/courses/:id/participants" element={<SchoolLmsParticipantsPage />} />
           <Route path="/school/lms/modules/:id" element={<SchoolLmsModuleViewPage />} />
-          <Route path="/school/lms/course-offerings" element={<SchoolLmsCourseOfferingsPage />} />
+          <Route path="/school/course-offerings" element={<SchoolLmsCourseOfferingsPage />} />
+          <Route path="/school/lms/course-offerings" element={<Navigate to="/school/course-offerings" replace />} />
           <Route path="/school/lms/lesson-plans" element={<SchoolLmsLessonPlansPage />} />
           <Route path="/school/lms/templates" element={<SchoolLmsTemplatesPage />} />
           <Route path="/school/lms/scheduled-lessons" element={<SchoolLmsScheduledLessonsPage />} />

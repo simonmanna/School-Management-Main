@@ -529,7 +529,15 @@ export class EnrollmentService {
         ...(opts.status ? { status: opts.status } : {}),
       },
       orderBy: { enrolledAt: 'desc' },
-      include: { student: true, schoolClass: true, section: true, stream: true, term: true },
+      // The pupil's NAME lives on Partner, not StudentProfile — an enrollment
+      // list without it is a list of ids. The student register report reads this.
+      include: {
+        student: { include: { partner: true } },
+        schoolClass: true,
+        section: true,
+        stream: true,
+        term: true,
+      },
     });
   }
 }

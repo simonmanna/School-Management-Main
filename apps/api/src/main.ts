@@ -189,6 +189,7 @@ async function bootstrap(): Promise<void> {
           {
             organizationId: effective.organizationId,
             userId: effective.sub,
+            requestId: req.id,
             permissions: effective.permissions,
             // Portal subject travels with the verified token, so downstream
             // services can answer "which student is this?" without trusting
@@ -218,7 +219,7 @@ async function bootstrap(): Promise<void> {
         .then((device: { id: string; organizationId: string; branchId: string | null } | null) => {
           if (!device) return next();
           (req as any).posDevice = device;
-          return tenant.run({ organizationId: device.organizationId }, () => next());
+          return tenant.run({ organizationId: device.organizationId, requestId: req.id }, () => next());
         })
         .catch(() => next());
       return;

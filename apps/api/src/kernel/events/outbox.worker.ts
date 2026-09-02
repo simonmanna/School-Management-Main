@@ -20,6 +20,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('OutboxWorker');
   private timer: NodeJS.Timeout | null = null;
+  private stopped = false;
   private readonly intervalMs = Number(process.env.OUTBOX_POLL_MS ?? '1000');
   private readonly batchSize = Number(process.env.OUTBOX_BATCH ?? '50');
   private readonly staleClaimMs = 30_000;
@@ -30,10 +31,14 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   ) {}
 
   onApplicationBootstrap(): void {
+    this.stopped = false;
     this.scheduleNext();
   }
 
   onModuleDestroy(): void {
+    // Set the guard before clearing: a tick may already be awaiting I/O and its
+    // finally block must not schedule a fresh timer after shutdown.
+    this.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -93,14 +98,16 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private scheduleNext(): void {
+    if (this.stopped) return;
     this.timer = setTimeout(async () => {
       try {
         await this.tick();
       } catch (err) {
         this.logger.error(`Outbox worker tick failed: ${String(err)}`);
       } finally {
-        this.scheduleNext();
+        if (!this.stopped) this.scheduleNext();
       }
     }, this.intervalMs);
+    this.timer.unref();
   }
 }

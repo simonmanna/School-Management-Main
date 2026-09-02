@@ -213,6 +213,20 @@ export class PortalsService {
       include: { partner: true },
     });
 
+    // If teacher doesn't exist, return empty workspace instead of 500
+    if (!staff) {
+      return {
+        teacher: null,
+        classes: [],
+        needsMarking: [],
+        dueSoon: [],
+        awaitingApproval: 0,
+        returnedToMe: [],
+        examPapers: [],
+        lessonPlans: { draft: 0, submitted: 0, approved: 0 },
+      };
+    }
+
     const classIds = [...new Set(assignments.map((a) => a.classId))];
     const subjectIds = [...new Set(assignments.map((a) => a.subjectId))];
     const scope = classIds.length

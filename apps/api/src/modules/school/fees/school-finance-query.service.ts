@@ -136,6 +136,162 @@ export class SchoolFinanceQueryService {
   }
 
   /**
+   * The SAME balance identity as `studentBalance`, for many pupils at once.
+   *
+   * `studentBalance` is 6 queries per pupil. Anything class-wide or school-wide
+   * built on it in a loop is 6N queries — `classFeeClearance` already pays that,
+   * and a 2,000-pupil arrears report would issue ~12,000. This does the identical
+   * arithmetic in grouped aggregates: 6 queries total, whatever N is.
+   *
+   * It lives HERE and not in the reporting layer on purpose. The identity in
+   * FINANCIAL_INVARIANTS.md has exactly one implementation site; a second copy
+   * anywhere else is how a dashboard starts disagreeing with a statement.
+   *
+   * Returns a Map keyed by studentProfileId. Pupils with no fee documents come
+   * back with an all-zero balance rather than being absent, so callers do not
+   * have to distinguish "no debt" from "not found".
+   */
+  async studentBalances(studentProfileIds: string[]): Promise<Map<string, StudentBalance>> {
+    const organizationId = this.tenant.organizationId;
+    const out = new Map<string, StudentBalance>();
+    if (studentProfileIds.length === 0) return out;
+
+    const zero = (id: string): StudentBalance => ({
+      studentProfileId: id,
+      billed: 0, collected: 0, waived: 0, credited: 0, adjusted: 0,
+      balance: 0, invoiceCount: 0,
+    });
+    for (const id of studentProfileIds) out.set(id, zero(id));
+
+    const students = await this.prisma.client.studentProfile.findMany({
+      where: { id: { in: studentProfileIds } },
+      select: { id: true, partnerId: true },
+    });
+    if (students.length === 0) return out;
+
+    const studentByPartner = new Map(students.map((s) => [s.partnerId, s.id]));
+    const partnerIds = students.map((s) => s.partnerId);
+
+    // Every financially-active fee document for these pupils, once. We need the
+    // ids (to attribute allocations) and the partner (to attribute back to a pupil).
+    const documents = await this.prisma.client.document.findMany({
+      where: { ...POSTED_FEE_WHERE, organizationId, partnerId: { in: partnerIds } },
+      select: { id: true, partnerId: true, totalAmount: true },
+    });
+
+    const studentByDocument = new Map<string, string>();
+    for (const d of documents) {
+      const sid = d.partnerId ? studentByPartner.get(d.partnerId) : undefined;
+      if (!sid) continue;
+      studentByDocument.set(d.id, sid);
+      const row = out.get(sid)!;
+      row.billed += Number(d.totalAmount);
+      row.invoiceCount += 1;
+    }
+
+    const docIds = [...studentByDocument.keys()];
+    const [allocations, credits, waivers, adjustments] = await Promise.all([
+      // Collected = SUM(PaymentAllocation), never Document.amountPaid — the P0-3
+      // defect polluted amountPaid with forgiven and credited value.
+      docIds.length
+        ? this.prisma.client.paymentAllocation.groupBy({
+            by: ['documentId'],
+            where: { organizationId, documentId: { in: docIds } },
+            _sum: { amount: true },
+          })
+        : Promise.resolve([] as Array<{ documentId: string; _sum: { amount: unknown } }>),
+      docIds.length
+        ? this.prisma.client.feeCreditAllocation.groupBy({
+            by: ['documentId'],
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
+            _sum: { amount: true },
+          })
+        : Promise.resolve([] as Array<{ documentId: string; _sum: { amount: unknown } }>),
+      this.prisma.client.waiver.groupBy({
+        by: ['studentProfileId'],
+        where: { organizationId, studentProfileId: { in: studentProfileIds }, applied: true },
+        _sum: { amount: true },
+      }),
+      this.prisma.client.feeAdjustment.findMany({
+        where: { organizationId, studentProfileId: { in: studentProfileIds }, status: 'posted' },
+        select: { studentProfileId: true, direction: true, amount: true },
+      }),
+    ]);
+
+    for (const a of allocations as any[]) {
+      const sid = studentByDocument.get(a.documentId);
+      if (sid) out.get(sid)!.collected += Number(a._sum.amount ?? 0);
+    }
+    for (const c of credits as any[]) {
+      const sid = studentByDocument.get(c.documentId);
+      if (sid) out.get(sid)!.credited += Number(c._sum.amount ?? 0);
+    }
+    for (const w of waivers as any[]) {
+      const row = out.get(w.studentProfileId);
+      if (row) row.waived += Number(w._sum.amount ?? 0);
+    }
+    for (const adj of adjustments as any[]) {
+      const row = out.get(adj.studentProfileId);
+      if (!row) continue;
+      row.adjusted += adj.direction === 'debit' ? Number(adj.amount) : -Number(adj.amount);
+    }
+
+    for (const row of out.values()) {
+      row.balance = row.billed - row.collected - row.waived - row.credited + row.adjusted;
+    }
+    return out;
+  }
+
+  /**
+   * School-wide outstanding, derived from the canonical identity.
+   *
+   * `outstanding` sums only POSITIVE balances: a pupil in credit does not pay
+   * down another family's arrears, so netting them would understate what the
+   * school is actually owed. `creditBalance` carries the other side separately.
+   */
+  async outstandingTotal(opts: { classIds?: string[] } = {}): Promise<{
+    outstanding: number;
+    creditBalance: number;
+    billed: number;
+    collected: number;
+    waived: number;
+    studentCount: number;
+    owingCount: number;
+  }> {
+    const students = await this.prisma.client.studentProfile.findMany({
+      where: {
+        status: 'active',
+        deletedAt: null,
+        ...(opts.classIds ? { currentClassId: { in: opts.classIds } } : {}),
+      },
+      select: { id: true },
+    });
+    const balances = await this.studentBalances(students.map((s) => s.id));
+
+    // Rounding at the presentation edge only — the sums above stay at full
+    // precision, per the money-precision rule in FINANCIAL_INVARIANTS.md.
+    const round = (n: number) => Number(n.toFixed(2));
+    let outstanding = 0; let creditBalance = 0; let billed = 0;
+    let collected = 0; let waived = 0; let owingCount = 0;
+    for (const b of balances.values()) {
+      billed += b.billed;
+      collected += b.collected;
+      waived += b.waived;
+      if (b.balance > 0) { outstanding += b.balance; owingCount += 1; }
+      else creditBalance += -b.balance;
+    }
+    return {
+      outstanding: round(outstanding),
+      creditBalance: round(creditBalance),
+      billed: round(billed),
+      collected: round(collected),
+      waived: round(waived),
+      studentCount: balances.size,
+      owingCount,
+    };
+  }
+
+  /**
    * Chronological student ledger (B1) — a typed union of every economic event,
    * with a running balance. Each row carries sourceType/sourceId/reference so a
    * bursar can trace a line back to the waiver or payment that produced it.

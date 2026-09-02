@@ -1,8 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { AuditService } from './audit.service';
-import { TenantContextService } from '../tenancy/tenant-context.service';
-import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * D1-3 acceptance: when AuditService.recordInTx throws, the surrounding
@@ -30,6 +27,7 @@ describeDb('AuditService.recordInTx (rolls back on audit failure)', () => {
       return this.organizationId;
     },
     userId: 'test-user',
+    requestId: 'phase0-request-id',
   } as any;
 
   const prismaSvc = { client: prisma, raw: prisma } as any;
@@ -123,5 +121,8 @@ describeDb('AuditService.recordInTx (rolls back on audit failure)', () => {
     const after = await prisma.auditLog.count();
     expect(after).toBe(before + 1);
     expect(partner.id).toBeDefined();
+    const row = await prisma.auditLog.findFirstOrThrow({ where: { entity: 'Partner', entityId: partner.id } });
+    expect(row.actorId).toBe('test-user');
+    expect(row.requestId).toBe('phase0-request-id');
   });
 });

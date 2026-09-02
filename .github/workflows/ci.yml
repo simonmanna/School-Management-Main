@@ -6,20 +6,9 @@ name: CI
 # `tenancy-registration.spec.ts`, whose failure mode — a model missing from
 # ORG_SCOPED — leaks rows across tenants silently.
 #
-# Scope note — two pre-existing debts, both unrelated to the school vertical and
-# tracked separately:
-#   1. `typecheck` fails on apps/api/test/integration/{invoice-to-payment,
-#      pos-print-lifecycle}.spec.ts — each creates a `Document` without the
-#      `documentTypeId` that became required with the DMS registry, so neither
-#      has compiled since.
-#   2. Several test/integration/*.spec.ts fail at module init because their
-#      hand-built testing modules drifted from current constructors (e.g.
-#      RecurringService now needs DmsTypeResolver). They also require a seeded
-#      DB. So the `Test` step below runs everything EXCEPT test/integration —
-#      that keeps a meaningful green baseline (unit + kernel + module specs,
-#      including the tenancy-registration guard) that catches regressions now,
-#      instead of a perpetually-red job. Re-include integration once its
-#      harnesses are repaired.
+# Phase 0 separates the academic gate from the wider repository suite so its
+# ownership and failures are visible. No test step uses --forceExit: leaked
+# handles are defects, not output to suppress.
 
 on:
   push:
@@ -78,6 +67,9 @@ jobs:
       - name: Build shared contracts
         run: pnpm shared:build
 
+      - name: Academic architecture inventory is current
+        run: pnpm academics:inventory:check
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -88,14 +80,11 @@ jobs:
       - name: Apply migrations
         run: pnpm --filter @erp/api exec prisma migrate deploy
 
-      # Unit + kernel + module specs (excludes the drifted test/integration
-      # harnesses — see the scope note at the top of this file).
       - name: Test (unit + module)
-        run: pnpm --filter @erp/api exec jest --testPathIgnorePatterns test/integration --forceExit
+        run: pnpm --filter @erp/api exec jest --testPathIgnorePatterns test/integration --runInBand --detectOpenHandles
 
-      # The school vertical's own integration specs DO run against the CI
-      # Postgres — they're self-contained (seed their own currency) and the CI
-      # DB role bypasses RLS. --runInBand avoids the cross-suite DB contention
-      # that makes the parallel run flaky.
-      - name: Test (school integration)
-        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine test/integration/school-admissions-attendance --runInBand --forceExit
+      - name: Test (academic integration)
+        run: pnpm test:academics
+
+      - name: Test (school cross-domain integration)
+        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine test/integration/school-admissions-attendance --runInBand --detectOpenHandles

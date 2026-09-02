@@ -304,6 +304,10 @@ export class AdmissionsWorkflowService {
     for (const cfg of cfgs) {
       if (cfg.order >= targetCfg.order) continue;
       if (cfg.mode !== 'required') continue;
+      // An already-accepted applicant has cleared the decision stage; the OFFER and
+      // APPLICANT_ACCEPTANCE stages (if configured) are treated as satisfied so they
+      // can enroll directly without issuing/accepting an offer letter.
+      if ((cfg.stage === 'OFFER' || cfg.stage === 'APPLICANT_ACCEPTANCE') && app.status === 'accepted') continue;
       if (this.completeFor(app, cfg)) continue;
       throw new ConflictException(
         `Cannot proceed to ${STAGE_LABEL.get(target)}: the ${STAGE_LABEL.get(cfg.stage)} stage is ` +

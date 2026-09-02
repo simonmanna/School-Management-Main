@@ -46,6 +46,7 @@ import {
   MapPin,
   School,
   SlidersHorizontal,
+  Database,
   Layers,
   Link2,
   CalendarX2,
@@ -165,7 +166,7 @@ interface NavItem {
   /** Optional sub-grouping label rendered as a sub-header above the item (expanded mode only). */
   group?: string;
   /** Per-item feature gate, resolved the same way as section flags. */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS';
 }
 
 interface NavSection {
@@ -178,7 +179,7 @@ interface NavSection {
    * here without gating the module server-side would leave its routes, crons
    * and boot hooks live.
    */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS';
 }
 
 const flagEnabled = (flag?: string): boolean =>
@@ -186,16 +187,8 @@ const flagEnabled = (flag?: string): boolean =>
 
 const NAV_SECTIONS: NavSection[] = [
   { items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }] },
-  // ===== School & Academic =====
-  // `/school` — the school's own dashboard — had no nav entry at all, so the
-  // one screen that summarises the term was reachable only by typing the URL.
   {
-    items: [
-      { to: '/school', label: 'School Dashboard', icon: GraduationCap, flag: 'VITE_ENABLE_SCHOOL', permission: PERMISSIONS.school.read },
-    ],
-  },
-  {
-    title: 'Front Desk & CRM',
+    title: 'Frontdesk',
     icon: Users,
     items: [
       { to: '/school/front-desk', label: 'Visitors', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
@@ -238,6 +231,12 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/workflow', label: 'Admission Workflow', icon: Workflow, permission: PERMISSIONS.school.manageAdmissions },
       { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
+      // Phase 1 canonical enrollment spine (ADR-018 / ADR-019). Separate from the
+      // admissions funnel above: admissions decides who joins, this decides where
+      // they sit and keeps the history of every move.
+      { to: '/school/enrollment', label: 'Enrollment & Placement', icon: Users, permission: PERMISSIONS.school.read },
+      { to: '/school/enrollment/programmes', label: 'Programmes & Classes', icon: Layers, permission: PERMISSIONS.school.manageProgrammes },
+      { to: '/school/enrollment/migration', label: 'Enrollment Migration', icon: Database, permission: PERMISSIONS.school.runAcademicMigration },
     ],
   },
   {
@@ -245,22 +244,19 @@ const NAV_SECTIONS: NavSection[] = [
     icon: BookOpen,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/campuses', label: 'Campuses & Classes', icon: Building2, permission: PERMISSIONS.school.read },
-      { to: '/school/subjects', label: 'Subjects & Terms', icon: BookOpen, permission: PERMISSIONS.school.read },
+      // Foundation / organisation structure — order per product spec.
       { to: '/school/management/academic-years', label: 'Academic Years', icon: CalendarRange, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/terms', label: 'Terms / Semesters', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/classes', label: 'Classes / Grades', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
-      // One concept, one nav item. "Streams" and "Sections" were two entries for
-      // the same thing a school calls a stream ("P4 West"), backed by two tables
-      // — and only Section reaches attendance, class teachers and rosters, so
-      // that is the one to create. The legacy Streams screen stays reachable for
-      // schools that already built streams there.
-      { to: '/school/management/sections', label: 'Streams (P4 West)', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/streams', label: 'Streams (legacy)', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/campuses', label: 'Campuses', icon: Building2, permission: PERMISSIONS.school.read },
+      // Remaining academic-management tools.
+      { to: '/school/subjects', label: 'Subjects & Terms', icon: BookOpen, permission: PERMISSIONS.school.read },
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/class-teacher', label: 'Class Teachers', icon: Users, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/teaching-load', label: 'Teaching Load', icon: Users, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/course-offerings', label: 'Teaching Allocation', icon: Users, permission: PERMISSIONS.school.manageCourses },
       { to: '/school/teacher-cover', label: 'Teacher Cover', icon: CalendarX2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
     ],
@@ -283,6 +279,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/homework', label: 'Homework Submissions', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Tools' },
       { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
 
+      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Reports' },
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
       { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
       { to: '/school/results', label: 'Result Runs', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Reports' },
@@ -330,19 +327,19 @@ const NAV_SECTIONS: NavSection[] = [
     // Curriculum & Lessons — the teaching half of the old LMS section, now that
     // homework and the teacher dashboard have moved into Teaching & Assessment.
     // Every item carries a permission guard (they previously had none).
-    title: 'Curriculum & Lessons',
+    title: 'Academics',
     icon: Presentation,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/lms/courses', label: 'Courses', icon: GraduationCap, permission: PERMISSIONS.school.lmsRead, group: 'Courses' },
-      { to: '/school/lms/course-offerings', label: 'Course Offerings', icon: BookCopy, permission: PERMISSIONS.school.manageCourses, group: 'Courses' },
+      { to: '/school/course-offerings', label: 'Curriculum & Courses', icon: BookCopy, permission: PERMISSIONS.school.manageCourses, group: 'Courses' },
       { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
       { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
       { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead, group: 'Planning' },
       { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: Award, permission: PERMISSIONS.school.read, group: 'Outcomes' },
-      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead, group: 'Outcomes' },
-      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead, group: 'Outcomes' },
-      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead, group: 'Community' },
+      { to: '/school/lms/courses', label: 'Advanced Courses', icon: GraduationCap, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
+      { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
+      { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
+      { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
     ],
   },
   {

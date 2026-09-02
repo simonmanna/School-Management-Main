@@ -90,6 +90,7 @@ export class UpdateTeacherAssignmentDto {
 export class CreateTimetableSlotDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
   @IsInt() @Min(1) @Max(7) dayOfWeek!: number; // 1=Mon ... 7=Sun
   @IsString() @IsNotEmpty() periodId!: string;
   @IsString() @IsNotEmpty() subjectId!: string;
@@ -109,6 +110,8 @@ export class BulkTimetableSlot {
   @IsInt() @Min(1) @Max(7) dayOfWeek!: number;
   @IsString() @IsNotEmpty() periodId!: string;
   @IsString() @IsNotEmpty() subjectId!: string;
+  @IsOptional() @IsString() streamId?: string;
+  @IsOptional() @IsString() courseOfferingId?: string;
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() room?: string;
@@ -132,6 +135,7 @@ export class BulkTimetableDto {
 export class UpdateTimetableSlotDto {
   @IsOptional() @IsString() @IsNotEmpty() classId?: string;
   @IsOptional() @IsString() sectionId?: string;
+  @IsOptional() @IsString() streamId?: string;
   @IsOptional() @IsInt() @Min(1) @Max(7) dayOfWeek?: number;
   @IsOptional() @IsString() @IsNotEmpty() periodId?: string;
   @IsOptional() @IsString() @IsNotEmpty() subjectId?: string;

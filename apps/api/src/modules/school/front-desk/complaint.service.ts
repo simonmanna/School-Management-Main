@@ -42,17 +42,23 @@ export class ComplaintService {
   }
 
   create(dto: CreateComplaintDto) {
+    // Empty-string FK ids (sent by the UI when nothing is selected) must be
+    // normalised to null — otherwise Prisma treats "" as a real FK and the
+    // constraint blows up with a 500.
+    const partnerId = dto.partnerId && dto.partnerId.trim() !== '' ? dto.partnerId : null;
+    const assignedToId = dto.assignedToId && dto.assignedToId.trim() !== '' ? dto.assignedToId : null;
     return this.prisma.client.complaint.create({
       data: {
         organizationId: this.orgId,
-        partnerId: dto.partnerId,
+        partnerId,
         category: dto.category,
         subject: dto.subject,
         description: dto.description,
         status: dto.status ?? 'open',
         priority: dto.priority ?? 'medium',
-        assignedToId: dto.assignedToId,
+        assignedToId,
         resolution: dto.resolution,
+        receivedAt: dto.receivedAt ? new Date(dto.receivedAt) : undefined,
       },
     });
   }
@@ -62,6 +68,15 @@ export class ComplaintService {
     // Auto-set resolvedAt when status changes to resolved
     if (dto.status === 'resolved' || dto.status === 'closed') {
       updateData.resolvedAt = new Date();
+    }
+    if ('partnerId' in updateData) {
+      updateData.partnerId = updateData.partnerId && String(updateData.partnerId).trim() !== '' ? updateData.partnerId : null;
+    }
+    if ('assignedToId' in updateData) {
+      updateData.assignedToId = updateData.assignedToId && String(updateData.assignedToId).trim() !== '' ? updateData.assignedToId : null;
+    }
+    if ('receivedAt' in updateData && updateData.receivedAt) {
+      updateData.receivedAt = new Date(updateData.receivedAt);
     }
     return this.prisma.client.complaint.update({
       where: { id },

@@ -7,6 +7,7 @@ import { TenantContextService } from './tenancy/tenant-context.service';
 import { PortalIdentityService } from './auth/portal-identity.service';
 import { EmployeeIdentityService } from './auth/employee-identity.service';
 import { DataScopeService } from './auth/data-scope.service';
+import { PermissionResolverService } from './auth/permission-resolver.service';
 import { PrismaService } from './prisma/prisma.service';
 import { EventBus } from './events/event-bus';
 import { EventOutboxService } from './events/event-outbox.service';
@@ -82,6 +83,7 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
     PortalIdentityService,
     EmployeeIdentityService,
     DataScopeService,
+    PermissionResolverService,
     PrismaService,
     EventBus,
     EventOutboxService,
@@ -114,6 +116,7 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
     PortalIdentityService,
     EmployeeIdentityService,
     DataScopeService,
+    PermissionResolverService,
     TenantContextService,
     PrismaService,
     EventBus,

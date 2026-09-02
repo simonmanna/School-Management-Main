@@ -24,7 +24,10 @@
     "test": "pnpm -r test",
     "test:e2e": "vitest run tests/e2e",
     "typecheck": "pnpm -r typecheck",
-    "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test"
+    "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test",
+    "academics:inventory": "node scripts/academic-inventory.mjs",
+    "academics:inventory:check": "pnpm academics:inventory && git diff --exit-code -- docs/architecture/academic-current-state-inventory.md docs/architecture/academic-current-state-inventory.json",
+    "test:academics": "pnpm --filter @erp/api exec jest test/unit/academic-fsm.spec.ts test/unit/marks-workspace.spec.ts test/unit/enrollment-grouping.spec.ts test/unit/course-offering-phase2.spec.ts test/integration/academics-foundation.spec.ts test/integration/school-enrollment-placement.spec.ts test/integration/school-assessment-core.spec.ts test/integration/school-assessment-roster.spec.ts test/integration/school-assessment-unified.spec.ts test/integration/school-gradeentry-parity.spec.ts test/integration/school-result-integrity.spec.ts --runInBand --detectOpenHandles"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

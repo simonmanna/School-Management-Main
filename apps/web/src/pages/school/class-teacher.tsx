@@ -31,7 +31,8 @@ export function SchoolClassTeacherPage() {
       result = result.filter((s: any) =>
         s.name?.toLowerCase().includes(q) ||
         s.schoolClass?.name?.toLowerCase().includes(q) ||
-        s.classTeacher?.name?.toLowerCase().includes(q)
+        s.classTeacher?.name?.toLowerCase().includes(q) ||
+        s.schoolClass?.homeroomTeacher?.partner?.name?.toLowerCase().includes(q)
       );
     }
     if (classFilter) {
@@ -103,9 +104,10 @@ export function SchoolClassTeacherPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">#</TableHead>
-                <TableHead>Section</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead>Section</TableHead>
                 <TableHead>Class Teacher</TableHead>
+                <TableHead>Teacher</TableHead>
                 <TableHead className="w-40 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -113,11 +115,18 @@ export function SchoolClassTeacherPage() {
               {filteredSections.map((s, i) => (
                 <TableRow key={s.id}>
                   <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                  <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell>{s.schoolClass?.name || s.classId?.slice(0, 8)}</TableCell>
+                  <TableCell className="font-medium">{s.name}</TableCell>
                   <TableCell>
                     {s.classTeacherId ? (
                       <span className="text-emerald-600 font-medium">{s.classTeacher?.name || 'Assigned'}</span>
+                    ) : (
+                      <Badge variant="secondary">Unassigned</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {s.schoolClass?.homeroomTeacher?.partner?.name ? (
+                      <span className="text-blue-600 font-medium">{s.schoolClass.homeroomTeacher.partner.name}</span>
                     ) : (
                       <Badge variant="secondary">Unassigned</Badge>
                     )}
@@ -130,7 +139,7 @@ export function SchoolClassTeacherPage() {
                 </TableRow>
               ))}
               {filteredSections.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">No sections found.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No sections found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

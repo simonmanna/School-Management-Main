@@ -22,5 +22,16 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [014](./ADR-014-lms-moodle-architecture.md) | LMS (Moodle-Shaped) Architecture | Accepted |
 | [015](./ADR-015-configurable-admission-workflow.md) | Configurable Admission Workflow | Accepted |
 | [016](./ADR-016-messaging-broadcasts-and-transports.md) | Messaging: Multi-Transport Delivery, Consent and Broadcasts | Accepted |
+| 017 | Registry-Driven Reporting (implementation exists; ADR record pending) | Proposed |
+| [018](./ADR-018-enrollment-placement-history.md) | Enrollment and Placement History | Proposed |
+| [019](./ADR-019-section-stream-grouping.md) | Section and Stream Grouping Modes | Proposed |
+| [020](./ADR-020-learning-offering-types.md) | CourseOffering as the Learning Offering | Proposed |
+| [021](./ADR-021-course-vs-assessment-rosters.md) | Course Membership and Frozen Assessment Rosters | Proposed |
+| [022](./ADR-022-assignment-consolidation.md) | Assignment Consolidation | Proposed |
+| [023](./ADR-023-assessment-lifecycle.md) | Assessment Lifecycle and Learner Evidence | Proposed |
+| [024](./ADR-024-result-immutability.md) | Immutable ResultSet Revisions | Proposed |
+| [025](./ADR-025-report-document-provenance.md) | Report-Document Provenance | Proposed |
+| [026](./ADR-026-lms-academic-core-boundary.md) | LMS as a Consumer of the Academic Core | Proposed |
+| [027](./ADR-027-legacy-academic-retirement.md) | Legacy Academic Retirement Strategy | Proposed |
 
 Template: **Context → Decision → Consequences → Alternatives considered.**

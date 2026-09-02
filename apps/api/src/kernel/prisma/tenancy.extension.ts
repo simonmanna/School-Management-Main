@@ -411,6 +411,7 @@ export const ORG_SCOPED = new Set<string>([
   // LMS Phase 1
   'CourseOffering',
   'CourseOfferingTeacher',
+  'CourseEnrollment',
   'LearningActivity',
   'LessonPlanActivity',
   'LessonPlanResource',
@@ -422,6 +423,15 @@ export const ORG_SCOPED = new Set<string>([
   'LessonPlanRevision',
   'ScheduledLesson',
   'LessonDelivery',
+  // Phase 3 — schemes of work, plan/outcome links, offering resources and the
+  // evidence/follow-up trail a delivered lesson leaves behind.
+  'SchemeOfWork',
+  'SchemeOfWorkWeek',
+  'SchemeOfWorkItem',
+  'LessonPlanOutcome',
+  'CourseOfferingResource',
+  'LessonDeliveryEvidence',
+  'LessonFollowUp',
   'Discussion',
   'DiscussionPost',
   'LearningOutcome',
@@ -651,6 +661,15 @@ export const ORG_SCOPED = new Set<string>([
   'LtiPlatformKey',
   'LtiLaunchSession',
   'ModLessonAttempt',
+
+  // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
+  'AcademicProgramme',
+  'ProgrammeGradeLevel',
+  'ClassCohort',
+  'StudentEnrollment',
+  'EnrollmentPlacement',
+  'StudentEnrollmentEvent',
+  'AcademicMigrationException',
 ]);
 
 /**
@@ -658,6 +677,10 @@ export const ORG_SCOPED = new Set<string>([
  * Exported for the same reason as ORG_SCOPED — see `tenancy-registration.spec.ts`.
  */
 export const SOFT_DELETE = new Set<string>([
+  // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
+  'AcademicProgramme',
+  'ClassCohort',
+
   // Registered by the tenancy-registration ratchet: these carry `deletedAt`
   // but were not filtered, so soft-deleted rows kept being returned.
   'IncomeHead',
@@ -830,6 +853,8 @@ export const SOFT_DELETE = new Set<string>([
   // LMS Phase 1 — course offerings, activities, plan templates and discussions
   // all carry deletedAt; without them a soft-deleted row kept being returned.
   'CourseOffering',
+  // Phase 3 — a retired scheme of work stays readable for past terms.
+  'SchemeOfWork',
   'LearningActivity',
   'LessonPlanTemplate',
   'Discussion',

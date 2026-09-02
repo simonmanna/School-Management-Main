@@ -5,6 +5,8 @@ import type { PortalClaim } from '../auth/portal-identity.types';
 export interface TenantStore {
   organizationId: string;
   userId?: string;
+  /** Correlation id assigned at the HTTP boundary; persisted with audit rows. */
+  requestId?: string;
   permissions?: string[];
   /** Verified portal subject, copied from the access token. Absent for staff. */
   portal?: PortalClaim;
@@ -42,6 +44,10 @@ export class TenantContextService {
 
   get userId(): string | undefined {
     return this.als.getStore()?.userId;
+  }
+
+  get requestId(): string | undefined {
+    return this.als.getStore()?.requestId;
   }
 
   get permissions(): string[] {

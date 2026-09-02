@@ -376,6 +376,17 @@ export const PERMISSIONS = {
     read: 'school:read',
     manageFoundation: 'school:foundation:write',
     manageStudents: 'school:students:write',
+    // Phase 1 (ADR-018 / ADR-019). Enrollment membership and placement history
+    // are deliberately NOT folded into `school:students:write`: moving a
+    // learner between classes rewrites who sits in which roster, which is an
+    // academic-integrity action, while `students:write` is the front-desk
+    // grant that edits a pupil's phone number.
+    manageEnrollment: 'school:enrollment:write',
+    /// Programmes, annual class cohorts and grouping modes — configuration that
+    /// changes how every downstream academic rule is resolved.
+    manageProgrammes: 'school:programmes:write',
+    /// Running and resolving the academic backfill / exception queue.
+    runAcademicMigration: 'school:academics:migrate',
     manageStaff: 'school:staff:write',
     manageAdmissions: 'school:admissions:write',
     // Admissions sub-grants (off by default; the broad write above is the legacy grant).
@@ -451,6 +462,22 @@ export const PERMISSIONS = {
     revokeCertificates: 'school:certificates:revoke',
     readAnalytics: 'school:analytics:read',
     exportAnalytics: 'school:analytics:export',
+    // Report centre (ADR-017). Deliberately NOT folded into `school:read` — that
+    // grant is on ~300 routes and effectively everyone holds it, so gating the
+    // report routes on it would make the route guard decorative and leave the
+    // per-report check in the runner as the only real defence. Deliberately not
+    // reusing `school:analytics:*` either: those are namespaced to the analytics
+    // screens, and widening them would silently grant report access to whoever
+    // already holds them.
+    readReports: 'school:reports:read',
+    exportReports: 'school:reports:export',
+    // Fees, GL and audit reports are split out because "who owes money" is the
+    // most sensitive set a school holds. Gating them on `school:fees:write`
+    // instead would force a WRITE grant on a read-only bursar or governor.
+    readFinanceReports: 'school:reports:finance:read',
+    readAuditReports: 'school:reports:audit:read',
+    manageSavedReports: 'school:reports:saved:write',
+    scheduleReports: 'school:reports:schedule',
     manageFees: 'school:fees:write',
     manageDocuments: 'school:documents:write',
     readDocuments: 'school:documents:read',
@@ -867,6 +894,9 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:read': { label: 'School read (org-wide)', description: 'Read any school record. Broad — grant deliberately.', group: 'School', subgroup: 'General' },
   'school:portal:self': { label: 'Ask who am I', description: 'The narrowest grant: the account may ask the API its own identity.', group: 'School', subgroup: 'Portal' },
   'school:students:write': { label: 'Manage students', description: 'CRUD pupil records.', group: 'School', subgroup: 'Students' },
+  'school:enrollment:write': { label: 'Manage enrollment & placement', description: 'Enrol, move, transfer, withdraw, repeat and promote learners. Rewrites who sits in which class roster.', group: 'School', subgroup: 'Enrollment' },
+  'school:programmes:write': { label: 'Manage programmes & cohorts', description: 'Academic programmes, annual class cohorts and section/stream grouping modes.', group: 'School', subgroup: 'Enrollment' },
+  'school:academics:migrate': { label: 'Run academic backfill', description: 'Execute enrollment/placement backfills and resolve the migration exception queue.', group: 'School', subgroup: 'Enrollment' },
   'school:staff:write': { label: 'Manage staff', description: 'CRUD staff profiles.', group: 'School', subgroup: 'Staff' },
   'school:admissions:write': { label: 'Manage admissions', description: 'CRUD admission applications.', group: 'School', subgroup: 'Admissions' },
   'school:attendance:write': { label: 'Take attendance (org-wide)', description: 'Mark registers for any class. Use the own-scoped grant for teachers.', group: 'School', subgroup: 'Attendance' },
@@ -876,12 +906,21 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:lessonplans:write': { label: 'Manage lesson plans', description: 'CRUD lesson plans (org-wide).', group: 'School', subgroup: 'Teaching' },
   'school:lessonplans:own': { label: 'Manage own lesson plans', description: 'CRUD your own lesson plans only.', group: 'School', subgroup: 'Teaching' },
   'school:timetable:own': { label: 'Manage own timetable', description: 'Edit your own timetable entries.', group: 'School', subgroup: 'Teaching' },
+  'school:courses:write': { label: 'Manage course offerings', description: 'Create, staff, publish, close and roll over canonical teaching contexts.', group: 'School', subgroup: 'Teaching' },
+  'school:courses:teach': { label: 'Teach assigned courses', description: 'Use teaching tools only inside an assigned offering.', group: 'School', subgroup: 'Teaching' },
+  'school:courses:enrol': { label: 'Manage course rosters', description: 'Generate compulsory rosters and record elective, remedial, opt-out or withdrawal decisions.', group: 'School', subgroup: 'Enrollment' },
   'school:fees:write': { label: 'Manage fee structures', description: 'Configure fee categories/structures/schedules.', group: 'School', subgroup: 'Fees & Finance' },
   'school:fees:collect': { label: 'Collect payments', description: 'Record fee payments at the till/gate.', group: 'School', subgroup: 'Fees & Finance' },
   'school:fees:refund': { label: 'Issue refund', description: 'Pay money back to a payer.', group: 'School', subgroup: 'Fees & Finance' },
   'school:fees:reconcile': { label: 'Reconcile payments', description: 'Tie payments to the AR ledger.', group: 'School', subgroup: 'Fees & Finance' },
   'school:analytics:read': { label: 'Read analytics', description: 'View school analytics dashboards.', group: 'School', subgroup: 'Analytics' },
   'school:analytics:export': { label: 'Export analytics', description: 'Export analytics data.', group: 'School', subgroup: 'Analytics' },
+  'school:reports:read': { label: 'Open the report centre', description: 'Run reports from the school report catalogue.', group: 'School', subgroup: 'Reports' },
+  'school:reports:export': { label: 'Export reports', description: 'Download reports as CSV, Excel or PDF.', group: 'School', subgroup: 'Reports' },
+  'school:reports:finance:read': { label: 'Run fee & finance reports', description: 'Fee balances, arrears, collections and GL reports.', group: 'School', subgroup: 'Reports', risk: 'high' },
+  'school:reports:audit:read': { label: 'Run audit reports', description: 'Adjustments, waivers, reversals and permission changes.', group: 'School', subgroup: 'Reports', risk: 'high' },
+  'school:reports:saved:write': { label: 'Manage saved reports', description: 'Save and edit report filter presets.', group: 'School', subgroup: 'Reports' },
+  'school:reports:schedule': { label: 'Schedule reports', description: 'Run reports on a schedule and email the output.', group: 'School', subgroup: 'Reports', risk: 'high' },
   'school:documents:read': { label: 'Read school documents', description: 'View school document store.', group: 'School', subgroup: 'Documents' },
   'school:documents:write': { label: 'Manage school documents', description: 'Upload/edit the school document store.', group: 'School', subgroup: 'Documents' },
   'school:transport:write': { label: 'Manage transport', description: 'Configure routes, fleet and trips.', group: 'School', subgroup: 'Transport' },
@@ -1054,6 +1093,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:results:publish',
       'school:lessonplans:review',
       'school:lessonplans:approve',
+      'school:courses:write',
+      'school:courses:enrol',
       'school:marks:moderate',
       'school:fees:waiver:approve',
       'school:fees:credit:approve',
@@ -1067,6 +1108,13 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'approvals:decide',
       'approvals:manage',
       'audit_log:read',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
+      'school:reports:finance:read',
+      'school:reports:audit:read',
+      'school:reports:saved:write',
     ],
   },
   {
@@ -1089,6 +1137,12 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'cash_session:close',
       'cash_session:reconcile',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
+      'school:reports:finance:read',
+      'school:reports:saved:write',
     ],
   },
   {
@@ -1098,6 +1152,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
     permissions: [
       'school:read',
       'school:students:write',
+      // Phase 1: the registrar is the role that moves, transfers, withdraws and
+      // repeats learners, so the enrollment/placement grants live here.
+      'school:enrollment:write',
+      'school:programmes:write',
       'school:admissions:write',
       'school:admissions:interview',
       'school:admissions:offer',
@@ -1110,6 +1168,11 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:certificates:issue',
       'school:communicate',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
+      'school:reports:saved:write',
     ],
   },
   {
@@ -1132,6 +1195,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:certificates:issue',
       'school:analytics:read',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
     ],
   },
   {
@@ -1154,6 +1221,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:portal:teacher',
       'school:portal:self',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
     ],
   },
 
@@ -1166,11 +1237,17 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:read',
       'school:foundation:write',
       'school:courses:write',
+      'school:courses:enrol',
       'school:lessonplans:review',
       'school:lessonplans:approve',
       'school:assessments:write',
       'school:analytics:read',
       'school:analytics:export',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
+      'school:reports:saved:write',
     ],
   },
   {
@@ -1187,6 +1264,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:lessonplans:own',
       'school:timetable:own',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
     ],
   },
   {
@@ -1219,6 +1300,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'hr:document',
       'school:staff:write',
       'user:read',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
     ],
   },
   {
@@ -1290,6 +1375,9 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:communicate',
       'partner:read',
       'hr:self',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
     ],
   },
   {
@@ -1316,6 +1404,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'webhooks:write',
       'organization:read',
       'audit_log:read',
+      // Report centre (ADR-017). New grants do not reach existing tenants by
+      // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:audit:read',
     ],
   },
 ] as const;

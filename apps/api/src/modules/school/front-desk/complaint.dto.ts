@@ -10,6 +10,7 @@ export class CreateComplaintDto {
   @IsOptional() @IsEnum(ComplaintPriority) priority?: ComplaintPriority;
   @IsOptional() @IsString() assignedToId?: string;
   @IsOptional() @IsString() resolution?: string;
+  @IsOptional() @IsString() receivedAt?: string;
 }
 
 export class UpdateComplaintDto {
@@ -20,4 +21,5 @@ export class UpdateComplaintDto {
   @IsOptional() @IsEnum(ComplaintPriority) priority?: ComplaintPriority;
   @IsOptional() @IsString() assignedToId?: string;
   @IsOptional() @IsString() resolution?: string;
+  @IsOptional() @IsString() receivedAt?: string;
 }

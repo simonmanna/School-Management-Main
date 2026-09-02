@@ -83,7 +83,7 @@ const ADMISSION_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
   // decision is taken; every re-score still writes an audit row.
   scored: ['score', 'accept', 'reject', 'waitlist', 'withdraw'],
   exam_scheduled: ['exam_done', 'score', 'accept', 'reject', 'waitlist', 'withdraw'],
-  accepted: ['waitlist', 'issue_offer', 'withdraw'],
+  accepted: ['waitlist', 'issue_offer', 'enroll', 'withdraw'],
   waitlisted: ['issue_offer', 'reject', 'withdraw'],
   offer_issued: ['accept_offer', 'decline_offer', 'expire_offer', 'withdraw'],
   offer_accepted: ['enroll', 'withdraw'],
@@ -1921,11 +1921,15 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     // Workflow half of the gate. The stages a school requires are configurable, so
     // "is this application ready?" is "has every REQUIRED stage before ENROLLMENT been
     // completed?" — not the old hardcoded `status === 'offer_accepted'`, which assumed
-    // every school runs an offer round.
+    // every school runs an offer round. An already-accepted applicant has cleared the
+    // decision stage, so the OFFER stage (if any) is treated as satisfied and the
+    // path straight to ENROLLMENT is allowed.
     const stages = this.workflow.stagesFor(app);
     const offerSkipped = stages.find((s) => s.stage === 'OFFER')?.mode === 'skip';
     const nextStage = this.workflow.nextRequiredStage(app, stages);
-    if (nextStage !== 'ENROLLMENT') {
+    const blockedByStage =
+      nextStage !== 'ENROLLMENT' && !(app.status === 'accepted' && nextStage === 'OFFER');
+    if (blockedByStage) {
       missing.push(
         nextStage
           ? `workflow stage ${nextStage} is not complete (status=${app.status})`
@@ -1935,8 +1939,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
 
     // Offer conditions apply only when this school's workflow actually routes through
     // an offer. Everything below — documents, fee, capacity — applies to every school
-    // and is never skippable by configuration.
-    if (!offerSkipped) {
+    // and is never skippable by configuration. An already-accepted applicant has
+    // cleared the decision stage, so an offer letter is redundant; allow direct
+    // enroll from `accepted` (FSM permits accepted → enroll) without one.
+    if (!offerSkipped && app.status !== 'accepted') {
       if (!app.offerLetter) missing.push('no offer on file');
       else if (app.offerLetter.status === 'withdrawn') missing.push('offer withdrawn');
       else if (app.offerLetter.expiresAt && app.offerLetter.expiresAt.getTime() < Date.now()) {

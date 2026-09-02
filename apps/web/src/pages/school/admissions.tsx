@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronDown, MoreHorizontal } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Mail, MoreHorizontal, Plus } from 'lucide-react';
 import {
   useAdmissions,
   useAdmissionAction,

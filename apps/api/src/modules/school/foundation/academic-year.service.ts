@@ -74,6 +74,24 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
       return row;
     });
   }
+
+  async update(id: string, dto: UpdateAcademicYearDto): Promise<AcademicYear> {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
+      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
+      if (dto.isCurrent) {
+        await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      }
+      const res = await tx.academicYear.updateMany({
+        where: { id },
+        data: { ...dto, startDate, endDate } as any,
+      });
+      if (res.count === 0) throw new NotFoundException(`AcademicYear ${id} not found`);
+      const row = await tx.academicYear.findFirst({ where: { id }, include: { terms: true } });
+      await this.audit.recordInTx(tx, { entity: 'AcademicYear', entityId: id, action: 'update', newValues: row });
+      return row;
+    });
+  }
 }
 
 @Injectable()
@@ -148,6 +166,23 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
     return this.prisma.client.term.findMany({
       where: { academicYearId },
       orderBy: { startDate: 'asc' },
+    });
+  }
+
+  async update(id: string, dto: UpdateTermDto): Promise<Term> {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
+      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
+      if (dto.isCurrent) {
+        await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      }
+      const res = await tx.term.updateMany({
+        where: { id },
+        data: { ...dto, startDate, endDate } as any,
+      });
+      if (res.count === 0) throw new NotFoundException(`Term ${id} not found`);
+      const row = await tx.term.findFirst({ where: { id }, include: { academicYear: true } });
+      return row;
     });
   }
 }

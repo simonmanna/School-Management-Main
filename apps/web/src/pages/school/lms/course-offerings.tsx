@@ -1,87 +1,108 @@
-import { useState } from 'react';
-import { BookCopy, Plus, Repeat } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Archive, BookCopy, CheckCircle2, CircleAlert, Copy, Plus, RefreshCw, Users } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { useTerms, useSubjects, useClasses, useSections, useAcademicYears } from '@/features/school/api';
-import { useCourseOfferings, useCreateCourseOffering, useUpsertCourseOfferingFromTeacherAssignment } from '@/features/school/api';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
+import { useAcademicYears, useCurricula, useStaff, useSubjects, useTerms } from '@/features/school/api';
+import { useClassCohorts, useGroupingOptions, useProgrammes, useStudentEnrollments } from '@/features/school/enrollment-api';
+import {
+  type AudienceScope, type OfferingStatus, type OfferingType,
+  useAllocateOfferingTeacher, useBulkGenerateOfferings, useCanonicalCourseOfferings,
+  useCreateCanonicalOffering, useEndOfferingTeacher, useMigrateTeacherAssignments,
+  useOfferingRoster, useRolloverOffering, useSetCourseEnrollment, useSyncOfferingRoster,
+  useTransitionOffering,
+} from '@/features/school/course-offering-api';
 
-const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
+const sel = 'h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm';
+const TYPES: OfferingType[] = ['SUBJECT', 'LEARNING_AREA', 'COMPETENCY', 'SCHOOL_WIDE', 'CO_CURRICULAR', 'REMEDIAL', 'CLUB_OR_HOUSE'];
+const SCOPES: AudienceScope[] = ['COHORT', 'SECTION', 'STREAM', 'CUSTOM', 'SCHOOL'];
+const NEXT: Partial<Record<OfferingStatus, OfferingStatus>> = { DRAFT: 'STAFFED', STAFFED: 'ROSTER_READY', ROSTER_READY: 'PUBLISHED', PUBLISHED: 'ACTIVE', ACTIVE: 'CLOSED', CLOSED: 'ARCHIVED' };
+const rows = <T,>(value: any): T[] => Array.isArray(value) ? value : value?.data ?? [];
+const label = (value: string) => value.toLowerCase().replaceAll('_', ' ').replace(/\b\w/g, (x) => x.toUpperCase());
+const emptyForm = { name: '', code: '', academicYearId: '', termId: '', programmeId: '', classCohortId: '', offeringType: 'SUBJECT' as OfferingType, audienceScope: 'COHORT' as AudienceScope, subjectId: '', sectionId: '', streamId: '', curriculumId: '', competencyId: '', activityDefinitionId: '', effectiveFrom: '', effectiveTo: '', summary: '', teacherPartnerId: '' };
 
 export function SchoolLmsCourseOfferingsPage() {
-  const { data: offerings } = useCourseOfferings();
-  const { data: terms } = useTerms();
-  const { data: subjects } = useSubjects();
-  const { data: classes } = useClasses();
-  const { data: sections } = useSections();
-  const { data: years } = useAcademicYears();
-  const create = useCreateCourseOffering();
-  const upsert = useUpsertCourseOfferingFromTeacherAssignment();
+  const [filters, setFilters] = useState({ academicYearId: '', termId: '', programmeId: '', status: '', offeringType: '', search: '' });
+  const [form, setForm] = useState(emptyForm);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [teacherId, setTeacherId] = useState('');
+  const [teacherRole, setTeacherRole] = useState('CO_TEACHER');
+  const [replacedTeacherId, setReplacedTeacherId] = useState('');
+  const [substituteUntil, setSubstituteUntil] = useState('');
+  const [studentEnrollmentId, setStudentEnrollmentId] = useState('');
+  const [selectedCohorts, setSelectedCohorts] = useState<string[]>([]);
+  const [bulk, setBulk] = useState({ academicYearId: '', termId: '', includeElectives: false });
+  const [rollover, setRollover] = useState({ academicYearId: '', termId: '', classCohortId: '' });
 
-  const [form, setForm] = useState({ academicYearId: '', termId: '', subjectId: '', classId: '', sectionId: '', curriculumId: '' });
-  const [taId, setTaId] = useState('');
+  const { data: offerings = [], isLoading } = useCanonicalCourseOfferings(filters);
+  const selected = offerings.find((x) => x.id === selectedId);
+  const { data: roster = [] } = useOfferingRoster(selectedId);
+  const { data: yearsRaw } = useAcademicYears(); const years = rows<any>(yearsRaw);
+  const { data: termsRaw } = useTerms(); const terms = rows<any>(termsRaw);
+  const { data: subjectsRaw } = useSubjects(); const subjects = rows<any>(subjectsRaw);
+  const { data: curriculaRaw } = useCurricula(); const curricula = rows<any>(curriculaRaw);
+  const { data: staffRaw } = useStaff({ pageSize: 500 }); const staff = rows<any>(staffRaw);
+  const { data: programmes = [] } = useProgrammes();
+  const { data: formCohorts = [] } = useClassCohorts({ academicYearId: form.academicYearId || undefined });
+  const { data: bulkCohorts = [] } = useClassCohorts({ academicYearId: bulk.academicYearId || undefined });
+  const { data: rolloverCohorts = [] } = useClassCohorts({ academicYearId: rollover.academicYearId || undefined });
+  const { data: grouping } = useGroupingOptions(form.classCohortId || undefined);
+  const { data: enrollments } = useStudentEnrollments({ academicYearId: selected?.academicYearId, classCohortId: selected?.classCohortId ?? undefined, status: 'ACTIVE', pageSize: 500 }, !!selected);
+  const { data: competenciesRaw } = useQuery({ queryKey: ['school', 'competencies'], queryFn: async () => (await api.get('/school/competencies', { params: { pageSize: 500 } })).data });
+  const competencies = rows<any>(competenciesRaw);
+  const { data: activities = [] } = useQuery({ queryKey: ['school', 'course-offerings', 'activity-definitions'], queryFn: async () => (await api.get<any[]>('/school/course-offerings/definitions/activities')).data });
 
-  const name = (id?: string | null, list?: any[]) => list?.find((x) => x.id === id)?.name ?? '—';
+  const create = useCreateCanonicalOffering(); const transition = useTransitionOffering(); const sync = useSyncOfferingRoster();
+  const allocate = useAllocateOfferingTeacher(); const endTeacher = useEndOfferingTeacher(); const setEnrollment = useSetCourseEnrollment();
+  const generate = useBulkGenerateOfferings(); const migrate = useMigrateTeacherAssignments(); const roll = useRolloverOffering();
+  const formCohort = formCohorts.find((c) => c.id === form.classCohortId);
+  const matchingCurricula = curricula.filter((c) => c.status === 'published' && c.academicYearId === form.academicYearId && (!formCohort || c.classId === formCohort.classId));
+  const stats = useMemo(() => ({ total: offerings.length, active: offerings.filter((x) => x.status === 'ACTIVE').length, setup: offerings.filter((x) => ['DRAFT', 'STAFFED', 'ROSTER_READY'].includes(x.status)).length, blocked: offerings.filter((x) => !x.readiness.readyToPublish && !['ACTIVE', 'CLOSED', 'ARCHIVED'].includes(x.status)).length }), [offerings]);
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <BookCopy className="h-5 w-5" />
-        <h1 className="text-xl font-semibold">Course Offerings</h1>
-        <Badge variant="outline">{offerings?.length ?? 0}</Badge>
-      </div>
+  const act = async (work: () => Promise<unknown>, success: string) => { try { await work(); notify.success(success); } catch (error: any) { notify.error(error?.response?.data?.message ?? error?.message ?? 'Operation failed'); } };
+  const changeForm = (key: string, value: any) => setForm((old) => ({ ...old, [key]: value, ...(key === 'academicYearId' ? { termId: '', classCohortId: '', curriculumId: '' } : {}), ...(key === 'classCohortId' ? { sectionId: '', streamId: '', curriculumId: '', programmeId: formCohorts.find((c) => c.id === value)?.programmeId ?? old.programmeId } : {}) }));
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Create / upsert offering</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          <div><Label>Academic Year</Label><select className={sel} value={form.academicYearId} onChange={(e) => setForm({ ...form, academicYearId: e.target.value })}>
-            <option value="">—</option>{years?.data?.map((y: any) => <option key={y.id} value={y.id}>{y.name}</option>)}</select></div>
-          <div><Label>Term</Label><select className={sel} value={form.termId} onChange={(e) => setForm({ ...form, termId: e.target.value })}>
-            <option value="">—</option>{terms?.data?.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
-          <div><Label>Subject</Label><select className={sel} value={form.subjectId} onChange={(e) => setForm({ ...form, subjectId: e.target.value })}>
-            <option value="">—</option>{subjects?.data?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-          <div><Label>Class</Label><select className={sel} value={form.classId} onChange={(e) => setForm({ ...form, classId: e.target.value })}>
-            <option value="">—</option>{classes?.data?.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-          <div><Label>Section</Label><select className={sel} value={form.sectionId} onChange={(e) => setForm({ ...form, sectionId: e.target.value })}>
-            <option value="">—</option>{sections?.data?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-          <div><Label>Curriculum ID</Label><Input value={form.curriculumId} onChange={(e) => setForm({ ...form, curriculumId: e.target.value })} placeholder="curriculum uuid" /></div>
-          <div className="col-span-2 md:col-span-3">
-            <Button disabled={!form.academicYearId || !form.termId || !form.subjectId || !form.classId || create.isPending} onClick={async () => {
-              try { await create.mutateAsync(form); notify.success('Course offering saved'); setForm({ academicYearId: '', termId: '', subjectId: '', classId: '', sectionId: '', curriculumId: '' }); } catch (e: any) { notify.error(e?.message ?? 'Failed'); }
-            }}><Plus className="mr-1 h-4 w-4" />Create offering</Button>
-          </div>
-        </CardContent>
-      </Card>
+  return <div className="space-y-5">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><BookCopy className="h-6 w-6" /><h1 className="text-2xl font-semibold">Curriculum & Courses</h1></div><p className="mt-1 text-sm text-muted-foreground">Canonical teaching contexts, staff allocation, eligibility and readiness.</p></div><Badge variant="outline">Phase 2 academic context</Badge></div>
+    <div className="grid gap-3 sm:grid-cols-4">{[['Offerings', stats.total], ['Active', stats.active], ['In setup', stats.setup], ['Blocked', stats.blocked]].map(([name, value]) => <Card key={name}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{name}</p><p className="text-2xl font-semibold">{value}</p></CardContent></Card>)}</div>
+    <Tabs defaultValue="offerings"><TabsList><TabsTrigger value="offerings">Offerings</TabsTrigger><TabsTrigger value="create">Generation wizard</TabsTrigger><TabsTrigger value="bulk">Bulk & rollover</TabsTrigger></TabsList>
+      <TabsContent value="offerings" className="space-y-4">
+        <Card><CardContent className="grid gap-3 p-4 md:grid-cols-6"><Input className="md:col-span-2" placeholder="Search name or code" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} /><select className={sel} value={filters.academicYearId} onChange={(e) => setFilters({ ...filters, academicYearId: e.target.value, termId: '' })}><option value="">All years</option>{years.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select className={sel} value={filters.termId} onChange={(e) => setFilters({ ...filters, termId: e.target.value })}><option value="">All terms</option>{terms.filter((x) => !filters.academicYearId || x.academicYearId === filters.academicYearId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select className={sel} value={filters.offeringType} onChange={(e) => setFilters({ ...filters, offeringType: e.target.value })}><option value="">All types</option>{TYPES.map((x) => <option key={x} value={x}>{label(x)}</option>)}</select><select className={sel} value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option>{['DRAFT','STAFFED','ROSTER_READY','PUBLISHED','ACTIVE','CLOSED','ARCHIVED'].map((x) => <option key={x} value={x}>{label(x)}</option>)}</select></CardContent></Card>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,.85fr)]"><Card><CardHeader><CardTitle className="text-base">Course offerings</CardTitle></CardHeader><CardContent className="space-y-2">{isLoading && <p className="text-sm text-muted-foreground">Loading offerings…</p>}{!isLoading && !offerings.length && <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No offerings match these filters.</p>}{offerings.map((o) => <button key={o.id} onClick={() => setSelectedId(o.id)} className={`w-full rounded-lg border p-3 text-left hover:bg-muted/50 ${selectedId === o.id ? 'border-primary bg-muted/40' : ''}`}><div className="flex items-start justify-between gap-2"><div><p className="font-medium">{o.name}</p><p className="text-xs text-muted-foreground">{o.code} · {o.classCohort?.schoolClass?.name ?? label(o.audienceScope)} · {o.term?.name}</p></div><Badge variant={o.status === 'ACTIVE' ? 'default' : 'outline'}>{label(o.status)}</Badge></div><div className="mt-2 flex gap-2 text-xs text-muted-foreground"><span>{label(o.offeringType)}</span><span>•</span><span>{o._count.courseEnrollments} learners</span><span>•</span><span>{o.teachers.filter((t) => !t.effectiveTo).length} staff</span>{!o.readiness.readyToPublish && !['ACTIVE','CLOSED','ARCHIVED'].includes(o.status) && <span className="ml-auto text-amber-600">Setup incomplete</span>}</div></button>)}</CardContent></Card>
+          <OfferingDetail offering={selected} roster={roster} staff={staff} enrollments={enrollments?.data ?? []} teacherId={teacherId} setTeacherId={setTeacherId} teacherRole={teacherRole} setTeacherRole={setTeacherRole} replacedTeacherId={replacedTeacherId} setReplacedTeacherId={setReplacedTeacherId} substituteUntil={substituteUntil} setSubstituteUntil={setSubstituteUntil} studentEnrollmentId={studentEnrollmentId} setStudentEnrollmentId={setStudentEnrollmentId} onAction={act} transition={transition} sync={sync} allocate={allocate} endTeacher={endTeacher} setEnrollment={setEnrollment} />
+        </div>
+      </TabsContent>
+      <TabsContent value="create"><Card><CardHeader><CardTitle>Offering generation wizard</CardTitle></CardHeader><CardContent className="space-y-5">
+        <WizardSection title="1. Academic context"><Field label="Academic year"><select className={sel} value={form.academicYearId} onChange={(e) => changeForm('academicYearId', e.target.value)}><option value="">Select year</option>{years.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Term"><select className={sel} value={form.termId} onChange={(e) => changeForm('termId', e.target.value)}><option value="">Select term</option>{terms.filter((x) => x.academicYearId === form.academicYearId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Programme"><select className={sel} value={form.programmeId} onChange={(e) => changeForm('programmeId', e.target.value)}><option value="">Select programme</option>{programmes.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Annual class cohort"><select className={sel} value={form.classCohortId} onChange={(e) => changeForm('classCohortId', e.target.value)}><option value="">School/custom audience</option>{formCohorts.filter((x) => !form.programmeId || x.programmeId === form.programmeId).map((x) => <option key={x.id} value={x.id}>{x.schoolClass?.name}</option>)}</select></Field></WizardSection>
+        <WizardSection title="2. Definition and audience"><Field label="Offering type"><select className={sel} value={form.offeringType} onChange={(e) => changeForm('offeringType', e.target.value)}>{TYPES.map((x) => <option key={x} value={x}>{label(x)}</option>)}</select></Field><Field label="Audience"><select className={sel} value={form.audienceScope} onChange={(e) => changeForm('audienceScope', e.target.value)}>{SCOPES.map((x) => <option key={x} value={x}>{label(x)}</option>)}</select></Field>{form.audienceScope === 'SECTION' && <Field label="Section"><select className={sel} value={form.sectionId} onChange={(e) => changeForm('sectionId', e.target.value)}><option value="">Select section</option>{grouping?.sections.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>}{form.audienceScope === 'STREAM' && <Field label="Stream"><select className={sel} value={form.streamId} onChange={(e) => changeForm('streamId', e.target.value)}><option value="">Select stream</option>{grouping?.streams.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>}{['SUBJECT','LEARNING_AREA','REMEDIAL'].includes(form.offeringType) && <><Field label="Subject / learning area"><select className={sel} value={form.subjectId} onChange={(e) => changeForm('subjectId', e.target.value)}><option value="">Select subject</option>{subjects.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Published curriculum"><select className={sel} value={form.curriculumId} onChange={(e) => changeForm('curriculumId', e.target.value)}><option value="">Select version</option>{matchingCurricula.map((x) => <option key={x.id} value={x.id}>{x.name} · v{x.version}</option>)}</select></Field></>}{form.offeringType === 'COMPETENCY' && <Field label="Competency framework"><select className={sel} value={form.competencyId} onChange={(e) => changeForm('competencyId', e.target.value)}><option value="">Select competency</option>{competencies.map((x) => <option key={x.id} value={x.id}>{x.code} · {x.description}</option>)}</select></Field>}{['CO_CURRICULAR','CLUB_OR_HOUSE'].includes(form.offeringType) && <Field label="Activity definition"><select className={sel} value={form.activityDefinitionId} onChange={(e) => changeForm('activityDefinitionId', e.target.value)}><option value="">Select activity</option>{activities.map((x: any) => <option key={x.id} value={x.id}>{x.title}</option>)}</select></Field>}</WizardSection>
+        <WizardSection title="3. Identity, dates and staff"><Field label="Name"><Input value={form.name} onChange={(e) => changeForm('name', e.target.value)} placeholder="P5 Mathematics – Section A" /></Field><Field label="Code (optional)"><Input value={form.code} onChange={(e) => changeForm('code', e.target.value)} placeholder="Auto-generated" /></Field><Field label="Effective from"><Input type="date" value={form.effectiveFrom} onChange={(e) => changeForm('effectiveFrom', e.target.value)} /></Field><Field label="Effective to"><Input type="date" value={form.effectiveTo} onChange={(e) => changeForm('effectiveTo', e.target.value)} /></Field><Field label="Lead teacher"><select className={sel} value={form.teacherPartnerId} onChange={(e) => changeForm('teacherPartnerId', e.target.value)}><option value="">Allocate later</option>{staff.map((x) => <option key={x.id} value={x.id}>{x.partner?.name ?? x.employeeNo}</option>)}</select></Field><Field label="Summary"><Input value={form.summary} onChange={(e) => changeForm('summary', e.target.value)} /></Field></WizardSection>
+        <Button disabled={create.isPending || !form.name || !form.academicYearId || !form.termId || !form.programmeId || !form.effectiveFrom} onClick={() => act(async () => { const result = await create.mutateAsync({ ...form, code: form.code || undefined, classCohortId: form.classCohortId || undefined, subjectId: form.subjectId || undefined, sectionId: form.sectionId || undefined, streamId: form.streamId || undefined, curriculumId: form.curriculumId || undefined, competencyId: form.competencyId || undefined, activityDefinitionId: form.activityDefinitionId || undefined, effectiveTo: form.effectiveTo || undefined, summary: form.summary || undefined, teachers: form.teacherPartnerId ? [{ teacherPartnerId: form.teacherPartnerId, role: 'LEAD', isResponsible: true }] : [] }); setForm(emptyForm); setSelectedId(result.id); }, 'Offering created')}><Plus className="mr-2 h-4 w-4" />Create draft offering</Button>
+      </CardContent></Card></TabsContent>
+      <TabsContent value="bulk" className="space-y-4"><Card><CardHeader><CardTitle>Bulk offering creation</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">Generate one offering for each selected cohort and published curriculum subject.</p><div className="grid gap-3 md:grid-cols-3"><Field label="Academic year"><select className={sel} value={bulk.academicYearId} onChange={(e) => { setBulk({ ...bulk, academicYearId: e.target.value, termId: '' }); setSelectedCohorts([]); }}><option value="">Select year</option>{years.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Term"><select className={sel} value={bulk.termId} onChange={(e) => setBulk({ ...bulk, termId: e.target.value })}><option value="">Select term</option>{terms.filter((x) => x.academicYearId === bulk.academicYearId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={bulk.includeElectives} onChange={(e) => setBulk({ ...bulk, includeElectives: e.target.checked })} /> Include electives</label></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{bulkCohorts.map((c) => <label key={c.id} className="flex items-center gap-2 rounded-md border p-3 text-sm"><input type="checkbox" checked={selectedCohorts.includes(c.id)} onChange={() => setSelectedCohorts((old) => old.includes(c.id) ? old.filter((x) => x !== c.id) : [...old, c.id])} />{c.schoolClass?.name}</label>)}</div><Button disabled={!bulk.academicYearId || !bulk.termId || !selectedCohorts.length || generate.isPending} onClick={() => act(() => generate.mutateAsync({ ...bulk, classCohortIds: selectedCohorts }), 'Offerings generated')}><Copy className="mr-2 h-4 w-4" />Generate selected cohorts</Button></CardContent></Card>
+        <Card><CardHeader><CardTitle>Migration & rollover</CardTitle></CardHeader><CardContent className="grid gap-4 lg:grid-cols-2"><div className="rounded-lg border p-4"><p className="font-medium">TeacherAssignment migration</p><p className="my-2 text-sm text-muted-foreground">Preview or migrate legacy teaching allocations into offering teachers.</p><div className="flex gap-2"><Button variant="outline" onClick={() => act(() => migrate.mutateAsync({ dryRun: true }), 'Migration preview complete')}>Preview</Button><Button onClick={() => act(() => migrate.mutateAsync({ dryRun: false }), 'Teacher assignments migrated')}>Migrate</Button></div></div><div className="rounded-lg border p-4"><p className="font-medium">Selected offering rollover</p><p className="my-2 text-sm text-muted-foreground">Copy definition and active teachers into a new term.</p><div className="grid gap-2 sm:grid-cols-3"><select className={sel} value={rollover.academicYearId} onChange={(e) => setRollover({ ...rollover, academicYearId: e.target.value, termId: '', classCohortId: '' })}><option value="">Year</option>{years.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select className={sel} value={rollover.termId} onChange={(e) => setRollover({ ...rollover, termId: e.target.value })}><option value="">Term</option>{terms.filter((x) => x.academicYearId === rollover.academicYearId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><select className={sel} value={rollover.classCohortId} onChange={(e) => setRollover({ ...rollover, classCohortId: e.target.value })}><option value="">Same audience</option>{rolloverCohorts.map((x) => <option key={x.id} value={x.id}>{x.schoolClass?.name}</option>)}</select></div><Button className="mt-3" disabled={!selected || !rollover.academicYearId || !rollover.termId} onClick={() => act(() => roll.mutateAsync({ id: selected!.id, ...rollover, classCohortId: rollover.classCohortId || undefined, copyTeachers: true, syncRoster: true }), 'Offering rolled over')}><RefreshCw className="mr-2 h-4 w-4" />Rollover selected</Button></div></CardContent></Card>
+      </TabsContent>
+    </Tabs>
+  </div>;
+}
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Idempotent from Teacher Assignment</CardTitle></CardHeader>
-        <CardContent className="flex items-end gap-3">
-          <div className="flex-1"><Label>Teacher Assignment ID</Label><Input value={taId} onChange={(e) => setTaId(e.target.value)} placeholder="teacher-assignment uuid" /></div>
-          <Button disabled={!taId || upsert.isPending} onClick={async () => { try { await upsert.mutateAsync(taId); notify.success('Upserted (idempotent)'); setTaId(''); } catch (e: any) { notify.error(e?.message ?? 'Failed'); } }}><Repeat className="mr-1 h-4 w-4" />Upsert</Button>
-        </CardContent>
-      </Card>
+function WizardSection({ title, children }: { title: string; children: React.ReactNode }) { return <div><p className="text-sm font-medium">{title}</p><div className="mt-2 grid gap-3 md:grid-cols-4">{children}</div></div>; }
+function Field({ label: name, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-1"><Label>{name}</Label>{children}</div>; }
+function Meta({ name, value }: { name: string; value?: string | null }) { return <div><p className="text-xs text-muted-foreground">{name}</p><p>{value || '—'}</p></div>; }
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Offerings</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {!offerings?.length && <p className="text-sm text-muted-foreground">No course offerings yet.</p>}
-          {offerings?.map((o: any) => (
-            <div key={o.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-              <div>
-                <span className="font-medium">{name(o.subjectId, subjects?.data)}</span> · {name(o.classId, classes?.data)} {o.sectionId ? `(${name(o.sectionId, sections?.data)})` : ''}
-                <span className="ml-2 text-muted-foreground">{name(o.termId, terms?.data)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">{o.teacherPartnerIds?.length ?? 0} teacher(s)</Badge>
-                <span className="text-xs text-muted-foreground">{o.id.slice(0, 8)}</span>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
-  );
+function OfferingDetail({ offering, roster, staff, enrollments, teacherId, setTeacherId, teacherRole, setTeacherRole, replacedTeacherId, setReplacedTeacherId, substituteUntil, setSubstituteUntil, studentEnrollmentId, setStudentEnrollmentId, onAction, transition, sync, allocate, endTeacher, setEnrollment }: any) {
+  if (!offering) return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Select an offering to manage curriculum, staff, roster and lifecycle.</CardContent></Card>;
+  const next = NEXT[offering.status as OfferingStatus];
+  return <Card className="h-fit"><CardHeader><div className="flex items-start justify-between"><div><CardTitle className="text-base">{offering.name}</CardTitle><p className="text-xs text-muted-foreground">{offering.code}</p></div><Badge>{label(offering.status)}</Badge></div></CardHeader><CardContent className="space-y-5">
+    <div className="grid grid-cols-2 gap-3 text-sm"><Meta name="Type" value={label(offering.offeringType)} /><Meta name="Audience" value={`${label(offering.audienceScope)}${offering.section?.name ? ` · ${offering.section.name}` : ''}${offering.stream?.name ? ` · ${offering.stream.name}` : ''}`} /><Meta name="Programme" value={offering.programme?.name} /><Meta name="Curriculum" value={offering.curriculum ? `${offering.curriculum.name} v${offering.curriculum.version}` : 'Not applicable'} /></div>
+    <div><p className="mb-2 text-sm font-medium">Publication readiness</p><div className="grid grid-cols-2 gap-2">{Object.entries(offering.readiness.checks).map(([name, ok]) => <div key={name} className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${ok ? 'text-emerald-700' : 'text-amber-700'}`}>{ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleAlert className="h-3.5 w-3.5" />}{label(name)}</div>)}</div></div>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onAction(() => sync.mutateAsync({ id: offering.id }), 'Roster synchronized')}><RefreshCw className="mr-1 h-3.5 w-3.5" />Sync roster</Button>{next && <Button size="sm" onClick={() => onAction(() => transition.mutateAsync({ id: offering.id, toStatus: next }), `Offering moved to ${label(next)}`)}>{next === 'ARCHIVED' && <Archive className="mr-1 h-3.5 w-3.5" />}{label(next)}</Button>}{['DRAFT','STAFFED','ROSTER_READY'].includes(offering.status) && <Button variant="outline" size="sm" onClick={() => onAction(() => transition.mutateAsync({ id: offering.id, toStatus: 'ARCHIVED' }), 'Offering archived')}><Archive className="mr-1 h-3.5 w-3.5" />Archive</Button>}</div>
+    <div><div className="mb-2 flex items-center justify-between"><p className="text-sm font-medium">Teaching team</p><Badge variant="outline">{offering.teachers.filter((x: any) => !x.effectiveTo).length}</Badge></div><div className="space-y-1">{offering.teachers.filter((x: any) => !x.effectiveTo).map((x: any) => <div key={x.id} className="flex items-center justify-between rounded border px-2 py-1.5 text-xs"><span>{x.teacher?.partner?.name ?? x.teacherPartnerId} · {label(x.role)} {x.isResponsible ? '· Responsible' : ''}</span><button className="text-destructive" onClick={() => onAction(() => endTeacher.mutateAsync({ id: offering.id, teacherId: x.id }), 'Teacher allocation ended')}>End</button></div>)}</div><div className="mt-2 flex gap-2"><select className={sel} value={teacherId} onChange={(e) => setTeacherId(e.target.value)}><option value="">Select teacher</option>{staff.map((x: any) => <option key={x.id} value={x.id}>{x.partner?.name ?? x.employeeNo}</option>)}</select><select className={sel} value={teacherRole} onChange={(e) => setTeacherRole(e.target.value)}>{['LEAD','CO_TEACHER','ASSISTANT','SUBSTITUTE'].map((x) => <option key={x} value={x}>{label(x)}</option>)}</select><Button size="sm" disabled={!teacherId || (teacherRole === 'SUBSTITUTE' && (!replacedTeacherId || !substituteUntil))} onClick={() => onAction(() => allocate.mutateAsync({ id: offering.id, teacherPartnerId: teacherId, role: teacherRole, isResponsible: teacherRole === 'LEAD', replacedTeacherId: teacherRole === 'SUBSTITUTE' ? replacedTeacherId : undefined, effectiveTo: teacherRole === 'SUBSTITUTE' ? substituteUntil : undefined }), 'Teacher allocated')}>Add</Button></div>{teacherRole === 'SUBSTITUTE' && <div className="mt-2 grid grid-cols-2 gap-2"><select className={sel} value={replacedTeacherId} onChange={(e) => setReplacedTeacherId(e.target.value)}><option value="">Teacher being covered</option>{offering.teachers.filter((x: any) => !x.effectiveTo && x.role !== 'SUBSTITUTE').map((x: any) => <option key={x.teacherPartnerId} value={x.teacherPartnerId}>{x.teacher?.partner?.name}</option>)}</select><Input type="date" aria-label="Substitute assignment end date" value={substituteUntil} onChange={(e) => setSubstituteUntil(e.target.value)} /></div>}</div>
+    <div><div className="mb-2 flex items-center justify-between"><p className="flex items-center gap-1 text-sm font-medium"><Users className="h-4 w-4" />Course roster</p><Badge variant="outline">{roster.length}</Badge></div><div className="max-h-52 space-y-1 overflow-auto">{roster.map((x: any) => <div key={x.id} className="flex justify-between rounded border px-2 py-1.5 text-xs"><span>{x.studentEnrollment?.student?.partner?.name ?? x.studentEnrollmentId}</span><span className="text-muted-foreground">{label(x.source)} · {label(x.status)}</span></div>)}{!roster.length && <p className="text-xs text-muted-foreground">No learners yet. Sync a compulsory roster or add an elective/remedial learner.</p>}</div><div className="mt-2 flex gap-2"><select className={sel} value={studentEnrollmentId} onChange={(e) => setStudentEnrollmentId(e.target.value)}><option value="">Add learner…</option>{enrollments.map((x: any) => <option key={x.id} value={x.id}>{x.student?.partner?.name ?? x.student?.admissionNo}</option>)}</select><Button size="sm" disabled={!studentEnrollmentId} onClick={() => onAction(() => setEnrollment.mutateAsync({ id: offering.id, studentEnrollmentId, source: offering.offeringType === 'REMEDIAL' ? 'REMEDIAL' : 'ELECTIVE' }), 'Learner added')}>Add</Button></div></div>
+  </CardContent></Card>;
 }

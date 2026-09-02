@@ -184,8 +184,8 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
       domain: 'attendance',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['studentId', 'dateFrom', 'dateTo', 'termId'],
-      requiredFilters: ['studentId'],
+      filters: ['studentProfileId', 'dateFrom', 'dateTo', 'termId'],
+      requiredFilters: ['studentProfileId'],
       classBasisDefault: 'current',
       asOfMode: 'live',
       paging: 'memory',
@@ -206,12 +206,12 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
 
         // Resolve the pupil's current class via the directory resolver, which
         // already joins StudentProfile → Student → Person and current enrolment.
-        const dir = await deps.resolver.studentDirectory([params.studentId]);
-        const profile = dir.get(params.studentId);
+        const dir = await deps.resolver.studentDirectory([params.studentProfileId]);
+        const profile = dir.get(params.studentProfileId);
         if (!profile) {
           return {
             rows: [],
-            notes: [`No student found with id ${params.studentId}.`],
+            notes: [`No student found with id ${params.studentProfileId}.`],
           };
         }
 
@@ -234,7 +234,7 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
 
           const dayRegister = await deps.attendance.dailyRegister(classId, day);
           const pupilRow = dayRegister.find(
-            (r: any) => r.studentProfileId === params.studentId,
+            (r: any) => r.studentProfileId === params.studentProfileId,
           );
 
           if (!pupilRow) {
@@ -251,14 +251,14 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
               day: dayName,
               statusLabel: pupilRow.status,
               statusConfig: pupilRow.statusConfig?.label ?? pupilRow.status,
-              remarks: pupilRow.remarks ?? pupilRow.notes ?? '',
+              remarks: (pupilRow as any).remarks ?? '',
             });
           }
         }
 
         return {
           rows,
-          caption: `Attendance history for ${profile.name ?? params.studentId}`,
+          caption: `Attendance history for ${profile.name ?? params.studentProfileId}`,
         };
       },
     },

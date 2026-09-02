@@ -243,6 +243,10 @@ export const EVENTS = {
   SchoolEnrollmentCreated: 'school.enrollment.created',
   SchoolEnrollmentEnded: 'school.enrollment.ended',
   SchoolEnrollmentReEnrolled: 'school.enrollment.re_enrolled',
+  // Phase 1 canonical enrollment/placement spine (ADR-018).
+  SchoolStudentEnrollmentCreated: 'school.student_enrollment.created',
+  SchoolStudentEnrollmentStatusChanged: 'school.student_enrollment.status_changed',
+  SchoolPlacementChanged: 'school.placement.changed',
   // Assessment core (A1)
   SchoolAssessmentStatusChanged: 'school.assessment.status_changed',
   SchoolMarksApproved: 'school.marks.approved',
@@ -723,6 +727,41 @@ export interface DomainEventMap {
   'school.enrollment.created': { organizationId: string; enrollmentId: string; studentProfileId: string };
   'school.enrollment.ended': { organizationId: string; enrollmentId: string; toStatus: string; reason: string };
   'school.enrollment.re_enrolled': { organizationId: string; enrollmentId: string };
+  // Phase 1 canonical enrollment/placement spine (ADR-018 / ADR-019).
+  'school.student_enrollment.created': {
+    organizationId: string;
+    enrollmentId: string;
+    studentProfileId: string;
+    academicYearId: string;
+    programmeId: string;
+    gradeLevelId: string;
+    actorId: string | null;
+    requestId: string | null;
+  };
+  'school.student_enrollment.status_changed': {
+    organizationId: string;
+    enrollmentId: string;
+    studentProfileId: string;
+    fromStatus: string;
+    toStatus: string;
+    reason: string;
+    effectiveAt: Date;
+    actorId: string | null;
+    requestId: string | null;
+  };
+  'school.placement.changed': {
+    organizationId: string;
+    enrollmentId: string;
+    studentProfileId: string;
+    placementId: string;
+    previousPlacementId: string | null;
+    from: { classCohortId: string; sectionId: string | null; streamId: string | null; termId: string } | null;
+    to: { classCohortId: string; sectionId: string | null; streamId: string | null; termId: string };
+    movementReason: string;
+    effectiveFrom: Date;
+    actorId: string | null;
+    requestId: string | null;
+  };
   'school.assessment.status_changed': {
     organizationId: string;
     assessmentId: string;

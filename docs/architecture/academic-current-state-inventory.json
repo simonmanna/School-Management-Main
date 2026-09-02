@@ -1,0 +1,3797 @@
+{
+  "generatedFrom": "working-tree",
+  "scope": [
+    "apps",
+    "packages",
+    "scripts",
+    "apps/api/prisma/schema.prisma"
+  ],
+  "counts": {
+    "models": 76,
+    "endpoints": 499,
+    "markWrites": 45,
+    "currentClassFiles": 74,
+    "reportPaths": 74,
+    "jobs": 9,
+    "pages": 46
+  },
+  "models": [
+    "AcademicMigrationException",
+    "AcademicProgramme",
+    "AcademicRoster",
+    "AcademicRosterMember",
+    "AcademicTranscript",
+    "AcademicYear",
+    "Assessment",
+    "AssessmentComponent",
+    "AssessmentGradeOverride",
+    "AssessmentPolicy",
+    "AssessmentRubricScore",
+    "CourseEnrolment",
+    "CourseEnrolmentMethod",
+    "CourseOffering",
+    "CourseOfferingTeacher",
+    "Curriculum",
+    "CurriculumSubject",
+    "Enrollment",
+    "EnrollmentHistory",
+    "EnrollmentPlacement",
+    "EntranceExam",
+    "Exam",
+    "ExamRegistration",
+    "ExamSchedule",
+    "ExamType",
+    "ExamVenue",
+    "ExternalExamResult",
+    "ExternalExamSubjectResult",
+    "GradeEntry",
+    "GradeLevel",
+    "HomeworkAssignment",
+    "HomeworkSubmission",
+    "HrJobGrade",
+    "HrTrainingEnrollment",
+    "LessonDelivery",
+    "LessonPlan",
+    "LessonPlanActivity",
+    "LessonPlanAssessment",
+    "LessonPlanDifferentiation",
+    "LessonPlanObjective",
+    "LessonPlanReflection",
+    "LessonPlanResource",
+    "LessonPlanReview",
+    "LessonPlanRevision",
+    "LessonPlanTemplate",
+    "LmsActivityType",
+    "LmsBadge",
+    "LmsBadgeAward",
+    "LmsCapabilityOverride",
+    "LmsContext",
+    "LmsEvent",
+    "LmsFile",
+    "LmsGroup",
+    "LmsGroupMember",
+    "LmsGrouping",
+    "LmsRole",
+    "LmsRoleAssignment",
+    "LmsRoleCapability",
+    "MarkAdjustment",
+    "MarkEntry",
+    "ModLesson",
+    "ModLessonAttempt",
+    "ModLessonPage",
+    "PenaltyAssessment",
+    "ProgrammeGradeLevel",
+    "ReportCard",
+    "ReportCardSettings",
+    "ResultProcessingRun",
+    "ResultSet",
+    "ScheduledLesson",
+    "StudentAssessment",
+    "StudentAssessmentHistory",
+    "StudentEnrollment",
+    "StudentEnrollmentEvent",
+    "StudentSubjectResult",
+    "StudentTermResult"
+  ],
+  "endpoints": [
+    {
+      "method": "GET",
+      "route": "/approvals",
+      "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#list",
+      "line": 41
+    },
+    {
+      "method": "GET",
+      "route": "/approvals/:id",
+      "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#findOne",
+      "line": 46
+    },
+    {
+      "method": "POST",
+      "route": "/approvals/request",
+      "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#request",
+      "line": 51
+    },
+    {
+      "method": "POST",
+      "route": "/approvals/:id/decide",
+      "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#decide",
+      "line": 56
+    },
+    {
+      "method": "GET",
+      "route": "/reports/export/trial-balance.csv",
+      "handler": "apps/api/src/modules/accounting/reporting/export.controller.ts#trialBalanceCsv",
+      "line": 24
+    },
+    {
+      "method": "GET",
+      "route": "/reports/export/ar-aging.csv",
+      "handler": "apps/api/src/modules/accounting/reporting/export.controller.ts#arAgingCsv",
+      "line": 67
+    },
+    {
+      "method": "GET",
+      "route": "/reports/export/invoice/:id.pdf",
+      "handler": "apps/api/src/modules/accounting/reporting/export.controller.ts#invoicePdf",
+      "line": 109
+    },
+    {
+      "method": "POST",
+      "route": "/documents/:id/actions/:action",
+      "handler": "apps/api/src/modules/documents/document-actions.controller.ts#run",
+      "line": 27
+    },
+    {
+      "method": "GET",
+      "route": "/pos/posting-monitor/counts",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#counts",
+      "line": 28
+    },
+    {
+      "method": "GET",
+      "route": "/pos/posting-monitor/jobs",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#jobs",
+      "line": 34
+    },
+    {
+      "method": "POST",
+      "route": "/pos/posting-monitor/jobs/:id/retry",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#retryJob",
+      "line": 40
+    },
+    {
+      "method": "GET",
+      "route": "/pos/posting-monitor/exceptions",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#exceptions",
+      "line": 46
+    },
+    {
+      "method": "POST",
+      "route": "/pos/posting-monitor/exceptions/:id/assign",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#assign",
+      "line": 52
+    },
+    {
+      "method": "POST",
+      "route": "/pos/posting-monitor/exceptions/:id/resolve",
+      "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#resolve",
+      "line": 58
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#list",
+      "line": 28
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#findOne",
+      "line": 34
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#create",
+      "line": 40
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#update",
+      "line": 46
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/:id/publish",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#publish",
+      "line": 52
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/:id/clone",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#clone",
+      "line": 58
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/:id/archive",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#archive",
+      "line": 64
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/versions/:classId/:academicYearId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#versions",
+      "line": 70
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#remove",
+      "line": 76
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#list",
+      "line": 91
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/by-teacher/:teacherPartnerId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#byTeacher",
+      "line": 98
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/by-class/:classId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#byClass",
+      "line": 105
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#findOne",
+      "line": 111
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#create",
+      "line": 117
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#update",
+      "line": 123
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/curricula/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#remove",
+      "line": 129
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/class/:classId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#gridForClass",
+      "line": 144
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/slots",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#createSlot",
+      "line": 150
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/slots/bulk",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#bulkUpsert",
+      "line": 156
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/curricula/slots/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#updateSlot",
+      "line": 162
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/slots/check-conflicts",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#checkConflicts",
+      "line": 168
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/curricula/slots/:id",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#removeSlot",
+      "line": 175
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/teacher/:teacherPartnerId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#gridForTeacher",
+      "line": 182
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/room/:room",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#gridForRoom",
+      "line": 189
+    },
+    {
+      "method": "GET",
+      "route": "/school/curricula/subject/:subjectId",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#gridForSubject",
+      "line": 195
+    },
+    {
+      "method": "POST",
+      "route": "/school/curricula/class/:classId/publish",
+      "handler": "apps/api/src/modules/school/academics/academics.controller.ts#publishClass",
+      "line": 201
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/competencies/:id",
+      "handler": "apps/api/src/modules/school/academics/curriculum-content.controller.ts#constructor",
+      "line": 28
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/competencies/:id",
+      "handler": "apps/api/src/modules/school/academics/curriculum-content.controller.ts#constructor",
+      "line": 38
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/competencies/:id",
+      "handler": "apps/api/src/modules/school/academics/curriculum-content.controller.ts#constructor",
+      "line": 48
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/special",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#special",
+      "line": 22
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/rooms",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#listRooms",
+      "line": 30
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/rooms",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#createRoom",
+      "line": 33
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/timetable/rooms/:id",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#updateRoom",
+      "line": 36
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/timetable/rooms/:id",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#removeRoom",
+      "line": 39
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#gridForStudent",
+      "line": 45
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/availability/teacher/:teacherPartnerId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#availability",
+      "line": 52
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/availability",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#setAvailability",
+      "line": 58
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/cover/affected/:teacherPartnerId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#affectedLessons",
+      "line": 65
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/cover/assign",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#assignSubstitute",
+      "line": 77
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/rotation/:classId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#getRotation",
+      "line": 84
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/rotation/:classId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#setRotation",
+      "line": 87
+    },
+    {
+      "method": "GET",
+      "route": "/school/timetable/overrides/:classId",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#listOverrides",
+      "line": 94
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/overrides",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#createOverride",
+      "line": 99
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/timetable/overrides/:id",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#removeOverride",
+      "line": 102
+    },
+    {
+      "method": "POST",
+      "route": "/school/timetable/generate",
+      "handler": "apps/api/src/modules/school/academics/timetable-advanced.controller.ts#generate",
+      "line": 108
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#list",
+      "line": 32
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/by-status/:status",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#byStatus",
+      "line": 38
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#create",
+      "line": 44
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/identity-matches/:id/review",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#reviewIdentityMatch",
+      "line": 50
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/admissions/:id",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#update",
+      "line": 56
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/review",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#review",
+      "line": 68
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/nationalities",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#listNationalities",
+      "line": 75
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/nationalities",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createNationality",
+      "line": 81
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/admissions/nationalities/:id",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#updateNationality",
+      "line": 87
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/submit",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#submit",
+      "line": 94
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/:id/history",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#history",
+      "line": 101
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/reveal-nin",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#revealNin",
+      "line": 108
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/exam-score",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#addExamScore",
+      "line": 114
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/documents",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#addDocument",
+      "line": 120
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/documents/:documentId/verify",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#verifyDocument",
+      "line": 131
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/enroll",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enroll",
+      "line": 141
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/enroll/bulk",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#bulkEnroll",
+      "line": 147
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/screen",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#screen",
+      "line": 153
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/interview",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scheduleInterview",
+      "line": 159
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/interview/complete",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#completeInterview",
+      "line": 165
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/score",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scoreApplication",
+      "line": 171
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/offer",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#issueOffer",
+      "line": 177
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/offer/accept",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#acceptOffer",
+      "line": 183
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/offer/decline",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#declineOffer",
+      "line": 189
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/fee",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#chargeApplicationFee",
+      "line": 195
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/fee/settle",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#settleApplicationFee",
+      "line": 212
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/offers/expire-lapsed",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#expireLapsedOffers",
+      "line": 219
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/students/transfer-in",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#transferIn",
+      "line": 225
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/students/:id/withdraw",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#withdrawStudent",
+      "line": 231
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/students/:id/re-enroll",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#reEnroll",
+      "line": 237
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/cycles",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createCycle",
+      "line": 244
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/cycles",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#listCycles",
+      "line": 250
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/capacity",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#setCapacity",
+      "line": 256
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/capacity/:cycleId/status",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#capacityStatus",
+      "line": 262
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/criteria-sets",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createCriteriaSet",
+      "line": 268
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/score-weighted",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scoreApplicationWeighted",
+      "line": 274
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/:id/decision",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#recordDecision",
+      "line": 280
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/:id/eligibility",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enrollmentEligibility",
+      "line": 286
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/:id/workflow",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#applicationWorkflow",
+      "line": 299
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/waitlist/:classId/rank",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#rankWaitlist",
+      "line": 305
+    },
+    {
+      "method": "POST",
+      "route": "/school/admissions/enroll/bulk/preview",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#bulkEnrollPreview",
+      "line": 311
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/metrics/pipeline",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#pipelineMetrics",
+      "line": 317
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/reports/enrollment-summary",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enrollmentSummary",
+      "line": 323
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/admissions/:id",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#remove",
+      "line": 329
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/:id",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#findOne",
+      "line": 338
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/overview/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#overview",
+      "line": 14
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/grade-distribution/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#gradeDistribution",
+      "line": 20
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/subject-performance/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#subjectPerformance",
+      "line": 26
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/class-performance/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#classPerformance",
+      "line": 32
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/ca-vs-exam/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#caVsExam",
+      "line": 38
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/at-risk/:resultSetId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#atRisk",
+      "line": 44
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/student-trend/:studentProfileId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#studentTrend",
+      "line": 50
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/assignment-metrics/:classId/term/:termId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#assignmentMetrics",
+      "line": 56
+    },
+    {
+      "method": "GET",
+      "route": "/school/analytics/exam-attendance/:examId",
+      "handler": "apps/api/src/modules/school/analytics/analytics.controller.ts#examAttendance",
+      "line": 62
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-board",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#board",
+      "line": 26
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-board/approvals",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#approvals",
+      "line": 33
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-board/:id/sheet",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#sheet",
+      "line": 40
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-board/:id/mark",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#mark",
+      "line": 47
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-board",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#create",
+      "line": 54
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-board/:id/submit",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#submit",
+      "line": 65
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-board/:id/approval",
+      "handler": "apps/api/src/modules/school/assessment/assessment-board.controller.ts#approval",
+      "line": 72
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
+      "line": 38
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/resolve",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#resolve",
+      "line": 44
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
+      "line": 55
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
+      "line": 61
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
+      "line": 67
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
+      "line": 73
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
+      "line": 85
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-policy/:policyId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byPolicy",
+      "line": 91
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/validate/:policyId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#validate",
+      "line": 97
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
+      "line": 103
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
+      "line": 109
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
+      "line": 115
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
+      "line": 127
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-class/:classId/term/:termId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byClassTerm",
+      "line": 133
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
+      "line": 139
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
+      "line": 145
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
+      "line": 151
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/transition",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#transition",
+      "line": 157
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
+      "line": 163
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-assessment/:assessmentId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byAssessment",
+      "line": 175
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byStudent",
+      "line": 181
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/participation",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#participation",
+      "line": 187
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/mark",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#mark",
+      "line": 201
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/adjustment",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#adjustment",
+      "line": 207
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/submit",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#submit",
+      "line": 214
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/approval",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#approval",
+      "line": 221
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
+      "line": 232
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
+      "line": 238
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id/members",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#members",
+      "line": 244
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/capture",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#capture",
+      "line": 250
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/members",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#addMember",
+      "line": 256
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/assessment-policies/:id/members/:studentProfileId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#removeMember",
+      "line": 262
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/freeze",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#freeze",
+      "line": 269
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
+      "line": 280
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
+      "line": 286
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
+      "line": 292
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/fork",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#fork",
+      "line": 298
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
+      "line": 304
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byId",
+      "line": 316
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-class/:classId/term/:termId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byClassTerm",
+      "line": 322
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
+      "line": 328
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/publish",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#publish",
+      "line": 334
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/submit",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#submit",
+      "line": 340
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/grade",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#grade",
+      "line": 346
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/compute",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#compute",
+      "line": 357
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/by-student/:studentProfileId/term/:termId",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byStudent",
+      "line": 363
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id/readiness",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#readiness",
+      "line": 369
+    },
+    {
+      "method": "GET",
+      "route": "/school/assessment-policies/:id",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
+      "line": 375
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/publish",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#publish",
+      "line": 381
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/:id/lock",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#lock",
+      "line": 387
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/amendments",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#requestAmendment",
+      "line": 393
+    },
+    {
+      "method": "POST",
+      "route": "/school/assessment-policies/amendments/:id/approve",
+      "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#approveAmendment",
+      "line": 399
+    },
+    {
+      "method": "GET",
+      "route": "/school/gradebook/sheet",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#sheet",
+      "line": 21
+    },
+    {
+      "method": "GET",
+      "route": "/school/gradebook/subjects",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#subjects",
+      "line": 32
+    },
+    {
+      "method": "POST",
+      "route": "/school/gradebook/cell",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#cell",
+      "line": 38
+    },
+    {
+      "method": "POST",
+      "route": "/school/gradebook/column",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#createColumn",
+      "line": 44
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/gradebook/column/:id",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#updateColumn",
+      "line": 50
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/gradebook/column/:id",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#deleteColumn",
+      "line": 56
+    },
+    {
+      "method": "POST",
+      "route": "/school/gradebook/column/:id/lock",
+      "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#lock",
+      "line": 62
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/statuses",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#listStatuses",
+      "line": 25
+    },
+    {
+      "method": "POST",
+      "route": "/school/attendance/statuses",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#createStatus",
+      "line": 31
+    },
+    {
+      "method": "PUT",
+      "route": "/school/attendance/statuses/:id",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#updateStatus",
+      "line": 37
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/attendance/statuses/:id",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#deleteStatus",
+      "line": 43
+    },
+    {
+      "method": "POST",
+      "route": "/school/attendance/mark",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#mark",
+      "line": 59
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/register",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#register",
+      "line": 65
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/weekly",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#weekly",
+      "line": 71
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#byStudent",
+      "line": 77
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/report",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#report",
+      "line": 89
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/attendance/:id",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#correct",
+      "line": 100
+    },
+    {
+      "method": "GET",
+      "route": "/school/attendance/thresholds",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#thresholds",
+      "line": 107
+    },
+    {
+      "method": "PUT",
+      "route": "/school/attendance/thresholds",
+      "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#upsertThresholds",
+      "line": 113
+    },
+    {
+      "method": "GET",
+      "route": "/school/transcripts/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#byStudent",
+      "line": 12
+    },
+    {
+      "method": "POST",
+      "route": "/school/transcripts/build/:studentProfileId",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#build",
+      "line": 18
+    },
+    {
+      "method": "GET",
+      "route": "/school/transcripts/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#byStudent",
+      "line": 29
+    },
+    {
+      "method": "POST",
+      "route": "/school/transcripts",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#record",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "route": "/school/transcripts/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#byStudent",
+      "line": 46
+    },
+    {
+      "method": "POST",
+      "route": "/school/transcripts/issue",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#issue",
+      "line": 52
+    },
+    {
+      "method": "POST",
+      "route": "/school/transcripts/:id/revoke",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#revoke",
+      "line": 58
+    },
+    {
+      "method": "GET",
+      "route": "/school/transcripts/:code",
+      "handler": "apps/api/src/modules/school/certification/cert.controller.ts#verify",
+      "line": 74
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
+      "line": 36
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/:id",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
+      "line": 48
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/programmes/:id",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#update",
+      "line": 54
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/seed-uganda",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#seedUganda",
+      "line": 61
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
+      "line": 74
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/:id",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
+      "line": 84
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/:id/grouping-options",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#groupingOptions",
+      "line": 91
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
+      "line": 97
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/generate",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#generate",
+      "line": 103
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/programmes/:id",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#update",
+      "line": 109
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/programmes/:id/section",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#attach",
+      "line": 122
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
+      "line": 138
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#forStudent",
+      "line": 162
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/placement-at/:studentProfileId",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#placementAt",
+      "line": 172
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/:id",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
+      "line": 178
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/:id/placements",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#history",
+      "line": 184
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
+      "line": 190
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/late-admission",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#lateAdmission",
+      "line": 196
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/status",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#changeStatus",
+      "line": 202
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/withdraw",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#withdraw",
+      "line": 208
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/transfer-out",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#transferOut",
+      "line": 214
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/suspend",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#suspend",
+      "line": 220
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/complete",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#complete",
+      "line": 226
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/repeat",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#repeat",
+      "line": 232
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:id/promote",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#promote",
+      "line": 238
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/roster/:cohortId",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#roster",
+      "line": 252
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:enrollmentId/preview",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#preview",
+      "line": 265
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/:enrollmentId/move",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#move",
+      "line": 271
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/bulk",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#bulk",
+      "line": 277
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/term-rollover",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#termRollover",
+      "line": 283
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/backfill",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#backfill",
+      "line": 296
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/reconcile",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#reconcile",
+      "line": 302
+    },
+    {
+      "method": "GET",
+      "route": "/school/programmes/exceptions",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#exceptions",
+      "line": 308
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/exceptions/:id/resolve",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#resolveException",
+      "line": 317
+    },
+    {
+      "method": "POST",
+      "route": "/school/programmes/rollback/:migrationRunId",
+      "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#rollback",
+      "line": 323
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-venues",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#list",
+      "line": 19
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-venues/:id",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#findOne",
+      "line": 25
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-venues",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#create",
+      "line": 31
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-venues/:id",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#update",
+      "line": 37
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-venues/:id",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#remove",
+      "line": 43
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-venues/by-exam/:examId",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#byExam",
+      "line": 55
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-venues/register-class",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#registerClass",
+      "line": 61
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-venues/register",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#register",
+      "line": 67
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-venues/allocate-seats",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#allocateSeats",
+      "line": 73
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-venues/:id",
+      "handler": "apps/api/src/modules/school/examinations/exam-ops.controller.ts#updateStatus",
+      "line": 79
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 43
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
+      "line": 49
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 55
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 61
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 67
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 79
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
+      "line": 85
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 91
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 97
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/:id/publish",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publish",
+      "line": 103
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/:id/close",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#close",
+      "line": 109
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 115
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 127
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
+      "line": 133
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 139
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 145
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 151
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/bulk-upsert",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bulkUpsert",
+      "line": 166
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/submit/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#submit",
+      "line": 172
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/approve/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#approve",
+      "line": 178
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/reject/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#reject",
+      "line": 184
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/by-class/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#byClass",
+      "line": 190
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 201
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/default",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#default",
+      "line": 207
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
+      "line": 213
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 219
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 225
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 231
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/generate",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#generate",
+      "line": 246
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/generate-class",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#generateClass",
+      "line": 253
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/class-roll",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#classRoll",
+      "line": 260
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/class-pdf",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#classPdf",
+      "line": 278
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/:id/publish",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publish",
+      "line": 297
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/publish-class",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publishClass",
+      "line": 304
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/:id/unpublish",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#unpublish",
+      "line": 310
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/comment",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#updateComment",
+      "line": 317
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/by-student/:studentProfileId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#byStudent",
+      "line": 323
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id/pdf",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#pdfDownload",
+      "line": 339
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#schema",
+      "line": 362
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#get",
+      "line": 371
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 378
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/preset",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#applyPreset",
+      "line": 385
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/reset",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#reset",
+      "line": 393
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 405
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 411
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 417
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 423
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/assign",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#assign",
+      "line": 431
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/assign/:examScheduleId/:invigilatorId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#unassign",
+      "line": 437
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/by-schedule/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bySchedule",
+      "line": 444
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 455
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
+      "line": 461
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 467
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 473
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 479
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types/achievement",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#recordAchievement",
+      "line": 487
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/achievements/student/:studentProfileId/term/:termId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#achievementsByStudentTerm",
+      "line": 493
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/achievements/subject/:subjectId/term/:termId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#achievementsBySubjectTerm",
+      "line": 499
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
+      "line": 510
+    },
+    {
+      "method": "GET",
+      "route": "/school/exam-types/by-schedule/:examScheduleId",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bySchedule",
+      "line": 516
+    },
+    {
+      "method": "POST",
+      "route": "/school/exam-types",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
+      "line": 522
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
+      "line": 528
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/exam-types/:id",
+      "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
+      "line": 534
+    },
+    {
+      "method": "GET",
+      "route": "/school/marks/exams",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#exams",
+      "line": 23
+    },
+    {
+      "method": "GET",
+      "route": "/school/marks/coverage",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#coverage",
+      "line": 29
+    },
+    {
+      "method": "GET",
+      "route": "/school/marks/subjects",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#subjects",
+      "line": 35
+    },
+    {
+      "method": "POST",
+      "route": "/school/marks/apply-classes",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#applyClasses",
+      "line": 41
+    },
+    {
+      "method": "POST",
+      "route": "/school/marks/remove-class",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#removeClass",
+      "line": 47
+    },
+    {
+      "method": "GET",
+      "route": "/school/marks/sheet",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#sheet",
+      "line": 53
+    },
+    {
+      "method": "POST",
+      "route": "/school/marks/entry",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#saveMark",
+      "line": 64
+    },
+    {
+      "method": "GET",
+      "route": "/school/marks/grid",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#grid",
+      "line": 70
+    },
+    {
+      "method": "POST",
+      "route": "/school/marks/lock",
+      "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#lock",
+      "line": 80
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#list",
+      "line": 22
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years/current",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#current",
+      "line": 28
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#findOne",
+      "line": 36
+    },
+    {
+      "method": "POST",
+      "route": "/school/academic-years",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#create",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "route": "/school/academic-years/set-current",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#setCurrent",
+      "line": 48
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#update",
+      "line": 54
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#remove",
+      "line": 60
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#list",
+      "line": 72
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years/current",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#current",
+      "line": 78
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years/by-year/:academicYearId",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#byYear",
+      "line": 84
+    },
+    {
+      "method": "GET",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#findOne",
+      "line": 90
+    },
+    {
+      "method": "POST",
+      "route": "/school/academic-years",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#create",
+      "line": 96
+    },
+    {
+      "method": "POST",
+      "route": "/school/academic-years/set-current",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#setCurrent",
+      "line": 102
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#update",
+      "line": 108
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/academic-years/:id",
+      "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#remove",
+      "line": 114
+    },
+    {
+      "method": "GET",
+      "route": "/school/grade-levels",
+      "handler": "apps/api/src/modules/school/foundation/grade-level.controller.ts#list",
+      "line": 12
+    },
+    {
+      "method": "GET",
+      "route": "/school/grade-levels/:id",
+      "handler": "apps/api/src/modules/school/foundation/grade-level.controller.ts#findOne",
+      "line": 18
+    },
+    {
+      "method": "POST",
+      "route": "/school/grade-levels",
+      "handler": "apps/api/src/modules/school/foundation/grade-level.controller.ts#create",
+      "line": 24
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/grade-levels/:id",
+      "handler": "apps/api/src/modules/school/foundation/grade-level.controller.ts#update",
+      "line": 30
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/grade-levels/:id",
+      "handler": "apps/api/src/modules/school/foundation/grade-level.controller.ts#remove",
+      "line": 36
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/course-offerings",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#createOffering",
+      "line": 27
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/course-offerings/from-teacher-assignment",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#fromTeacherAssignment",
+      "line": 33
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/course-offerings",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#listOfferings",
+      "line": 39
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/course-offerings/:id/teachers",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#addTeacher",
+      "line": 45
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#create",
+      "line": 65
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/lesson-plans",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#list",
+      "line": 71
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/lesson-plans/:id",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#get",
+      "line": 82
+    },
+    {
+      "method": "PUT",
+      "route": "/school/lp/lesson-plans/:id",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#update",
+      "line": 88
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans/:id/submit",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#submit",
+      "line": 94
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans/:id/review",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#review",
+      "line": 100
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans/:id/transition",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#transition",
+      "line": 114
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans/:id/archive",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#archive",
+      "line": 123
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/lesson-plans/:id/save-template",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#saveTemplate",
+      "line": 129
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/templates",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#listTemplates",
+      "line": 135
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/scheduled-lessons/from-timetable",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#fromTimetable",
+      "line": 142
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/teacher-dashboard",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#dashboard",
+      "line": 149
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/curriculum-coverage",
+      "handler": "apps/api/src/modules/school/lms/lesson-planning.controller.ts#coverage",
+      "line": 156
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/scheduled-lessons",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#createScheduledLesson",
+      "line": 11
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/scheduled-lessons",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#listScheduledLessons",
+      "line": 17
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/scheduled-lessons/deliver",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#deliver",
+      "line": 23
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/discussions",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#createDiscussion",
+      "line": 30
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/discussions",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#listDiscussions",
+      "line": 36
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/discussions/:id",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#getDiscussion",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/discussions/:id/posts",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#addPost",
+      "line": 48
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/lp/discussions/:id",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#deleteDiscussion",
+      "line": 54
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/homework/submit",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#submitHomework",
+      "line": 61
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/homework/grade",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#gradeHomework",
+      "line": 67
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/evidence",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#recordEvidence",
+      "line": 74
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/mastery/objective/recompute",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#recomputeObjective",
+      "line": 80
+    },
+    {
+      "method": "POST",
+      "route": "/school/lp/mastery/course/recompute",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#recomputeCourse",
+      "line": 86
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/reporting/objective-mastery",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#objectiveMastery",
+      "line": 93
+    },
+    {
+      "method": "GET",
+      "route": "/school/lp/reporting/course-progress",
+      "handler": "apps/api/src/modules/school/lms/lms-execution.controller.ts#courseProgressList",
+      "line": 99
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#list",
+      "line": 24
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/by-class/:classId",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#byClass",
+      "line": 30
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#findOne",
+      "line": 36
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/:id/detail",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#detail",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#create",
+      "line": 48
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#update",
+      "line": 54
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework/submit",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#submit",
+      "line": 60
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework/grade",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#grade",
+      "line": 66
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#remove",
+      "line": 72
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#list",
+      "line": 84
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#findOne",
+      "line": 90
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#list",
+      "line": 101
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#findOne",
+      "line": 107
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#create",
+      "line": 113
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#update",
+      "line": 119
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#remove",
+      "line": 125
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#list",
+      "line": 137
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/feed",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#feed",
+      "line": 143
+    },
+    {
+      "method": "GET",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#findOne",
+      "line": 149
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#create",
+      "line": 155
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#update",
+      "line": 161
+    },
+    {
+      "method": "POST",
+      "route": "/school/homework/:id/publish",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#publish",
+      "line": 167
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/homework/:id",
+      "handler": "apps/api/src/modules/school/lms/lms.controller.ts#remove",
+      "line": 173
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/roles/seed",
+      "handler": "apps/api/src/modules/school/lms/moodle/context/roles.controller.ts#seed",
+      "line": 12
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/roles",
+      "handler": "apps/api/src/modules/school/lms/moodle/context/roles.controller.ts#list",
+      "line": 18
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/roles/assign",
+      "handler": "apps/api/src/modules/school/lms/moodle/context/roles.controller.ts#assign",
+      "line": 24
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/lms/roles/assign/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/context/roles.controller.ts#unassign",
+      "line": 30
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/roles/participants",
+      "handler": "apps/api/src/modules/school/lms/moodle/context/roles.controller.ts#participants",
+      "line": 36
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#listCourses",
+      "line": 29
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#coursePage",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/permissions",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#permissions",
+      "line": 57
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/courses/:id/settings",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateSettings",
+      "line": 66
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/sections/ensure",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#ensureSections",
+      "line": 74
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/sections",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#addSection",
+      "line": 80
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/sections/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateSection",
+      "line": 88
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/sections/:id/move",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#moveSection",
+      "line": 96
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/lms/sections/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#deleteSection",
+      "line": 102
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/modules",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#addModule",
+      "line": 109
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/modules/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateModule",
+      "line": 117
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/modules/:id/instance",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateInstance",
+      "line": 125
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/modules/:id/move",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#moveModule",
+      "line": 133
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/modules/:id/visibility",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#setVisibility",
+      "line": 141
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/modules/:id/duplicate",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#duplicate",
+      "line": 149
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/lms/modules/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#removeModule",
+      "line": 157
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/modules/:id/view",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#viewModule",
+      "line": 171
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/modules/:id/action/:action",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#actionModule",
+      "line": 179
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/question-categories",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#listCategories",
+      "line": 190
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/question-categories",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#createCategory",
+      "line": 196
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/questions/:id/version",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#versionQuestion",
+      "line": 202
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/lesson-plans/:id/publish-to-course",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#publishToCourse",
+      "line": 209
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/plan-coverage",
+      "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#coverage",
+      "line": 215
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/files/attach",
+      "handler": "apps/api/src/modules/school/lms/moodle/files/lms-file.controller.ts#attach",
+      "line": 18
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/files",
+      "handler": "apps/api/src/modules/school/lms/moodle/files/lms-file.controller.ts#list",
+      "line": 26
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/files/:id/url",
+      "handler": "apps/api/src/modules/school/lms/moodle/files/lms-file.controller.ts#url",
+      "line": 37
+    },
+    {
+      "method": "DELETE",
+      "route": "/school/lms/files/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/files/lms-file.controller.ts#remove",
+      "line": 43
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/my",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#dashboard",
+      "line": 23
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/my/courses",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#courses",
+      "line": 29
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/my/due",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#due",
+      "line": 35
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/my/grades",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#grades",
+      "line": 41
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/my/children",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#children",
+      "line": 48
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/enrolment-methods",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#methods",
+      "line": 41
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/enrolments",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#enrolments",
+      "line": 45
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/enrol",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#enrol",
+      "line": 49
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/enrol/sync",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#syncRoster",
+      "line": 53
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/enrolments/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#setEnrolStatus",
+      "line": 57
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/groups",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#listGroups",
+      "line": 62
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/groups",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#createGroup",
+      "line": 66
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/groups/:id/members",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#addMember",
+      "line": 70
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/groups/:id/members",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#members",
+      "line": 74
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/groupings",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#listGroupings",
+      "line": 78
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/groupings",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#createGrouping",
+      "line": 82
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/modules/:id/completion",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#setCompletion",
+      "line": 95
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/completion-report",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#completionReport",
+      "line": 123
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/progress/:studentProfileId",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#progress",
+      "line": 141
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/gradebook",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#gradebookReport",
+      "line": 151
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/gradebook/user/:studentProfileId",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#userReport",
+      "line": 157
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/courses/:id/gradebook/cell",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#editCell",
+      "line": 166
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/gradebook/override",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#override",
+      "line": 172
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/gradebook/export",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#exportGrades",
+      "line": 178
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/gradebook/import",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#importGrades",
+      "line": 182
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/logs",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#logs",
+      "line": 187
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/activity-report",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#activityReport",
+      "line": 193
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/participation",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#participation",
+      "line": 199
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/outline",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#outline",
+      "line": 205
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/badges",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#listBadges",
+      "line": 212
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/badges",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#createBadge",
+      "line": 216
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/badges/:id/award",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#awardBadge",
+      "line": 220
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/maintenance/orphans",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#scanOrphans",
+      "line": 230
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/maintenance/orphans/repair",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#repairOrphans",
+      "line": 237
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/calendar",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#calendarRange",
+      "line": 249
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/engagement",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#engagement",
+      "line": 263
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/courses/:id/not-viewed/:moduleId",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#notViewed",
+      "line": 272
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/export",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#exportCourse",
+      "line": 282
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/:id/import",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#importCourse",
+      "line": 290
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/courses/rollover",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#rollover",
+      "line": 302
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/lti/.well-known/jwks.json",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#jwks",
+      "line": 23
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/lti/:id/launch/begin",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#begin",
+      "line": 29
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/lti/launch",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#launch",
+      "line": 39
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/lti/:id/lineitem",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#lineItem",
+      "line": 59
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/lti/:id/scores",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#scores",
+      "line": 66
+    },
+    {
+      "method": "POST",
+      "route": "/school/lms/lti/keys/rotate",
+      "handler": "apps/api/src/modules/school/lms/moodle/lti/lti.controller.ts#rotate",
+      "line": 72
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/packages/:kind/:fileId/entry-point",
+      "handler": "apps/api/src/modules/school/lms/moodle/packages/package-serve.controller.ts#entryPoint",
+      "line": 19
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/packages/:kind/:fileId/*path",
+      "handler": "apps/api/src/modules/school/lms/moodle/packages/package-serve.controller.ts#asset",
+      "line": 25
+    },
+    {
+      "method": "GET",
+      "route": "/school/meals/sessions/today",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#today",
+      "line": 12
+    },
+    {
+      "method": "GET",
+      "route": "/school/meals/sessions",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#list",
+      "line": 18
+    },
+    {
+      "method": "GET",
+      "route": "/school/meals/sessions/:id",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#get",
+      "line": 24
+    },
+    {
+      "method": "GET",
+      "route": "/school/meals/sessions/:id/roster",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#roster",
+      "line": 30
+    },
+    {
+      "method": "POST",
+      "route": "/school/meals/sessions/open",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#open",
+      "line": 36
+    },
+    {
+      "method": "POST",
+      "route": "/school/meals/sessions/:id/mark",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#mark",
+      "line": 42
+    },
+    {
+      "method": "POST",
+      "route": "/school/meals/sessions/:id/close",
+      "handler": "apps/api/src/modules/school/meals/meal-session.controller.ts#close",
+      "line": 48
+    },
+    {
+      "method": "GET",
+      "route": "/school/enrollments",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#list",
+      "line": 15
+    },
+    {
+      "method": "GET",
+      "route": "/school/enrollments/:id/history",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#history",
+      "line": 25
+    },
+    {
+      "method": "POST",
+      "route": "/school/enrollments/register",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#register",
+      "line": 31
+    },
+    {
+      "method": "POST",
+      "route": "/school/enrollments",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#enroll",
+      "line": 37
+    },
+    {
+      "method": "POST",
+      "route": "/school/enrollments/:id/transfer-out",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#transferOut",
+      "line": 43
+    },
+    {
+      "method": "POST",
+      "route": "/school/enrollments/:id/withdraw",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#withdraw",
+      "line": 49
+    },
+    {
+      "method": "POST",
+      "route": "/school/enrollments/:id/re-enroll",
+      "handler": "apps/api/src/modules/school/people/enrollment.controller.ts#reEnroll",
+      "line": 55
+    },
+    {
+      "method": "POST",
+      "route": "/school/promotion/promote",
+      "handler": "apps/api/src/modules/school/people/promotion.controller.ts#promote",
+      "line": 12
+    },
+    {
+      "method": "POST",
+      "route": "/school/promotion/rollover",
+      "handler": "apps/api/src/modules/school/people/promotion.controller.ts#rollover",
+      "line": 22
+    },
+    {
+      "method": "POST",
+      "route": "/school/staff-attendance/mark",
+      "handler": "apps/api/src/modules/school/people/staff-attendance.controller.ts#mark",
+      "line": 11
+    },
+    {
+      "method": "GET",
+      "route": "/school/staff-attendance/by-date",
+      "handler": "apps/api/src/modules/school/people/staff-attendance.controller.ts#byDate",
+      "line": 17
+    },
+    {
+      "method": "GET",
+      "route": "/school/staff-attendance/by-staff/:staffProfileId",
+      "handler": "apps/api/src/modules/school/people/staff-attendance.controller.ts#byStaff",
+      "line": 23
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/admin",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#adminDashboard",
+      "line": 10
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/academic",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#academicDashboard",
+      "line": 16
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/finance",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#financeDashboard",
+      "line": 22
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/operational",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#operationalDashboard",
+      "line": 28
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/outstanding-by-class",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#outstandingByClass",
+      "line": 34
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/attendance-today",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#attendanceToday",
+      "line": 40
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/top-performers",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#topPerformers",
+      "line": 46
+    },
+    {
+      "method": "GET",
+      "route": "/school/reports/daily-collections",
+      "handler": "apps/api/src/modules/school/reporting/reporting.controller.ts#dailyCollections",
+      "line": 52
+    }
+  ],
+  "markWrites": [
+    {
+      "model": "studentAssessment",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 231
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "update",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 239
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 261
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "update",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 270
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 237
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 238
+    },
+    {
+      "model": "resultSet",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 290
+    },
+    {
+      "model": "resultSet",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 606
+    },
+    {
+      "model": "reportCard",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 323
+    },
+    {
+      "model": "reportCard",
+      "operation": "create",
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "line": 632
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/assessment-board.service.ts",
+      "line": 473
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "create",
+      "file": "apps/api/src/modules/school/assessment/assignment.service.ts",
+      "line": 114
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/assignment.service.ts",
+      "line": 190
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/assessment/cbt-result-bridge.service.ts",
+      "line": 123
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/gradebook.service.ts",
+      "line": 257
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 102
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "create",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 150
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 280
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 335
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 462
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 485
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 495
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 127
+    },
+    {
+      "model": "markEntry",
+      "operation": "deleteMany",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 242
+    },
+    {
+      "model": "markEntry",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/assessment/marking.service.ts",
+      "line": 252
+    },
+    {
+      "model": "resultSet",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 116
+    },
+    {
+      "model": "resultSet",
+      "operation": "deleteMany",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 118
+    },
+    {
+      "model": "resultSet",
+      "operation": "create",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 122
+    },
+    {
+      "model": "resultSet",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 225
+    },
+    {
+      "model": "resultSet",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 256
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/cbt/cbt.service.ts",
+      "line": 245
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 292
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 331
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 388
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 421
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 466
+    },
+    {
+      "model": "reportCard",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 547
+    },
+    {
+      "model": "reportCard",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 825
+    },
+    {
+      "model": "reportCard",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 880
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/lms/moodle/lti/lti.service.ts",
+      "line": 280
+    },
+    {
+      "model": "markEntry",
+      "operation": "createMany",
+      "file": "apps/api/src/scripts/backfill-markentry-from-effective.ts",
+      "line": 108
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/test/unit/marking-recompute.spec.ts",
+      "line": 82
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/test/unit/marking-recompute.spec.ts",
+      "line": 92
+    },
+    {
+      "model": "markEntry",
+      "operation": "create",
+      "file": "apps/api/test/unit/marking-recompute.spec.ts",
+      "line": 130
+    },
+    {
+      "model": "gradeEntry",
+      "operation": "create",
+      "file": "scripts/seed-school-extra.ts",
+      "line": 209
+    }
+  ],
+  "currentClassReads": [
+    {
+      "file": "apps/api/prisma/seed-academics-phase0.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/prisma/seed-school-demo.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/communication/audience/audience-resolver.service.spec.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/src/modules/communication/audience/audience-resolver.service.ts",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/api/src/modules/core/reporting/report.types.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/src/modules/school/admissions/admissions.service.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/src/modules/school/assessment/assessment-board.service.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/src/modules/school/assessment/gradebook.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/assessment/roster.service.ts",
+      "occurrences": 5
+    },
+    {
+      "file": "apps/api/src/modules/school/enrollment/enrollment-backfill.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/enrollment/placement.service.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/src/modules/school/examinations/exam-ops.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/examinations/marks-workspace.service.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/advanced.service.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/billing-run.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/billing.service.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/catalog.service.ts",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/fee-notifications.subscriber.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/fees/school-finance-query.service.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/src/modules/school/lms/lms.service.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/src/modules/school/meals/meal-billing.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/meals/meal-session.service.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/people/dto.types.ts",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/api/src/modules/school/people/enrollment.service.ts",
+      "occurrences": 5
+    },
+    {
+      "file": "apps/api/src/modules/school/people/promotion.service.ts",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/api/src/modules/school/people/student.service.ts",
+      "occurrences": 9
+    },
+    {
+      "file": "apps/api/src/modules/school/portals/portals.service.ts",
+      "occurrences": 10
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/definitions/academics.reports.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/definitions/enrollment.reports.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/definitions/student.reports.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/definitions/teacher.reports.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/filter-resolver.service.ts",
+      "occurrences": 5
+    },
+    {
+      "file": "apps/api/src/modules/school/reporting/reporting.service.ts",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/api/test/integration/http-validation-contract.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/integration/school-admissions-attendance.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-assessment-core.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-assessment-roster.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-assessment-unified.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-elementary-e2e.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-enrollment-placement.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/integration/school-exam-operations.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-exam-workspace.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-fees-concurrency.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-fees-integrity.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-grade-sod.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-gradebook.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-happy-path.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-lms-authz.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-lms-e2e.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/integration/school-lms-grade-bridge.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-meals-finance-kitchen.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-meals-lifecycle.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-portal-onboarding.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-promotion-gate.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-promotion-lifecycle.spec.ts",
+      "occurrences": 8
+    },
+    {
+      "file": "apps/api/test/integration/school-reporting.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/integration/school-result-integrity.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/integration/school-teacher-ownership.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/school-tenant-isolation.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/unit/admission-fsm.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/unit/billing-calc.spec.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/api/test/unit/fees-operations.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/unit/fees-pricing-and-period.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/unit/fees-statement-and-targeting.spec.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/api/test/unit/marks-workspace.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/unit/optional-fees-billing.spec.ts",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/portal/src/lib/portal-api.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "apps/web/src/features/school/api.ts",
+      "occurrences": 4
+    },
+    {
+      "file": "apps/web/src/pages/school/library.tsx",
+      "occurrences": 1
+    },
+    {
+      "file": "apps/web/src/pages/school/promotion.tsx",
+      "occurrences": 3
+    },
+    {
+      "file": "apps/web/src/pages/school/student-360.tsx",
+      "occurrences": 10
+    },
+    {
+      "file": "apps/web/src/pages/school/students.tsx",
+      "occurrences": 8
+    },
+    {
+      "file": "scripts/seed-school-extra.ts",
+      "occurrences": 2
+    },
+    {
+      "file": "scripts/seed-school.ts",
+      "occurrences": 1
+    }
+  ],
+  "reportPaths": [
+    "apps/api/prisma/seed-academics-phase0.ts",
+    "apps/api/prisma/seed-school-demo.ts",
+    "apps/api/src/kernel/prisma/tenancy.extension.ts",
+    "apps/api/src/kernel/sequence/sequence.service.ts",
+    "apps/api/src/modules/core/reporting/report-params.dto.ts",
+    "apps/api/src/modules/core/reporting/report.types.ts",
+    "apps/api/src/modules/documents/dms.seed-data.ts",
+    "apps/api/src/modules/school/analytics/analytics.controller.ts",
+    "apps/api/src/modules/school/analytics/analytics.service.ts",
+    "apps/api/src/modules/school/assessment/assessment.controller.ts",
+    "apps/api/src/modules/school/assessment/dto.types.ts",
+    "apps/api/src/modules/school/assessment/gradebook.service.ts",
+    "apps/api/src/modules/school/assessment/result-computation.golden.spec.ts",
+    "apps/api/src/modules/school/assessment/result-computation.ts",
+    "apps/api/src/modules/school/assessment/result-run.service.ts",
+    "apps/api/src/modules/school/assessment/subject-roles.ts",
+    "apps/api/src/modules/school/certification/cert.service.ts",
+    "apps/api/src/modules/school/examinations/dto.types.ts",
+    "apps/api/src/modules/school/examinations/examinations.controller.ts",
+    "apps/api/src/modules/school/examinations/examinations.module.ts",
+    "apps/api/src/modules/school/examinations/examinations.service.ts",
+    "apps/api/src/modules/school/examinations/grading.service.ts",
+    "apps/api/src/modules/school/examinations/marks-workspace.service.ts",
+    "apps/api/src/modules/school/examinations/report-card-pdf.service.ts",
+    "apps/api/src/modules/school/examinations/report-card-settings.schema.ts",
+    "apps/api/src/modules/school/examinations/report-card-settings.service.ts",
+    "apps/api/src/modules/school/examinations/report-card-template.service.ts",
+    "apps/api/src/modules/school/fees/school-finance-query.service.ts",
+    "apps/api/src/modules/school/library/library-transport-hostel-cafeteria.service.ts",
+    "apps/api/src/modules/school/people/promotion.service.ts",
+    "apps/api/src/modules/school/portals/portal-documents.service.ts",
+    "apps/api/src/modules/school/portals/portals.controller.ts",
+    "apps/api/src/modules/school/portals/portals.module.ts",
+    "apps/api/src/modules/school/portals/portals.service.ts",
+    "apps/api/src/modules/school/reporting/definitions/academics.reports.ts",
+    "apps/api/src/modules/school/reporting/definitions/teacher.reports.ts",
+    "apps/api/src/modules/school/reporting/reporting.service.ts",
+    "apps/api/src/modules/school/reporting/school-report-deps.ts",
+    "apps/api/src/modules/school/reporting/school-reports.module.ts",
+    "apps/api/test/integration/school-analytics.spec.ts",
+    "apps/api/test/integration/school-certification.spec.ts",
+    "apps/api/test/integration/school-grade-sod.spec.ts",
+    "apps/api/test/integration/school-gradebook.spec.ts",
+    "apps/api/test/integration/school-gradeentry-parity.spec.ts",
+    "apps/api/test/integration/school-promotion-gate.spec.ts",
+    "apps/api/test/integration/school-reporting.spec.ts",
+    "apps/api/test/integration/school-result-integrity.spec.ts",
+    "apps/api/test/unit/class-rank.spec.ts",
+    "apps/api/test/unit/report-card-pdf-render.spec.ts",
+    "apps/api/test/unit/report-card-settings-schema.spec.ts",
+    "apps/api/test/unit/report-card-template.spec.ts",
+    "apps/portal/src/lib/portal-api.ts",
+    "apps/portal/src/routes/shared/results-panel.tsx",
+    "apps/web/src/App.tsx",
+    "apps/web/src/components/layout/app-shell.tsx",
+    "apps/web/src/features/school/api.ts",
+    "apps/web/src/features/school/reports-api.ts",
+    "apps/web/src/pages/pos/CustomerProfileDialog.tsx",
+    "apps/web/src/pages/pos/ReportsPage.tsx",
+    "apps/web/src/pages/pos/cash/CashRegistersPage.tsx",
+    "apps/web/src/pages/reports/ReportCenterPage.tsx",
+    "apps/web/src/pages/school/_components/exam-workflow.tsx",
+    "apps/web/src/pages/school/_components/report-card-preview.tsx",
+    "apps/web/src/pages/school/analytics.tsx",
+    "apps/web/src/pages/school/dashboard.tsx",
+    "apps/web/src/pages/school/exam-results.tsx",
+    "apps/web/src/pages/school/library.tsx",
+    "apps/web/src/pages/school/report-card-settings.tsx",
+    "apps/web/src/pages/school/report-cards.tsx",
+    "apps/web/src/pages/school/reports/_components/report-filter-bar.tsx",
+    "apps/web/src/pages/school/reports/index.tsx",
+    "apps/web/src/pages/school/results.tsx",
+    "apps/web/src/pages/school/student-360.tsx",
+    "packages/shared/src/events.ts"
+  ],
+  "jobs": [
+    "apps/api/src/kernel/events/outbox.worker.ts",
+    "apps/api/src/kernel/recurring/recurring.service.ts",
+    "apps/api/src/modules/backup/backup.service.ts",
+    "apps/api/src/modules/repair/repair-cron.worker.ts",
+    "apps/api/src/modules/school/lms/moodle/maintenance/orphan-check.service.ts",
+    "apps/api/src/modules/school/lms/moodle/notify/lms-notify.service.ts",
+    "apps/api/src/modules/school/transport/transport.module.ts",
+    "apps/web/src/features/school/offline-queue.ts",
+    "apps/web/src/pages/school/lms/quiz-attempt.tsx"
+  ],
+  "pages": [
+    "apps/portal/src/routes/parent/results.tsx",
+    "apps/portal/src/routes/shared/results-panel.tsx",
+    "apps/portal/src/routes/student/results.tsx",
+    "apps/portal/src/routes/teacher/marking.tsx",
+    "apps/portal/src/site/pages/academics.tsx",
+    "apps/web/src/pages/hr/HrJobGradesPage.tsx",
+    "apps/web/src/pages/school/_components/assessment-form.tsx",
+    "apps/web/src/pages/school/_components/exam-workflow.tsx",
+    "apps/web/src/pages/school/_components/mark-grid.tsx",
+    "apps/web/src/pages/school/_components/report-card-preview.tsx",
+    "apps/web/src/pages/school/academic-years.tsx",
+    "apps/web/src/pages/school/assessment-mark.tsx",
+    "apps/web/src/pages/school/assessment-ops.tsx",
+    "apps/web/src/pages/school/assessment.tsx",
+    "apps/web/src/pages/school/assessments.tsx",
+    "apps/web/src/pages/school/enrollment-summary.tsx",
+    "apps/web/src/pages/school/enrollment/_shared.tsx",
+    "apps/web/src/pages/school/enrollment/migration.tsx",
+    "apps/web/src/pages/school/enrollment/programmes.tsx",
+    "apps/web/src/pages/school/enrollment/workspace.tsx",
+    "apps/web/src/pages/school/enter-marks.tsx",
+    "apps/web/src/pages/school/exam-classes.tsx",
+    "apps/web/src/pages/school/exam-ops.tsx",
+    "apps/web/src/pages/school/exam-results.tsx",
+    "apps/web/src/pages/school/exam-workspace.tsx",
+    "apps/web/src/pages/school/gradebook.tsx",
+    "apps/web/src/pages/school/homework.tsx",
+    "apps/web/src/pages/school/lms/calendar.tsx",
+    "apps/web/src/pages/school/lms/course-offerings.tsx",
+    "apps/web/src/pages/school/lms/course-page.tsx",
+    "apps/web/src/pages/school/lms/course-reports.tsx",
+    "apps/web/src/pages/school/lms/courses.tsx",
+    "apps/web/src/pages/school/lms/coverage.tsx",
+    "apps/web/src/pages/school/lms/discussions.tsx",
+    "apps/web/src/pages/school/lms/lesson-plans.tsx",
+    "apps/web/src/pages/school/lms/mastery.tsx",
+    "apps/web/src/pages/school/lms/module-view.tsx",
+    "apps/web/src/pages/school/lms/my-learning.tsx",
+    "apps/web/src/pages/school/lms/package-player.tsx",
+    "apps/web/src/pages/school/lms/participants.tsx",
+    "apps/web/src/pages/school/lms/quiz-attempt.tsx",
+    "apps/web/src/pages/school/lms/scheduled-lessons.tsx",
+    "apps/web/src/pages/school/lms/templates.tsx",
+    "apps/web/src/pages/school/report-card-settings.tsx",
+    "apps/web/src/pages/school/report-cards.tsx",
+    "apps/web/src/pages/school/results.tsx"
+  ]
+}

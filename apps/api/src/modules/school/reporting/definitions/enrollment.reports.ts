@@ -176,7 +176,7 @@ export function enrollmentReports(deps: SchoolReportDeps): ReportDefinition<any>
               male: b.male,
               female: b.female,
               capacity: classInfo?.capacity ?? 0,
-              utilisation: classInfo?.capacity > 0 ? (b.enrolled / classInfo.capacity) * 100 : 0,
+              utilisation: (classInfo?.capacity ?? 0) > 0 ? (b.enrolled / (classInfo?.capacity ?? 0)) * 100 : 0,
               netChange,
               growthRate,
             });

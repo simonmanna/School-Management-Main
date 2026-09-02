@@ -12,7 +12,11 @@ COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/web apps/web
 ARG VITE_API_URL=http://localhost:3000
+ARG VITE_ENABLE_SCHOOL=false
+ARG VITE_ENABLE_ADVANCED_LMS=false
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_ENABLE_SCHOOL=${VITE_ENABLE_SCHOOL}
+ENV VITE_ENABLE_ADVANCED_LMS=${VITE_ENABLE_ADVANCED_LMS}
 RUN pnpm --filter @erp/shared build
 RUN pnpm --filter @erp/web build
 

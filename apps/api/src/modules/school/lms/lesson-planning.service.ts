@@ -73,18 +73,29 @@ export class LessonPlanningService {
     if (existing) {
       offering = await this.prisma.client.courseOffering.update({
         where: { id: existing.id },
-        data: { curriculumId: dto.curriculumId, status: 'active' },
+        data: { curriculumId: dto.curriculumId },
       });
     } else {
+      const [subject, schoolClass, term, cohort] = await Promise.all([
+        this.prisma.client.subject.findFirst({ where: { id: dto.subjectId } }),
+        this.prisma.client.schoolClass.findFirst({ where: { id: dto.classId } }),
+        this.prisma.client.term.findFirst({ where: { id: dto.termId } }),
+        this.prisma.client.classCohort.findFirst({ where: { academicYearId: dto.academicYearId, classId: dto.classId } }),
+      ]);
       offering = await this.prisma.client.courseOffering.create({
         data: {
           organizationId: org,
+          code: `LEGACY-${dto.termId.slice(0, 6)}-${dto.subjectId.slice(0, 6)}-${dto.classId.slice(0, 6)}-${(dto.sectionId ?? 'ALL').slice(0, 6)}`.toUpperCase(),
+          name: `${schoolClass?.name ?? 'Class'} ${subject?.name ?? 'Subject'}`,
           academicYearId: dto.academicYearId,
           termId: dto.termId,
+          programmeId: cohort?.programmeId,
+          classCohortId: cohort?.id,
           subjectId: dto.subjectId,
           classId: dto.classId,
           sectionId: dto.sectionId,
           curriculumId: dto.curriculumId,
+          effectiveFrom: term?.startDate ?? new Date(),
         },
       });
     }
@@ -92,7 +103,7 @@ export class LessonPlanningService {
       for (const t of dto.teacherPartnerIds) {
         await this.prisma.client.courseOfferingTeacher.upsert({
           where: { courseOfferingId_teacherPartnerId: { courseOfferingId: offering.id, teacherPartnerId: t } },
-          create: { organizationId: org, courseOfferingId: offering.id, teacherPartnerId: t, role: 'lead' },
+          create: { organizationId: org, courseOfferingId: offering.id, teacherPartnerId: t, role: 'LEAD', isResponsible: true },
           update: {},
         });
       }
@@ -106,10 +117,6 @@ export class LessonPlanningService {
       where: { id: teacherAssignmentId, organizationId: this.org },
     });
     if (!ta) throw new NotFoundException(`TeacherAssignment ${teacherAssignmentId} not found`);
-    const curriculum = await this.prisma.client.curriculum.findFirst({
-      where: { classId: ta.classId, academicYearId: ta.termId ? undefined : undefined },
-      orderBy: { version: 'desc' },
-    });
     // Resolve the latest published curriculum version for this class (best-effort).
     const latest = await this.prisma.client.curriculum.findFirst({
       where: { classId: ta.classId, organizationId: this.org },
@@ -141,8 +148,8 @@ export class LessonPlanningService {
     if (!co) throw new NotFoundException('CourseOffering not found');
     return this.prisma.client.courseOfferingTeacher.upsert({
       where: { courseOfferingId_teacherPartnerId: { courseOfferingId, teacherPartnerId } },
-      create: { organizationId: this.org, courseOfferingId, teacherPartnerId, role: role ?? 'lead' },
-      update: { role: role ?? 'lead' },
+      create: { organizationId: this.org, courseOfferingId, teacherPartnerId, role: role === 'assistant' ? 'ASSISTANT' : 'LEAD', isResponsible: role !== 'assistant' },
+      update: { role: role === 'assistant' ? 'ASSISTANT' : 'LEAD', isResponsible: role !== 'assistant' },
     });
   }
 
@@ -153,6 +160,7 @@ export class LessonPlanningService {
       where: { id: lpId },
       include: {
         learningObjectives: true,
+        learningOutcomes: true,
         lessonPlanActivities: true,
         lessonPlanResources: true,
         lessonPlanAssessments: true,
@@ -166,18 +174,72 @@ export class LessonPlanningService {
     });
   }
 
+  /**
+   * The teaching context a plan must belong to (Phase 3, ADR-020).
+   *
+   * A plan used to float free of any offering, which is how the same lesson
+   * could be counted for one class and invisible for another. The offering now
+   * supplies subject, class, term and curriculum version; anything the caller
+   * sends that contradicts it is refused rather than quietly overwritten.
+   */
+  private async resolveOffering(dto: any) {
+    if (!dto.courseOfferingId) {
+      throw new BadRequestException('A lesson plan must belong to a course offering.');
+    }
+    const offering = await this.prisma.client.courseOffering.findFirst({
+      where: { id: dto.courseOfferingId, organizationId: this.org },
+      include: { classCohort: true },
+    });
+    if (!offering) throw new NotFoundException('Course offering not found');
+    if (['CLOSED', 'ARCHIVED'].includes(offering.status)) {
+      throw new BadRequestException(`Course offering is ${offering.status.toLowerCase()}; it cannot take new lesson plans.`);
+    }
+    const subjectId = dto.subjectId ?? offering.subjectId;
+    if (!subjectId) throw new BadRequestException('This offering has no subject, so the plan must name one.');
+    if (dto.subjectId && offering.subjectId && dto.subjectId !== offering.subjectId) {
+      throw new BadRequestException('The subject does not match the course offering.');
+    }
+    const classId = dto.classId ?? offering.classId ?? offering.classCohort?.classId ?? null;
+    if (dto.termId && dto.termId !== offering.termId) {
+      throw new BadRequestException('The term does not match the course offering.');
+    }
+    return {
+      offering,
+      subjectId,
+      classId,
+      termId: offering.termId,
+      curriculumVersionId: dto.curriculumVersionId ?? offering.curriculumId ?? null,
+    };
+  }
+
+  /** A scheme week may only be claimed by a plan on the same offering. */
+  private async assertSchemeWeek(courseOfferingId: string, schemeOfWorkWeekId?: string) {
+    if (!schemeOfWorkWeekId) return;
+    const week = await this.prisma.client.schemeOfWorkWeek.findFirst({
+      where: { id: schemeOfWorkWeekId },
+      include: { schemeOfWork: true },
+    });
+    if (!week) throw new NotFoundException('Scheme-of-work week not found');
+    if (week.schemeOfWork.courseOfferingId !== courseOfferingId) {
+      throw new BadRequestException('That scheme-of-work week belongs to a different course.');
+    }
+  }
+
   async createLessonPlan(dto: any) {
     // A teacher may create a plan for themselves, not for a colleague.
     await this.assertMayWritePlan(dto.teacherPartnerId);
+    const context = await this.resolveOffering(dto);
+    await this.assertSchemeWeek(context.offering.id, dto.schemeOfWorkWeekId);
     const org = this.org;
     const lp = await this.prisma.client.lessonPlan.create({
       data: {
         organizationId: org,
-        courseOfferingId: dto.courseOfferingId,
-        curriculumVersionId: dto.curriculumVersionId,
-        subjectId: dto.subjectId,
-        classId: dto.classId,
-        termId: dto.termId,
+        courseOfferingId: context.offering.id,
+        curriculumVersionId: context.curriculumVersionId,
+        subjectId: context.subjectId,
+        classId: context.classId,
+        termId: context.termId,
+        schemeOfWorkWeekId: dto.schemeOfWorkWeekId,
         teacherPartnerId: dto.teacherPartnerId,
         title: dto.title,
         weekOf: dto.weekOf ? new Date(dto.weekOf) : new Date(),
@@ -228,6 +290,18 @@ export class LessonPlanningService {
         data: dto.resources.map((r: any) => ({ organizationId: this.org, lessonPlanId: lpId, learningResourceId: r.learningResourceId })),
       });
     }
+    // Phase 3: outcomes are typed links, so curriculum coverage can be counted
+    // rather than guessed from the free-text objectives field.
+    if (dto.learningOutcomeIds?.length) {
+      await this.prisma.client.lessonPlanOutcome.createMany({
+        data: [...new Set<string>(dto.learningOutcomeIds)].map((learningOutcomeId) => ({
+          organizationId: this.org,
+          lessonPlanId: lpId,
+          learningOutcomeId,
+        })),
+        skipDuplicates: true,
+      });
+    }
     if (dto.assessments?.length) {
       await this.prisma.client.lessonPlanAssessment.createMany({
         data: dto.assessments.map((x: any) => ({ organizationId: this.org, lessonPlanId: lpId, kind: x.kind, prompt: x.prompt, sequence: x.sequence ?? 0 })),
@@ -250,6 +324,7 @@ export class LessonPlanningService {
   private lpInclude() {
     return {
       learningObjectives: { include: { learningObjective: true } },
+      learningOutcomes: { include: { learningOutcome: true } },
       lessonPlanActivities: { include: { learningActivity: true } },
       lessonPlanResources: { include: { learningResource: true } },
       lessonPlanAssessments: true,
@@ -257,6 +332,12 @@ export class LessonPlanningService {
       lessonPlanReflections: true,
       lessonPlanReviews: true,
       subject: true,
+      courseOffering: { select: { id: true, code: true, name: true, status: true, termId: true } },
+      schemeOfWorkWeek: { select: { id: true, weekNumber: true, theme: true, weekStart: true } },
+      scheduledLessons: {
+        select: { id: true, plannedDate: true, status: true, delivery: { select: { id: true, status: true, completedAt: true } } },
+        orderBy: { plannedDate: 'asc' as const },
+      },
     };
   }
 
@@ -293,15 +374,20 @@ export class LessonPlanningService {
     if (!['draft', 'needs_revision'].includes(lp.workflowStatus)) {
       throw new BadRequestException(`Cannot edit a plan in status '${lp.workflowStatus}' — return to revision first`);
     }
+    // The offering may be corrected but never cleared: a plan without a teaching
+    // context is exactly what Phase 3 set out to remove.
+    const context = await this.resolveOffering({ ...dto, courseOfferingId: dto.courseOfferingId ?? lp.courseOfferingId });
+    await this.assertSchemeWeek(context.offering.id, dto.schemeOfWorkWeekId);
     const nextVersion = lp.version + 1;
     await this.prisma.client.lessonPlan.update({
       where: { id },
       data: {
-        courseOfferingId: dto.courseOfferingId,
-        curriculumVersionId: dto.curriculumVersionId,
-        subjectId: dto.subjectId,
-        classId: dto.classId,
-        termId: dto.termId,
+        courseOfferingId: context.offering.id,
+        curriculumVersionId: context.curriculumVersionId,
+        subjectId: context.subjectId,
+        classId: context.classId,
+        termId: context.termId,
+        schemeOfWorkWeekId: dto.schemeOfWorkWeekId,
         title: dto.title,
         weekOf: dto.weekOf ? new Date(dto.weekOf) : undefined,
         objectives: dto.objectives,
@@ -312,6 +398,18 @@ export class LessonPlanningService {
         version: nextVersion,
       },
     });
+    if (dto.learningOutcomeIds) {
+      const wanted = [...new Set<string>(dto.learningOutcomeIds)];
+      await this.prisma.client.lessonPlanOutcome.deleteMany({
+        where: { lessonPlanId: id, ...(wanted.length ? { learningOutcomeId: { notIn: wanted } } : {}) },
+      });
+      if (wanted.length) {
+        await this.prisma.client.lessonPlanOutcome.createMany({
+          data: wanted.map((learningOutcomeId) => ({ organizationId: this.org, lessonPlanId: id, learningOutcomeId })),
+          skipDuplicates: true,
+        });
+      }
+    }
     await this.snapshot(id, nextVersion, lp.teacherPartnerId ?? undefined);
     return this.getLessonPlan(id);
   }
@@ -506,7 +604,14 @@ export class LessonPlanningService {
     return { draft, submitted, needsRevision, approved };
   }
 
-  /** Four-way coverage for a subject's curriculum in a term (Planned/Delivered/Assessed/Mastered). */
+  /**
+   * Four-way coverage for a subject's curriculum in a term
+   * (Planned/Delivered/Assessed/Mastered).
+   *
+   * Objective-level, and kept as the subject-wide view a head of department
+   * reads. The per-course outcome ladder a teacher works from lives in
+   * `TeachingWorkspaceService.coverage`.
+   */
   async curriculumCoverage(subjectId: string, termId?: string) {
     const objectives = await this.prisma.client.learningObjective.findMany({
       where: { organizationId: this.org, topic: { curriculumSubject: { subjectId } } },

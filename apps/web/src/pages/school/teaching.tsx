@@ -5,6 +5,8 @@ import {
   FileSpreadsheet, GraduationCap, Send, Undo2,
 } from 'lucide-react';
 import { useStaff, useTeacherOverview } from '@/features/school/api';
+import { useMyCourses } from '@/features/school/teaching-api';
+import { courseLabel } from './teaching/workspace';
 import { useMyStaffIdentity } from '@/features/hr/api';
 import { useAuthStore } from '@/stores/auth.store';
 import { PERMISSIONS } from '@erp/shared';
@@ -40,6 +42,7 @@ export function SchoolTeachingPage() {
     ? teacherId || me?.staffProfileId || teachers[0]?.id || ''
     : me?.staffProfileId || '';
   const { data: overview, isLoading } = useTeacherOverview(activeTeacher || undefined);
+  const { data: myCourses = [] } = useMyCourses(canPickAnyTeacher && activeTeacher ? { teacherPartnerId: activeTeacher } : {});
 
   const totalToMark = overview?.needsMarking.reduce((n, m) => n + m.count, 0) ?? 0;
 
@@ -155,19 +158,38 @@ export function SchoolTeachingPage() {
 
           {/* My classes + lesson plans */}
           <div className="grid gap-4 lg:grid-cols-2">
-            <Panel title="My classes" icon={<BookOpen className="h-4 w-4" />}>
-              {overview.classes.length === 0 ? (
-                <EmptyState title="No classes assigned" hint="Ask an admin to set your teaching load." />
+            {/*
+              My courses, not "my classes": Phase 3 gives every teaching
+              relationship a course offering, and the workspace behind each one
+              is where a week is planned, taught and closed.
+            */}
+            <Panel title="My courses" icon={<BookOpen className="h-4 w-4" />}>
+              {myCourses.length === 0 ? (
+                overview.classes.length === 0 ? (
+                  <EmptyState title="No courses allocated" hint="Ask an admin to allocate you on a course offering." />
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {overview.classes.map((c) => (
+                      <button
+                        key={`${c.classId}:${c.subjectId}`}
+                        onClick={() => navigate('/school/gradebook')}
+                        className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
+                      >
+                        {c.className} · {c.subjectName}
+                      </button>
+                    ))}
+                  </div>
+                )
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {overview.classes.map((c) => (
-                    <button
-                      key={`${c.classId}:${c.subjectId}`}
-                      onClick={() => navigate('/school/gradebook')}
-                      className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-                    >
-                      {c.className} · {c.subjectName}
-                    </button>
+                <div className="space-y-1.5">
+                  {myCourses.map((course) => (
+                    <Row
+                      key={course.id}
+                      title={courseLabel(course)}
+                      sub={`${course.term?.name ?? ''} · ${course._count.courseEnrollments} learners`}
+                      right={<Badge variant="secondary">{course.status}</Badge>}
+                      onClick={() => navigate(`/school/teaching/${course.id}`)}
+                    />
                   ))}
                 </div>
               )}
