@@ -15,10 +15,20 @@ import { randomUUID } from 'node:crypto';
  * pattern as PrismaService: `SET LOCAL app.org_id` inside an interactive
  * transaction (the GUC is transaction-scoped and pinned to one connection).
  *
- * Skipped automatically when no DATABASE_URL is configured.
+ * Skipped, loudly, until RLS_APP_DATABASE_URL names the `app` role (DB-01).
  */
-const HAS_DB = !!process.env.DATABASE_URL;
-const describeDb = HAS_DB ? describe : describe.skip;
+// This spec needs more than a database: it needs the NOSUPERUSER/NOBYPASSRLS
+// `app` role created by scripts/setup-rls-role.ts, supplied as
+// RLS_APP_DATABASE_URL. Until DB-01 provisions that role in CI the spec cannot
+// run — so it says so rather than reporting a silent pass.
+const APP_DB_URL = process.env.RLS_APP_DATABASE_URL;
+if (!APP_DB_URL) {
+  console.warn(
+    '[SKIPPED] rls.spec.ts requires RLS_APP_DATABASE_URL (the non-superuser `app` role). ' +
+      'Run scripts/setup-rls-role.ts and export it. Tracked in docs/audit/KNOWN_FAILURES.md.',
+  );
+}
+const describeDb = APP_DB_URL ? describe : describe.skip;
 
 describeDb('Row-Level Security (RLS) — D2-1', () => {
   let prismaSuper: PrismaClient;
@@ -40,8 +50,7 @@ describeDb('Row-Level Security (RLS) — D2-1', () => {
 
     // Try to connect as the `app` role. If it doesn't exist, skip the
     // RLS tests with a notice — the user hasn't run setup-rls-role.ts yet.
-    const dbUrl = process.env.DATABASE_URL!;
-    const appUrl = dbUrl.replace(/(\/\/)[^:]+:[^@]+@/, '$1app:app@');
+    const appUrl = APP_DB_URL!;
     try {
       prismaApp = new PrismaClient({ datasourceUrl: appUrl });
       await prismaApp.$connect();

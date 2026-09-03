@@ -139,7 +139,7 @@ export function enrollmentReports(deps: SchoolReportDeps): ReportDefinition<any>
         const scopedClassIds = classes.map((c: any) => c.id);
 
         const rows: any[] = [];
-        let prevEnrolled: Record<string, number> = {};
+        const prevEnrolled: Record<string, number> = {};
 
         for (const term of terms) {
           const enrollments = await deps.enrollment.list(ctx.organizationId, {

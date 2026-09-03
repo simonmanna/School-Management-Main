@@ -11,6 +11,7 @@ import { MfaLoginDto } from './dto/mfa-login.dto';
 import { MfaEnrollDto } from './dto/mfa-enroll.dto';
 import { AcceptInviteDto, ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { Public } from './decorators/public.decorator';
+import { NoPermissionRequired } from './decorators/no-permission-required.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthUser } from './jwt-token.service';
 import { Idempotent } from '../idempotency/idempotent.decorator';
@@ -52,16 +53,19 @@ export class AuthController {
     return this.auth.refresh(dto, req);
   }
 
+  @NoPermissionRequired('reads only the identity of the calling user')
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user);
   }
 
+  @NoPermissionRequired('lists only the sessions of the calling user')
   @Get('sessions')
   sessions(@CurrentUser() user: AuthUser) {
     return this.auth.listSessions(user);
   }
 
+  @NoPermissionRequired('revokes only a session of the calling user')
   @Delete('sessions/:id')
   revoke(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.auth.revokeSession(user, id);
@@ -70,17 +74,20 @@ export class AuthController {
   // ---- MFA enrollment ----
 
   /** Step 1: returns the TOTP secret + QR code. Secret is not yet persisted. */
+  @NoPermissionRequired('enrols MFA on the account of the calling user')
   @Post('mfa/enroll')
   enroll(@CurrentUser() user: AuthUser) {
     return this.auth.enrollMfa(user);
   }
 
   /** Step 2: verify a TOTP code, then persist the secret. */
+  @NoPermissionRequired('verifies MFA on the account of the calling user')
   @Post('mfa/verify')
   verifyEnroll(@CurrentUser() user: AuthUser, @Body() dto: MfaEnrollDto) {
     return this.auth.verifyMfaEnrollment(user, dto.code);
   }
 
+  @NoPermissionRequired('disables MFA on the account of the calling user')
   @Post('mfa/disable')
   disable(@CurrentUser() user: AuthUser, @Body() dto: MfaEnrollDto) {
     return this.auth.disableMfa(user, dto.code);
@@ -122,6 +129,7 @@ export class AuthController {
   /** Authenticated password change (current password required). */
   @ApiBearerAuth()
   @HttpCode(200)
+  @NoPermissionRequired('changes the password of the calling user; current password required')
   @Post('change-password')
   async change(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
     await this.auth.changePassword(user, dto.currentPassword, dto.newPassword);

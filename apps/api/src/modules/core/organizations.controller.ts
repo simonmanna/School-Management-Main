@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import { Public } from '../../kernel/auth/decorators/public.decorator';
+import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
+import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../kernel/auth/decorators/current-user.decorator';
 import type { AuthUser } from '../../kernel/auth/jwt-token.service';
 import { OrganizationsService } from './organizations.service';
@@ -60,6 +62,7 @@ export class OrganizationsController {
   }
 
   @ApiBearerAuth()
+  @NoPermissionRequired('returns the organization of the calling user')
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
     const org = await this.prisma.raw.organization.findUnique({ where: { id: user.organizationId } });
@@ -68,6 +71,7 @@ export class OrganizationsController {
   }
 
   @ApiBearerAuth()
+  @RequirePermissions('setting:update')
   @Patch('me/settings')
   updateSettings(@Body() dto: UpdateSettingsDto) {
     return this.svc.updateSettings(dto);
@@ -78,6 +82,7 @@ export class OrganizationsController {
    * org-wide (all-branch) access. Drives BranchScopeService scoping.
    */
   @ApiBearerAuth()
+  @NoPermissionRequired('sets the active branch of the calling user')
   @Patch('me/branch')
   async setMyBranch(
     @CurrentUser() user: AuthUser,
@@ -91,6 +96,7 @@ export class OrganizationsController {
   }
 
 
+  @RequirePermissions('user:read')
   @Get('users')
   async listUsers() {
     return this.prisma.client.user.findMany({
@@ -101,12 +107,14 @@ export class OrganizationsController {
   }
 
   @ApiBearerAuth()
+  @RequirePermissions('user:create')
   @Post('users/invite')
   invite(@Body() dto: InviteUserDto) {
     return this.svc.inviteUser(dto);
   }
 
   @ApiBearerAuth()
+  @RequirePermissions('user:update')
   @Patch('users/:id/deactivate')
   async deactivate(@Param('id') id: string) {
     await this.prisma.client.user.update({ where: { id }, data: { isActive: false } });

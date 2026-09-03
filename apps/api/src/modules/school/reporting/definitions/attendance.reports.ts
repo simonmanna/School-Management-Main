@@ -316,7 +316,7 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
         const scopedClassIds = classes.map((c: any) => c.id);
 
         const rows: any[] = [];
-        let prevRate: Record<string, number> = {};
+        const prevRate: Record<string, number> = {};
 
         for (const term of terms) {
           for (const classId of scopedClassIds) {

@@ -5,7 +5,12 @@ import { ALL_PERMISSIONS } from '@erp/shared';
 /**
  * Route-permission coverage invariant (Phase 4).
  *
- * The PermissionsGuard currently FAILS OPEN: an undecorated handler is allowed.
+ * SEC-06: the PermissionsGuard no longer fails open. An undecorated handler now
+ * requires a valid session, and with PERMISSIONS_FAIL_CLOSED=true it is refused
+ * outright. This ledger is the worklist for that switch: drain it to zero, then
+ * set the flag in production.
+ *
+ * Previously the guard allowed undecorated handlers ANONYMOUSLY.
  * That is the legacy state across 1800+ handlers. Rather than flip the guard and
  * 403 the whole app, we make the gap EXPLICIT and MACHINE-CHECKED:
  *
@@ -33,11 +38,30 @@ function computeGaps(): Set<string> {
       if (!entry.isFile() || !entry.name.endsWith('.controller.ts')) continue;
       const lines = fs.readFileSync(full, 'utf-8').split('\n');
       let cls: string | null = null;
+      // SEC-06: a marker on the CLASS covers every handler in it. The runtime
+      // guard resolves metadata with `getAllAndOverride([handler, class])`, so a
+      // class-level @RequirePermissions or @Public really does protect the
+      // methods. Scanning only method-level decorators reported 13 handlers as
+      // open when they were not — including AuditLogController#list, which is
+      // class-gated on auditLog.read. Over-reporting is the safe direction for a
+      // ratchet, but it is still wrong, and it hides which gaps are real.
+      let classDecorated = false;
       const rel = path.relative(SRC, full).replace(/\\/g, '/');
       for (let i = 0; i < lines.length; i++) {
         const cm = lines[i].match(/export class (\w+Controller)/);
-        if (cm) cls = cm[1];
+        if (cm) {
+          cls = cm[1];
+          // Walk up the contiguous decorator block sitting above the class.
+          classDecorated = false;
+          for (let d = i - 1; d >= 0 && lines[d].trim().startsWith('@'); d--) {
+            if (MARKERS.some((mk) => lines[d].includes(mk))) {
+              classDecorated = true;
+              break;
+            }
+          }
+        }
         if (!/^\s*@(Get|Post|Put|Patch|Delete|All|Options|Head)\s*(\(|$)/.test(lines[i])) continue;
+        if (classDecorated) continue;
         // Gather decorator lines both ABOVE and BELOW the HTTP-method decorator
         // (order is not guaranteed — @RequirePermissions may sit below @Get),
         // up to the method signature.

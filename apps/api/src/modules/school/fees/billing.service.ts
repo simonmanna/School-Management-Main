@@ -1101,7 +1101,7 @@ export class SchoolPaymentService {
       //  2. Explicit `documentIds` (convenience full-pay): settle each in full.
       //  3. Neither: open school-sourced invoices, oldest issue date first,
       //     auto-filled up to the tender (the legacy behaviour).
-      let allocations: Array<{ documentId: string; amount: number }> = [];
+      const allocations: Array<{ documentId: string; amount: number }> = [];
 
       if (dto.allocations?.length) {
         const ids = dto.allocations.map((a) => a.documentId);

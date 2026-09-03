@@ -1,0 +1,62 @@
+# OPS-02 — there was no .dockerignore, so `docker build` uploaded the entire
+# repository as build context: every node_modules tree, the vendored full copy
+# of the repo under school-management-feature/, .git, local uploads and a
+# ~100MB zip. That is minutes of wasted upload per build and a real risk of the
+# CI image job timing out before it compiles anything.
+#
+# The build stages install their own dependencies from the lockfile, so no
+# node_modules from the host should ever enter the context.
+
+# Dependencies — installed inside the image from pnpm-lock.yaml.
+node_modules
+**/node_modules
+.pnpm-store
+
+# Build output — regenerated inside the image.
+dist
+**/dist
+build
+**/build
+*.tsbuildinfo
+
+# A vendored second copy of this repository. Excluded from the pnpm workspace
+# already; it must not reach the build context either.
+school-management-feature/
+
+# VCS and tooling.
+.git
+.github
+.gitignore
+.vscode
+.idea
+.claude
+.hermes
+
+# Local runtime state and operator data.
+var/
+infra/backups/
+coverage/
+*.log
+api.log
+
+# Environment and secrets — never bake these into an image.
+.env
+.env.*
+!.env.example
+
+# Documentation and planning material; irrelevant to a runtime image.
+docs/
+deployment/
+workspace/
+*.md
+!README.md
+
+# Tests are not shipped. The runtime stage prunes apps/api/test anyway, but
+# keeping it out of the context is cheaper.
+tests/
+**/*.spec.ts
+
+# Assorted local artefacts found in the working tree.
+openeducat_19.zip
+Autodesk.txt
+avail_err.json

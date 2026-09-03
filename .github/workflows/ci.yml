@@ -6,9 +6,19 @@ name: CI
 # `tenancy-registration.spec.ts`, whose failure mode — a model missing from
 # ORG_SCOPED — leaks rows across tenants silently.
 #
-# Phase 0 separates the academic gate from the wider repository suite so its
-# ownership and failures are visible. No test step uses --forceExit: leaked
-# handles are defects, not output to suppress.
+# Phase 0 of the production-readiness plan added the gates below. Before it:
+#   - QA-01: 55 of 56 integration suites reported PASS with no database, because
+#     `_setup.ts` exported `describe.skip` when DATABASE_URL was unset. Jest is
+#     now split into `unit` and `integration` projects, and the integration
+#     project hard-fails without a database.
+#   - QA-04: ~30 existing integration suites (fees integrity/concurrency,
+#     admissions concurrency, payroll, reporting) were never run by CI at all.
+#   - OPS-02: the runtime image was never built, so a Dockerfile that shipped an
+#     ungenerated Prisma client went unnoticed.
+#   - OPS-03: nothing checked which ports a rendered Compose merge publishes.
+#
+# No test step uses --forceExit: leaked handles are defects, not output to
+# suppress.
 
 on:
   push:
@@ -25,6 +35,11 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # No test step uses --forceExit, so a leaked handle hangs rather than
+    # fails. The unit project currently leaks (see KNOWN_FAILURES.md #7):
+    # the run itself takes ~2 minutes, then Jest refuses to exit. A bounded
+    # timeout turns that into a legible failure instead of a stuck runner.
+    timeout-minutes: 60
 
     services:
       postgres:
@@ -76,28 +91,121 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # QA-05: the two SPAs are typechecked and linted by the recursive steps
+      # above, but were never actually built — a bundling or import-resolution
+      # failure would only have surfaced at deploy time.
+      - name: Build web and portal
+        run: pnpm --filter @erp/web build && pnpm --filter @erp/portal build
+
       # Applies migrations so any DB-backed spec runs against a real schema.
       - name: Apply migrations
         run: pnpm --filter @erp/api exec prisma migrate deploy
 
-      - name: Test (unit + module)
-        run: pnpm --filter @erp/api exec jest --testPathIgnorePatterns test/integration --runInBand --detectOpenHandles
+      # DB-02: EnrollmentPlacement_no_overlap is created inside an exception
+      # handler, so a missing btree_gist extension leaves the migration
+      # "successful" and the constraint absent. Fail here instead of discovering
+      # it when a learner appears in two classes at once.
+      - name: Schema preflight (constraints that can silently not exist)
+        run: node scripts/assert-db-constraints.mjs
 
-      - name: Test (academic integration)
-        run: pnpm test:academics
+      # The unit project also carries the authorization ratchets —
+      # route-permission coverage, role-preset segregation-of-duty invariants,
+      # the permission catalogue and tenancy registration. They are cheap, and
+      # they are the ones that fail silently if nobody runs them.
+      - name: Test (unit)
+        run: pnpm --filter @erp/api exec jest --selectProjects unit --runInBand --detectOpenHandles
 
-      - name: Test (Phase 4 assessment contracts and workflows)
-        run: pnpm test:academics:phase4
+      # QA-04. This replaces a curated list of four named specs plus four
+      # academic phase scripts. Roughly 30 suites covering launch-blocking
+      # workflows — fees integrity and concurrency, admissions concurrency,
+      # payroll, reporting, teacher ownership, tenant isolation — existed in
+      # test/integration and were never a gate. Selecting the whole project
+      # rather than naming paths means a new spec cannot be invisible to CI,
+      # which is what let the enumerated phase scripts drift.
+      #
+      # --runInBand is deliberate: every suite seeds into one shared schema, so
+      # the previous --maxWorkers=4 raced suites against each other. The
+      # trade-off is wall-clock time, paid once here instead of in a pilot.
+      - name: Test (integration)
+        run: pnpm --filter @erp/api exec jest --selectProjects integration --runInBand --detectOpenHandles
 
-      - name: Test (Phase 5 examination operations and result integrity)
-        run: pnpm test:academics:phase5
+  # OPS-02 — build the artifact that actually ships, and prove it can start.
+  # The previous Dockerfile ran `prisma generate` only in the build stage and
+  # never copied node_modules into the runtime stage, so the shipped image
+  # resolved @prisma/client to an ungenerated stub. Compiling the source cannot
+  # catch that; building and booting the image can.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
 
-      # Phase 6 also carries the authorization ratchets: route-permission
-      # coverage, the role-preset segregation-of-duty invariants, the permission
-      # catalogue and the tenancy registration. They are cheap and they are the
-      # ones that fail silently if nobody runs them.
-      - name: Test (Phase 6 statutory submissions and role privacy)
-        run: pnpm test:academics:phase6
+      - name: Build the API runtime image
+        run: docker build -f infra/docker/Dockerfile.api -t school-api:ci .
 
-      - name: Test (school cross-domain integration)
-        run: pnpm --filter @erp/api exec jest test/integration/school-happy-path test/integration/school-tenant-isolation test/integration/school-library-fine test/integration/school-admissions-attendance --runInBand --detectOpenHandles
+      - name: Generated Prisma client is present in the shipped image
+        run: |
+          docker run --rm school-api:ci node -e "const { Prisma } = require('@prisma/client'); const n = Prisma.dmmf?.datamodel?.models?.length ?? 0; if (!n) { console.error('FATAL: @prisma/client is an ungenerated stub'); process.exit(1); } console.log('prisma client OK:', n, 'models');"
+
+      - name: API boots and serves readiness
+        run: |
+          docker network create ci-net
+          docker run -d --name ci-db --network ci-net \
+            -e POSTGRES_USER=cafe-pos -e POSTGRES_PASSWORD=cafe-pos -e POSTGRES_DB=cafe-pos \
+            postgres:16-alpine
+          for i in $(seq 1 30); do
+            docker exec ci-db pg_isready -U cafe-pos && break
+            sleep 2
+          done
+          docker run -d --name ci-api --network ci-net -p 3000:3000 \
+            -e DATABASE_URL="postgresql://cafe-pos:cafe-pos@ci-db:5432/cafe-pos?schema=public" \
+            -e JWT_ACCESS_SECRET=ci-access-secret-not-for-production \
+            -e JWT_REFRESH_SECRET=ci-refresh-secret-not-for-production \
+            -e JWT_POS_SECRET=ci-pos-secret-not-for-production \
+            -e NODE_ENV=development \
+            school-api:ci
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost:3000/api/v1/health/live; then
+              echo "API is live"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become live."
+          exit 1
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs ci-api || true
+
+  # OPS-03 — assert the RENDERED port set. `ports: []` in an overlay is a no-op:
+  # Compose concatenates multi-value options, so the staging overlay looked
+  # hardened while Postgres (5433) and Redis (6379) stayed published on every
+  # interface. Only the merged output tells the truth.
+  compose-ports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JWT_ACCESS_SECRET: ci
+      JWT_REFRESH_SECRET: ci
+      JWT_POS_SECRET: ci
+      SCHOOL_DOMAIN: school.example
+      ACME_EMAIL: ci@school.example
+      METRICS_TOKEN: ci
+      PORTAL_ORG_CODE: CI
+      STAGING_CORS_ORIGINS: https://staging.school.example
+      STAGING_API_URL: https://staging.school.example
+      PROD_CORS_ORIGINS: https://school.example
+      APP_DATABASE_URL: postgresql://app:ci@db:5432/school
+      MIGRATOR_DATABASE_URL: postgresql://migrator:ci@db:5432/school
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Production overlay publishes only Caddy 80/443
+        run: node scripts/assert-compose-ports.mjs docker-compose.yml docker-compose.prod.yml
+
+      - name: Staging overlay publishes nothing beyond loopback
+        run: node scripts/assert-compose-ports.mjs docker-compose.yml docker-compose.staging.yml

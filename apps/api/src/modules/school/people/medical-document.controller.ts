@@ -17,8 +17,12 @@ export class MedicalRecordController {
     return this.service.get(id);
   }
 
+  // SEC-01: the read was scoped to the student, the write was not. A portal
+  // caller could therefore write a health record for a learner they have no
+  // relationship with. Both directions are scoped now.
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageStudents)
+  @ScopedToStudent('studentProfileId')
   upsert(@Param('studentProfileId') id: string, @Body() body: Omit<UpsertMedicalRecordDto, 'studentProfileId'>) {
     return this.service.upsert({ ...body, studentProfileId: id });
   }

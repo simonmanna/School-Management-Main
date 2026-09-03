@@ -5,6 +5,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/jwt-token.service';
 import { ApprovalsService } from './approvals.service';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 
 class DecideDto {
   @ApiProperty({ enum: ['approved', 'rejected'] })
@@ -38,21 +39,25 @@ class ListQuery {
 export class ApprovalsController {
   constructor(private readonly approvals: ApprovalsService) {}
 
+  @RequirePermissions('approvals:read')
   @Get()
   list(@Query() q: ListQuery) {
     return this.approvals.list(q);
   }
 
+  @RequirePermissions('approvals:read')
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.approvals.findOne(id);
   }
 
+  @RequirePermissions('approvals:read')
   @Post('request')
   request(@Body() dto: RequestApprovalDto) {
     return this.approvals.requestApproval(dto);
   }
 
+  @RequirePermissions('approvals:decide')
   @Post(':id/decide')
   decide(@Param('id') id: string, @Body() dto: DecideDto) {
     return this.approvals.decide({ requestId: id, ...dto });

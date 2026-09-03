@@ -5,10 +5,11 @@ import { AuditService } from './audit.service';
  * D1-3 acceptance: when AuditService.recordInTx throws, the surrounding
  * $transaction must roll back, leaving NO orphan business rows.
  *
- * Skipped automatically when no DATABASE_URL is configured.
+ * Requires DATABASE_URL. Runs in the `integration` jest project.
  */
-const HAS_DB = !!process.env.DATABASE_URL;
-const describeDb = HAS_DB ? describe : describe.skip;
+// QA-01: this spec runs in the `integration` jest project, whose setup file
+// hard-fails when DATABASE_URL is absent. It no longer skips itself.
+const describeDb = describe;
 
 describeDb('AuditService.recordInTx (rolls back on audit failure)', () => {
   const prisma = new PrismaClient();

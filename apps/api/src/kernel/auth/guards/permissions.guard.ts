@@ -31,6 +31,21 @@ export class PermissionsGuard implements CanActivate {
   private readonly logger = new Logger('PermissionsGuard');
   private readonly dbMode = process.env.PERMISSIONS_DB_LOOKUP !== 'false';
 
+  /** SEC-06 stage 2: refuse undecorated routes outright. See canActivate. */
+  private static readonly strictMode = process.env.PERMISSIONS_FAIL_CLOSED === 'true';
+  /** One line per handler, not one per request — this is a defect report, not traffic logging. */
+  private static readonly warnedRoutes = new Set<string>();
+
+  private warnUndecorated(label: string): void {
+    if (PermissionsGuard.warnedRoutes.has(label)) return;
+    PermissionsGuard.warnedRoutes.add(label);
+    this.logger.warn(
+      `${label} has no authorization policy; allowing any authenticated caller. ` +
+        'Annotate it with @RequirePermissions or @NoPermissionRequired. ' +
+        'Set PERMISSIONS_FAIL_CLOSED=true to refuse such routes.',
+    );
+  }
+
   constructor(
     private readonly reflector: Reflector,
     private readonly resolver: PermissionResolverService,
@@ -50,9 +65,44 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required || required.length === 0) return true;
 
     const request = context.switchToHttp().getRequest<{ auth?: AuthUser }>();
+
+    // SEC-06 — undecorated handlers no longer fall through to "allowed".
+    //
+    // This branch used to `return true` BEFORE the authentication check below,
+    // so any handler that simply forgot `@RequirePermissions` was reachable
+    // ANONYMOUSLY. 93 handlers were in that state, including
+    // ApprovalsController#decide, AuditLogController#list and
+    // OrganizationsController#deactivate. Absence of a decorator is not a
+    // policy — it is a missing policy, and the safe reading of a missing policy
+    // is "no".
+    //
+    // Two stages, because flipping straight to deny would break the ledger's
+    // remaining handlers in one step:
+    //   1. default — an undecorated route now requires a valid session. This
+    //      removes anonymous access, which is the dangerous half.
+    //   2. PERMISSIONS_FAIL_CLOSED=true — an undecorated route is refused
+    //      outright. Turn this on once the ledger in
+    //      test/unit/route-permission-exceptions.json reaches zero.
+    //
+    // Genuinely anonymous routes must say so with @Public(). A comment saying
+    // "no auth" is not enforcement.
+    if (!required || required.length === 0) {
+      const label = `${context.getClass().name}#${context.getHandler().name}`;
+      if (PermissionsGuard.strictMode) {
+        throw new ForbiddenException(
+          `Route ${label} has no authorization policy. Annotate it with @RequirePermissions, ` +
+            '@NoPermissionRequired (session-only, with a reason) or @Public.',
+        );
+      }
+      if (!request.auth) {
+        throw new ForbiddenException('Authentication required');
+      }
+      this.warnUndecorated(label);
+      return true;
+    }
+
     if (!request.auth) {
       throw new ForbiddenException('Authentication required');
     }

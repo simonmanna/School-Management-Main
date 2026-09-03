@@ -7,7 +7,7 @@
     "start": "node --max-http-header-size=65536 dist/main.js",
     "start:dev": "node scripts/start-dev.mjs",
     "start:prod": "node --max-http-header-size=65536 dist/main.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -18,11 +18,13 @@
     "authz:inventory": "ts-node ../../scripts/authz-inventory.ts",
     "backfill:inventory-gl": "ts-node src/scripts/backfill-inventory-gl.ts",
     "rls:setup-role": "ts-node scripts/setup-rls-role.ts",
-    "test": "jest",
-    "test:integration": "jest --testPathPattern 'test/integration' --maxWorkers=4 --forceExit",
-    "test:tenancy": "jest --testPathPattern 'kernel/prisma' --forceExit",
+    "test": "jest --selectProjects unit",
+    "test:integration": "jest --selectProjects integration --runInBand",
+    "test:tenancy": "jest --selectProjects unit --testPathPattern 'kernel/prisma'",
     "_comment_test_e2e": "E2E lives at the repo root (vitest, tests/e2e) — run `pnpm test:e2e` from there. There is no jest e2e config in this package.",
-    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
+    "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test:unit": "jest --selectProjects unit",
+    "test:all": "jest --runInBand"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -106,24 +108,59 @@
     "typescript": "^5.6.3"
   },
   "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
     "rootDir": ".",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
     "collectCoverageFrom": [
       "src/**/*.(t|j)s"
     ],
     "coverageDirectory": "./coverage",
-    "testEnvironment": "node",
-    "roots": [
-      "<rootDir>/src",
-      "<rootDir>/test"
+    "projects": [
+      {
+        "rootDir": "<rootDir>",
+        "moduleFileExtensions": [
+          "js",
+          "json",
+          "ts"
+        ],
+        "transform": {
+          "^.+\\.(t|j)s$": "ts-jest"
+        },
+        "testEnvironment": "node",
+        "displayName": "unit",
+        "roots": [
+          "<rootDir>/src",
+          "<rootDir>/test/unit",
+          "<rootDir>/test/backup"
+        ],
+        "testRegex": ".*\\.spec\\.ts$",
+        "testPathIgnorePatterns": [
+          "/node_modules/",
+          "<rootDir>/src/kernel/audit/audit.service.spec.ts",
+          "<rootDir>/src/kernel/prisma/rls.spec.ts",
+          "<rootDir>/src/kernel/sequence/sequence.service.spec.ts"
+        ]
+      },
+      {
+        "rootDir": "<rootDir>",
+        "moduleFileExtensions": [
+          "js",
+          "json",
+          "ts"
+        ],
+        "transform": {
+          "^.+\\.(t|j)s$": "ts-jest"
+        },
+        "testEnvironment": "node",
+        "displayName": "integration",
+        "testMatch": [
+          "<rootDir>/test/integration/**/*.spec.ts",
+          "<rootDir>/src/kernel/audit/audit.service.spec.ts",
+          "<rootDir>/src/kernel/prisma/rls.spec.ts",
+          "<rootDir>/src/kernel/sequence/sequence.service.spec.ts"
+        ],
+        "setupFilesAfterEnv": [
+          "<rootDir>/test/integration/jest.setup.ts"
+        ]
+      }
     ]
   }
 }

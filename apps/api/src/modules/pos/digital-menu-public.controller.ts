@@ -3,6 +3,12 @@
  *
  * No auth. The customer-facing menu page calls these. Auth is implicit in
  * the QR session token passed as a query/body parameter.
+ *
+ * SEC-06: this controller is now marked @Public explicitly. It previously
+ * relied on PermissionsGuard failing open for undecorated handlers — the
+ * intent lived in this comment and the enforcement was an accident of a
+ * missing decorator. Now that undecorated routes require a session, the
+ * anonymity has to be declared to survive, which is the right way round.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
@@ -10,6 +16,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { IsArray, IsIn, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DigitalMenuService } from './digital-menu.service';
+import { Public } from '../../kernel/auth/decorators/public.decorator';
 
 class PublicOrderLineDto {
   @IsString() productId!: string;
@@ -41,6 +48,7 @@ class PlaceOrderDto {
 }
 
 @ApiTags('menu/public')
+@Public()
 @Controller('menu/public')
 export class DigitalMenuPublicController {
   constructor(private readonly svc: DigitalMenuService) {}

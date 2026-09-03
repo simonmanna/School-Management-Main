@@ -13,10 +13,11 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
  *
  * Requires a live Postgres (DATABASE_URL must be set and reachable). The test
  * creates an ephemeral organization so it never collides with seeded data.
- * Skipped automatically when no DATABASE_URL is configured.
+ * Requires DATABASE_URL. Runs in the `integration` jest project.
  */
-const HAS_DB = !!process.env.DATABASE_URL;
-const describeDb = HAS_DB ? describe : describe.skip;
+// QA-01: this spec runs in the `integration` jest project, whose setup file
+// hard-fails when DATABASE_URL is absent. It no longer skips itself.
+const describeDb = describe;
 
 describeDb('SequenceService (concurrent / native Postgres sequences)', () => {
   const prisma = new PrismaClient();

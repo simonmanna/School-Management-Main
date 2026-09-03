@@ -1,0 +1,73 @@
+# Production overlay:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# OPS-03 — the default stack is not deployable as-is. In docker-compose.yml,
+# Caddy sits behind `profiles: ["public"]`, so the default `up` serves plaintext
+# HTTP while publishing Postgres (5433), unauthenticated Redis (6379), the API
+# (3000), web (5173) and the portal (5175) on every interface. This overlay
+# inverts that: TLS is on, and nothing else reaches the host.
+#
+# `!reset` is required. `ports: []` is a no-op — Compose concatenates the
+# multi-value options, so an empty list leaves the inherited mapping in place.
+#
+# OPS-04 — the base file connects as the `cafe-pos` role, which the postgres
+# image creates as a SUPERUSER, while also setting NODE_ENV=production. That
+# combination trips the startup guard in PrismaService (it refuses a
+# superuser/BYPASSRLS role in production) and the stack cannot boot. The fix is
+# to supply the non-superuser application role created by
+# scripts/setup-rls-role.ts — NOT to set RLS_ALLOW_SUPERUSER. `:?` makes Compose
+# refuse to start rather than fall back to the superuser URL.
+
+services:
+  db:
+    container_name: school-db
+    ports: !reset []
+
+  redis:
+    container_name: school-redis
+    ports: !reset []
+
+  api:
+    container_name: school-api
+    ports: !reset []
+    environment:
+      # Non-superuser, NOBYPASSRLS application role. See scripts/setup-rls-role.ts.
+      DATABASE_URL: ${APP_DATABASE_URL:?set APP_DATABASE_URL to the non-superuser app role — see scripts/setup-rls-role.ts}
+      # Migrations run as the owner; the application never does.
+      DIRECT_URL: ${MIGRATOR_DATABASE_URL:?set MIGRATOR_DATABASE_URL to the migration role}
+      NODE_ENV: production
+      LOG_LEVEL: info
+      CORS_ORIGINS: ${PROD_CORS_ORIGINS:?set PROD_CORS_ORIGINS}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+      # SCOPE-01: first-release scope. Everything absent here is off.
+      ENABLE_SCHOOL: "true"
+      ENABLE_HR: "true"
+      ENABLE_COMMUNICATION: "true"
+      ENABLE_ADVANCED_LMS: "false"
+      ENABLE_MOMO: "false"
+      ENABLE_MANUFACTURING: "false"
+      ENABLE_RENTAL: "false"
+      ENABLE_REPAIR: "false"
+      ENABLE_BEVERAGE: "false"
+      ENABLE_ASSETS: "false"
+      ENABLE_TASKS: "false"
+      ENABLE_ORDERS: "false"
+
+  web:
+    container_name: school-web
+    ports: !reset []
+
+  portal:
+    container_name: school-portal
+    ports: !reset []
+
+  # An unauthenticated database console has no place in a production stack.
+  # Start it deliberately, through a tunnel: --profile operator-tools
+  adminer:
+    profiles: ["operator-tools"]
+
+  # The only service that touches the host. Base file hides it behind the
+  # "public" profile; production is exactly when it must run.
+  caddy:
+    container_name: school-caddy
+    profiles: !reset []
