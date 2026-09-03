@@ -458,22 +458,14 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         // `status` and `postingDate` are columns on JournalEntry itself. They
         // were wrapped in `entry: { … }` — the shape a JournalLine query takes —
         // so Prisma rejected the whole report rather than filtering it.
-        const where: any = {
-          status: { in: ['posted', 'reversed'] },
-          postingDate: deps.accounting['rangeFilter'](range),
-        };
-
-        const [entries, total] = await Promise.all([
-          (deps.accounting as any).prisma.client.journalEntry.findMany({
-            where,
-            // `journal` was read for the Journal column but never included.
-            include: { journal: true, lines: { include: { account: true } } },
-            orderBy: { postingDate: 'desc' },
-            skip: (opts.page - 1) * opts.pageSize,
-            take: opts.pageSize,
-          }),
-          (deps.accounting as any).prisma.client.journalEntry.count({ where }),
-        ]);
+        // `journal` is read for the Journal column, so the lookup includes it.
+        const { entries, total } = await deps.lookup.journalEntriesPage({
+          from: range.from,
+          to: range.to,
+          statuses: ['posted', 'reversed'],
+          page: opts.page,
+          pageSize: opts.pageSize,
+        });
 
         const rows = entries.map((e: any) => ({
           postingDate: e.postingDate,
@@ -516,18 +508,13 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       ],
       async run(ctx, params) {
         const range = { from: params.dateFrom, to: params.dateTo };
-        const where: any = {
-          status: 'reversed',
-          postingDate: deps.accounting['rangeFilter'](range),
-        };
-
         // `createdBy` and `reversedBy` were included as relations. Neither is
         // one — `createdBy` and `postedBy` are plain user-id columns — so
         // Prisma rejected the query and the report never ran.
-        const entries = await (deps.accounting as any).prisma.client.journalEntry.findMany({
-          where,
-          include: { lines: true },
-          orderBy: { postingDate: 'desc' },
+        const entries = await deps.lookup.journalEntriesWithLines({
+          from: range.from,
+          to: range.to,
+          statuses: ['reversed'],
         });
 
         // The reversal is a separate entry, reached by id. `reversalEntryNumber`,
@@ -536,12 +523,7 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         // model actually records is the reversal entry's number, who posted it
         // and its description.
         const reversalIds = entries.map((e: any) => e.reversedEntryId).filter(Boolean);
-        const reversals = reversalIds.length
-          ? await (deps.accounting as any).prisma.client.journalEntry.findMany({
-              where: { id: { in: reversalIds } },
-              select: { id: true, entryNumber: true, postedBy: true, createdBy: true, description: true },
-            })
-          : [];
+        const reversals = await deps.lookup.journalEntrySummaries(reversalIds);
         const reversalById = new Map<string, any>(reversals.map((r: any) => [r.id, r]));
 
         const rows = entries.map((e: any) => {
@@ -587,13 +569,9 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         { key: 'lockedAt', label: 'Locked At', type: 'datetime', width: 18 },
       ],
       async run(ctx, params) {
-        const where: any = {};
-        if (params.dateFrom) where.startDate = { gte: new Date(params.dateFrom) };
-        if (params.dateTo) where.endDate = { lte: new Date(params.dateTo) };
-
-        const periods = await (deps.fiscalPeriod as any).prisma.client.fiscalPeriod.findMany({
-          where,
-          orderBy: { startDate: 'asc' },
+        const periods = await deps.lookup.fiscalPeriods({
+          from: params.dateFrom,
+          to: params.dateTo,
         });
 
         const rows = periods.map((p: any) => ({
@@ -630,14 +608,8 @@ export function financeReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       ],
       async run(ctx, params) {
         const asOf = params.asOf ? new Date(params.asOf) : new Date();
-        const org = await (deps.fiscalPeriod as any).prisma.client.organization.findUnique({
-          where: { id: ctx.organizationId },
-          select: { booksLockDate: true, requireFiscalPeriod: true },
-        });
-
-        const period = await (deps.fiscalPeriod as any).prisma.client.fiscalPeriod.findFirst({
-          where: { startDate: { lte: asOf }, endDate: { gte: asOf } },
-        });
+        const org = await deps.lookup.bookLockSettings();
+        const period = await deps.lookup.fiscalPeriodCovering(asOf);
 
         const rows = [
           { label: 'Books Lock Date', value: org?.booksLockDate ? new Date(org.booksLockDate).toISOString().slice(0, 10) : 'Not set' },

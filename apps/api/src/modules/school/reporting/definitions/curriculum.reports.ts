@@ -47,25 +47,13 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
         }
 
         // Get published curriculum versions for these classes
-        const curricula = await (deps.timetable as any).prisma.client.curriculum.findMany({
-          where: {
-            organizationId: ctx.organizationId,
-            academicYearId,
-            ...(classIds?.length ? { classId: { in: classIds } } : {}),
-            status: 'published',
-          },
-          include: {
-            // `Curriculum` holds a loose `classId` with no Prisma relation, so
-            // asking for `class` here made the query invalid. The class is
-            // resolved separately below.
-            topics: { orderBy: { order: 'asc' } },
-          },
-        });
+        const curricula = await deps.lookup.publishedCurricula({ academicYearId, classIds });
 
-        const curriculumClasses = await (deps.timetable as any).prisma.client.schoolClass.findMany({
-          where: { id: { in: [...new Set(curricula.map((c: any) => c.classId))] } },
-          include: { gradeLevel: true },
-        });
+        // `Curriculum` holds a loose `classId` with no Prisma relation, so the
+        // class is resolved separately rather than included above.
+        const curriculumClasses = await deps.lookup.classesByIds([
+          ...new Set(curricula.map((c: any) => c.classId).filter(Boolean)),
+        ] as string[]);
         const classById = new Map<string, any>((curriculumClasses as any[]).map((c: any) => [c.id, c]));
 
         if (curricula.length === 0) {
@@ -73,23 +61,10 @@ export function curriculumReports(deps: SchoolReportDeps): ReportDefinition<any>
         }
 
         // Get timetable slots to know teacher assignments and period counts
-        const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
-          include: { subject: true, teacher: true, period: true },
-        });
+        const slots = await deps.lookup.timetableSlotsForCoverage({ classIds });
 
         // Get lesson plans for the term to see what was actually taught
-        const lessonPlans = await (deps.timetable as any).prisma.client.lessonPlan.findMany({
-          where: {
-            organizationId: ctx.organizationId,
-            ...(classIds?.length ? { classId: { in: classIds } } : {}),
-            termId: termId ?? undefined,
-            status: { in: ['approved', 'archived'] },
-          },
-          // `LessonPlan` has a `subject` relation but only a loose `classId`,
-          // so asking for `class` here made the whole query invalid.
-          include: { subject: true },
-        });
+        const lessonPlans = await deps.lookup.lessonPlans({ classIds, termId });
 
         // Group lesson plans by class+subject
         const deliveredByClassSubject = new Map<string, { topics: Set<string>; hours: number }>();

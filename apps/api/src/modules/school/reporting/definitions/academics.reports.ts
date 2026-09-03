@@ -214,9 +214,9 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
         }
 
         // Find existing report cards for these students
-        const reportCards = await (deps.reportCardPdf as any).prisma.client.reportCard.findMany({
-          where: { studentProfileId: { in: targetIds }, termId: rs.termId },
-          orderBy: { generatedAt: 'desc' },
+        const reportCards = await deps.lookup.reportCards({
+          studentProfileIds: targetIds,
+          termId: rs.termId,
         });
         const cardByStudent = new Map<string, string>();
         for (const card of reportCards) {
@@ -297,11 +297,7 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
         }
 
         // Get all terms for this academic year
-        const terms = await (deps.analytics as any).prisma.client.term.findMany({
-          where: { academicYearId, organizationId: ctx.organizationId },
-          orderBy: { startDate: 'asc' },
-          include: { academicYear: true },
-        });
+        const terms = await deps.lookup.termsForYear(academicYearId);
 
         if (terms.length === 0) {
           return { rows: [], notes: ['No terms found for this academic year.'] };
@@ -315,16 +311,9 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
 
         for (const term of terms) {
           // Find published result sets for this term
-          const resultSets = await (deps.analytics as any).prisma.client.resultSet.findMany({
-            where: {
-              organizationId: ctx.organizationId,
-              termId: term.id,
-              scopeType: 'class',
-              scopeId: { in: scopedClassIds },
-              status: 'published',
-            },
-            include: { termResults: true, subjectResults: true },
-            orderBy: { revision: 'desc' },
+          const resultSets = await deps.lookup.publishedClassResultSets({
+            termId: term.id,
+            classIds: scopedClassIds,
           });
 
           // Group by class (take latest revision per class)

@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -983,6 +984,62 @@ export function isOrgScoped(model: string): boolean {
 }
 
 /**
+ * SEC-02 — raised when a write payload names an organization other than the
+ * request's own. A 403 rather than a 500: the request is well-formed, it is
+ * simply not permitted.
+ */
+export class CrossTenantWriteError extends ForbiddenException {
+  constructor(path: string, supplied: unknown, expected: string) {
+    super(
+      `Cross-tenant write rejected at ${path}: payload names organization ` +
+        `'${String(supplied)}' but the request belongs to '${expected}'.`,
+    );
+  }
+}
+
+/**
+ * Reject an explicit foreign organizationId anywhere in a write payload,
+ * including nested relation writes.
+ *
+ * The extension only sees the TOP-LEVEL model, so it cannot resolve which model
+ * a `data.x.create` belongs to and therefore cannot stamp nested creates — that
+ * gap is unchanged and relies on Prisma inheriting the parent foreign key. What
+ * it can do, and now does, is refuse a payload that explicitly names someone
+ * else's organization at any depth. Stamping is best-effort; refusing is not.
+ *
+ * Only write payloads are walked. `where` clauses legitimately carry an
+ * organizationId — the caller's is overwritten with the request's anyway.
+ */
+function assertNoForeignOrg(node: unknown, organizationId: string, path: string, depth = 0): void {
+  // Prisma nests deeply on connectOrCreate chains; 8 covers real payloads
+  // without turning a pathological object into a stack overflow.
+  if (depth > 8 || node === null || typeof node !== 'object') return;
+  if (node instanceof Date) return;
+
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      assertNoForeignOrg(node[i], organizationId, `${path}[${i}]`, depth + 1);
+    }
+    return;
+  }
+
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (key === 'organizationId') {
+      // `undefined` means "not supplied"; `{ set: x }` is Prisma's update form.
+      const supplied =
+        value !== null && typeof value === 'object' && 'set' in (value as Record<string, unknown>)
+          ? (value as Record<string, unknown>).set
+          : value;
+      if (supplied !== undefined && supplied !== null && supplied !== organizationId) {
+        throw new CrossTenantWriteError(`${path}.${key}`, supplied, organizationId);
+      }
+      continue;
+    }
+    assertNoForeignOrg(value, organizationId, `${path}.${key}`, depth + 1);
+  }
+}
+
+/**
  * Pure transform that injects organizationId (and a soft-delete filter) into a
  * Prisma operation's args. Exported for unit testing; the extension below wraps
  * it. Returns the (mutated) args.
@@ -1000,14 +1057,26 @@ export function scopeArgs(
 
   if (operation === 'create') {
     const data = (a.data ?? {}) as Record<string, unknown>;
-    if (orgScoped && data.organizationId === undefined) data.organizationId = organizationId;
+    if (orgScoped) {
+      // SEC-02: was `if (data.organizationId === undefined)`, so a caller-supplied
+      // value won and the extension deferred to it. Now the request's tenant is
+      // authoritative and a conflicting value is refused outright.
+      assertNoForeignOrg(data, organizationId, `${model}.data`);
+      data.organizationId = organizationId;
+    }
     a.data = data;
   } else if (operation === 'createMany' || operation === 'createManyAndReturn') {
     if (orgScoped) {
+      // SEC-02: spread order was `{ organizationId, ...d }`, so any
+      // `d.organizationId` overrode the injected one. Reversed, plus the check.
+      const stamp = (d: Record<string, unknown>, i: number): Record<string, unknown> => {
+        assertNoForeignOrg(d, organizationId, `${model}.data[${i}]`);
+        return { ...d, organizationId };
+      };
       if (Array.isArray(a.data)) {
-        a.data = a.data.map((d: Record<string, unknown>) => ({ organizationId, ...d }));
+        a.data = a.data.map((d: Record<string, unknown>, i: number) => stamp(d, i));
       } else if (a.data) {
-        a.data = { organizationId, ...(a.data as Record<string, unknown>) };
+        a.data = stamp(a.data as Record<string, unknown>, 0);
       }
     }
   } else if (WHERE_OPS.has(operation)) {
@@ -1017,6 +1086,28 @@ export function scopeArgs(
       where.deletedAt = null;
     }
     a.where = where;
+
+    if (orgScoped) {
+      if (operation === 'upsert') {
+        // SEC-02: only `where` was scoped. The `create:` payload was never
+        // stamped, which is why MedicalRecordService's hand-rolled
+        // organization lookup was load-bearing — that value was what actually
+        // landed on the row.
+        const create = (a.create ?? {}) as Record<string, unknown>;
+        assertNoForeignOrg(create, organizationId, `${model}.create`);
+        create.organizationId = organizationId;
+        a.create = create;
+        if (a.update !== undefined) {
+          assertNoForeignOrg(a.update, organizationId, `${model}.update`);
+        }
+      } else if (a.data !== undefined) {
+        // SEC-02: `update`/`updateMany` data was never inspected, so
+        // organizationId was mutable through the scoped client — a row could be
+        // moved to another tenant. Reassignment is never legitimate; reject it
+        // rather than silently rewriting it.
+        assertNoForeignOrg(a.data, organizationId, `${model}.data`);
+      }
+    }
   }
 
   return a;

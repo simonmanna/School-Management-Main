@@ -17,15 +17,6 @@ import type { SchoolReportDeps } from '../school-report-deps';
  * query invalid — and the cells built from those overrides read `.subject.name`,
  * which could never have been populated. Resolve the ids explicitly instead.
  */
-async function withOverrideSubjects(deps: any, rows: any[]): Promise<any[]> {
-  const subjectIds = [...new Set(rows.map((o: any) => o.subjectId).filter(Boolean))] as string[];
-  const subjects = subjectIds.length
-    ? await deps.timetable.prisma.client.subject.findMany({ where: { id: { in: subjectIds } } })
-    : [];
-  const byId = new Map<string, any>((subjects as any[]).map((x: any) => [x.id, x]));
-  return rows.map((o: any) => ({ ...o, subject: o.subjectId ? byId.get(o.subjectId) ?? null : null }));
-}
-
 export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[] {
   return [
     {
@@ -90,10 +81,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
           }
         }
 
-        const classInfo = await (deps.timetable as any).prisma.client.schoolClass.findUnique({
-          where: { id: classId },
-          include: { gradeLevel: true, campus: true },
-        });
+        const classInfo = await deps.lookup.classById(classId);
 
         return {
           rows,
@@ -138,31 +126,12 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         const date = params.dateFrom;
 
         // Get all slots where this teacher is assigned
-        const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { teacherPartnerId },
-          include: {
-            // The relation is `schoolClass`, and a slot's room is either the
-            // managed `teachingRoom` or the free-text `room` column — `class`
-            // and `room` as relations made Prisma reject the whole query.
-            schoolClass: { include: { gradeLevel: true } },
-            section: true,
-            subject: true,
-            period: true,
-            teachingRoom: true,
-          },
-          orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }],
-        });
+        const slots = await deps.lookup.timetableSlotsDetailed({ teacherPartnerId });
 
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
-          overrides = await withOverrideSubjects(deps, await (deps.timetable as any).prisma.client.timetableOverride.findMany({
-            where: {
-              teacherPartnerId,
-              effectiveFrom: { lte: d },
-              effectiveTo: { gte: d },
-            },
-          }));
+          overrides = await deps.lookup.timetableOverridesOn({ on: d, teacherPartnerId });
         }
 
         const overrideMap = new Map<string, any>();
@@ -237,29 +206,12 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         const classIds = ctx.resolved.classIds;
 
         // Get all slots for the filtered classes
-        const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
-          include: {
-            schoolClass: { include: { gradeLevel: true } },
-            section: true,
-            subject: true,
-            teacher: { include: { partner: true } },
-            period: true,
-            teachingRoom: true,
-          },
-          orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }, { schoolClass: { name: 'asc' } }],
-        });
+        const slots = await deps.lookup.timetableSlotsDetailed({ classIds });
 
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
-          overrides = await withOverrideSubjects(deps, await (deps.timetable as any).prisma.client.timetableOverride.findMany({
-            where: {
-              ...(classIds?.length ? { classId: { in: classIds } } : {}),
-              effectiveFrom: { lte: d },
-              effectiveTo: { gte: d },
-            },
-          }));
+          overrides = await deps.lookup.timetableOverridesOn({ on: d, classIds });
         }
 
         // Build a lookup for the effective cell (override wins)
@@ -361,21 +313,12 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         const roomIds = rooms.map((r: any) => r.id);
 
         // Get all slots for classes
-        const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
-          include: { teachingRoom: true, period: true },
-        });
+        const slots = await deps.lookup.timetableSlotsForRooms({ classIds });
 
         let overrides: any[] = [];
         if (date) {
           const d = new Date(date);
-          overrides = await (deps.timetable as any).prisma.client.timetableOverride.findMany({
-            where: {
-              ...(classIds?.length ? { classId: { in: classIds } } : {}),
-              effectiveFrom: { lte: d },
-              effectiveTo: { gte: d },
-            },
-          });
+          overrides = await deps.lookup.timetableOverridesOn({ on: d, classIds });
         }
 
         const effectiveRoomSlots = new Map<string, Set<string>>();
@@ -395,10 +338,7 @@ export function timetableReports(deps: SchoolReportDeps): ReportDefinition<any>[
         }
 
         // Periods in the cycle
-        const periods = await (deps.timetable as any).prisma.client.period.findMany({
-          where: { organizationId: ctx.organizationId },
-          orderBy: { order: 'asc' },
-        });
+        const periods = await deps.lookup.periods();
         const days = 7;
         const totalPeriodsPerWeek = periods.length * days;
 

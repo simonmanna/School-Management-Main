@@ -28,6 +28,7 @@ import { FiscalPeriodService } from '../../accounting/posting/fiscal-period.serv
 import { AccountingModule } from '../../accounting/accounting.module';
 import { buildSchoolReportDefinitions } from './definitions';
 import { FilterResolverService } from './filter-resolver.service';
+import { ReportLookupService } from './report-lookup.service';
 import {
   SCHOOL_REPORT_DEFINITIONS,
   SCHOOL_REPORT_DEPS,
@@ -64,6 +65,7 @@ import { SchoolReportsController } from './school-reports.controller';
   controllers: [SchoolReportsController],
   providers: [
     FilterResolverService,
+    ReportLookupService,
     {
       // The one place a definition's reachable surface is enumerated.
       provide: SCHOOL_REPORT_DEPS,
@@ -85,10 +87,12 @@ import { SchoolReportsController } from './school-reports.controller';
         cashFlow: CashFlowReportService,
         tieOut: TieOutService,
         fiscalPeriod: FiscalPeriodService,
+        lookup: ReportLookupService,
       ): SchoolReportDeps => ({
         finance, advancedFinance, analytics, resultRun, attendance, enrollment,
         admissions, timetable, reportCardPdf, resolver,
         accounting, pnl, balanceSheet, cashFlow, tieOut, fiscalPeriod,
+        lookup,
       }),
       inject: [
         SchoolFinanceQueryService,
@@ -108,6 +112,7 @@ import { SchoolReportsController } from './school-reports.controller';
         CashFlowReportService,
         TieOutService,
         FiscalPeriodService,
+        ReportLookupService,
       ],
     },
     {

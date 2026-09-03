@@ -197,6 +197,75 @@ async function main() {
     data: { organizationId: O, studentProfileId: s.id, termId: term.id, classId: s.classId, rollNumber: s.no.split('/').pop()!, enrolledAt: new Date('2026-05-04') },
   })));
 
+  // ── SIS-10: the canonical enrollment spine ─────────────────────────────────
+  //
+  // The rows above are the LEGACY membership model, and for a long time they
+  // were all this seed wrote — along with `StudentProfile.currentClassId`. That
+  // left every freshly seeded database in the drifted state the enrollment work
+  // exists to remove: `CourseOfferingService.syncRoster` resolves learners
+  // through `EnrollmentPlacement` only, so a demo database produced empty
+  // course rosters and any QA run exercised the legacy path alone.
+  //
+  // A seed has no Nest container, so it cannot call StudentEnrollmentService.
+  // It writes the same rows that service would.
+  const programme = await prisma.academicProgramme.create({
+    data: {
+      organizationId: O,
+      code: 'SEC-O',
+      name: 'Lower Secondary',
+      stage: 'LOWER_SECONDARY',
+      effectiveFrom: year.startDate,
+    },
+  });
+  await prisma.programmeGradeLevel.create({
+    // Unique on (organizationId, gradeLevelId): a grade level belongs to exactly
+    // one programme, which is what makes programme resolution deterministic.
+    data: { organizationId: O, programmeId: programme.id, gradeLevelId: gl.id },
+  });
+
+  const cohortByClassId = new Map<string, string>();
+  for (const c of [classEast, classWest]) {
+    const cohort = await prisma.classCohort.create({
+      data: {
+        organizationId: O,
+        academicYearId: year.id,
+        classId: c.id,
+        programmeId: programme.id,
+        capacity: 45,
+      },
+    });
+    cohortByClassId.set(c.id, cohort.id);
+  }
+
+  for (const s of students) {
+    const enrollment = await prisma.studentEnrollment.create({
+      data: {
+        organizationId: O,
+        studentProfileId: s.id,
+        academicYearId: year.id,
+        programmeId: programme.id,
+        gradeLevelId: gl.id,
+        admissionDate: new Date('2025-02-03'),
+        status: 'ACTIVE',
+        enrollmentType: 'NEW',
+      },
+    });
+    await prisma.enrollmentPlacement.create({
+      data: {
+        organizationId: O,
+        enrollmentId: enrollment.id,
+        termId: term.id,
+        classCohortId: cohortByClassId.get(s.classId)!,
+        sectionId: s.classId === classEast.id ? secA.id : null,
+        rollNumber: s.no.split('/').pop()!,
+        effectiveFrom: new Date('2026-05-04'),
+        effectiveTo: null,
+        movementReason: 'INITIAL_PLACEMENT',
+      },
+    });
+  }
+  ok(`canonical spine: 1 programme, ${cohortByClassId.size} cohorts, ${students.length} enrollments + placements`);
+
   // ── A2: Frozen academic roster for S3 East ──────────────────────────────────
   const roster = await prisma.academicRoster.create({
     data: { organizationId: O, termId: term.id, scopeType: 'class', classId: classEast.id, name: 'S3 East — Term 2 (frozen)', source: 'derived_current_class', capturedAt: new Date('2026-05-06'), frozenAt: new Date('2026-05-06'), frozenById: teacherPartnerOf('MAT') },

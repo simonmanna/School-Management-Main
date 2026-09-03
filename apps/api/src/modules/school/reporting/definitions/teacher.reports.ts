@@ -326,20 +326,10 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         // classes" — which is why this report threw for an unfiltered run. Omit
         // the predicate entirely in that case; the tenancy extension still scopes
         // the query to the organization.
-        const slots = await (deps.timetable as any).prisma.client.timetableSlot.findMany({
-          where: { ...(classIds?.length ? { classId: { in: classIds } } : {}) },
-          include: {
-            // `teacher` is a StaffProfile, whose display name lives on its
-            // Partner — reading `teacher.name` returned undefined, so every row
-            // printed a blank teacher. The relation to the class is
-            // `schoolClass`, not `class`; asking for `class` made Prisma reject
-            // the whole query.
-            teacher: { include: { partner: true, department: true } },
-            subject: true,
-            schoolClass: { include: { gradeLevel: true } },
-            period: true,
-          },
-        });
+        // RPT-01: reads go through the canonical lookup surface. The include
+        // shape (teacher → partner + department, schoolClass → gradeLevel) now
+        // lives there, so every report sees the same slot.
+        const slots = await deps.lookup.timetableSlotsDetailed({ classIds });
 
         // Group by teacher
         const byTeacher = new Map<string, any>();
@@ -364,10 +354,7 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         }
 
         // Get period duration for hours calculation
-        const periods = await (deps.timetable as any).prisma.client.period.findMany({
-          where: { organizationId },
-          orderBy: { order: 'asc' },
-        });
+        const periods = await deps.lookup.periods();
         const periodMinutes = periods.reduce((sum: number, p: any) => sum + (Number(p.durationMinutes) || 40), 0);
         const avgPeriodMin = periods.length > 0 ? periodMinutes / periods.length : 40;
 

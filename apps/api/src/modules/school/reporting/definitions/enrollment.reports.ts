@@ -125,10 +125,7 @@ export function enrollmentReports(deps: SchoolReportDeps): ReportDefinition<any>
         }
 
         // Get all terms for this academic year
-        const terms = await (deps.enrollment as any).prisma.client.term.findMany({
-          where: { academicYearId, organizationId: ctx.organizationId },
-          orderBy: { startDate: 'asc' },
-        });
+        const terms = await deps.lookup.termsForYear(academicYearId);
 
         if (terms.length === 0) {
           return { rows: [], notes: ['No terms found for this academic year.'] };

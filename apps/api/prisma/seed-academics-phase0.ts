@@ -30,7 +30,7 @@ async function main() {
   term ??= await db.term.create({ data: { organizationId, academicYearId: year.id, name: 'Term 2', startDate: new Date('2026-05-04'), endDate: new Date('2026-08-07') } });
 
   const gradeNames = ['P1', 'P3', 'P5', 'P7', 'S1', 'S3', 'S4', 'S6'];
-  const classes = new Map<string, { id: string }>();
+  const classes = new Map<string, { id: string; gradeLevelId: string }>();
   for (const [index, name] of gradeNames.entries()) {
     const grade = await db.gradeLevel.upsert({
       where: { organizationId_name: { organizationId, name } }, update: {},
@@ -40,7 +40,7 @@ async function main() {
       where: { organizationId_name: { organizationId, name: `${name} Phase 0` } }, update: {},
       create: { organizationId, gradeLevelId: grade.id, name: `${name} Phase 0`, capacity: 45 },
     });
-    classes.set(name, schoolClass);
+    classes.set(name, { id: schoolClass.id, gradeLevelId: grade.id });
     await db.section.upsert({
       where: { organizationId_classId_name: { organizationId, classId: schoolClass.id, name: 'A' } }, update: {},
       create: { organizationId, classId: schoolClass.id, name: 'A' },
@@ -51,6 +51,77 @@ async function main() {
         create: { organizationId, classId: schoolClass.id, name: 'Blue' },
       });
     }
+  }
+
+  // ── SIS-10: the canonical spine ────────────────────────────────────────
+  //
+  // This fixture used to write only `StudentProfile.currentClassId` and a
+  // legacy `Enrollment` row. Neither is the canonical membership model, so a
+  // freshly seeded database started in exactly the drifted state the
+  // enrollment work exists to remove: `CourseOfferingService.syncRoster` reads
+  // `EnrollmentPlacement` and would return an empty roster, and any test or
+  // manual QA run against this data exercised the legacy path alone.
+  //
+  // Three programmes rather than one, so programme boundaries are actually
+  // exercised: a promotion must not walk a P7 learner into S1.
+  const programmeFor: Record<string, { code: string; name: string; stage: 'PRIMARY_LOWER' | 'PRIMARY_UPPER' | 'LOWER_SECONDARY' | 'ADVANCED_SECONDARY' }> = {
+    P1: { code: 'P0-PRI-L', name: 'Primary (Lower) Phase 0', stage: 'PRIMARY_LOWER' },
+    P3: { code: 'P0-PRI-L', name: 'Primary (Lower) Phase 0', stage: 'PRIMARY_LOWER' },
+    P5: { code: 'P0-PRI-U', name: 'Primary (Upper) Phase 0', stage: 'PRIMARY_UPPER' },
+    P7: { code: 'P0-PRI-U', name: 'Primary (Upper) Phase 0', stage: 'PRIMARY_UPPER' },
+    S1: { code: 'P0-SEC-O', name: 'Lower Secondary Phase 0', stage: 'LOWER_SECONDARY' },
+    S3: { code: 'P0-SEC-O', name: 'Lower Secondary Phase 0', stage: 'LOWER_SECONDARY' },
+    S4: { code: 'P0-SEC-O', name: 'Lower Secondary Phase 0', stage: 'LOWER_SECONDARY' },
+    S6: { code: 'P0-SEC-A', name: 'Advanced Secondary Phase 0', stage: 'ADVANCED_SECONDARY' },
+  };
+
+  const programmeIdByGradeName = new Map<string, string>();
+  const cohortByGradeName = new Map<string, string>();
+
+  for (const gradeName of gradeNames) {
+    const spec = programmeFor[gradeName];
+    const entry = classes.get(gradeName)!;
+
+    const programme = await db.academicProgramme.upsert({
+      where: { organizationId_code: { organizationId, code: spec.code } },
+      update: {},
+      create: {
+        organizationId,
+        code: spec.code,
+        name: spec.name,
+        stage: spec.stage,
+        effectiveFrom: year.startDate,
+      },
+    });
+    programmeIdByGradeName.set(gradeName, programme.id);
+
+    // ProgrammeGradeLevel is unique on (organizationId, gradeLevelId): a grade
+    // level belongs to exactly one programme, which is what makes programme
+    // resolution deterministic.
+    await db.programmeGradeLevel.upsert({
+      where: { organizationId_gradeLevelId: { organizationId, gradeLevelId: entry.gradeLevelId } },
+      update: {},
+      create: { organizationId, programmeId: programme.id, gradeLevelId: entry.gradeLevelId },
+    });
+
+    const cohort = await db.classCohort.upsert({
+      where: {
+        organizationId_academicYearId_classId: {
+          organizationId,
+          academicYearId: year.id,
+          classId: entry.id,
+        },
+      },
+      update: {},
+      create: {
+        organizationId,
+        academicYearId: year.id,
+        classId: entry.id,
+        programmeId: programme.id,
+        capacity: 45,
+      },
+    });
+    cohortByGradeName.set(gradeName, cohort.id);
   }
 
   async function learner(key: string, name: string, grade: string, status: 'active' | 'withdrawn' = 'active', effectiveDate = '2026-05-04') {
@@ -70,7 +141,55 @@ async function main() {
       update: {},
       create: { organizationId, studentProfileId: profile.id, classId, termId: term!.id, rollNumber: key, effectiveDate: new Date(effectiveDate), status: status === 'withdrawn' ? 'withdrawn' : 'enrolled', endedAt: status === 'withdrawn' ? new Date('2026-06-20') : null, endReason: status === 'withdrawn' ? 'Phase 0 withdrawal scenario' : null },
     });
-    return { profile, enrollment, classId };
+    // SIS-10: the canonical membership and its dated placement. A seed cannot
+    // call StudentEnrollmentService (no Nest container here), so it writes the
+    // same rows that service would — including closing the placement for a
+    // withdrawn learner rather than leaving an open one behind.
+    const withdrawn = status === 'withdrawn';
+    const studentEnrollment = await db.studentEnrollment.upsert({
+      where: {
+        organizationId_studentProfileId_academicYearId: {
+          organizationId,
+          studentProfileId: profile.id,
+          academicYearId: year.id,
+        },
+      },
+      update: {},
+      create: {
+        organizationId,
+        studentProfileId: profile.id,
+        academicYearId: year.id,
+        programmeId: programmeIdByGradeName.get(grade)!,
+        gradeLevelId: classes.get(grade)!.gradeLevelId,
+        admissionDate: new Date(effectiveDate),
+        status: withdrawn ? 'WITHDRAWN' : 'ACTIVE',
+        enrollmentType: key === 'REPEATER' ? 'REPEAT' : key === 'TRANSFER' ? 'TRANSFER_IN' : 'NEW',
+      },
+    });
+
+    // Exactly one OPEN placement per enrollment is a partial unique index, so
+    // this must not create a second one on re-run.
+    const existingPlacement = await db.enrollmentPlacement.findFirst({
+      where: { enrollmentId: studentEnrollment.id },
+    });
+    if (!existingPlacement) {
+      await db.enrollmentPlacement.create({
+        data: {
+          organizationId,
+          enrollmentId: studentEnrollment.id,
+          termId: term!.id,
+          classCohortId: cohortByGradeName.get(grade)!,
+          rollNumber: key,
+          effectiveFrom: new Date(effectiveDate),
+          effectiveTo: withdrawn ? new Date('2026-06-20') : null,
+          movementReason:
+            key === 'LATE' ? 'LATE_ADMISSION' : key === 'REPEATER' ? 'REPEAT' : 'INITIAL_PLACEMENT',
+          endReason: withdrawn ? 'WITHDRAWAL' : null,
+        },
+      });
+    }
+
+    return { profile, enrollment, studentEnrollment, classId };
   }
 
   const regular = await learner('REGULAR', 'Amina Nakato', 'P5');

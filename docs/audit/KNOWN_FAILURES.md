@@ -7,9 +7,15 @@ A required check may only be red if it appears here, with an owner and a closing
 
 ---
 
-## 1. `report-definition-canon.spec.ts` — 7 failing report definitions
+## 1. `report-definition-canon.spec.ts` — CLOSED
 
-**Status:** required, failing. **Closes in:** Phase 9a. **Owner:** domain owners per file.
+**Status:** green, 12/12. **Closed in:** Phase 9a. **Owner:** reporting.
+
+Fixed by adding `ReportLookupService` — a canonical, calculation-free read surface on the reports deps bag — and rewriting all 27 violations across the seven files to use it. The rule was not relaxed. The same change removed the last `deps.accounting['rangeFilter']` private-method access, and folded the duplicated override→subject join out of `timetable.reports.ts` into one place.
+
+The service deliberately performs no arithmetic: money still comes from `SchoolFinanceQueryService` and marks still come from the result spine. A lookup there must never become a second place to derive a figure an owning service already answers.
+
+<details><summary>Original violations, for the record</summary>
 
 The spec text-scans `apps/api/src/modules/school/reporting/definitions/*.reports.ts` for four banned tokens — `amountResidual`, `payment.amount`, `prisma.`, `GradeEntry` — after stripping comments. All seven failures are the `prisma.` rule, and all have the same shape: reaching through an injected service to its private Prisma client, usually via an `as any` cast.
 
@@ -23,7 +29,9 @@ The spec text-scans `apps/api/src/modules/school/reporting/definitions/*.reports
 | `attendance.reports.ts` | 304 |
 | `enrollment.reports.ts` | 128 |
 
-`admissions.reports.ts`, `fees.reports.ts` and `student.reports.ts` are clean — use them as the pattern.
+</details>
+
+`admissions.reports.ts`, `fees.reports.ts` and `student.reports.ts` were already clean.
 
 **Why it matters:** these definitions re-derive figures outside the canonical query services. That is what produced the dashboard-versus-statement divergence the spec header describes. Seven failing files are not proof of seven wrong reports, but they are a live consistency risk on financial and academic numbers.
 
@@ -123,15 +131,17 @@ This was previously invisible because `test:integration` and `test:tenancy` pass
 
 ---
 
-## 9. Seed scripts create a pre-drifted database
+## 9. Seed scripts create a pre-drifted database — PARTLY CLOSED
 
-**Status:** open. **Closes in:** Phase 2 (SIS-06) / Phase 10 (OPS-14). **Owner:** SIS.
+**Status:** the two API seeds now write the canonical spine. **Remaining:** the legacy writers themselves (SIS-02..05) and `scripts/seed-school.ts`. **Owner:** SIS.
 
 `prisma/seed-academics-phase0.ts:66` and `prisma/seed-school-demo.ts:185` write `currentClassId` directly onto `StudentProfile`, and `seed-school-demo.ts:196` creates a legacy `Enrollment`. Neither writes `AcademicProgramme`, `ClassCohort`, `StudentEnrollment` or `EnrollmentPlacement`.
 
 So **every freshly seeded environment starts in exactly the drifted state Phase 2 exists to eliminate**: a `currentClassId` projection with no placement behind it. `CourseOfferingService.syncRoster` reads placements only, so a fresh seed yields empty rosters, and any integration test or manual QA session against seeded data exercises the legacy spine alone.
 
-This raises the `currentClassId` writer count from 10 to **12, of which 8 are legacy**. The seeds must be migrated with the other writers, or Phase 2's regression tests will pass against fixtures that cannot represent the bug.
+**Fixed here:** `seed-academics-phase0.ts` and `seed-school-demo.ts` now create `AcademicProgramme`, `ProgrammeGradeLevel`, `ClassCohort`, `StudentEnrollment` and a dated `EnrollmentPlacement` alongside the legacy rows. The phase-0 fixture uses three programmes so programme boundaries are genuinely exercised (a promotion must not walk a P7 learner into S1), closes the placement for the withdrawn learner rather than leaving an open one, and is re-runnable without tripping the one-open-placement partial unique index.
+
+**Still open:** the seeds no longer *create* drift, but the legacy write paths (`enrollNewStudent`, `promoteOne`, `StudentService.create`/`bulkImport`) still do, so a running system drifts as soon as anyone admits a learner. That is SIS-02..05 and remains the keystone.
 
 ---
 

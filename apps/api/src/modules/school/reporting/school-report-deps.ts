@@ -14,6 +14,7 @@ import type { BalanceSheetReportService } from '../../accounting/reporting/balan
 import type { CashFlowReportService } from '../../accounting/reporting/cash-flow-report.service';
 import type { TieOutService } from '../../accounting/reporting/tieout.service';
 import type { FiscalPeriodService } from '../../accounting/posting/fiscal-period.service';
+import { ReportLookupService } from './report-lookup.service';
 
 /**
  * Everything a school report definition is allowed to touch.
@@ -64,6 +65,17 @@ export interface SchoolReportDeps {
   tieOut: TieOutService;
   /** Fiscal period status and lock dates. */
   fiscalPeriod: FiscalPeriodService;
+
+  /**
+   * RPT-01 — canonical reference reads for report definitions.
+   *
+   * Seven definition files used to reach through an injected service to its
+   * private Prisma client (`(deps.timetable as any).prisma.client...`). This
+   * is the supported surface for calendar, structure, timetable, curriculum,
+   * results metadata and GL reads. It performs no calculation: money still
+   * comes from `finance`, marks still come from the result spine.
+   */
+  lookup: ReportLookupService;
 }
 
 export const SCHOOL_REPORT_DEPS = Symbol('SCHOOL_REPORT_DEPS');
