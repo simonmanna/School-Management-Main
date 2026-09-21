@@ -5,9 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SkillsTab, ExperienceTab, DocumentsTab, QualificationsTab, CertificationsTab } from './employee-detail-tabs';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string | null) =>
-  n === null || n === undefined ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`;
 
 const EMP_TYPE_STYLE: Record<string, string> = {
   FULL_TIME: 'bg-emerald-100 text-emerald-800',
@@ -42,6 +41,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function HrEmployeeDetailPage() {
+  const fmt = useMoneyFormatter();
   const { id } = useParams();
   const { data: emp, isLoading } = useHrEmployee(id);
 
@@ -100,7 +100,7 @@ export function HrEmployeeDetailPage() {
               <InfoRow label="Position" value={emp.position?.name} />
               <InfoRow label="Department" value={emp.department?.name} />
               <InfoRow label="Supervisor" value={emp.supervisor ? `${emp.supervisor.firstName}${emp.supervisor.lastName ? ' ' + emp.supervisor.lastName : ''}` : null} />
-              <InfoRow label="Hire date" value={emp.hireDate ? new Date(emp.hireDate).toLocaleDateString('id-ID') : null} />
+              <InfoRow label="Hire date" value={emp.hireDate ? new Date(emp.hireDate).toLocaleDateString() : null} />
               <InfoRow label="Base salary" value={fmt(emp.baseSalary)} />
               <InfoRow label="Pay frequency" value={emp.payFrequency.replace(/_/g, ' ')} />
               <InfoRow label="Hourly rate" value={fmt(emp.hourlyRate)} />
@@ -164,7 +164,7 @@ export function HrEmployeeDetailPage() {
                 <div key={a.id} className="flex items-center justify-between px-4 py-3">
                   <div>
                     <p className="text-sm font-medium">{a.advanceCode}</p>
-                    <p className="text-xs text-muted-foreground">Balance {fmt(a.balance)} · Rp {Number(a.monthlyDeduction).toLocaleString('id-ID')}/mo</p>
+                    <p className="text-xs text-muted-foreground">Balance {fmt(a.balance)} · {fmt(a.monthlyDeduction)}/mo</p>
                   </div>
                   <Badge variant="outline" className={ADVANCE_STATUS[a.status] ?? ''}>{a.status}</Badge>
                 </div>

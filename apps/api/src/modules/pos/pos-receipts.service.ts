@@ -415,13 +415,16 @@ export class PosReceiptsService {
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { margin:0; padding:0; width:72mm; height:auto; }
-  body { font-family:'Courier New',Courier,monospace; font-size:9.5px; line-height:1.25; white-space:pre; padding:1mm 1mm 14mm; }
+  body { font-family:'Courier New',Courier,monospace; font-size:9.5px; line-height:1.25; white-space:pre; padding:1mm; }
   @media print {
     @page { margin:0; size:72mm 297mm; }
     html,body { width:72mm; height:auto; }
+    /* 14mm bottom padding feeds the last lines past the tear bar/cutter —
+       a print concern only; on screen it rendered as a blank band. */
+    body { padding:1mm 1mm 14mm; }
   }
 </style></head>
-<body><img src="/abiliz-logo.png" style="width:60mm;max-width:100%;display:block;margin:0 auto 6px auto;" onerror="this.style.display='none'">${escape(text).replace(/\n/g, '<br>')}<script>
+<body>${escape(text).replace(/\n/g, '<br>')}<script>
   // "size:80mm auto" is invalid CSS (dropped by browsers), which left the page
   // size to the driver's custom thermal paper — that broke print preview and
   // paginated long receipts so the cutter fired mid-receipt. Size the page to

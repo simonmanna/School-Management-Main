@@ -106,7 +106,6 @@ export class TeachingWorkspaceService {
         subject: offering.subject?.name ?? null,
         className: offering.classCohort?.schoolClass?.name ?? null,
         section: offering.section?.name ?? null,
-        stream: offering.stream?.name ?? null,
         term: { id: offering.term.id, name: offering.term.name, startDate: offering.term.startDate, endDate: offering.term.endDate },
         curriculum: offering.curriculum,
         teachers: offering.teachers
@@ -244,7 +243,7 @@ export class TeachingWorkspaceService {
         studentEnrollment: {
           include: {
             student: { include: { partner: true } },
-            placements: { where: { effectiveTo: null }, include: { section: true, stream: true } },
+            placements: { where: { effectiveTo: null }, include: { section: true } },
           },
         },
       },
@@ -291,7 +290,6 @@ export class TeachingWorkspaceService {
         source: row.source,
         status: row.status,
         section: placement?.section?.name ?? null,
-        stream: placement?.stream?.name ?? null,
         attendancePct: att && att.total ? Math.round((att.present / att.total) * 100) : null,
         attendanceMarkedDays: att?.total ?? 0,
         openFollowUps: followUps.filter((f: any) => f.studentProfileId === studentProfileId).length,

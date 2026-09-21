@@ -100,8 +100,8 @@ export function HrAttendancePage() {
                       {a.employee?.employeeCode} · {a.employee?.firstName}{a.employee?.lastName ? ' ' + a.employee?.lastName : ''}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {a.date}{a.shift ? ` · ${a.shift.name}` : ''} · {a.checkInAt ? new Date(a.checkInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                      {a.checkOutAt ? '–' + new Date(a.checkOutAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}
+                      {a.date}{a.shift ? ` · ${a.shift.name}` : ''} · {a.checkInAt ? new Date(a.checkInAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {a.checkOutAt ? '–' + new Date(a.checkOutAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : ''}
                     </p>
                   </div>
                 </div>

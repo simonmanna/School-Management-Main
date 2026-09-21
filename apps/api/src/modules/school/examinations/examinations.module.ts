@@ -39,9 +39,10 @@ import {
 } from './examinations.controller';
 import { ExamRegistrationController, ExamVenueController } from './exam-ops.controller';
 import { MarksWorkspaceController } from './marks-workspace.controller';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 @Module({
-  imports: [AssessmentModule],
+  imports: [PlacementLookupModule, AssessmentModule],
   controllers: [
     ExamTypeController,
     ExamController,

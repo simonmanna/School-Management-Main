@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { FeesModule } from '../fees/fees.module';
 import { ReportingService } from './reporting.service';
 import { ReportingController } from './reporting.controller';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 /**
  * Dashboard tiles for the four school dashboards.
@@ -11,7 +12,7 @@ import { ReportingController } from './reporting.controller';
  * `Document.amountResidual`, which is a cached projection.
  */
 @Module({
-  imports: [FeesModule],
+  imports: [PlacementLookupModule, FeesModule],
   controllers: [ReportingController],
   providers: [ReportingService],
   exports: [ReportingService],

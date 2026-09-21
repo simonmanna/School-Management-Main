@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { PlacementService } from '../enrollment/placement.service';
+import { StudentEnrollmentService } from '../enrollment/student-enrollment.service';
 import type { ApplyPromotionDto, DecidePromotionDto, ProposePromotionsDto } from './promotion-decision.dto';
 
 /**
@@ -23,6 +24,7 @@ export class PromotionDecisionService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly placements: PlacementService,
+    private readonly enrollments: StudentEnrollmentService,
   ) {}
 
   private get db(): any { return this.prisma.client; }
@@ -145,7 +147,6 @@ export class PromotionDecisionService {
             toClassId: row.toClassId ?? d.toClassId ?? null,
             toGradeLevelId: row.toGradeLevelId ?? d.toGradeLevelId ?? null,
             toSectionId: row.toSectionId ?? d.toSectionId ?? null,
-            toStreamId: row.toStreamId ?? d.toStreamId ?? null,
             reason: row.reason ?? d.reason ?? null,
             decidedById: this.tenant.userId ?? null,
             decidedAt: new Date(),
@@ -168,12 +169,14 @@ export class PromotionDecisionService {
   // ── application ────────────────────────────────────────────────────────────
 
   /**
-   * Apply approved decisions: write the next placement on the canonical spine.
+   * Apply approved decisions through the canonical promotion engine.
    *
-   * The learner's history is appended to, never rewritten — `appendPlacement`
-   * closes the open placement and opens a new one with `PROMOTION` or `REPEAT`
-   * as the reason. A graduation writes no new placement; it completes the
-   * enrollment, which is what "no seat next year" actually means.
+   * Into a term of the NEXT academic year, promote and repeat complete this
+   * year's enrollment and open next year's (StudentEnrollmentService), so both
+   * years stay separately reportable. Into a later term of the SAME year (a
+   * mid-year move) the open placement is closed and a new one appended.
+   * Graduation completes the enrollment and closes the seat as GRADUATION.
+   * History is appended to, never rewritten.
    */
   async apply(dto: ApplyPromotionDto) {
     const decisions = await this.db.promotionDecision.findMany({
@@ -229,31 +232,40 @@ export class PromotionDecisionService {
     let placementId: string | null = null;
     if (outcome === 'promote' || outcome === 'repeat') {
       if (!dto.toTermId) throw new BadRequestException('Applying a promotion needs the term the learners move into');
-      const result = await this.placements.appendPlacement(
-        tx,
-        enrollment,
-        {
-          termId: dto.toTermId,
-          classId: fresh.toClassId ?? undefined,
+      const term = await tx.term.findFirst({ where: { id: dto.toTermId }, select: { academicYearId: true } });
+      if (!term) throw new BadRequestException(`Term ${dto.toTermId} not found`);
+      const notes = fresh.reason ?? `Applied from result set ${fresh.resultSetId}`;
+      if (term.academicYearId !== enrollment.academicYearId) {
+        const common = {
+          toAcademicYearId: term.academicYearId,
+          toTermId: dto.toTermId,
           sectionId: fresh.toSectionId ?? undefined,
-          streamId: fresh.toStreamId ?? undefined,
           effectiveFrom: now.toISOString(),
-          movementReason: outcome === 'promote' ? 'PROMOTION' : 'REPEAT',
-          notes: fresh.reason ?? `Applied from result set ${fresh.resultSetId}`,
-        } as any,
-        { closeReason: outcome === 'promote' ? 'PROMOTION' : 'REPEAT', fallbackTermId: dto.toTermId },
-      );
-      placementId = result.placement.id;
-    } else if (outcome === 'graduate') {
-      await tx.studentEnrollment.updateMany({
-        where: { id: enrollment.id },
-        data: { status: 'COMPLETED', completionDate: now },
-      });
-      const open = enrollment.placements?.[0];
-      if (open) {
-        await this.placements.closeOpen(tx, enrollment.id, now, 'COMPLETION');
-        await this.placements.syncProjection(tx, fresh.studentProfileId);
+          reason: notes,
+        };
+        const result: any =
+          outcome === 'promote'
+            ? await this.enrollments.promoteInTx(tx, enrollment.id, { ...common, toClassId: fresh.toClassId ?? undefined })
+            : await this.enrollments.repeatInTx(tx, enrollment.id, { ...common, classId: fresh.toClassId ?? undefined });
+        placementId = result.placement?.id ?? null;
+      } else {
+        const result = await this.placements.appendPlacement(
+          tx,
+          enrollment,
+          {
+            termId: dto.toTermId,
+            classId: fresh.toClassId ?? undefined,
+            sectionId: fresh.toSectionId ?? undefined,
+            effectiveFrom: now.toISOString(),
+            movementReason: outcome === 'promote' ? 'PROMOTION' : 'REPEAT',
+            notes,
+          } as any,
+          { closeReason: outcome === 'promote' ? 'PROMOTION' : 'REPEAT', fallbackTermId: dto.toTermId },
+        );
+        placementId = result.placement.id;
       }
+    } else if (outcome === 'graduate') {
+      await this.enrollments.graduateInTx(tx, enrollment.id, fresh.reason ?? 'Completed the final grade', now);
     } else {
       throw new BadRequestException(`'${outcome}' is a review outcome, not something that can be applied. Decide promote, repeat or graduate first.`);
     }
@@ -279,7 +291,7 @@ export class PromotionDecisionService {
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
     });
     const ids = [...new Set(rows.map((r: any) => r.studentProfileId))] as string[];
-    const [students, classes, sections, streams] = await Promise.all([
+    const [students, classes, sections] = await Promise.all([
       ids.length
         ? this.db.studentProfile.findMany({
             where: { id: { in: ids } },
@@ -288,7 +300,6 @@ export class PromotionDecisionService {
         : [],
       this.db.schoolClass.findMany({ where: { deletedAt: null }, select: { id: true, name: true, gradeLevelId: true, gradeLevel: { select: { order: true, name: true } } } }),
       this.db.section.findMany({ where: { deletedAt: null }, select: { id: true, classId: true, name: true } }),
-      this.db.stream.findMany({ where: { deletedAt: null }, select: { id: true, classId: true, sectionId: true, name: true } }),
     ]);
     const byId = new Map<string, any>((students as any[]).map((s: any) => [s.id, s]));
     const classById = new Map<string, any>((classes as any[]).map((c: any) => [c.id, c]));
@@ -304,7 +315,6 @@ export class PromotionDecisionService {
       // The subdivisions of each class, so a decision names the exact grouping
       // rather than leaving the placement to guess between two sections.
       sections: (sections as any[]).map((s: any) => ({ id: s.id, classId: s.classId, name: s.name })),
-      streams: (streams as any[]).map((s: any) => ({ id: s.id, classId: s.classId, sectionId: s.sectionId, name: s.name })),
       rows: rows.map((r: any) => ({
         ...r,
         studentName: byId.get(r.studentProfileId)?.partner?.name ?? null,

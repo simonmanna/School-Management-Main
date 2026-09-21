@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string | null) =>
-  n === null || n === undefined ? '—' : `Rp ${Number(n).toLocaleString('id-ID')}`;
 
 export function HrPositionsPage() {
+  const fmt = useMoneyFormatter();
   const [search, setSearch] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [open, setOpen] = useState(false);

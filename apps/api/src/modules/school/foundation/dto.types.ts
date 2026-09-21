@@ -75,10 +75,51 @@ export class UpdateDepartmentDto {
 export class CreateGradeLevelDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsInt() @Min(0) order!: number;
+  /// Stable identifier for imports. Derived from the name when omitted.
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  /// The grade a learner is promoted INTO. Null/omitted leaves it unset.
+  @IsOptional() @IsString() nextGradeLevelId?: string | null;
+  @IsOptional() @IsBoolean() isTerminal?: boolean;
+  /// The band this grade sits in.
+  @IsOptional() @IsString() academicLevelId?: string | null;
 }
 export class UpdateGradeLevelDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsInt() @Min(0) order?: number;
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() nextGradeLevelId?: string | null;
+  @IsOptional() @IsBoolean() isTerminal?: boolean;
+  @IsOptional() @IsString() academicLevelId?: string | null;
+}
+
+// ── AcademicLevel ───────────────────────────────────────────────────────────
+export class CreateAcademicLevelDto {
+  @IsString() @IsNotEmpty() name!: string;
+  /// Stable identifier. Derived from the name when omitted.
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional()
+  @IsIn(['PRE_PRIMARY', 'PRIMARY', 'PRIMARY_LOWER', 'PRIMARY_UPPER', 'LOWER_SECONDARY', 'ADVANCED_SECONDARY', 'OTHER'])
+  stage?: string;
+  /// The programme grades under this level enrol into by default.
+  @IsOptional() @IsString() defaultProgrammeId?: string | null;
+}
+export class UpdateAcademicLevelDto {
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional()
+  @IsIn(['PRE_PRIMARY', 'PRIMARY', 'PRIMARY_LOWER', 'PRIMARY_UPPER', 'LOWER_SECONDARY', 'ADVANCED_SECONDARY', 'OTHER'])
+  stage?: string;
+  @IsOptional() @IsString() defaultProgrammeId?: string | null;
 }
 
 // ── SchoolClass + Section ───────────────────────────────────────────────────
@@ -87,7 +128,15 @@ export class CreateSchoolClassDto {
   @IsString() @IsNotEmpty() gradeLevelId!: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() homeroomTeacherId?: string;
-  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  /// Stable identifier for imports. Derived from the name when omitted.
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  /// NULL means unlimited, which is a real choice and not a missing value.
+  @IsOptional() @IsInt() @Min(1) capacity?: number | null;
+  /// False when learners enrol straight into the class with no subdivision.
+  @IsOptional() @IsBoolean() allowsStreams?: boolean;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 export class UpdateSchoolClassDto {
@@ -95,20 +144,35 @@ export class UpdateSchoolClassDto {
   @IsOptional() @IsString() @IsNotEmpty() gradeLevelId?: string;
   @IsOptional() @IsString() campusId?: string;
   @IsOptional() @IsString() homeroomTeacherId?: string;
-  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number | null;
+  @IsOptional() @IsBoolean() allowsStreams?: boolean;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
 export class CreateSectionDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsString() @IsNotEmpty() name!: string;
-  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  /// Stable identifier, unique within the class. Derived when omitted.
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  /// NULL means unlimited.
+  @IsOptional() @IsInt() @Min(1) capacity?: number | null;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() classTeacherId?: string;
 }
 export class UpdateSectionDto {
   @IsOptional() @IsString() @IsNotEmpty() classId?: string;
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
-  @IsOptional() @IsInt() @Min(1) capacity?: number;
+  @IsOptional() @IsString() @IsNotEmpty() code?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsInt() @Min(1) capacity?: number | null;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsString() classTeacherId?: string;
 }
 
@@ -168,6 +232,14 @@ export class UpdateCalendarEventDto {
 // ── Bulk term activation ────────────────────────────────────────────────────
 export class SetCurrentYearDto {
   @IsString() @IsNotEmpty() academicYearId!: string;
+}
+
+/// Lifecycle transition for an academic year (brief para 3).
+export class SetAcademicYearStatusDto {
+  @IsIn(['PLANNING', 'ACTIVE', 'CLOSED', 'ARCHIVED'])
+  status!: 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED';
+  /// Required when re-opening a CLOSED year, so the reason is on the record.
+  @IsOptional() @IsString() @IsNotEmpty() reason?: string;
 }
 export class SetCurrentTermDto {
   @IsString() @IsNotEmpty() termId!: string;

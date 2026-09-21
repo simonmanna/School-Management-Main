@@ -8,12 +8,12 @@
   ],
   "counts": {
     "models": 88,
-    "endpoints": 617,
+    "endpoints": 625,
     "markWrites": 54,
-    "currentClassFiles": 81,
-    "reportPaths": 90,
+    "currentClassFiles": 83,
+    "reportPaths": 91,
     "jobs": 11,
-    "pages": 59
+    "pages": 64
   },
   "models": [
     "AcademicMigrationException",
@@ -110,25 +110,25 @@
       "method": "GET",
       "route": "/approvals",
       "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#list",
-      "line": 41
+      "line": 43
     },
     {
       "method": "GET",
       "route": "/approvals/:id",
       "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#findOne",
-      "line": 46
+      "line": 49
     },
     {
       "method": "POST",
       "route": "/approvals/request",
       "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#request",
-      "line": 51
+      "line": 55
     },
     {
       "method": "POST",
       "route": "/approvals/:id/decide",
       "handler": "apps/api/src/kernel/approvals/approvals.controller.ts#decide",
-      "line": 56
+      "line": 61
     },
     {
       "method": "GET",
@@ -189,6 +189,24 @@
       "route": "/pos/posting-monitor/exceptions/:id/resolve",
       "handler": "apps/api/src/modules/pos/billing/stock-posting.controller.ts#resolve",
       "line": 58
+    },
+    {
+      "method": "GET",
+      "route": "/menu/public/catalog",
+      "handler": "apps/api/src/modules/pos/digital-menu-public.controller.ts#catalog",
+      "line": 56
+    },
+    {
+      "method": "POST",
+      "route": "/menu/public/orders",
+      "handler": "apps/api/src/modules/pos/digital-menu-public.controller.ts#placeOrder",
+      "line": 61
+    },
+    {
+      "method": "GET",
+      "route": "/menu/public/orders/:id/track",
+      "handler": "apps/api/src/modules/pos/digital-menu-public.controller.ts#track",
+      "line": 66
     },
     {
       "method": "GET",
@@ -2906,133 +2924,133 @@
       "method": "GET",
       "route": "/school/lms/courses/:id",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#coursePage",
-      "line": 35
+      "line": 38
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/permissions",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#permissions",
-      "line": 57
+      "line": 60
     },
     {
       "method": "PATCH",
       "route": "/school/lms/courses/:id/settings",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateSettings",
-      "line": 66
+      "line": 69
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/sections/ensure",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#ensureSections",
-      "line": 74
+      "line": 77
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/sections",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#addSection",
-      "line": 80
+      "line": 83
     },
     {
       "method": "PATCH",
       "route": "/school/lms/sections/:id",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateSection",
-      "line": 88
+      "line": 91
     },
     {
       "method": "POST",
       "route": "/school/lms/sections/:id/move",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#moveSection",
-      "line": 96
+      "line": 99
     },
     {
       "method": "DELETE",
       "route": "/school/lms/sections/:id",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#deleteSection",
-      "line": 102
+      "line": 105
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/modules",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#addModule",
-      "line": 109
+      "line": 112
     },
     {
       "method": "PATCH",
       "route": "/school/lms/modules/:id",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateModule",
-      "line": 117
+      "line": 120
     },
     {
       "method": "PATCH",
       "route": "/school/lms/modules/:id/instance",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#updateInstance",
-      "line": 125
+      "line": 128
     },
     {
       "method": "POST",
       "route": "/school/lms/modules/:id/move",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#moveModule",
-      "line": 133
+      "line": 136
     },
     {
       "method": "POST",
       "route": "/school/lms/modules/:id/visibility",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#setVisibility",
-      "line": 141
+      "line": 144
     },
     {
       "method": "POST",
       "route": "/school/lms/modules/:id/duplicate",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#duplicate",
-      "line": 149
+      "line": 152
     },
     {
       "method": "DELETE",
       "route": "/school/lms/modules/:id",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#removeModule",
-      "line": 157
+      "line": 160
     },
     {
       "method": "GET",
       "route": "/school/lms/modules/:id/view",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#viewModule",
-      "line": 171
+      "line": 174
     },
     {
       "method": "POST",
       "route": "/school/lms/modules/:id/action/:action",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#actionModule",
-      "line": 179
+      "line": 182
     },
     {
       "method": "GET",
       "route": "/school/lms/question-categories",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#listCategories",
-      "line": 190
+      "line": 193
     },
     {
       "method": "POST",
       "route": "/school/lms/question-categories",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#createCategory",
-      "line": 196
+      "line": 199
     },
     {
       "method": "POST",
       "route": "/school/lms/questions/:id/version",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#versionQuestion",
-      "line": 202
+      "line": 205
     },
     {
       "method": "POST",
       "route": "/school/lms/lesson-plans/:id/publish-to-course",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#publishToCourse",
-      "line": 209
+      "line": 212
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/plan-coverage",
       "handler": "apps/api/src/modules/school/lms/moodle/course/course.controller.ts#coverage",
-      "line": 215
+      "line": 218
     },
     {
       "method": "POST",
@@ -3084,9 +3102,15 @@
     },
     {
       "method": "GET",
+      "route": "/school/lms/my/badges",
+      "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#badges",
+      "line": 47
+    },
+    {
+      "method": "GET",
       "route": "/school/lms/my/children",
       "handler": "apps/api/src/modules/school/lms/moodle/learner/learner.controller.ts#children",
-      "line": 48
+      "line": 54
     },
     {
       "method": "GET",
@@ -3143,160 +3167,184 @@
       "line": 74
     },
     {
+      "method": "DELETE",
+      "route": "/school/lms/group-members/:id",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#removeMember",
+      "line": 78
+    },
+    {
       "method": "GET",
       "route": "/school/lms/courses/:id/groupings",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#listGroupings",
-      "line": 78
+      "line": 82
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/groupings",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#createGrouping",
-      "line": 82
+      "line": 86
     },
     {
       "method": "POST",
       "route": "/school/lms/modules/:id/completion",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#setCompletion",
-      "line": 95
+      "line": 99
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/completion-report",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#completionReport",
-      "line": 123
+      "line": 127
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/progress/:studentProfileId",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#progress",
-      "line": 141
+      "line": 145
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/gradebook",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#gradebookReport",
-      "line": 151
+      "line": 155
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/gradebook/user/:studentProfileId",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#userReport",
-      "line": 157
+      "line": 161
     },
     {
       "method": "PATCH",
       "route": "/school/lms/courses/:id/gradebook/cell",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#editCell",
-      "line": 166
+      "line": 170
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/gradebook/override",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#override",
-      "line": 172
+      "line": 176
+    },
+    {
+      "method": "PATCH",
+      "route": "/school/lms/courses/:id/gradebook/column",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#setColumnFlags",
+      "line": 187
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/gradebook/export",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#exportGrades",
-      "line": 178
+      "line": 197
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/gradebook/import",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#importGrades",
-      "line": 182
+      "line": 201
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/logs",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#logs",
-      "line": 187
+      "line": 206
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/activity-report",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#activityReport",
-      "line": 193
+      "line": 212
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/participation",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#participation",
-      "line": 199
+      "line": 218
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/outline",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#outline",
-      "line": 205
+      "line": 224
     },
     {
       "method": "GET",
       "route": "/school/lms/badges",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#listBadges",
-      "line": 212
+      "line": 231
     },
     {
       "method": "POST",
       "route": "/school/lms/badges",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#createBadge",
-      "line": 216
+      "line": 235
     },
     {
       "method": "POST",
       "route": "/school/lms/badges/:id/award",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#awardBadge",
-      "line": 220
+      "line": 239
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/badges/:id/awards",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#badgeAwards",
+      "line": 244
+    },
+    {
+      "method": "GET",
+      "route": "/school/lms/students/:studentProfileId/badges",
+      "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#studentBadges",
+      "line": 252
     },
     {
       "method": "GET",
       "route": "/school/lms/maintenance/orphans",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#scanOrphans",
-      "line": 230
+      "line": 265
     },
     {
       "method": "POST",
       "route": "/school/lms/maintenance/orphans/repair",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#repairOrphans",
-      "line": 237
+      "line": 272
     },
     {
       "method": "GET",
       "route": "/school/lms/calendar",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#calendarRange",
-      "line": 249
+      "line": 284
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/engagement",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#engagement",
-      "line": 263
+      "line": 298
     },
     {
       "method": "GET",
       "route": "/school/lms/courses/:id/not-viewed/:moduleId",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#notViewed",
-      "line": 272
+      "line": 307
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/export",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#exportCourse",
-      "line": 282
+      "line": 317
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/:id/import",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#importCourse",
-      "line": 290
+      "line": 325
     },
     {
       "method": "POST",
       "route": "/school/lms/courses/rollover",
       "handler": "apps/api/src/modules/school/lms/moodle/lms-ops.controller.ts#rollover",
-      "line": 302
+      "line": 337
     },
     {
       "method": "GET",
@@ -3814,61 +3862,61 @@
       "model": "studentAssessment",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 231
+      "line": 300
     },
     {
       "model": "studentAssessment",
       "operation": "update",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 239
+      "line": 308
     },
     {
       "model": "studentAssessment",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 261
+      "line": 330
     },
     {
       "model": "studentAssessment",
       "operation": "update",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 270
+      "line": 339
     },
     {
       "model": "markEntry",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 237
+      "line": 306
     },
     {
       "model": "markEntry",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 238
+      "line": 307
     },
     {
       "model": "resultSet",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 290
+      "line": 359
     },
     {
       "model": "resultSet",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 606
+      "line": 675
     },
     {
       "model": "reportCard",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 323
+      "line": 392
     },
     {
       "model": "reportCard",
       "operation": "create",
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "line": 632
+      "line": 701
     },
     {
       "model": "studentAssessment",
@@ -4138,11 +4186,11 @@
   "currentClassReads": [
     {
       "file": "apps/api/prisma/seed-academics-phase0.ts",
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "file": "apps/api/prisma/seed-school-demo.ts",
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "file": "apps/api/src/modules/communication/audience/audience-resolver.service.spec.ts",
@@ -4279,6 +4327,10 @@
     {
       "file": "apps/api/src/modules/school/statutory/uneb-ca.service.ts",
       "occurrences": 1
+    },
+    {
+      "file": "apps/api/test/integration/_placement.ts",
+      "occurrences": 2
     },
     {
       "file": "apps/api/test/integration/http-validation-contract.spec.ts",
@@ -4425,6 +4477,10 @@
       "occurrences": 1
     },
     {
+      "file": "apps/api/test/unit/placement-projection-drift.spec.ts",
+      "occurrences": 3
+    },
+    {
       "file": "apps/portal/src/lib/portal-api.ts",
       "occurrences": 2
     },
@@ -4505,6 +4561,7 @@
     "apps/api/src/modules/school/portals/portals.service.ts",
     "apps/api/src/modules/school/reporting/definitions/academics.reports.ts",
     "apps/api/src/modules/school/reporting/definitions/teacher.reports.ts",
+    "apps/api/src/modules/school/reporting/report-lookup.service.ts",
     "apps/api/src/modules/school/reporting/reporting.service.ts",
     "apps/api/src/modules/school/reporting/school-report-deps.ts",
     "apps/api/src/modules/school/reporting/school-reports.module.ts",
@@ -4604,6 +4661,8 @@
     "apps/web/src/pages/school/exam-workspace.tsx",
     "apps/web/src/pages/school/gradebook.tsx",
     "apps/web/src/pages/school/homework.tsx",
+    "apps/web/src/pages/school/lms/admin.tsx",
+    "apps/web/src/pages/school/lms/badges.tsx",
     "apps/web/src/pages/school/lms/calendar.tsx",
     "apps/web/src/pages/school/lms/course-offerings.tsx",
     "apps/web/src/pages/school/lms/course-page.tsx",
@@ -4611,6 +4670,9 @@
     "apps/web/src/pages/school/lms/courses.tsx",
     "apps/web/src/pages/school/lms/coverage.tsx",
     "apps/web/src/pages/school/lms/discussions.tsx",
+    "apps/web/src/pages/school/lms/enrolment.tsx",
+    "apps/web/src/pages/school/lms/grading-workbench.tsx",
+    "apps/web/src/pages/school/lms/groups.tsx",
     "apps/web/src/pages/school/lms/lesson-plans.tsx",
     "apps/web/src/pages/school/lms/mastery.tsx",
     "apps/web/src/pages/school/lms/module-view.tsx",

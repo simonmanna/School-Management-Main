@@ -774,8 +774,8 @@ export interface DomainEventMap {
     studentProfileId: string;
     placementId: string;
     previousPlacementId: string | null;
-    from: { classCohortId: string; sectionId: string | null; streamId: string | null; termId: string } | null;
-    to: { classCohortId: string; sectionId: string | null; streamId: string | null; termId: string };
+    from: { classCohortId: string; sectionId: string | null; termId: string } | null;
+    to: { classCohortId: string; sectionId: string | null; termId: string };
     movementReason: string;
     effectiveFrom: Date;
     actorId: string | null;

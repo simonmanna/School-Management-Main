@@ -8,6 +8,7 @@ import {
   BALANCE_SHEET_SECTIONS,
   ZERO,
   balanceSheetSideOf,
+  balanceSheetValue,
   displayBalance,
   isProfitAndLoss,
 } from './account-classification';
@@ -63,8 +64,19 @@ export class BalanceSheetReportService {
       });
       const totals = this.emptyTotals();
       for (const r of rows as any[]) {
-        // Snapshot balances are already sign-adjusted for display.
-        this.accumulate(totals, r.reportSection as ReportSection | null, r.balance);
+        // Snapshot balances are persisted in the DISPLAY convention (positive in
+        // the account's own normal direction). The statement needs them signed by
+        // their section's side instead, or a contra account adds to the side it
+        // should deduct from — so recover the raw net first. Done here rather
+        // than in the builder so stored rows keep their meaning and no snapshot
+        // schema version has to change.
+        const stored = new Prisma.Decimal(r.balance ?? 0);
+        const net = r.normalBalance === 'credit' ? stored.negated() : stored;
+        this.accumulate(
+          totals,
+          r.reportSection as ReportSection | null,
+          balanceSheetValue(net, r.reportSection as ReportSection | null),
+        );
       }
       // The snapshot builder already closed revenue/expense into retained
       // earnings for the period, so no extra earnings term is added here.
@@ -132,7 +144,14 @@ export class BalanceSheetReportService {
 
       const debit = new Prisma.Decimal(g._sum.baseDebit ?? 0);
       const credit = new Prisma.Decimal(g._sum.baseCredit ?? 0);
-      const display = displayBalance(debit.minus(credit), account);
+      const net = debit.minus(credit);
+      // Balance-sheet rows are signed by their section's side, not by the
+      // account's own normal balance — see balanceSheetValue. P&L rows keep the
+      // display convention, which `accumulate` already signs per section.
+      const side = balanceSheetSideOf(account.reportSection);
+      const display = side
+        ? balanceSheetValue(net, account.reportSection)
+        : displayBalance(net, account);
 
       this.accumulate(totals, account.reportSection, display);
 

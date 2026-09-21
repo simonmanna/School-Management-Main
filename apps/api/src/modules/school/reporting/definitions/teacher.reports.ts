@@ -238,7 +238,10 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const names = await deps.resolver.subjectNames(subjectIds);
 
         const studentIds = rsWithRelations.termResults
-          .filter((t: any) => classIds.includes(t.studentProfile?.currentClassId ?? ''))
+          // A results document groups by the class FROZEN on the result row —
+          // the roster basis — never by where the pupil sits today. A pupil who
+          // moved after the results were computed still belongs to this sheet.
+          .filter((t: any) => classIds.includes(t.classId ?? ''))
           .map((t: any) => t.studentProfileId);
 
         const subjectResults = rsWithRelations.subjectResults.filter((s: any) => studentIds.includes(s.studentProfileId));

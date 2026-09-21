@@ -17,9 +17,8 @@ export class PromotionDecisionRowDto {
   @IsOptional() @IsIn([...PROMOTION_OUTCOMES]) decision?: (typeof PROMOTION_OUTCOMES)[number];
   @IsOptional() @IsString() toClassId?: string;
   @IsOptional() @IsString() toGradeLevelId?: string;
-  /// Required when the target class is organised into sections or streams.
+  /// Required when the target class is divided into streams.
   @IsOptional() @IsString() toSectionId?: string;
-  @IsOptional() @IsString() toStreamId?: string;
   @IsOptional() @IsString() @MaxLength(1000) reason?: string;
 }
 

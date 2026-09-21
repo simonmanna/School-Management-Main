@@ -5,6 +5,7 @@
  * per component. We mock the DB so the math is exercised in isolation.
  */
 import { BillingService } from '../../src/modules/school/fees/billing.service';
+import { makePlacementLookupStub, placement } from './_placement-stub';
 
 interface MockContext {
   prisma: any;
@@ -75,6 +76,7 @@ function makeService(): { service: BillingService; mocks: MockContext } {
     determination as any,
     dmsTypes as any,
     { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
+    makePlacementLookupStub() as any,
   );
   return { service, mocks: { prisma, tenant, events, sequence, documentBuilder, posting, determination } };
 }
@@ -91,7 +93,8 @@ describe('BillingService — generateForTerm math', () => {
   it('rejects when no fee schedule exists for the term', async () => {
     const { service, mocks } = makeService();
     mocks.prisma.client.studentProfile.findMany.mockResolvedValue([
-      { id: 's1', partnerId: 'p1', admissionNo: 'STU-001', currentClassId: 'c1', currentClass: { name: 'P.1 A' } },
+      { id: 's1', partnerId: 'p1', admissionNo: 'STU-001', currentClass: { name: 'P.1 A' },
+        placement: placement({ classId: 'c1', gradeLevelId: 'g1' }) },
     ]);
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([]);
     await expect(
@@ -103,7 +106,8 @@ describe('BillingService — generateForTerm math', () => {
     const { service, mocks } = makeService();
     const student = {
       id: 's1', partnerId: 'p1', admissionNo: 'STU-001',
-      currentClassId: 'c1', currentClass: { name: 'P.1 A' },
+      currentClass: { name: 'P.1 A' },
+      placement: placement({ classId: 'c1', gradeLevelId: 'g1' }),
     };
     mocks.prisma.client.studentProfile.findMany.mockResolvedValue([student]);
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
@@ -134,7 +138,8 @@ describe('BillingService — generateForTerm math', () => {
     const { service, mocks } = makeService();
     const student = {
       id: 's1', partnerId: 'p1', admissionNo: 'STU-001',
-      currentClassId: 'c1', currentClass: { name: 'P.1 A' },
+      currentClass: { name: 'P.1 A' },
+      placement: placement({ classId: 'c1', gradeLevelId: 'g1' }),
     };
     mocks.prisma.client.studentProfile.findMany.mockResolvedValue([student]);
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{
@@ -168,7 +173,8 @@ describe('BillingService — generateForTerm math', () => {
     const { service, mocks } = makeService();
     const student = {
       id: 's1', partnerId: 'p1', admissionNo: 'STU-001',
-      currentClassId: 'c1', currentClass: { name: 'P.1 A' },
+      currentClass: { name: 'P.1 A' },
+      placement: placement({ classId: 'c1', gradeLevelId: 'g1' }),
     };
     mocks.prisma.client.studentProfile.findMany.mockResolvedValue([student]);
     mocks.prisma.client.feeSchedule.findMany.mockResolvedValue([{

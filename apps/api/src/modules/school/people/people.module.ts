@@ -14,17 +14,16 @@ import { PositionService } from './position.service';
 import { PositionController } from './position.controller';
 import { StaffAttendanceService } from './staff-attendance.service';
 import { StaffAttendanceController } from './staff-attendance.controller';
-import { PromotionService } from './promotion.service';
-import { PromotionController } from './promotion.controller';
-import { EnrollmentService } from './enrollment.service';
-import { EnrollmentController } from './enrollment.controller';
+import { StudentAdmissionService } from './student-admission.service';
 import { FeesModule } from '../fees/fees.module';
+import { SchoolEnrollmentModule } from '../enrollment/enrollment.module';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 @Module({
   // D1: the fee statement must read the ONE canonical fee calculation
   // (SchoolFinanceQueryService), not compute a balance of its own — that
   // divergence is exactly how it came to report waivers as money paid.
-  imports: [FeesModule],
+  imports: [FeesModule, SchoolEnrollmentModule, PlacementLookupModule],
   controllers: [
     StudentController,
     GuardianController,
@@ -34,8 +33,6 @@ import { FeesModule } from '../fees/fees.module';
     StaffController,
     PositionController,
     StaffAttendanceController,
-    PromotionController,
-    EnrollmentController,
   ],
   providers: [
     StudentService,
@@ -46,8 +43,7 @@ import { FeesModule } from '../fees/fees.module';
     StaffService,
     PositionService,
     StaffAttendanceService,
-    PromotionService,
-    EnrollmentService,
+    StudentAdmissionService,
   ],
   exports: [
     StudentService,
@@ -58,8 +54,7 @@ import { FeesModule } from '../fees/fees.module';
     StaffService,
     PositionService,
     StaffAttendanceService,
-    PromotionService,
-    EnrollmentService,
+    StudentAdmissionService,
   ],
 })
 export class PeopleModule {}

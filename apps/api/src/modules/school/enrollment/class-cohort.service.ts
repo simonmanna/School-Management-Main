@@ -2,9 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
-import { resolveGroupingMode, type GroupingModeValue } from './grouping';
+import { resolveAllowsSubdivision } from './subdivision';
+import { resolveProgrammeForGrade } from './programme.service';
 import type {
-  AttachStreamToSectionDto,
   CreateClassCohortDto,
   GenerateClassCohortsDto,
   UpdateClassCohortDto,
@@ -13,10 +13,11 @@ import type {
 /**
  * ClassCohort — one class in one academic year.
  *
- * This is the row that makes "P5, 2026" a thing you can point at. Sections and
- * streams are tied to the cohort's class, the grouping mode lives here (or on
- * the programme), and every placement names a cohort rather than a bare class,
- * so "which P5 did this learner sit in?" has a year attached to the answer.
+ * This is the row that makes "P5, 2026" a thing you can point at. Sections are
+ * tied to the cohort's class, whether the class is divided at all is decided
+ * here (or on the class), and every placement names a cohort rather than a bare
+ * class, so "which P5 did this learner sit in?" has a year attached to the
+ * answer.
  */
 @Injectable()
 export class ClassCohortService {
@@ -47,7 +48,7 @@ export class ClassCohortService {
     const row = await this.prisma.client.classCohort.findFirst({
       where: { id },
       include: {
-        schoolClass: { include: { gradeLevel: true, sections: true, streams: true } },
+        schoolClass: { include: { gradeLevel: true, sections: { orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }] } } },
         academicYear: true,
         programme: true,
       },
@@ -57,37 +58,40 @@ export class ClassCohortService {
   }
 
   /**
-   * The grouping options a UI may offer for a cohort: the effective mode plus
-   * the sections and streams that legally belong to it. The placement screens
-   * read this so a user is never shown a stream from another class.
+   * What a placement screen may offer for a cohort: whether the class is divided
+   * and its ACTIVE sections in the school's own order. A deactivated section
+   * stays on historical records but is never offered for a new placement.
    */
   async groupingOptions(cohortId: string) {
     const cohort = await this.get(cohortId);
-    const mode = resolveGroupingMode(
-      cohort.groupingMode as GroupingModeValue | null,
-      (cohort.programme?.groupingMode ?? null) as GroupingModeValue | null,
-    );
+    const allowsSubdivision = this.allowsSubdivisionOf(cohort);
     const sections = await this.prisma.client.section.findMany({
-      where: { classId: cohort.classId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, capacity: true, classId: true },
-    });
-    const streams = await this.prisma.client.stream.findMany({
-      where: { classId: cohort.classId },
-      orderBy: { name: 'asc' },
-      select: { id: true, name: true, capacity: true, classId: true, sectionId: true },
+      where: { classId: cohort.classId, isActive: true },
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, code: true, capacity: true, classId: true, displayOrder: true },
     });
     return {
       cohortId: cohort.id,
       classId: cohort.classId,
       className: cohort.schoolClass?.name ?? null,
       academicYearId: cohort.academicYearId,
-      groupingMode: mode,
-      requiresSection: mode === 'SECTION_ONLY' || mode === 'SECTION_AND_STREAM',
-      requiresStream: mode === 'STREAM_ONLY' || mode === 'SECTION_AND_STREAM',
+      allowsSubdivision,
+      requiresSection: allowsSubdivision && sections.length > 0,
       sections,
-      streams,
     };
+  }
+
+  /** Whether a loaded cohort (with schoolClass) is divided. */
+  allowsSubdivisionOf(cohort: any): boolean {
+    return resolveAllowsSubdivision({
+      cohortOverride: cohort.allowsSubdivision,
+      classAllowsStreams: cohort.schoolClass?.allowsStreams,
+    });
+  }
+
+  /** The per-year subdivision override a DTO asks for; undefined leaves it alone. */
+  private requestedSubdivision(dto: { allowsSubdivision?: boolean | null }): boolean | null | undefined {
+    return dto.allowsSubdivision;
   }
 
   async create(dto: CreateClassCohortDto) {
@@ -108,7 +112,7 @@ export class ClassCohortService {
           academicYearId: dto.academicYearId,
           classId: dto.classId,
           programmeId: programmeId ?? null,
-          groupingMode: dto.groupingMode ?? null,
+          allowsSubdivision: this.requestedSubdivision(dto) ?? null,
           capacity: dto.capacity ?? null,
           status: dto.status ?? 'ACTIVE',
           createdBy: this.tenant.userId ?? null,
@@ -126,15 +130,16 @@ export class ClassCohortService {
 
   async update(id: string, dto: UpdateClassCohortDto) {
     const before = await this.get(id);
-    if (dto.groupingMode && dto.groupingMode !== before.groupingMode) {
-      await this.assertGroupingModeChangeAllowed(id, dto.groupingMode);
+    const nextSubdivision = this.requestedSubdivision(dto);
+    if (nextSubdivision === false && this.allowsSubdivisionOf(before)) {
+      await this.assertUndivideAllowed(id);
     }
     return this.prisma.client.$transaction(async (tx: any) => {
       await tx.classCohort.updateMany({
         where: { id },
         data: {
           ...(dto.programmeId !== undefined ? { programmeId: dto.programmeId } : {}),
-          ...(dto.groupingMode !== undefined ? { groupingMode: dto.groupingMode } : {}),
+          ...(nextSubdivision !== undefined ? { allowsSubdivision: nextSubdivision } : {}),
           ...(dto.capacity !== undefined ? { capacity: dto.capacity } : {}),
           ...(dto.status !== undefined ? { status: dto.status } : {}),
           updatedBy: this.tenant.userId ?? null,
@@ -144,7 +149,11 @@ export class ClassCohortService {
         entity: 'ClassCohort',
         entityId: id,
         action: 'update',
-        oldValues: { groupingMode: before.groupingMode, status: before.status, capacity: before.capacity },
+        oldValues: {
+          allowsSubdivision: this.allowsSubdivisionOf(before),
+          status: before.status,
+          capacity: before.capacity,
+        },
         newValues: dto as any,
       });
       return tx.classCohort.findFirst({ where: { id } });
@@ -152,32 +161,18 @@ export class ClassCohortService {
   }
 
   /**
-   * ADR-019: changing a grouping mode is versioned by academic year and blocked
-   * once placements depend on it. Silently flipping SECTION_ONLY to STREAM_ONLY
-   * would leave every existing placement holding a now-illegal tuple.
+   * Turning subdivision OFF for a year is refused while learners in that cohort
+   * sit in a stream: they would be left holding a placement the class no longer
+   * allows. Move them out of their streams first.
    */
-  private async assertGroupingModeChangeAllowed(cohortId: string, next: GroupingModeValue) {
-    const open = await this.prisma.client.enrollmentPlacement.count({
-      where: { classCohortId: cohortId, effectiveTo: null },
+  private async assertUndivideAllowed(cohortId: string) {
+    const inSection = await this.prisma.client.enrollmentPlacement.count({
+      where: { classCohortId: cohortId, effectiveTo: null, sectionId: { not: null } },
     });
-    if (open === 0) return;
-    const offending = await this.prisma.client.enrollmentPlacement.count({
-      where: {
-        classCohortId: cohortId,
-        effectiveTo: null,
-        ...(next === 'NONE'
-          ? { OR: [{ sectionId: { not: null } }, { streamId: { not: null } }] }
-          : next === 'SECTION_ONLY'
-            ? { OR: [{ sectionId: null }, { streamId: { not: null } }] }
-            : next === 'STREAM_ONLY'
-              ? { OR: [{ streamId: null }, { sectionId: { not: null } }] }
-              : { OR: [{ sectionId: null }, { streamId: null }] }),
-      },
-    });
-    if (offending > 0) {
+    if (inSection > 0) {
       throw new BadRequestException(
-        `Cannot switch this cohort to ${next}: ${offending} of ${open} current placements would become invalid. ` +
-          'Move those learners first, or supply a reviewed migration.',
+        `Cannot stop dividing this class: ${inSection} learner(s) currently sit in a stream. ` +
+          'Move them to the class as a whole first.',
       );
     }
   }
@@ -214,8 +209,11 @@ export class ClassCohortService {
           academicYearId: dto.academicYearId,
           classId: cls.id,
           programmeId,
-          groupingMode: dto.groupingMode ?? null,
-          capacity: cls.capacity ?? null,
+          allowsSubdivision: this.requestedSubdivision(dto) ?? null,
+          // NULL = inherit the class's capacity. Copying it here froze the class
+          // value into every year's cohort, so a later change to the class never
+          // reached the cohorts already generated.
+          capacity: null,
           status: 'ACTIVE',
           createdBy: this.tenant.userId ?? null,
         },
@@ -253,55 +251,11 @@ export class ClassCohortService {
     });
   }
 
-  /** The programme that owns a class, via its grade level. Null when unmapped. */
+  /** The programme a class enrols into, via its grade's academic level. Null when unmapped. */
   async programmeForClass(classId: string, tx?: any): Promise<string | null> {
     const client = tx ?? this.prisma.client;
     const cls = await client.schoolClass.findFirst({ where: { id: classId }, select: { gradeLevelId: true } });
     if (!cls) return null;
-    const link = await client.programmeGradeLevel.findFirst({
-      where: { gradeLevelId: cls.gradeLevelId },
-      select: { programmeId: true },
-    });
-    return link?.programmeId ?? null;
-  }
-
-  /**
-   * Attach (or detach) a stream to a section. ADR-019 backfill path for schools
-   * moving to SECTION_AND_STREAM — the database trigger refuses a section from
-   * another class, and so do we, with a message a person can act on.
-   */
-  async attachStreamToSection(streamId: string, dto: AttachStreamToSectionDto) {
-    const stream = await this.prisma.client.stream.findFirst({ where: { id: streamId } });
-    if (!stream) throw new NotFoundException(`Stream ${streamId} not found`);
-    const sectionId = dto.sectionId ?? null;
-    if (sectionId) {
-      const section = await this.prisma.client.section.findFirst({ where: { id: sectionId } });
-      if (!section) throw new NotFoundException(`Section ${sectionId} not found`);
-      if (section.classId !== stream.classId) {
-        throw new BadRequestException(
-          `Section "${section.name}" belongs to a different class than stream "${stream.name}". ` +
-            'A stream may only sit under a section of its own class.',
-        );
-      }
-      const clashes = await this.prisma.client.enrollmentPlacement.count({
-        where: { streamId, effectiveTo: null, sectionId: { not: sectionId } },
-      });
-      if (clashes > 0) {
-        throw new BadRequestException(
-          `${clashes} current placement(s) use stream "${stream.name}" with a different section. Move those learners first.`,
-        );
-      }
-    }
-    return this.prisma.client.$transaction(async (tx: any) => {
-      await tx.stream.updateMany({ where: { id: streamId }, data: { sectionId } });
-      await this.audit.recordInTx(tx, {
-        entity: 'Stream',
-        entityId: streamId,
-        action: 'update',
-        oldValues: { sectionId: stream.sectionId },
-        newValues: { sectionId },
-      });
-      return tx.stream.findFirst({ where: { id: streamId } });
-    });
+    return (await resolveProgrammeForGrade(client, cls.gradeLevelId))?.id ?? null;
   }
 }

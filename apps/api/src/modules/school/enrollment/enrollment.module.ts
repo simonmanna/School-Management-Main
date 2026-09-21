@@ -3,40 +3,37 @@ import { ProgrammeService } from './programme.service';
 import { ClassCohortService } from './class-cohort.service';
 import { PlacementService } from './placement.service';
 import { StudentEnrollmentService } from './student-enrollment.service';
-import { EnrollmentBackfillService } from './enrollment-backfill.service';
+import { PromotionRunService } from './promotion-run.service';
+import { PlacementLookupModule } from './placement-lookup.module';
 import {
   ClassCohortController,
-  EnrollmentMigrationController,
   PlacementController,
   ProgrammeController,
-  StreamGroupingController,
+  PromotionRunController,
   StudentEnrollmentController,
 } from './enrollment.controller';
 
 /**
- * Phase 1 — the canonical enrollment and grouping spine (ADR-018 / ADR-019).
- *
- * Deliberately separate from `PeopleModule`: the legacy per-term `Enrollment`
- * lives there and stays a compatibility surface until the Phase 0.5 retirement
- * conditions are met. Keeping the canonical model in its own module makes the
- * boundary visible in the import graph rather than in a comment.
+ * The enrollment and grouping spine (ADR-018 / ADR-029): programmes, annual
+ * class cohorts, student enrollments and effective-dated placements. The only
+ * source of which class and stream a learner is in.
  */
 @Module({
+  imports: [PlacementLookupModule],
   controllers: [
     ProgrammeController,
     ClassCohortController,
-    StreamGroupingController,
     StudentEnrollmentController,
     PlacementController,
-    EnrollmentMigrationController,
+    PromotionRunController,
   ],
   providers: [
     ProgrammeService,
     ClassCohortService,
     PlacementService,
     StudentEnrollmentService,
-    EnrollmentBackfillService,
+    PromotionRunService,
   ],
-  exports: [ProgrammeService, ClassCohortService, PlacementService, StudentEnrollmentService, EnrollmentBackfillService],
+  exports: [ProgrammeService, ClassCohortService, PlacementService, StudentEnrollmentService],
 })
 export class SchoolEnrollmentModule {}

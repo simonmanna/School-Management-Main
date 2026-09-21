@@ -8,6 +8,7 @@
  */
 import { SchoolPaymentService } from '../../src/modules/school/fees/billing.service';
 import { SchoolFinanceQueryService } from '../../src/modules/school/fees/school-finance-query.service';
+import { makePlacementLookupStub } from './_placement-stub';
 
 /* ───────────────────── B1 · overpayment ───────────────────── */
 
@@ -171,7 +172,7 @@ describe('C1 · fee clearance before exams', () => {
         },
       },
     };
-    const service = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any);
+    const service = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any, makePlacementLookupStub() as any);
     jest.spyOn(service, 'studentBalance').mockResolvedValue({
       studentProfileId: 'stu_1',
       billed: 1_000_000,
@@ -237,7 +238,7 @@ describe('D2 · instalment plans finally read', () => {
         installmentPlan: { findFirst: jest.fn().mockResolvedValue(plan) },
       },
     };
-    const service = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any);
+    const service = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any, makePlacementLookupStub() as any);
     jest.spyOn(service, 'studentBalance').mockResolvedValue({
       studentProfileId: 'stu_1',
       billed: 900_000,

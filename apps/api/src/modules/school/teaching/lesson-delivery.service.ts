@@ -117,7 +117,6 @@ export class LessonDeliveryService {
         subject: offering.subject?.name ?? null,
         className: offering.classCohort?.schoolClass?.name ?? null,
         section: offering.section?.name ?? null,
-        stream: offering.stream?.name ?? null,
         termId: offering.termId,
       },
       weekStart: start.toISOString(),

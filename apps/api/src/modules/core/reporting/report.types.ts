@@ -86,23 +86,35 @@ export type ReportFilterKey =
   | 'house'
   | 'studentCategoryId'
   | 'search'
-  | 'classBasis';
+  | 'classBasis'
+  // ── HR / payroll ──────────────────────────────────────────────────────────
+  // The workforce catalogue partitions by employer structures, not by class.
+  // These live in the shared vocabulary (rather than an HR-only one) because
+  // the runner validates every filter against this single list.
+  | 'departmentId'
+  | 'positionId'
+  | 'employeeId'
+  | 'payrollPeriodId'
+  | 'payrollRunId'
+  | 'employmentType';
 
 export const REPORT_FILTER_KEYS: readonly ReportFilterKey[] = [
   'academicYearId', 'termId', 'campusId', 'gradeLevelId', 'classId',
   'sectionId', 'streamId', 'studentProfileId', 'staffProfileId', 'subjectId',
   'resultSetId', 'dateFrom', 'dateTo', 'asOf', 'status', 'gender',
   'residenceType', 'house', 'studentCategoryId', 'search', 'classBasis',
+  'departmentId', 'positionId', 'employeeId', 'payrollPeriodId', 'payrollRunId',
+  'employmentType',
 ] as const;
 
 /**
  * Which notion of "class" a report means. These three disagree the moment a
  * pupil moves mid-term, and the disagreement is silent:
  *
- *   current    — StudentProfile.currentClassId. Where the pupil sits today.
+ *   current    — the placement open today (ADR-027). Where the pupil sits now.
  *   enrollment — Enrollment.classId for the term. Historical truth.
  *   roster     — the frozen AcademicRoster. Academic truth; the only basis a
- *                results report may use (currentClassId is an input to roster
+ *                results report may use (the live class is an input to roster
  *                capture, never academic truth).
  *
  * Every definition declares a default and the runner records the resolved basis
@@ -140,12 +152,16 @@ export type ReportDomain =
   | 'inventory'
   | 'documents'
   | 'executive'
-  | 'audit';
+  | 'audit'
+  /** People, posts and employment lifecycle. */
+  | 'hr'
+  /** Money paid to staff, and the statutory returns that follow it. */
+  | 'payroll';
 
 export const REPORT_DOMAINS: readonly ReportDomain[] = [
   'student', 'enrollment', 'admissions', 'attendance', 'academics', 'fees',
   'finance', 'staff', 'timetable', 'curriculum', 'lms', 'meals', 'inventory',
-  'documents', 'executive', 'audit',
+  'documents', 'executive', 'audit', 'hr', 'payroll',
 ] as const;
 
 export interface ReportScope {

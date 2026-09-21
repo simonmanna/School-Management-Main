@@ -3,8 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
 import { Users, Clock, CalendarCheck, CalendarX2, Wallet, Building2 } from 'lucide-react';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 const RUN_STATUS: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
@@ -15,6 +15,7 @@ const RUN_STATUS: Record<string, string> = {
 };
 
 export function HrDashboardPage() {
+  const fmt = useMoneyFormatter();
   const { data, isLoading } = useHrDashboard();
 
   const cards = [

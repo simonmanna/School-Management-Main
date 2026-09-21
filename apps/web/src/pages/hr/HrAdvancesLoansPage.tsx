@@ -8,8 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 const ADVANCE_STATUS: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-800',
@@ -26,6 +26,7 @@ const LOAN_STATUS: Record<string, string> = {
 };
 
 export function HrAdvancesLoansPage() {
+  const fmt = useMoneyFormatter();
   const [tab, setTab] = useState('advances');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);

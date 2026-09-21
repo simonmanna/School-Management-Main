@@ -3,10 +3,11 @@ import { useHrAttendanceRegister, useHrLeaveOverview, useHrPayrollRuns } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 export function HrReportsPage() {
+  const fmt = useMoneyFormatter();
   const [tab, setTab] = useState('attendance');
   const [from, setFrom] = useState(new Date(new Date().setDate(1)).toISOString().slice(0, 10));
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -51,6 +52,7 @@ export class StatutoryExportService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly ca: UnebCaService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   private get org() {
@@ -376,7 +378,9 @@ export class StatutoryExportService {
       where: {
         id: { in: references.map((r) => r.studentProfileId) },
         deletedAt: null,
-        ...(dto.classIds?.length ? { currentClassId: { in: dto.classIds } } : {}),
+        // A statutory submission leaves the school and cannot be recalled, so it
+        // must name the class the learner actually held (ADR-027).
+        ...(dto.classIds?.length ? this.placements.studentWhere({ classIds: dto.classIds }) : {}),
       },
       select: {
         id: true,
@@ -384,11 +388,12 @@ export class StatutoryExportService {
         gender: true,
         dateOfBirth: true,
         partner: { select: { name: true } },
-        currentClass: { select: { name: true } },
-        currentStream: { select: { name: true } },
       },
     });
     const byId = new Map(learners.map((l) => [l.id, l]));
+    // A statutory submission leaves the school and cannot be recalled: it names
+    // the class and stream from placement history (ADR-027).
+    const placedCandidates = await this.placements.describe(learners.map((l) => l.id));
 
     const enrollments = await this.prisma.client.studentEnrollment.findMany({
       where: { studentProfileId: { in: learners.map((l) => l.id) }, status: 'ACTIVE' },
@@ -421,8 +426,8 @@ export class StatutoryExportService {
         sex: learner.gender?.trim().toUpperCase().startsWith('F') ? 'F' : learner.gender ? 'M' : null,
         dateOfBirth: learner.dateOfBirth,
         admissionNo: learner.admissionNo,
-        className: learner.currentClass?.name ?? null,
-        streamName: learner.currentStream?.name ?? null,
+        className: placedCandidates.get(learner.id)?.className ?? null,
+        streamName: placedCandidates.get(learner.id)?.sectionName ?? null,
         programmeCode: programmeByStudent.get(learner.id) ?? null,
         referenceStatus: ref.status,
         registrationYear: ref.registrationYear,
@@ -463,8 +468,6 @@ export class StatutoryExportService {
         id: true,
         admissionNo: true,
         partner: { select: { name: true } },
-        currentClass: { select: { name: true } },
-        currentStream: { select: { name: true } },
       },
     });
     const byId = new Map(learners.map((l) => [l.id, l]));
@@ -478,6 +481,10 @@ export class StatutoryExportService {
     for (const r of references) if (!candidateNo.has(r.studentProfileId)) candidateNo.set(r.studentProfileId, r.candidateNumber);
 
     const term = await this.prisma.client.term.findFirst({ where: { id: dto.termId }, select: { name: true } });
+    const placedResults = await this.placements.describe(
+      [...new Set(results.map((r) => r.studentProfileId))],
+      { termId: dto.termId },
+    );
 
     const rows = results.map((r) => {
       const learner = byId.get(r.studentProfileId);
@@ -486,8 +493,8 @@ export class StatutoryExportService {
         studentName: learner?.partner?.name ?? null,
         admissionNo: learner?.admissionNo ?? null,
         candidateNumber: candidateNo.get(r.studentProfileId) ?? null,
-        className: learner?.currentClass?.name ?? null,
-        streamName: learner?.currentStream?.name ?? null,
+        className: placedResults.get(r.studentProfileId)?.className ?? null,
+        streamName: placedResults.get(r.studentProfileId)?.sectionName ?? null,
         termName: term?.name ?? null,
         meanPercent: r.meanPercent == null ? null : Number(r.meanPercent),
         aggregate: r.aggregate,

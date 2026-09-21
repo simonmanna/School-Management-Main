@@ -58,6 +58,9 @@ const QUALIFICATION_TYPES = ['degree', 'diploma', 'certificate', 'teaching_qual'
 const CERTIFICATION_STATUSES = ['active', 'expiring', 'expired', 'revoked'] as const;
 const ENROLLMENT_STATUSES = ['enrolled', 'in_progress', 'completed', 'failed', 'cancelled'] as const;
 const STATUTORY_CONFIG_TYPES = ['PENSION', 'SOCIAL_SECURITY', 'LOCAL_TAX', 'INSURANCE', 'OTHER'] as const;
+const LEAVE_ACCRUAL_METHODS = ['ANNUAL_UPFRONT', 'MONTHLY', 'NONE'] as const;
+const PAYROLL_INPUT_TYPES = ['BONUS', 'COMMISSION', 'ALLOWANCE', 'DEDUCTION', 'REIMBURSEMENT'] as const;
+const PAYROLL_INPUT_STATUSES = ['PENDING', 'APPROVED', 'APPLIED', 'CANCELLED'] as const;
 
 // ── Org masters ─────────────────────────────────────────────────────────────
 
@@ -286,6 +289,10 @@ export class CreateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) carryForwardDays?: number;
   @IsOptional() @IsInt() @Min(0) maxConsecutiveDays?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsIn(LEAVE_ACCRUAL_METHODS) accrualMethod?: (typeof LEAVE_ACCRUAL_METHODS)[number];
+  @IsOptional() @IsInt() @Min(0) accrualStartsAfterMonths?: number;
+  @IsOptional() @IsInt() @Min(0) carryForwardExpiryMonths?: number;
+  @IsOptional() @IsInt() @Min(0) maxBalanceDays?: number;
 }
 
 export class UpdateLeaveTypeDto {
@@ -295,6 +302,39 @@ export class UpdateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) carryForwardDays?: number;
   @IsOptional() @IsInt() @Min(0) maxConsecutiveDays?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsIn(LEAVE_ACCRUAL_METHODS) accrualMethod?: (typeof LEAVE_ACCRUAL_METHODS)[number];
+  @IsOptional() @IsInt() @Min(0) accrualStartsAfterMonths?: number;
+  @IsOptional() @IsInt() @Min(0) carryForwardExpiryMonths?: number;
+  @IsOptional() @IsInt() @Min(0) maxBalanceDays?: number;
+}
+
+// ── Leave accrual engine ─────────────────────────────────────────────
+
+export class RunLeaveAccrualDto {
+  /** Accrue as at this date. Defaults to today. Only CLOSED periods are granted. */
+  @IsOptional() @IsString() asOf?: string;
+  @IsOptional() @IsString() leaveTypeId?: string;
+  @IsOptional() @IsString() employeeId?: string;
+  /** Compute and return what WOULD be granted without writing anything. */
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
+
+export class LeaveYearEndDto {
+  /** The year being CLOSED. Defaults to last year. */
+  @IsOptional() @IsInt() year?: number;
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
+
+export class ExpireCarryForwardDto {
+  @IsOptional() @IsInt() year?: number;
+  @IsOptional() @IsString() asOf?: string;
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+}
+
+export class LeaveAccrualLedgerQueryDto {
+  @IsOptional() @IsString() employeeId?: string;
+  @IsOptional() @IsString() leaveTypeId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() year?: number;
 }
 
 export class AdjustLeaveBalanceDto {
@@ -462,6 +502,53 @@ export class UpdateBankPaymentStatusDto {
 }
 
 // ── Advances & loans ────────────────────────────────────────────────────────
+
+// ── Ad-hoc payroll inputs ───────────────────────────────────────────
+
+export class PayrollInputRowDto {
+  @IsString() @IsNotEmpty() employeeId!: string;
+  @IsString() @IsNotEmpty() periodId!: string;
+  @IsIn(PAYROLL_INPUT_TYPES) inputType!: (typeof PAYROLL_INPUT_TYPES)[number];
+  @IsString() @IsNotEmpty() name!: string;
+  @IsNumber() @IsPositive() amount!: number;
+  @IsOptional() @IsBoolean() isTaxable?: boolean;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class CreatePayrollInputDto extends PayrollInputRowDto {}
+
+/** Bulk capture — a bonus list keyed off one memo lands as one request. */
+export class CreatePayrollInputsDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PayrollInputRowDto)
+  inputs!: PayrollInputRowDto[];
+}
+
+export class UpdatePayrollInputDto {
+  @IsOptional() @IsIn(PAYROLL_INPUT_TYPES) inputType?: (typeof PAYROLL_INPUT_TYPES)[number];
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
+  @IsOptional() @IsNumber() @IsPositive() amount?: number;
+  @IsOptional() @IsBoolean() isTaxable?: boolean;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class ApprovePayrollInputsDto {
+  @IsArray() @IsString({ each: true }) ids!: string[];
+}
+
+export class CancelPayrollInputDto {
+  @IsOptional() @IsString() reason?: string;
+}
+
+export class ListPayrollInputsQueryDto {
+  @IsOptional() @IsString() periodId?: string;
+  @IsOptional() @IsString() employeeId?: string;
+  @IsOptional() @IsIn(PAYROLL_INPUT_STATUSES) status?: (typeof PAYROLL_INPUT_STATUSES)[number];
+  @IsOptional() @IsIn(PAYROLL_INPUT_TYPES) inputType?: (typeof PAYROLL_INPUT_TYPES)[number];
+}
 
 export class CreateAdvanceDto {
   @IsString() @IsNotEmpty() employeeId!: string;

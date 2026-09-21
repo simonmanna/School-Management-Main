@@ -17,6 +17,7 @@
  *  - The penalty Document now has a DocumentLine + posts to the GL.
  */
 import { BillingService } from '../../src/modules/school/fees/billing.service';
+import { makePlacementLookupStub, placement } from './_placement-stub';
 
 interface Mocks {
   penaltyRuleFindFirst: jest.Mock;
@@ -110,6 +111,7 @@ function makeService() {
     { mapped: jest.fn(), receivableAccount: jest.fn() } as any,
     { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') } as any,
     { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
+    makePlacementLookupStub() as any,
   );
 
   const mocks: Mocks = {

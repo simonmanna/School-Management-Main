@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   ClassBasis,
   ReportContext,
@@ -21,7 +22,7 @@ import type {
  *     Every campus filter must therefore resolve campus -> class ids first. One
  *     query that forgets, and campus A sees campus B's fee arrears.
  *
- *  2. CLASS BASIS. `currentClassId` / `Enrollment.classId` / the frozen academic
+ *  2. CLASS BASIS. The live placement / the term's placements / the frozen academic
  *     roster are three different answers to "who is in P5", and they diverge the
  *     moment a pupil moves. Resolving here, and stamping the answer onto the
  *     report caption, is what stops the fee report and the results report
@@ -42,6 +43,7 @@ export class FilterResolverService implements ReportContextBuilder {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly scope: DataScopeService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   private get db(): Record<string, any> {
@@ -210,19 +212,28 @@ export class FilterResolverService implements ReportContextBuilder {
     admissionNo: string; name: string; className: string; classId: string | null;
   }>> {
     if (studentProfileIds.length === 0) return new Map();
-    const rows = await this.db.studentProfile.findMany({
+    const found = await this.db.studentProfile.findMany({
       where: { id: { in: studentProfileIds } },
-      select: {
-        id: true, admissionNo: true, currentClassId: true,
-        partner: { select: { name: true } },
-        currentClass: { select: { name: true } },
-      },
+      select: { id: true, admissionNo: true, partner: { select: { name: true } } },
     });
+    // Class from placement history (ADR-027), not the StudentProfile projection.
+    const rows = await this.placements.attach(found as Array<{ id: string }>);
+    const classIds = [...new Set(rows.map((r) => r.placement?.classId).filter(Boolean) as string[])];
+    const classNames = new Map<string, string>(
+      classIds.length === 0
+        ? []
+        : (
+            await this.db.schoolClass.findMany({
+              where: { id: { in: classIds } },
+              select: { id: true, name: true },
+            })
+          ).map((c: any) => [c.id, c.name]),
+    );
     return new Map(rows.map((s: any) => [s.id, {
       admissionNo: s.admissionNo ?? '',
       name: s.partner?.name ?? s.admissionNo ?? s.id,
-      className: s.currentClass?.name ?? '',
-      classId: s.currentClassId ?? null,
+      className: s.placement ? (classNames.get(s.placement.classId) ?? '') : '',
+      classId: s.placement?.classId ?? null,
     }]));
   }
 
@@ -242,8 +253,14 @@ export class FilterResolverService implements ReportContextBuilder {
    *
    * Shared by every pupil-centric report so the three bases stay one
    * implementation. `roster` deliberately falls back to enrollment only when no
-   * frozen roster exists for the term — a report that silently substitutes
-   * `currentClassId` for academic truth is the bug this whole type exists to stop.
+   * frozen roster exists for the term — a report that silently substitutes a
+   * learner's CURRENT class for academic truth is the bug this whole type exists
+   * to stop.
+   *
+   * Every basis reads placement history (ADR-027). `current` is the placement
+   * open now; `enrollment` and `roster` are placements held during the term.
+   * During the compatibility window a learner with no placement still resolves
+   * through the legacy Enrollment row (term bases) or the projection (current).
    */
   async studentIdsFor(
     ctx: ReportContext,
@@ -257,7 +274,13 @@ export class FilterResolverService implements ReportContextBuilder {
           `This report uses the "${classBasis}" class basis and needs a term. Select a term, or none is current.`,
         );
       }
-      const rows = await this.db.enrollment.findMany({
+      const placed = await this.placements.studentIdsIn(
+        classIds ? { classIds } : {},
+        { termId, includeInactive: opts.includeInactive },
+      );
+      // Compat: learners not yet backfilled are still counted from their legacy
+      // term Enrollment. Removed with the legacy table (Phase 8).
+      const legacy = await this.db.enrollment.findMany({
         where: {
           termId,
           ...(classIds ? { classId: { in: classIds } } : {}),
@@ -265,12 +288,17 @@ export class FilterResolverService implements ReportContextBuilder {
         },
         select: { studentProfileId: true },
       });
-      return [...new Set<string>(rows.map((r: { studentProfileId: string }) => r.studentProfileId))];
+      return [
+        ...new Set<string>([
+          ...placed,
+          ...legacy.map((r: { studentProfileId: string }) => r.studentProfileId),
+        ]),
+      ];
     }
 
     const rows = await this.db.studentProfile.findMany({
       where: {
-        ...(classIds ? { currentClassId: { in: classIds } } : {}),
+        ...(classIds ? this.placements.studentWhere({ classIds }) : {}),
         ...(opts.includeInactive ? {} : { status: 'active' }),
         deletedAt: null,
       },

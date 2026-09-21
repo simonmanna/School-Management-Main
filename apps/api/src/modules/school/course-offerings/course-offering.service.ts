@@ -57,7 +57,6 @@ export class CourseOfferingService {
     classCohort: { include: { schoolClass: { include: { gradeLevel: true } } } },
     subject: true,
     section: true,
-    stream: true,
     curriculum: { select: { id: true, name: true, version: true, status: true } },
     competency: true,
     activityDefinition: true,
@@ -131,16 +130,16 @@ export class CourseOfferingService {
       throw new BadRequestException(`${dto.audienceScope} audience requires an annual class cohort.`);
     }
     if (dto.audienceScope === 'SECTION' && !dto.sectionId) throw new BadRequestException('SECTION audience requires sectionId.');
-    if (dto.audienceScope === 'STREAM' && !dto.streamId) throw new BadRequestException('STREAM audience requires streamId.');
+    // ADR-029: a stream IS a section now. A STREAM audience is refused rather than
+    // quietly treated as a section so a stale client learns what changed.
+    if (dto.audienceScope === 'STREAM' || dto.streamId) {
+      throw new BadRequestException(
+        'Streams are now kept as sections (ADR-029). Use a SECTION audience with the stream\'s sectionId.',
+      );
+    }
     if (dto.sectionId) {
       const section = await tx.section.findFirst({ where: { id: dto.sectionId, organizationId: this.org } });
       if (!section || !cohort || section.classId !== cohort.classId) throw new BadRequestException('Section does not belong to the selected cohort class.');
-    }
-    if (dto.streamId) {
-      const stream = await tx.stream.findFirst({ where: { id: dto.streamId, organizationId: this.org } });
-      if (!stream || !cohort || stream.classId !== cohort.classId || (dto.sectionId && stream.sectionId !== dto.sectionId)) {
-        throw new BadRequestException('Stream does not belong to the selected cohort/section.');
-      }
     }
 
     const curriculumTypes = ['SUBJECT', 'LEARNING_AREA', 'REMEDIAL'];
@@ -178,7 +177,7 @@ export class CourseOfferingService {
           organizationId: this.org, code, name: dto.name.trim(), academicYearId: dto.academicYearId,
           termId: dto.termId, programmeId: dto.programmeId, classCohortId: dto.classCohortId,
           classId: cohort?.classId, offeringType: dto.offeringType, audienceScope: dto.audienceScope,
-          subjectId: dto.subjectId, sectionId: dto.sectionId, streamId: dto.streamId,
+          subjectId: dto.subjectId, sectionId: dto.sectionId,
           curriculumId: dto.curriculumId, competencyId: dto.competencyId,
           activityDefinitionId: dto.activityDefinitionId, effectiveFrom: new Date(dto.effectiveFrom),
           effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : null, summary: dto.summary,
@@ -267,7 +266,6 @@ export class CourseOfferingService {
     };
     if (offering.audienceScope !== 'SCHOOL') scope.classCohortId = offering.classCohortId;
     if (offering.audienceScope === 'SECTION') scope.sectionId = offering.sectionId;
-    if (offering.audienceScope === 'STREAM') scope.streamId = offering.streamId;
     return scope;
   }
 
@@ -310,7 +308,6 @@ export class CourseOfferingService {
       const eligible = await this.prisma.client.enrollmentPlacement.findFirst({ where: {
         enrollmentId: enrollment.id, termId: offering.termId, classCohortId: offering.classCohortId,
         ...(offering.audienceScope === 'SECTION' ? { sectionId: offering.sectionId } : {}),
-        ...(offering.audienceScope === 'STREAM' ? { streamId: offering.streamId } : {}),
       } });
       if (!eligible) throw new BadRequestException('Learner placement is outside this offering audience.');
     }
@@ -329,7 +326,7 @@ export class CourseOfferingService {
     await this.get(id);
     return this.prisma.client.courseEnrollment.findMany({
       where: { courseOfferingId: id },
-      include: { studentEnrollment: { include: { student: { include: { partner: true } }, placements: { where: { effectiveTo: null }, include: { section: true, stream: true } } } } },
+      include: { studentEnrollment: { include: { student: { include: { partner: true } }, placements: { where: { effectiveTo: null }, include: { section: true } } } } },
       orderBy: { studentEnrollment: { student: { partner: { name: 'asc' } } } },
     });
   }
@@ -383,9 +380,9 @@ export class CourseOfferingService {
         if (!cohort?.programmeId) throw new Error('No annual cohort/programme mapping.');
         const curriculum = await this.prisma.client.curriculum.findFirst({ where: { academicYearId: assignment.term.academicYearId, classId: assignment.classId, status: 'published', subjects: { some: { subjectId: assignment.subjectId } } }, orderBy: { version: 'desc' } });
         if (!curriculum) throw new Error('No published curriculum containing the subject.');
-        let offering = await this.prisma.client.courseOffering.findFirst({ where: { termId: assignment.termId, classCohortId: cohort.id, subjectId: assignment.subjectId, sectionId: assignment.sectionId, streamId: assignment.streamId } });
+        let offering = await this.prisma.client.courseOffering.findFirst({ where: { termId: assignment.termId, classCohortId: cohort.id, subjectId: assignment.subjectId, sectionId: assignment.sectionId } });
         if (offering) report.existing++;
-        else if (!dto.dryRun) offering = await this.create({ name: `${assignment.schoolClass.name} ${assignment.subject.name}`, academicYearId: assignment.term.academicYearId, termId: assignment.termId, programmeId: cohort.programmeId, classCohortId: cohort.id, offeringType: 'SUBJECT', audienceScope: assignment.streamId ? 'STREAM' : assignment.sectionId ? 'SECTION' : 'COHORT', subjectId: assignment.subjectId, sectionId: assignment.sectionId ?? undefined, streamId: assignment.streamId ?? undefined, curriculumId: curriculum.id, effectiveFrom: assignment.term.startDate.toISOString() }) as any;
+        else if (!dto.dryRun) offering = await this.create({ name: `${assignment.schoolClass.name} ${assignment.subject.name}`, academicYearId: assignment.term.academicYearId, termId: assignment.termId, programmeId: cohort.programmeId, classCohortId: cohort.id, offeringType: 'SUBJECT', audienceScope: assignment.sectionId ? 'SECTION' : 'COHORT', subjectId: assignment.subjectId, sectionId: assignment.sectionId ?? undefined, curriculumId: curriculum.id, effectiveFrom: assignment.term.startDate.toISOString() }) as any;
         if (!dto.dryRun && offering) await this.allocateTeacher(offering.id, { teacherPartnerId: assignment.teacherPartnerId, role: 'LEAD', isResponsible: true, effectiveFrom: assignment.term.startDate.toISOString() });
         report.mapped++;
       } catch (error) { report.exceptions.push({ id: assignment.id, reason: error instanceof Error ? error.message : String(error) }); }
@@ -401,7 +398,7 @@ export class CourseOfferingService {
     const copy = await this.create({
       name: source.name, academicYearId: dto.academicYearId, termId: dto.termId, programmeId: cohort?.programmeId ?? source.programmeId,
       classCohortId: dto.classCohortId ?? source.classCohortId, offeringType: source.offeringType, audienceScope: source.audienceScope,
-      subjectId: source.subjectId, sectionId: source.sectionId, streamId: source.streamId, curriculumId: dto.curriculumId ?? source.curriculumId,
+      subjectId: source.subjectId, sectionId: source.sectionId, curriculumId: dto.curriculumId ?? source.curriculumId,
       competencyId: source.competencyId, activityDefinitionId: source.activityDefinitionId,
       effectiveFrom: dto.effectiveFrom ?? term.startDate.toISOString(), effectiveTo: dto.effectiveTo ?? term.endDate.toISOString(), summary: source.summary,
       teachers: dto.copyTeachers === false ? [] : source.teachers.filter((t: any) => !t.effectiveTo).map((t: any) => ({ teacherPartnerId: t.teacherPartnerId, role: t.role, isResponsible: t.isResponsible, effectiveFrom: dto.effectiveFrom ?? term.startDate.toISOString() })),

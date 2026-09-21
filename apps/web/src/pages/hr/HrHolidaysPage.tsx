@@ -53,7 +53,7 @@ export function HrHolidaysPage() {
                   <div>
                     <p className="text-sm font-medium">{h.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(h.date).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                      {new Date(h.date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                   </div>
                 </div>

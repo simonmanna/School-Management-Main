@@ -1086,6 +1086,138 @@ export function useMarkHrPayslipPaid() {
   });
 }
 
+// ── Ad-hoc payroll inputs ────────────────────────────────────────
+//
+// One-off money for one employee in one period — bonuses, commissions,
+// reimbursements and ad-hoc deductions. Capture needs `hr:payroll_input`;
+// APPROVING needs `hr:payroll`, so a 403 on approve is the separation of duties
+// working, not a bug.
+
+export type HrPayrollInputType =
+  | 'BONUS' | 'COMMISSION' | 'ALLOWANCE' | 'DEDUCTION' | 'REIMBURSEMENT';
+export type HrPayrollInputStatus = 'PENDING' | 'APPROVED' | 'APPLIED' | 'CANCELLED';
+
+export interface HrPayrollInput {
+  id: string;
+  employeeId: string;
+  periodId: string;
+  inputType: HrPayrollInputType;
+  name: string;
+  amount: string;
+  isTaxable: boolean;
+  status: HrPayrollInputStatus;
+  appliedRunId: string | null;
+  reference: string | null;
+  notes: string | null;
+  employee?: { id: string; employeeCode: string; firstName: string; lastName: string | null };
+  period?: { id: string; periodCode: string; startDate: string; endDate: string };
+}
+
+export function useHrPayrollInputs(params: {
+  periodId?: string; employeeId?: string; status?: string; inputType?: string;
+} = {}) {
+  return useQuery({
+    queryKey: ['hr', 'payroll', 'inputs', params],
+    queryFn: async () =>
+      (await api.get<HrPayrollInput[]>('/hr/payroll/inputs', { params })).data,
+  });
+}
+
+/** Bulk capture — a bonus list keyed off one memo lands as one request. */
+export function useCreateHrPayrollInputs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { inputs: any[] }) =>
+      (await api.post('/hr/payroll/inputs/bulk', dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payroll', 'inputs'] }),
+  });
+}
+
+export function useUpdateHrPayrollInput() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: any }) =>
+      (await api.patch(`/hr/payroll/inputs/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payroll', 'inputs'] }),
+  });
+}
+
+export function useApproveHrPayrollInputs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]) =>
+      (await api.post('/hr/payroll/inputs/approve', { ids })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payroll'] }),
+  });
+}
+
+export function useCancelHrPayrollInput() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) =>
+      (await api.post(`/hr/payroll/inputs/${id}/cancel`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payroll', 'inputs'] }),
+  });
+}
+
+export function useDeleteHrPayrollInput() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/hr/payroll/inputs/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payroll', 'inputs'] }),
+  });
+}
+
+// ── Leave accrual engine ─────────────────────────────────────────
+//
+// Every one of these is safe to call twice: a grant is keyed by accrual period,
+// so a repeat run grants nothing again. `dryRun` returns the movements without
+// writing them, which is what the screens show before committing.
+
+export function useRunLeaveAccrual() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { asOf?: string; leaveTypeId?: string; employeeId?: string; dryRun?: boolean }) =>
+      (await api.post('/hr/leave/accrual/run', dto)).data,
+    onSuccess: (_d, vars) => {
+      if (!vars?.dryRun) qc.invalidateQueries({ queryKey: ['hr', 'leave'] });
+    },
+  });
+}
+
+export function useRunLeaveYearEnd() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { year?: number; dryRun?: boolean }) =>
+      (await api.post('/hr/leave/accrual/year-end', dto)).data,
+    onSuccess: (_d, vars) => {
+      if (!vars?.dryRun) qc.invalidateQueries({ queryKey: ['hr', 'leave'] });
+    },
+  });
+}
+
+export function useExpireCarryForward() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { year?: number; asOf?: string; dryRun?: boolean }) =>
+      (await api.post('/hr/leave/accrual/expire-carry-forward', dto)).data,
+    onSuccess: (_d, vars) => {
+      if (!vars?.dryRun) qc.invalidateQueries({ queryKey: ['hr', 'leave'] });
+    },
+  });
+}
+
+/** The movements behind a balance — answers "why do I have 14.5 days?". */
+export function useLeaveAccrualLedger(params: {
+  employeeId?: string; leaveTypeId?: string; year?: number;
+} = {}) {
+  return useQuery({
+    queryKey: ['hr', 'leave', 'accrual-ledger', params],
+    queryFn: async () => (await api.get('/hr/leave/accrual/ledger', { params })).data,
+    enabled: Boolean(params.employeeId || params.leaveTypeId || params.year),
+  });
+}
+
 // ── Bank payments ─────────────────────────────────────────────────────────
 
 export function useHrBankPayments(params: { runId?: string; status?: string } = {}) {

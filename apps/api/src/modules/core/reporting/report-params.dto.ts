@@ -38,6 +38,15 @@ export class ReportFilterDto {
   @IsOptional() @IsUUID() resultSetId?: string;
   @IsOptional() @IsUUID() studentCategoryId?: string;
 
+  // ── HR / payroll ──────────────────────────────────────────────────────────
+  @IsOptional() @IsUUID() departmentId?: string;
+  @IsOptional() @IsUUID() positionId?: string;
+  @IsOptional() @IsUUID() employeeId?: string;
+  @IsOptional() @IsUUID() payrollPeriodId?: string;
+  @IsOptional() @IsUUID() payrollRunId?: string;
+  /** HrEmploymentType: FULL_TIME | PART_TIME | CONTRACT | INTERN | CASUAL | PROBATION. */
+  @IsOptional() @IsString() employmentType?: string;
+
   @IsOptional() @IsDateString() dateFrom?: string;
   @IsOptional() @IsDateString() dateTo?: string;
 

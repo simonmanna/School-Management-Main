@@ -15,6 +15,7 @@ import {
   type SubjectInput,
 } from './result-computation';
 import type { GradebookCellDto, GradebookColumnDto, UpdateGradebookColumnDto } from './gradebook.dto';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -46,6 +47,7 @@ export class GradebookService {
     private readonly audit: AuditService,
     private readonly marking: MarkingService,
     private readonly policies: AssessmentPolicyService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   private get org() {
@@ -54,7 +56,7 @@ export class GradebookService {
 
   /* ─────────────────────────── The sheet ─────────────────────────── */
 
-  async sheet(params: { classId: string; termId: string; subjectId?: string; streamId?: string }) {
+  async sheet(params: { classId: string; termId: string; subjectId?: string; sectionId?: string }) {
     const [klass, term, subjects] = await Promise.all([
       this.prisma.client.schoolClass.findFirst({ where: { id: params.classId }, include: { gradeLevel: true } }),
       this.prisma.client.term.findFirst({ where: { id: params.termId } }),
@@ -145,7 +147,7 @@ export class GradebookService {
     ].filter((g) => g.columnIds.length > 0 || g.id !== UNWEIGHTED.id);
 
     // Students + their marks.
-    const students = await this.studentsOfClass(params.classId, params.streamId);
+    const students = await this.studentsOfClass(params.classId, params.sectionId);
     const assessmentIds = assessments.map((a) => a.id);
     const saRows = assessmentIds.length
       ? await this.prisma.client.studentAssessment.findMany({
@@ -199,7 +201,7 @@ export class GradebookService {
         studentProfileId: s.studentProfileId,
         name: s.name,
         admissionNo: s.admissionNo,
-        streamName: s.streamName,
+        sectionName: s.sectionName,
         cells,
         finalPercent: result.finalPercent != null ? Number(result.finalPercent) : null,
         grade: result.grade,
@@ -395,29 +397,18 @@ export class GradebookService {
     return subjects.map((s) => ({ id: s.id, name: s.name, code: s.code }));
   }
 
-  private async studentsOfClass(classId: string, streamId?: string) {
-    const students = await this.prisma.client.studentProfile.findMany({
-      where: {
-        currentClassId: classId,
-        status: 'active',
-        // The subdivision a school calls a "stream" can be stored as either a
-        // Section or a Stream row: the schema has both, attendance/class-teacher/
-        // rosters only ever hang off Section, and the mark screens only ever
-        // filtered on Stream — so whichever a school picked, half the system
-        // could not see its P4 West. Matching either column makes both work
-        // while Section becomes the one the UI creates.
-        ...(streamId
-          ? { OR: [{ currentSectionId: streamId }, { currentStreamId: streamId }] }
-          : {}),
-      },
-      include: { partner: true, currentStream: true, currentSection: true },
+  /** The learners of a class, optionally one stream, from placement history. */
+  private async studentsOfClass(classId: string, sectionId?: string) {
+    const roster = await this.placements.roster({
+      classIds: [classId],
+      ...(sectionId ? { sectionIds: [sectionId] } : {}),
     });
-    return students
-      .map((s) => ({
-        studentProfileId: s.id,
-        name: s.partner?.name ?? s.admissionNo,
-        admissionNo: s.admissionNo,
-        streamName: s.currentStream?.name ?? null,
+    return roster
+      .map((r) => ({
+        studentProfileId: r.student.id,
+        name: r.student.partner?.name ?? r.student.admissionNo,
+        admissionNo: r.student.admissionNo,
+        sectionName: r.sectionName,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }

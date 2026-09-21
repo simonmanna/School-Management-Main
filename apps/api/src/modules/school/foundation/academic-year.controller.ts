@@ -6,6 +6,7 @@ import { AcademicYearService, TermService } from './academic-year.service';
 import {
   CreateAcademicYearDto,
   CreateTermDto,
+  SetAcademicYearStatusDto,
   SetCurrentYearDto,
   SetCurrentTermDto,
   UpdateAcademicYearDto,
@@ -49,6 +50,17 @@ export class AcademicYearController {
   @RequirePermissions(PERMISSIONS.school.manageFoundation)
   setCurrent(@Body() dto: SetCurrentYearDto) {
     return this.years.setCurrent(dto);
+  }
+
+  /**
+   * Move a year through PLANNING to ACTIVE to CLOSED to ARCHIVED. Declared
+   * BEFORE the :id PATCH so the literal path segment is not swallowed by the
+   * parameter route.
+   */
+  @Patch(':id/status')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  setStatus(@Param('id') id: string, @Body() dto: SetAcademicYearStatusDto) {
+    return this.years.setStatus(id, dto);
   }
 
   @Patch(':id')

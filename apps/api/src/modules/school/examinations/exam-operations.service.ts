@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import type { ExamLifecycleActionDto, FreezeCandidatesDto } from './exam-operations.dto';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /** A blocked transition, named so the exam office can act on it. */
 export interface ExamGateConflict {
@@ -67,6 +68,7 @@ export class ExamOperationsService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   private get db(): any { return this.prisma.client; }
@@ -226,10 +228,13 @@ export class ExamOperationsService {
         throw new BadRequestException('Register candidates before freezing the list');
       }
 
-      const students = await tx.studentProfile.findMany({
+      // The frozen candidate list records where each candidate sat at the
+      // moment it was frozen — from placement history (ADR-027).
+      const found = await tx.studentProfile.findMany({
         where: { id: { in: registrations.map((r: any) => r.studentProfileId) } },
-        select: { id: true, admissionNo: true, currentSectionId: true, currentStreamId: true },
+        select: { id: true, admissionNo: true },
       });
+      const students = await this.placements.attach(found);
       const byId = new Map<string, any>((students as any[]).map((s: any) => [s.id, s]));
 
       const prior = exam.activeSnapshotId
@@ -244,8 +249,7 @@ export class ExamOperationsService {
           studentProfileId: r.studentProfileId,
           examRegistrationId: r.id,
           classId: r.classId ?? null,
-          sectionId: p?.currentSectionId ?? null,
-          streamId: p?.currentStreamId ?? null,
+          sectionId: p?.placement?.sectionId ?? null,
           candidateNumber: p?.admissionNo ?? String(i + 1).padStart(4, '0'),
           indexNumber: null as string | null,
           venueId: r.venueId ?? null,

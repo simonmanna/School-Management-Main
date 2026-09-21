@@ -66,6 +66,40 @@ export function displayBalance(
 }
 
 /**
+ * A balance-sheet row's contribution to its side of the statement: assets
+ * debit-positive, liabilities and equity credit-positive.
+ *
+ * Deliberately NOT {@link displayBalance}. That presents an account positive in
+ * its OWN normal direction, which is right for a P&L line and wrong for a
+ * contra account on the balance sheet. Accumulated Depreciation is a
+ * credit-normal asset, so `displayBalance` hands back its charge as a positive
+ * number; adding that to assets overstated fixed assets by twice the
+ * accumulated charge instead of deducting it once, and pushed the statement out
+ * of balance by the same amount even though the trial balance footed.
+ *
+ * `net` is the raw ledger net (debit − credit).
+ */
+export function balanceSheetValue(
+  net: Prisma.Decimal,
+  section: ReportSection | null,
+): Prisma.Decimal {
+  return balanceSheetSideOf(section) === 'asset' ? net : net.negated();
+}
+
+/**
+ * A P&L account's contribution to earnings, from its raw ledger net.
+ *
+ * Revenue is credit-normal (negative net) and increases earnings; expense is
+ * debit-normal (positive net) and reduces them — so one negation covers every
+ * P&L account, contra-revenue included. Signing by `classification` instead
+ * got contra-revenue backwards: sales discounts carry `classification =
+ * 'revenue'` with a debit normal balance, so they were ADDED to profit.
+ */
+export function earningsValue(net: Prisma.Decimal): Prisma.Decimal {
+  return net.negated();
+}
+
+/**
  * Cash-flow section. Revenue and expense accounts are always operating;
  * everything else uses the account override, then the category default.
  */

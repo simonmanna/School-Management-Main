@@ -1,21 +1,23 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, BarChart3, CheckCircle2, Circle, Clock, GripVertical, Lock, Pencil, Plus, RefreshCw,
-  Settings2, Trash2, Users,
+  ArrowLeft, BarChart3, CheckCircle2, Circle, Clock, GripVertical, Layers, Lock, PanelLeftClose,
+  PanelLeftOpen, Pencil, Plus, RefreshCw, Settings2, Trash2, UserPlus, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { SafeHtml } from '@/components/ui/safe-html';
 import {
   useLmsCoursePage, useLmsEnsureSections, useLmsAddSection, useLmsAddModule,
-  useLmsDeleteModule, useLmsSyncRoster, useLmsGradebook, useLmsCompletionReport,
-  useLmsMoveModule, useLmsUpdateModule, useLmsUpdateInstance, useLmsEditCell,
+  useLmsDeleteModule, useLmsSyncRoster, useLmsCompletionReport,
+  useLmsMoveModule, useLmsUpdateModule, useLmsUpdateInstance,
 } from '@/features/school/api';
-import { activityUi, registeredActivityTypes } from '@/features/school/lms/activities/registry';
+import { activityUi } from '@/features/school/lms/activities/registry';
 import { ActivityEditor } from '@/features/school/lms/activity-editor';
+import { ActivityChooser } from '@/features/school/lms/activity-chooser';
+import { CourseIndex } from '@/features/school/lms/course-index';
+import { GradebookPanel } from '@/features/school/lms/gradebook-panel';
 import { formatDue } from '@/features/school/lms/activities/shared';
 import { can, CAP, type CourseModuleView, type CoursePageView } from '@/features/school/lms/types';
 import { notify } from '@/lib/notify';
@@ -40,6 +42,12 @@ export function SchoolLmsCoursePage() {
   const [edit, setEdit] = useState(false);
   const [tab, setTab] = useState<Tab>('course');
   const [addingIn, setAddingIn] = useState<string | null>(null);
+  const [showIndex, setShowIndex] = useState(true);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  // One ref per section card, so the index can scroll to a week without navigating
+  // away and losing edit mode.
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [editor, setEditor] = useState<
     { activityType: string; sectionId: string; existing?: CourseModuleView } | null
   >(null);
@@ -64,11 +72,41 @@ export function SchoolLmsCoursePage() {
   // offer siblings from other sections too, not just the current one.
   const allModules = sections.flatMap((sec) => sec.modules);
 
+  const jumpTo = (sectionId: string) => {
+    setActiveSection(sectionId);
+    setCollapsed((prev) => {
+      // Jumping to a collapsed section should open it, or the jump lands on a
+      // header with nothing under it.
+      if (!prev.has(sectionId)) return prev;
+      const next = new Set(prev);
+      next.delete(sectionId);
+      return next;
+    });
+    sectionRefs.current[sectionId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const toggleSection = (sectionId: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+
   return (
     <div className="space-y-4 p-4">
       <div className="flex items-start gap-2">
         <Button variant="ghost" size="icon" onClick={() => nav('/school/lms/courses')}>
           <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="hidden lg:inline-flex"
+          title={showIndex ? 'Hide course index' : 'Show course index'}
+          onClick={() => setShowIndex((v) => !v)}
+        >
+          {showIndex ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
         </Button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-semibold">{page?.course.name ?? 'Course'}</h1>
@@ -89,6 +127,16 @@ export function SchoolLmsCoursePage() {
             <Button variant="outline" size="sm" onClick={() => nav(`/school/lms/courses/${id}/participants`)}>
               <Users className="mr-1 h-4 w-4" />Participants
             </Button>
+          )}
+          {can(caps, CAP.courseManage) && (
+            <>
+              <Button variant="outline" size="sm" onClick={() => nav(`/school/lms/courses/${id}/enrolment`)}>
+                <UserPlus className="mr-1 h-4 w-4" />Enrolment
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => nav(`/school/lms/courses/${id}/groups`)}>
+                <Layers className="mr-1 h-4 w-4" />Groups
+              </Button>
+            </>
           )}
           {can(caps, CAP.courseViewReports) && (
             <Button variant="outline" size="sm" onClick={() => nav(`/school/lms/courses/${id}/reports`)}>
@@ -139,7 +187,13 @@ export function SchoolLmsCoursePage() {
       </div>
 
       {tab === 'course' && (
-        <>
+        <div className={showIndex && sections.length > 0 ? 'lg:grid lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-4' : ''}>
+          {showIndex && sections.length > 0 && (
+            <aside className="mb-4 hidden lg:sticky lg:top-4 lg:mb-0 lg:block lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+              <CourseIndex sections={sections} activeSectionId={activeSection} onJump={jumpTo} />
+            </aside>
+          )}
+          <div className="space-y-4">
           {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
           {!isLoading && sections.length === 0 && (
             <Card><CardContent className="space-y-3 py-8 text-center">
@@ -156,10 +210,20 @@ export function SchoolLmsCoursePage() {
           )}
 
           {sections.map((sec) => (
-            <Card key={sec.id} className={sec.availability && !sec.availability.available ? 'opacity-70' : undefined}>
+            <Card
+              key={sec.id}
+              ref={(el) => { sectionRefs.current[sec.id] = el; }}
+              className={`scroll-mt-4 ${sec.availability && !sec.availability.available ? 'opacity-70' : ''} ${
+                activeSection === sec.id ? 'ring-1 ring-primary' : ''
+              }`}
+            >
               <CardHeader className="flex flex-row items-start justify-between py-3">
                 <div className="min-w-0">
-                  <CardTitle className="text-base">
+                  <CardTitle
+                    className="cursor-pointer text-base"
+                    onClick={() => toggleSection(sec.id)}
+                    title={collapsed.has(sec.id) ? 'Expand section' : 'Collapse section'}
+                  >
                     {sec.name ?? (sec.sectionNo === 0 ? 'General' : `Section ${sec.sectionNo}`)}
                     {sec.weekOf && (
                       <span className="ml-2 text-xs font-normal text-muted-foreground">
@@ -175,13 +239,18 @@ export function SchoolLmsCoursePage() {
                     </p>
                   )}
                 </div>
-                {edit && mayEdit && (
-                  <Button variant="ghost" size="sm" onClick={() => setAddingIn(addingIn === sec.id ? null : sec.id)}>
-                    <Plus className="mr-1 h-4 w-4" />Add activity
-                  </Button>
-                )}
+                <div className="flex shrink-0 items-center gap-1">
+                  <Badge variant="outline" className="text-[10px] tabular-nums">
+                    {sec.modules.length}
+                  </Badge>
+                  {edit && mayEdit && (
+                    <Button variant="ghost" size="sm" onClick={() => setAddingIn(sec.id)}>
+                      <Plus className="mr-1 h-4 w-4" />Add activity
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
-              <CardContent className="space-y-1">
+              <CardContent className={`space-y-1 ${collapsed.has(sec.id) ? 'hidden' : ''}`}>
                 {sec.modules.length === 0 && <p className="py-2 text-xs text-muted-foreground">No activities.</p>}
                 {sec.modules.map((m) => (
                   <ModuleRow
@@ -211,25 +280,6 @@ export function SchoolLmsCoursePage() {
                   />
                 ))}
 
-                {edit && mayEdit && addingIn === sec.id && (
-                  <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-3">
-                    <Label className="text-xs">Choose an activity type</Label>
-                    <div className="flex flex-wrap gap-1">
-                      {registeredActivityTypes().map((a) => {
-                        const Icon = a.icon;
-                        return (
-                          <button
-                            key={a.type}
-                            onClick={() => { setEditor({ activityType: a.type, sectionId: sec.id }); setAddingIn(null); }}
-                            className="flex items-center gap-1 rounded border bg-card px-2 py-1 text-xs hover:border-primary hover:bg-primary/10"
-                          >
-                            <Icon className="h-3.5 w-3.5" />{a.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </Card>
           ))}
@@ -242,11 +292,21 @@ export function SchoolLmsCoursePage() {
               <Plus className="mr-1 h-4 w-4" />Add section
             </Button>
           )}
-        </>
+          </div>
+        </div>
       )}
 
-      {tab === 'grades' && <Gradebook id={id} canEdit={can(caps, CAP.gradeEdit)} />}
+      {tab === 'grades' && <GradebookPanel courseId={id} canEdit={can(caps, CAP.gradeEdit)} />}
       {tab === 'completion' && <CompletionReport id={id} />}
+
+      <ActivityChooser
+        open={Boolean(addingIn)}
+        onClose={() => setAddingIn(null)}
+        onPick={(activityType) => {
+          setEditor({ activityType, sectionId: addingIn! });
+          setAddingIn(null);
+        }}
+      />
 
       {editor && (
         <ActivityEditor
@@ -334,77 +394,6 @@ function ModuleRow({
         </>
       )}
     </div>
-  );
-}
-
-function Gradebook({ id, canEdit }: { id: string; canEdit: boolean }) {
-  const { data, isLoading, refetch } = useLmsGradebook(id);
-  const editCell = useLmsEditCell();
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading gradebook…</p>;
-  const items: any[] = (data as any)?.items ?? [];
-  const students: any[] = (data as any)?.students ?? [];
-  if (items.length === 0) {
-    return <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">
-      No gradable activities yet. Add an assignment or quiz.
-    </CardContent></Card>;
-  }
-  return (
-    <Card><CardContent className="overflow-x-auto py-4">
-      <table className="w-full text-sm">
-        <thead><tr className="border-b text-left text-xs text-muted-foreground">
-          <th className="py-2 pr-4">Student</th>
-          {items.map((it) => <th key={it.id} className="whitespace-nowrap px-3 py-2">{it.assessment?.title ?? it.activityType}</th>)}
-          <th className="px-3 py-2">Total</th>
-        </tr></thead>
-        <tbody>
-          {students.map((s) => (
-            <tr key={s.studentProfileId} className="border-b">
-              <td className="py-2 pr-4">
-                <span className="block">{s.studentName}</span>
-                {s.admissionNo && <span className="text-xs text-muted-foreground">{s.admissionNo}</span>}
-              </td>
-              {items.map((it) => {
-                const cell = it.assessmentId ? s.cells[it.assessmentId] : null;
-                return (
-                  <td key={it.id} className="px-3 py-2 tabular-nums">
-                    {canEdit && cell ? (
-                      <input
-                        type="number"
-                        defaultValue={cell.score ?? ''}
-                        className="h-8 w-16 rounded border bg-background px-1 text-right text-sm tabular-nums"
-                        max={it.assessment?.maxScore ?? undefined}
-                        min={0}
-                        onBlur={async (e) => {
-                          const next = e.target.value === '' ? null : Number(e.target.value);
-                          if (next === null || next === cell.score) return;
-                          try {
-                            // Writes go through the grade bridge to MarkingService,
-                            // the one permitted writer of a mark.
-                            await editCell.mutateAsync({ courseId: id, studentAssessmentId: cell.studentAssessmentId, score: next });
-                            await refetch();
-                          } catch (err: any) {
-                            notify.error(err?.response?.data?.message ?? 'Could not save the mark');
-                            e.target.value = String(cell.score ?? '');
-                          }
-                        }}
-                      />
-                    ) : (
-                      cell?.score ?? '—'
-                    )}
-                  </td>
-                );
-              })}
-              <td className="px-3 py-2 font-medium tabular-nums">{s.total ?? '—'}</td>
-            </tr>
-          ))}
-          {students.length === 0 && (
-            <tr><td colSpan={items.length + 2} className="py-6 text-center text-muted-foreground">
-              No enrolled students. Sync the roster.
-            </td></tr>
-          )}
-        </tbody>
-      </table>
-    </CardContent></Card>
   );
 }
 

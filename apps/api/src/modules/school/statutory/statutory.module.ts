@@ -3,6 +3,7 @@ import { CandidateReferenceService } from './candidate-reference.service';
 import { UnebCaService } from './uneb-ca.service';
 import { StatutoryExportService } from './statutory-export.service';
 import { StatutoryController } from './statutory.controller';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 /**
  * Statutory workflows (Phase 6): the candidate-reference registry, the UNEB
@@ -13,6 +14,9 @@ import { StatutoryController } from './statutory.controller';
  * therefore a view of the canonical record rather than a second copy of it.
  */
 @Module({
+  // PlacementLookupModule: a statutory submission must name the class the
+  // learner actually held, not a projection of where they sit today (ADR-027).
+  imports: [PlacementLookupModule],
   controllers: [StatutoryController],
   providers: [CandidateReferenceService, UnebCaService, StatutoryExportService],
   exports: [CandidateReferenceService, UnebCaService, StatutoryExportService],

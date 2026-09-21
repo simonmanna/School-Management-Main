@@ -5,6 +5,7 @@ import { PortalIdentityService } from '../../../kernel/auth/portal-identity.serv
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /** What the portal app needs on boot to know who it is talking to. */
 export interface PortalContext {
@@ -40,6 +41,7 @@ export class PortalsService {
     // D1: the ONE canonical fee calculation. The portal must not compute a
     // balance of its own, or it will disagree with the bursar.
     private readonly finance: SchoolFinanceQueryService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /**
@@ -85,25 +87,51 @@ export class PortalsService {
     return { kind: principal.kind, students, teacher, defaultLanding };
   }
 
+  /**
+   * Attach where each pupil sits, from placement history (ADR-027), plus the
+   * class and section rows the portal renders.
+   *
+   * `currentClass` / `currentSection` keep their names because they are the
+   * portal's response contract (`row.student.currentClass.name`). What changed
+   * is where they come from: the learner's placement, not the StudentProfile
+   * projection. A parent sees the class their child actually sits in.
+   */
+  private async withPlacementClass<T extends { id: string }>(students: T[]) {
+    const placed = await this.placements.attach(students);
+    const classIds = [...new Set(placed.map((s) => s.placement?.classId).filter(Boolean) as string[])];
+    const sectionIds = [...new Set(placed.map((s) => s.placement?.sectionId).filter(Boolean) as string[])];
+    const [classes, sections] = await Promise.all([
+      classIds.length
+        ? this.prisma.client.schoolClass.findMany({ where: { id: { in: classIds } }, include: { gradeLevel: true } })
+        : Promise.resolve([] as any[]),
+      sectionIds.length
+        ? this.prisma.client.section.findMany({ where: { id: { in: sectionIds } } })
+        : Promise.resolve([] as any[]),
+    ]);
+    const classById = new Map<string, any>(classes.map((c: any) => [c.id, c]));
+    const sectionById = new Map<string, any>(sections.map((x: any) => [x.id, x]));
+    return placed.map((s) => ({
+      ...s,
+      currentClass: s.placement ? (classById.get(s.placement.classId) ?? null) : null,
+      placedClassName: (s.placement ? classById.get(s.placement.classId)?.name : null) ?? null,
+      currentSection: s.placement?.sectionId ? (sectionById.get(s.placement.sectionId) ?? null) : null,
+    }));
+  }
+
   /** Names and classes for a set of pupils, for pickers and headers. */
   private async describeStudents(ids: string[]): Promise<PortalContext['students']> {
     if (ids.length === 0) return [];
     const rows = await this.prisma.client.studentProfile.findMany({
       where: { id: { in: ids }, deletedAt: null },
-      select: {
-        id: true,
-        admissionNo: true,
-        currentClassId: true,
-        partner: { select: { name: true } },
-        currentClass: { select: { name: true } },
-      },
+      select: { id: true, admissionNo: true, partner: { select: { name: true } } },
     });
-    return rows.map((r) => ({
+    const placed = await this.withPlacementClass(rows);
+    return placed.map((r) => ({
       studentProfileId: r.id,
       name: r.partner?.name ?? r.admissionNo ?? 'Student',
       admissionNo: r.admissionNo ?? null,
-      classId: r.currentClassId ?? null,
-      className: r.currentClass?.name ?? null,
+      classId: r.placement?.classId ?? null,
+      className: r.placedClassName,
     }));
   }
 
@@ -112,13 +140,9 @@ export class PortalsService {
    * return their children's overview.
    */
   async parentDashboard(studentProfileIds: string[]) {
-    const students = await this.prisma.client.studentProfile.findMany({
-      where: { id: { in: studentProfileIds } },
-      include: {
-        currentClass: { include: { gradeLevel: true } },
-        currentSection: true,
-      },
-    });
+    const students = await this.withPlacementClass(
+      await this.prisma.client.studentProfile.findMany({ where: { id: { in: studentProfileIds } } }),
+    );
 
     // For each student, fetch latest attendance, grades, fees.
     const result = [];
@@ -126,7 +150,7 @@ export class PortalsService {
       const [attendance, fees, announcements] = await Promise.all([
         this.recentAttendance(s.id),
         this.feeBalance(s.partnerId, s.id),
-        this.recentAnnouncements(s.currentClassId),
+        this.recentAnnouncements(s.placement?.classId),
       ]);
       result.push({ student: s, attendance, fees, announcements });
     }
@@ -134,18 +158,16 @@ export class PortalsService {
   }
 
   async studentDashboard(studentProfileId: string) {
-    const profile = await this.prisma.client.studentProfile.findFirst({
-      where: { id: studentProfileId },
-      include: { currentClass: { include: { gradeLevel: true } } },
-    });
-    if (!profile) return null;
+    const found = await this.prisma.client.studentProfile.findFirst({ where: { id: studentProfileId } });
+    if (!found) return null;
+    const [profile] = await this.withPlacementClass([found]);
 
     const [timetable, attendance, grades, assignments, announcements, publishedResults, certificates] = await Promise.all([
-      this.studentTimetable(profile.currentClassId, profile.id),
+      this.studentTimetable(profile.placement?.classId, profile.placement?.sectionId ?? null),
       this.recentAttendance(studentProfileId),
       this.recentGrades(studentProfileId),
       this.studentAssignments(studentProfileId),
-      this.recentAnnouncements(profile.currentClassId),
+      this.recentAnnouncements(profile.placement?.classId),
       this.publishedResults(studentProfileId),
       this.studentCertificates(studentProfileId),
     ]);
@@ -330,12 +352,7 @@ export class PortalsService {
     });
     if (schedules.length === 0) return [];
 
-    const sizes = await this.prisma.client.studentProfile.groupBy({
-      by: ['currentClassId'],
-      where: { currentClassId: { in: classIds }, status: 'active' },
-      _count: { _all: true },
-    });
-    const sizeByClass = new Map(sizes.map((s) => [s.currentClassId as string, s._count._all]));
+    const sizeByClass = await this.placements.classSizes(classIds);
 
     const entered = await this.prisma.client.gradeEntry.groupBy({
       by: ['examScheduleId'],
@@ -449,11 +466,10 @@ export class PortalsService {
     });
   }
 
-  private async studentTimetable(classId: string | null | undefined, studentProfileId: string) {
+  private async studentTimetable(classId: string | null | undefined, sectionId: string | null) {
     if (!classId) return [];
-    const profile = await this.prisma.client.studentProfile.findFirst({ where: { id: studentProfileId } });
     const slots = await this.prisma.client.timetableSlot.findMany({
-      where: { classId, sectionId: profile?.currentSectionId ?? null },
+      where: { classId, sectionId },
       include: { subject: true, period: true },
       orderBy: [{ dayOfWeek: 'asc' }, { period: { order: 'asc' } }] as any,
     });

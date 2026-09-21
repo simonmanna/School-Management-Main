@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { normalizeE164 } from '../providers/sms/sms-gateway.config';
+import { PlacementLookupService } from '../../school/enrollment/placement-lookup.service';
 import {
   describeSelector,
   parseAudienceSelector,
@@ -72,7 +73,10 @@ function chunk<T>(items: T[], size = CHUNK): T[][] {
 export class AudienceResolverService {
   private readonly logger = new Logger('AudienceResolver');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly placements: PlacementLookupService,
+  ) {}
 
   async resolve(
     organizationId: string,
@@ -114,16 +118,34 @@ export class AudienceResolverService {
     cc?: string,
   ): Promise<AudienceMember[]> {
     const where = await this.studentWhere(organizationId, selector);
-    const students = await this.prisma.raw.studentProfile.findMany({
+    const found = await this.prisma.raw.studentProfile.findMany({
       where,
       select: {
         id: true,
-        currentClassId: true,
         partner: { select: { name: true, phone: true, phoneE164: true, email: true } },
-        currentClass: { select: { name: true } },
       },
     });
-    if (students.length === 0) return [];
+    if (found.length === 0) return [];
+
+    // The class a message names is where the learner is placed (ADR-027). This
+    // runs from subscribers and cron, outside any tenant context, so the lookup
+    // is told the organization explicitly.
+    const placed = await this.placements.attach(found, { organizationId });
+    const classIds = [...new Set(placed.map((p) => p.placement?.classId).filter(Boolean) as string[])];
+    const classNames = new Map<string, string>(
+      classIds.length === 0
+        ? []
+        : (
+            await this.prisma.raw.schoolClass.findMany({
+              where: { organizationId, id: { in: classIds } },
+              select: { id: true, name: true },
+            })
+          ).map((c) => [c.id, c.name]),
+    );
+    const students = placed.map((p) => ({
+      ...p,
+      className: p.placement ? (classNames.get(p.placement.classId) ?? null) : null,
+    }));
 
     const out: AudienceMember[] = [];
 
@@ -144,7 +166,7 @@ export class AudienceResolverService {
           userId: portalByStudent.get(s.id) ?? null,
           studentProfileId: s.id,
           studentName: s.partner?.name ?? null,
-          className: s.currentClass?.name ?? null,
+          className: s.className,
           relationship: null,
         });
       }
@@ -223,7 +245,7 @@ export class AudienceResolverService {
         userId: portalByContact.get(g.guardianContactId) ?? null,
         studentProfileId: g.studentProfileId,
         studentName: student?.partner?.name ?? null,
-        className: student?.currentClass?.name ?? null,
+        className: student?.className ?? null,
         relationship: g.relationship,
       });
     }
@@ -251,11 +273,12 @@ export class AudienceResolverService {
       case 'students':
         return { ...base, id: { in: selector.ids } };
       case 'class':
-        return { ...base, currentClassId: { in: selector.ids } };
+        return { ...base, ...this.placements.studentWhere({ classIds: selector.ids }) };
       case 'section':
-        return { ...base, currentSectionId: { in: selector.ids } };
+        return { ...base, ...this.placements.studentWhere({ sectionIds: selector.ids }) };
       case 'stream':
-        return { ...base, currentStreamId: { in: selector.ids } };
+        // A saved 'stream' audience may hold legacy Stream ids (ADR-029).
+        return { ...base, ...this.placements.studentWhere({ subdivisionIds: selector.ids }) };
       case 'house':
         return { ...base, house: { in: selector.ids } };
       case 'residence':
@@ -272,7 +295,10 @@ export class AudienceResolverService {
           },
           select: { id: true },
         });
-        return { ...base, currentClassId: { in: classes.map((c) => c.id) } };
+        return {
+          ...base,
+          ...this.placements.studentWhere({ classIds: classes.map((c) => c.id) }),
+        };
       }
       default:
         return base;

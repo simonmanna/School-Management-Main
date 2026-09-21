@@ -1,21 +1,40 @@
 import { useMemo, useState } from 'react';
-import { FileText } from 'lucide-react';
+import { Download, FileText, Loader2 } from 'lucide-react';
 import { useHrPayslips, useHrPayslip, useMarkHrPayslipPaid } from '@/features/hr/api';
+import { downloadPayslipPdf } from '@/features/hr/reports-api';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 const PAYSLIP_STATUS: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
   ISSUED: 'bg-cyan-100 text-cyan-800',
   PAID: 'bg-emerald-100 text-emerald-800',
+  // A reversed payroll run voids its slips. The number still resolves, because
+  // staff may already hold a printed copy.
+  CANCELLED: 'bg-rose-100 text-rose-800',
 };
 
 export function HrPayslipsPage() {
+  const fmt = useMoneyFormatter();
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const download = async (id: string) => {
+    setDownloading(id);
+    try {
+      await downloadPayslipPdf(id);
+    } catch {
+      toast.error('Could not download that payslip.');
+    } finally {
+      setDownloading(null);
+    }
+  };
+
   const { data } = useHrPayslips();
   const { data: detail } = useHrPayslip(detailId ?? undefined);
   const markPaid = useMarkHrPayslipPaid();
@@ -47,6 +66,15 @@ export function HrPayslipsPage() {
                   </div>
                 </button>
                 <div className="flex items-center gap-2">
+                  <Button
+                    size="sm" variant="ghost" title="Download PDF"
+                    disabled={downloading === p.id}
+                    onClick={() => download(p.id)}
+                  >
+                    {downloading === p.id
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <Download className="h-4 w-4" />}
+                  </Button>
                   {p.status === 'ISSUED' && (
                     <Button size="sm" variant="outline" onClick={() => markPaid.mutate({ id: p.id, dto: { paymentMethod: 'BANK' } })}>Mark paid</Button>
                   )}
@@ -66,9 +94,19 @@ export function HrPayslipsPage() {
 
           <div className="flex items-center justify-between">
             <Badge variant="outline" className={PAYSLIP_STATUS[detail?.status ?? ''] ?? ''}>{detail?.status}</Badge>
-            {detail?.status === 'ISSUED' && (
-              <Button size="sm" onClick={() => markPaid.mutate({ id: detail.id, dto: { paymentMethod: 'BANK' } })}>Mark paid</Button>
-            )}
+            <div className="flex gap-2">
+              {detail && (
+                <Button size="sm" variant="outline" disabled={downloading === detail.id} onClick={() => download(detail.id)}>
+                  {downloading === detail.id
+                    ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    : <Download className="mr-1.5 h-3.5 w-3.5" />}
+                  PDF
+                </Button>
+              )}
+              {detail?.status === 'ISSUED' && (
+                <Button size="sm" onClick={() => markPaid.mutate({ id: detail.id, dto: { paymentMethod: 'BANK' } })}>Mark paid</Button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-x-6">
@@ -81,6 +119,12 @@ export function HrPayslipsPage() {
                 {Number(it?.commissionAmount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Commission</dt><dd>{fmt(it?.commissionAmount)}</dd></div>}
                 {Number(it?.bonusAmount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Bonus</dt><dd>{fmt(it?.bonusAmount)}</dd></div>}
                 <div className="flex justify-between border-t pt-1 font-medium"><dt>Gross</dt><dd>{fmt(it?.grossPay)}</dd></div>
+                {Number(it?.proRataFactor ?? 1) < 1 && (
+                  <p className="pt-1 text-xs text-amber-700">
+                    Pro-rated: paid {Number(it?.paidDays ?? 0)} of {Number(it?.periodDays ?? 0)} days
+                    {Number(it?.unpaidLeaveDays ?? 0) > 0 ? ` (${Number(it?.unpaidLeaveDays)} unpaid leave)` : ''}.
+                  </p>
+                )}
               </dl>
             </div>
             <div>

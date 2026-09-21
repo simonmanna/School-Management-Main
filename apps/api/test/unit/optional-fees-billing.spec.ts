@@ -12,6 +12,7 @@
  * threaded through the batched path.
  */
 import { BillingService } from '../../src/modules/school/fees/billing.service';
+import { makePlacementLookupStub, placement } from './_placement-stub';
 
 type Line = { productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number };
 
@@ -48,6 +49,7 @@ function makeService(overrides: Record<string, unknown> = {}) {
     { mapped: jest.fn() } as any,
     { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') } as any,
     { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
+    makePlacementLookupStub() as any,
   );
   return { service, prisma };
 }
@@ -56,7 +58,7 @@ const student = {
   id: 's1',
   partnerId: 'p1',
   admissionNo: 'STU-001',
-  currentClassId: 'c1',
+  placement: placement({ classId: 'c1', gradeLevelId: 'g1' }),
   currentClass: { name: 'S.2', gradeLevelId: 'g1' },
 };
 

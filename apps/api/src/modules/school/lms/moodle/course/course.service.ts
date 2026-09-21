@@ -31,8 +31,23 @@ export class CourseService {
     return this.tenant.organizationId;
   }
 
-  async listCourses(filter: { termId?: string; classId?: string; subjectId?: string; categoryId?: string }) {
-    return this.prisma.client.courseOffering.findMany({
+  /**
+   * The course catalog.
+   *
+   * Returns display HEADERS, not raw offering rows. `CourseOffering` has no usable
+   * display name of its own — the browser used to render "Course a1b2c3d4" for every
+   * card because the payload carried ids and nothing else. The header is the same
+   * one the course page and "My learning" use, so a course is named identically
+   * wherever it appears.
+   *
+   * `q` is a free-text filter over the composed name, applied after composition
+   * because the parts it matches (subject, class, term) live in four tables.
+   */
+  async listCourses(filter: {
+    termId?: string; classId?: string; subjectId?: string; categoryId?: string;
+    q?: string; visible?: string; mine?: string;
+  }) {
+    const rows = await this.prisma.client.courseOffering.findMany({
       where: {
         organizationId: this.org,
         deletedAt: null,
@@ -40,10 +55,44 @@ export class CourseService {
         ...(filter.classId ? { classId: filter.classId } : {}),
         ...(filter.subjectId ? { subjectId: filter.subjectId } : {}),
         ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+        ...(filter.visible === 'true' ? { visible: true } : {}),
+        ...(filter.visible === 'false' ? { visible: false } : {}),
       },
       include: { teachers: true, _count: { select: { modules: true, enrolments: true } } },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Teacher names in one round trip rather than one per card.
+    const staffIds = [...new Set(rows.flatMap((r) => r.teachers.map((t) => t.teacherPartnerId)))];
+    const staff = staffIds.length
+      ? await this.prisma.client.staffProfile.findMany({
+          where: { id: { in: staffIds }, organizationId: this.org },
+          select: { id: true, partner: { select: { name: true } } },
+        })
+      : [];
+    const staffName = new Map(staff.map((s) => [s.id, s.partner?.name ?? null]));
+
+    const cards = await Promise.all(
+      rows.map(async (o) => ({
+        ...(await this.envelope.courseHeader(o)),
+        numSections: o.numSections,
+        status: o.status,
+        teachers: o.teachers
+          .map((t) => staffName.get(t.teacherPartnerId))
+          .filter((n): n is string => Boolean(n)),
+        counts: { modules: o._count.modules, enrolments: o._count.enrolments },
+      })),
+    );
+
+    const needle = filter.q?.trim().toLowerCase();
+    const filtered = needle
+      ? cards.filter((c) =>
+          [c.name, c.subject, c.className, c.term, ...c.teachers]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(needle)),
+        )
+      : cards;
+    return filtered.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getOffering(id: string): Promise<CourseOffering> {

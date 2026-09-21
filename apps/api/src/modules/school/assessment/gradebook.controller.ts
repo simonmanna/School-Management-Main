@@ -24,9 +24,9 @@ export class GradebookController {
     @Query('classId') classId: string,
     @Query('termId') termId: string,
     @Query('subjectId') subjectId?: string,
-    @Query('streamId') streamId?: string,
+    @Query('sectionId') sectionId?: string,
   ) {
-    return this.service.sheet({ classId, termId, subjectId: subjectId || undefined, streamId: streamId || undefined });
+    return this.service.sheet({ classId, termId, subjectId: subjectId || undefined, sectionId: sectionId || undefined });
   }
 
   @Get('subjects')

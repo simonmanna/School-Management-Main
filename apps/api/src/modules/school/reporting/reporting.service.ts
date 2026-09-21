@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /**
  * ReportingService — aggregation queries that power the four school dashboards:
@@ -23,6 +24,7 @@ export class ReportingService {
     // service. Re-deriving one here is what let the dashboard and the statement
     // disagree (FINANCIAL_INVARIANTS.md, "cached projection, never an input").
     private readonly finance: SchoolFinanceQueryService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /** Single call that powers the admin dashboard tile. */
@@ -148,24 +150,34 @@ export class ReportingService {
 
   /** Outstanding fees grouped by class, from the canonical per-pupil balance. */
   async outstandingByClass() {
-    const students = await this.prisma.client.studentProfile.findMany({
-      where: { status: 'active', deletedAt: null, currentClassId: { not: null } },
-      select: {
-        id: true,
-        currentClassId: true,
-        currentClass: { select: { id: true, name: true } },
-      },
-    });
+    // Grouped by the class each pupil is placed in (ADR-027). A learner with no
+    // class at all is left out, as before.
+    const placedAll = await this.placements.attach(
+      await this.prisma.client.studentProfile.findMany({
+        where: { status: 'active', deletedAt: null },
+        select: { id: true },
+      }),
+    );
+    const students = placedAll.filter((s) => s.placement);
     if (students.length === 0) return [];
+    const classIdsForNames = [...new Set(students.map((s) => s.placement!.classId))];
+    const classNameById = new Map<string, string>(
+      (
+        await this.prisma.client.schoolClass.findMany({
+          where: { id: { in: classIdsForNames } },
+          select: { id: true, name: true },
+        })
+      ).map((c) => [c.id, c.name]),
+    );
 
     const balances = await this.finance.studentBalances(students.map((s) => s.id));
 
     const byClass = new Map<string, { className: string; outstanding: number; studentCount: number; owingCount: number }>();
     for (const s of students) {
-      const classId = s.currentClassId!;
+      const classId = s.placement!.classId;
       if (!byClass.has(classId)) {
         byClass.set(classId, {
-          className: s.currentClass?.name ?? classId,
+          className: classNameById.get(classId) ?? classId,
           outstanding: 0,
           studentCount: 0,
           owingCount: 0,
@@ -243,10 +255,23 @@ export class ReportingService {
     const profiles = latest.length
       ? await this.prisma.client.studentProfile.findMany({
           where: { id: { in: latest.map((r: any) => r.studentProfileId) } },
-          include: { partner: true, currentClass: true },
+          include: { partner: true },
         })
       : [];
     const byId = new Map(profiles.map((p: any) => [p.id, p]));
+    // A results figure names the class FROZEN on the result row — the class the
+    // pupil sat the term in — never the class they have since moved to.
+    const resultClassIds = [...new Set(latest.map((r: any) => r.classId).filter(Boolean))] as string[];
+    const resultClassName = new Map<string, string>(
+      resultClassIds.length
+        ? (
+            await this.prisma.client.schoolClass.findMany({
+              where: { id: { in: resultClassIds } },
+              select: { id: true, name: true },
+            })
+          ).map((c) => [c.id, c.name])
+        : [],
+    );
 
     return latest.map((r: any) => {
       const p: any = byId.get(r.studentProfileId);
@@ -254,7 +279,7 @@ export class ReportingService {
         id: r.studentProfileId,
         admissionNo: p?.admissionNo ?? '',
         name: p?.partner?.name ?? null,
-        className: p?.currentClass?.name ?? null,
+        className: r.classId ? (resultClassName.get(r.classId) ?? null) : null,
         classRank: r.classRank != null ? Number(r.classRank) : null,
         gpa: r.gpa != null ? Number(r.gpa) : null,
         meanPercent: r.meanPercent != null ? Number(r.meanPercent) : null,

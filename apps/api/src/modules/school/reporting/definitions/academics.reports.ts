@@ -29,7 +29,7 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
       filters: ['resultSetId', 'termId', 'classId', 'classBasis'],
       requiredFilters: ['resultSetId'],
       // The frozen academic roster is the only defensible membership for a
-      // results document: `currentClassId` would rewrite last term's broadsheet
+      // results document: a pupil's live class would rewrite last term's broadsheet
       // every time a pupil is moved.
       classBasisDefault: 'roster',
       asOfMode: 'live',

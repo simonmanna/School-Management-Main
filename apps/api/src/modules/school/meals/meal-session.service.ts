@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import type { OpenMealSessionDto, BulkMarkMealAttendanceDto } from './dto.types';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 @Injectable()
 export class MealSessionService {
@@ -12,6 +13,7 @@ export class MealSessionService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /** Active assignments valid on `date` whose plan is entitled to `mealTypeId`. */
@@ -21,7 +23,9 @@ export class MealSessionService {
       startDate: { lte: date },
       OR: [{ endDate: null }, { endDate: { gte: date } }],
       mealPlan: { entitlements: { some: { mealTypeId } } },
-      ...(classId ? { studentProfile: { currentClassId: classId } } : {}),
+      ...(classId
+        ? { studentProfile: this.placements.studentWhere({ classIds: [classId] }) }
+        : {}),
     };
   }
 

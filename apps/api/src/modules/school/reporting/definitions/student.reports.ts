@@ -9,7 +9,7 @@ import type { SchoolReportDeps } from '../school-report-deps';
  * Term → Class → Section → Stream → Pupil → Admission No. It runs on the
  * `enrollment` basis because a register is a statement about a TERM, not about
  * where a pupil happens to be sitting today — the two diverge the moment
- * anybody is moved mid-term, and a register built on `currentClassId` would
+ * anybody is moved mid-term, and a register built on the live class would
  * quietly rewrite history every time that happened.
  */
 export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] {

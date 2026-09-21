@@ -1,4 +1,5 @@
 import { AudienceResolverService } from './audience-resolver.service';
+import { PlacementLookupService } from '../../school/enrollment/placement-lookup.service';
 
 /**
  * Fixture: one class, three children, and the messy realities a school roster
@@ -50,7 +51,15 @@ function serviceWith(fx: Fixture) {
         ),
       },
       portalIdentity: { findMany: jest.fn(async () => []) },
-      schoolClass: { findMany: jest.fn(async () => []) },
+      // These learners carry only the StudentProfile projection — the
+      // un-backfilled case the ADR-027 compat path exists for — so the class
+      // name is resolved from the projected class id.
+      enrollmentPlacement: { findMany: jest.fn(async () => []) },
+      schoolClass: {
+        findMany: jest.fn(async ({ where }: { where?: { id?: { in?: string[] } } } = {}) =>
+          where?.id?.in?.includes('c1') ? [{ id: 'c1', name: CLASS.name }] : [],
+        ),
+      },
       gradeLevel: { findMany: jest.fn(async () => []) },
       section: { findMany: jest.fn(async () => []) },
       stream: { findMany: jest.fn(async () => []) },
@@ -59,7 +68,10 @@ function serviceWith(fx: Fixture) {
       user: { findMany: jest.fn(async () => []) },
     },
   };
-  return { svc: new AudienceResolverService(prisma as never), prisma };
+  return {
+    svc: new AudienceResolverService(prisma as never, new PlacementLookupService(prisma as never)),
+    prisma,
+  };
 }
 
 const CLASS = { name: 'P5 East' };

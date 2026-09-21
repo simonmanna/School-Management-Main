@@ -1,0 +1,502 @@
+/*
+ * Accounting report suite.
+ *
+ * Built on the app's shadcn HSL tokens so light and dark both work, and with a
+ * print block that strips the chrome and prints the statement alone on white —
+ * a client hands a printed P&L to an auditor, not a screenshot of an app.
+ */
+
+.acct-reports {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .acct-reports {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ───────────────────────────── catalog sidebar ─────────────────────────── */
+
+.acct-catalog {
+  position: sticky;
+  top: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  overflow: hidden;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.acct-catalog-group {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-catalog-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: hsl(var(--foreground));
+  background: transparent;
+  border: 0;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+
+.acct-catalog-item:hover {
+  background: hsl(var(--muted) / 0.6);
+}
+
+.acct-catalog-item.active {
+  background: hsl(var(--muted));
+  border-left-color: hsl(var(--primary));
+  font-weight: 600;
+}
+
+.acct-catalog-item svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-catalog-item.active svg {
+  color: hsl(var(--primary));
+}
+
+/* ───────────────────────────── toolbar ─────────────────────────────────── */
+
+.acct-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  margin-bottom: 12px;
+}
+
+.acct-toolbar-group {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.acct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.acct-field > label {
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-input,
+.acct-select {
+  height: 32px;
+  min-width: 130px;
+  padding: 0 8px;
+  font-size: 13px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+}
+
+.acct-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.acct-preset {
+  padding: 3px 9px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 0.5);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.acct-preset:hover {
+  background: hsl(var(--muted));
+}
+
+.acct-preset.active {
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+}
+
+/* ───────────────────────────── report surface ──────────────────────────── */
+
+.acct-report {
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  background: hsl(var(--card));
+  padding: 18px;
+}
+
+.acct-report-header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  margin-bottom: 14px;
+  border-bottom: 2px solid hsl(var(--border));
+}
+
+.acct-report-org {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-report-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.acct-report-subtitle {
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-report-period {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.acct-report-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-section-title {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ───────────────────────────── tables ──────────────────────────────────── */
+
+.acct-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.acct-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.acct-table th {
+  padding: 7px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-align: left;
+  color: hsl(var(--muted-foreground));
+  border-bottom: 1px solid hsl(var(--border));
+  white-space: nowrap;
+}
+
+.acct-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  vertical-align: top;
+}
+
+.acct-table-dense td,
+.acct-table-dense th {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.acct-table tbody tr:hover td {
+  background: hsl(var(--muted) / 0.35);
+}
+
+.acct-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.acct-row-section td {
+  padding-top: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+  background: transparent;
+}
+
+.acct-row-subtotal td {
+  font-weight: 600;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.35);
+}
+
+.acct-row-total td {
+  font-weight: 700;
+  border-top: 2px solid hsl(var(--foreground) / 0.6);
+  border-bottom: 3px double hsl(var(--foreground) / 0.6);
+  background: hsl(var(--muted) / 0.5);
+}
+
+.acct-row-group td {
+  font-weight: 600;
+  background: hsl(var(--muted) / 0.5);
+}
+
+.acct-indent {
+  padding-left: 18px !important;
+}
+
+.acct-muted {
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-pos {
+  color: hsl(142 71% 35%);
+}
+
+.acct-neg {
+  color: hsl(0 72% 48%);
+}
+
+.dark .acct-pos {
+  color: hsl(142 60% 55%);
+}
+
+.dark .acct-neg {
+  color: hsl(0 72% 62%);
+}
+
+.acct-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+/* ───────────────────────────── stat tiles ──────────────────────────────── */
+
+.acct-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.acct-stat {
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--background));
+}
+
+.acct-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-stat-value {
+  margin-top: 2px;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.acct-stat-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-stat-positive .acct-stat-value {
+  color: hsl(142 71% 35%);
+}
+
+.acct-stat-negative .acct-stat-value {
+  color: hsl(0 72% 48%);
+}
+
+.acct-stat-warning .acct-stat-value {
+  color: hsl(38 92% 42%);
+}
+
+.dark .acct-stat-positive .acct-stat-value {
+  color: hsl(142 60% 55%);
+}
+
+.dark .acct-stat-negative .acct-stat-value {
+  color: hsl(0 72% 62%);
+}
+
+/* ───────────────────────────── misc ────────────────────────────────────── */
+
+.acct-empty {
+  padding: 36px 12px;
+  text-align: center;
+}
+
+.acct-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.acct-empty-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-skeleton {
+  height: 12px;
+  border-radius: 4px;
+  background: hsl(var(--muted));
+  animation: acct-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes acct-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.acct-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.acct-badge-ok {
+  color: hsl(142 71% 30%);
+  border-color: hsl(142 71% 40% / 0.4);
+  background: hsl(142 71% 40% / 0.12);
+}
+
+.acct-badge-bad {
+  color: hsl(0 72% 45%);
+  border-color: hsl(0 72% 50% / 0.4);
+  background: hsl(0 72% 50% / 0.12);
+}
+
+.acct-bar {
+  height: 6px;
+  min-width: 2px;
+  border-radius: 999px;
+  background: hsl(var(--primary));
+}
+
+.acct-bar-track {
+  width: 100%;
+  min-width: 60px;
+  height: 6px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+}
+
+.acct-note {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  border: 1px solid hsl(38 92% 50% / 0.35);
+  border-radius: 8px;
+  background: hsl(38 92% 50% / 0.1);
+  color: hsl(var(--foreground));
+}
+
+/* ───────────────────────────── print ───────────────────────────────────── */
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .acct-report,
+  .acct-report * {
+    visibility: visible;
+  }
+
+  .acct-report {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    color: #000;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .acct-table {
+    font-size: 10px;
+  }
+
+  .acct-table th,
+  .acct-table td {
+    padding: 3px 5px;
+  }
+
+  .acct-table thead {
+    display: table-header-group;
+  }
+
+  .acct-table tr {
+    break-inside: avoid;
+  }
+
+  .acct-stat {
+    border-color: #ccc;
+  }
+}

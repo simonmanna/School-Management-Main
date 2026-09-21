@@ -36,6 +36,7 @@ import type {
   UpdateStudentFeeAssignmentDto,
 } from './dto.types';
 import type { FeeComponent } from './dto.types';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 @Injectable()
 export class FeeStructureService extends BaseCrudService<FeeStructure, CreateFeeStructureDto, UpdateFeeStructureDto> {
@@ -519,6 +520,7 @@ export class StudentOptionalFeeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /**
@@ -535,7 +537,9 @@ export class StudentOptionalFeeService {
     if (!category) throw new NotFoundException(`FeeCategory ${feeCategoryId} not found`);
 
     const where: any = { status: 'active' };
-    if (classId) where.currentClassId = classId;
+    // Placement history rather than the StudentProfile projection (ADR-027).
+    // Compat: a learner not yet backfilled still matches on their projection.
+    if (classId) Object.assign(where, this.placements.studentWhere({ classIds: [classId] }));
     if (search && search.trim()) {
       const q = search.trim();
       // A student's display name lives on the linked Partner, not the profile.
@@ -545,33 +549,56 @@ export class StudentOptionalFeeService {
       ];
     }
 
-    const [students, optIns] = await Promise.all([
+    const [rawStudents, optIns] = await Promise.all([
       this.prisma.client.studentProfile.findMany({
         where,
-        include: { partner: true, currentClass: true },
-        orderBy: [{ currentClassId: 'asc' }, { admissionNo: 'asc' }],
+        include: { partner: true },
+        // Class ordering is applied below, once placements are resolved. Prisma
+        // cannot order by a value that comes from placement history, and this is
+        // a bounded picker list, so sorting it in memory costs nothing.
+        orderBy: [{ admissionNo: 'asc' }],
         take: 1000,
       }),
       this.prisma.client.studentOptionalFee.findMany({ where: { organizationId, termId, feeCategoryId } }),
     ]);
     const byStudent = new Map(optIns.map((o: any) => [o.studentProfileId, o]));
 
-    return {
-      category,
-      rows: students.map((s: any) => {
-        const opt: any = byStudent.get(s.id);
-        return {
-          studentProfileId: s.id,
-          admissionNo: s.admissionNo,
-          name: s.partner?.name?.trim() || s.admissionNo,
-          className: s.currentClass?.name ?? '—',
-          classId: s.currentClassId,
-          optedIn: !!opt?.isActive,
-          amount: opt?.amount != null ? Number(opt.amount) : null,
-          notes: opt?.notes ?? null,
-        };
-      }),
-    };
+    const students = await this.placements.attach(rawStudents, { termId });
+    const classNames = new Map<string, string>(
+      (
+        await this.prisma.client.schoolClass.findMany({
+          where: {
+            id: { in: [...new Set(students.map((s) => s.placement?.classId).filter(Boolean) as string[])] },
+          },
+          select: { id: true, name: true },
+        })
+      ).map((c) => [c.id, c.name]),
+    );
+
+    const rows = students.map((s: any) => {
+      const opt: any = byStudent.get(s.id);
+      const resolvedClassId = s.placement?.classId ?? null;
+      return {
+        studentProfileId: s.id,
+        admissionNo: s.admissionNo,
+        name: s.partner?.name?.trim() || s.admissionNo,
+        className: resolvedClassId ? (classNames.get(resolvedClassId) ?? '—') : '—',
+        classId: resolvedClassId,
+        optedIn: !!opt?.isActive,
+        amount: opt?.amount != null ? Number(opt.amount) : null,
+        notes: opt?.notes ?? null,
+      };
+    });
+
+    // Group by class, then admission number — the same ordering the database
+    // used to apply via the projection column, except the grouping now follows
+    // the class a learner actually holds for the term.
+    rows.sort(
+      (a, b) =>
+        a.className.localeCompare(b.className) || a.admissionNo.localeCompare(b.admissionNo),
+    );
+
+    return { category, rows };
   }
 
   /** Every opt-in for one student (all terms) — feeds the student fee profile. */

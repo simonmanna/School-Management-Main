@@ -1,6 +1,6 @@
 # ADR-019: Section and Stream Grouping Modes
 
-- **Status:** Proposed
+- **Status:** Superseded by ADR-029
 - **Date:** 2026-09-02
 
 ## Context

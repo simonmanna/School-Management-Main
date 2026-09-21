@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useMoneyFormatter } from '@/lib/format';
 
 const fmtPct = (r: number | null) => (r === null ? '—' : `${r * 100}%`);
 
 export function HrPayrollSettingsPage() {
+  const fmt = useMoneyFormatter();
   const [tab, setTab] = useState('components');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -99,7 +101,7 @@ export function HrPayrollSettingsPage() {
                         <p className="text-sm font-medium">{c.code} · {c.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {c.componentType === 'ALLOWANCE' ? '+' : '−'}{' '}
-                          {c.calcMethod === 'FIXED' ? `Rp ${Number(c.amount ?? 0).toLocaleString('id-ID')}` : fmtPct(c.rate)}
+                          {c.calcMethod === 'FIXED' ? fmt(c.amount ?? 0) : fmtPct(c.rate)}
                           {c.isTaxable ? ' · taxable' : ' · non-taxable'} · {c.isRecurring ? 'recurring' : 'one-off'}
                           {c.appliesTo ? ` · ${c.appliesTo.replace(/_/g, ' ')}` : ''}
                         </p>
@@ -135,7 +137,7 @@ export function HrPayrollSettingsPage() {
                       <p className="text-sm font-medium">{t.code} · {t.name} · {t.taxType.replace(/_/g, ' ')}</p>
                       <p className="text-xs text-muted-foreground">
                         Effective {t.effectiveFrom?.slice(0, 10)}{t.countryCode ? ` · ${t.countryCode}` : ''} ·{' '}
-                        {(t.brackets ?? []).map((b: any) => `Rp ${Number(b.fromAmount).toLocaleString('id-ID')}–${b.toAmount ? 'Rp ' + Number(b.toAmount).toLocaleString('id-ID') : '∞'} @ ${b.rate * 100}%`).join(' · ')}
+                        {(t.brackets ?? []).map((b: any) => `${fmt(b.fromAmount)}–${b.toAmount ? fmt(b.toAmount) : '∞'} @ ${b.rate * 100}%`).join(' · ')}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

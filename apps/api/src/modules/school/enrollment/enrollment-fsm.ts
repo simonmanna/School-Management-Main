@@ -51,7 +51,9 @@ export type MovementReasonValue =
   | 'SUSPENSION'
   | 'COMPLETION'
   | 'CORRECTION'
-  | 'BACKFILL';
+  | 'BACKFILL'
+  /** Finished the ladder: a terminal grade promoted into nothing (brief §13). */
+  | 'GRADUATION';
 
 export const MOVEMENT_REASONS: readonly MovementReasonValue[] = [
   'INITIAL_PLACEMENT',
@@ -70,6 +72,7 @@ export const MOVEMENT_REASONS: readonly MovementReasonValue[] = [
   'COMPLETION',
   'CORRECTION',
   'BACKFILL',
+  'GRADUATION',
 ] as const;
 
 /**

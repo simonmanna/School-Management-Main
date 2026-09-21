@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
@@ -14,6 +15,8 @@ import { HrRecruitmentService } from './hr-recruitment.service';
 import { HrTrainingService } from './hr-training.service';
 import { HrAlertsSubscriber } from './hr-alerts.subscriber';
 import { HrPeopleService } from './hr-people.service';
+import { HrPayslipPdfService } from './hr-payslip-pdf.service';
+import { HrLeaveAccrualService } from './hr-leave-accrual.service';
 import { HrReconciliationService } from './hr-reconciliation.service';
 import { EmployeeIdentityService } from '../../kernel/auth/employee-identity.service';
 import { RequiresModule } from '../../kernel/module-loader/requires-module.decorator';
@@ -24,7 +27,13 @@ import {
   AdjustLeaveBalanceDto,
   AssignShiftDto,
   ClockDto,
+  ApprovePayrollInputsDto,
+  CancelPayrollInputDto,
   CreateAdvanceDto,
+  CreatePayrollInputDto,
+  CreatePayrollInputsDto,
+  ListPayrollInputsQueryDto,
+  UpdatePayrollInputDto,
   CreateApplicantDto,
   CreateCertificationDto,
   CreateContractDto,
@@ -34,6 +43,10 @@ import {
   CreateJobGradeDto,
   CreateLeaveRequestDto,
   CreateLeaveTypeDto,
+  ExpireCarryForwardDto,
+  LeaveAccrualLedgerQueryDto,
+  LeaveYearEndDto,
+  RunLeaveAccrualDto,
   CreateLoanDto,
   CreatePayrollComponentDto,
   CreatePayrollPeriodDto,
@@ -120,6 +133,8 @@ export class HrController {
     private readonly training: HrTrainingService,
     private readonly alerts: HrAlertsSubscriber,
     private readonly people: HrPeopleService,
+    private readonly payslipPdf: HrPayslipPdfService,
+    private readonly leaveAccrual: HrLeaveAccrualService,
     private readonly reconciliation: HrReconciliationService,
     private readonly employeeIdentity: EmployeeIdentityService,
     private readonly tenant: TenantContextService,
@@ -478,6 +493,38 @@ export class HrController {
     return this.leave.cancelRequest(id);
   }
 
+  // ── Leave accrual engine ────────────────────────────────────────
+  //
+  // These are safe to call repeatedly — every grant is keyed by accrual period,
+  // so a scheduled job, a retry and an administrator pressing the button twice
+  // all produce the same balances. Pass `dryRun` to see the movements first.
+
+  @Post('leave/accrual/run')
+  @RequirePermissions('hr:leave')
+  runLeaveAccrual(@Body() dto: RunLeaveAccrualDto) {
+    return this.leaveAccrual.runAccrual(dto);
+  }
+
+  /** Close a leave year: carry forward what policy allows, forfeit the rest. */
+  @Post('leave/accrual/year-end')
+  @RequirePermissions('hr:leave')
+  runLeaveYearEnd(@Body() dto: LeaveYearEndDto) {
+    return this.leaveAccrual.runYearEndRollover(dto);
+  }
+
+  @Post('leave/accrual/expire-carry-forward')
+  @RequirePermissions('hr:leave')
+  expireCarryForward(@Body() dto: ExpireCarryForwardDto) {
+    return this.leaveAccrual.expireCarryForward(dto);
+  }
+
+  /** The movements behind a balance — answers "why do I have 14.5 days?". */
+  @Get('leave/accrual/ledger')
+  @RequirePermissions('hr:leave')
+  leaveAccrualLedger(@Query() query: LeaveAccrualLedgerQueryDto) {
+    return this.leaveAccrual.ledger(query);
+  }
+
   @Get('holidays')
   @RequirePermissions('hr:holiday')
   listHolidays(@Query() query: any) {
@@ -628,6 +675,21 @@ export class HrController {
     return this.payroll.getPayslip(id);
   }
 
+  /**
+   * The printable payslip. Streamed rather than returned as JSON because the
+   * document IS the deliverable — a school hands this to staff.
+   */
+  @Get('payslips/:id/pdf')
+  @RequirePermissions('hr:payslip')
+  async downloadPayslipPdf(@Param('id') id: string, @Res() res: Response) {
+    const filename = await this.payslipPdf.filenameFor(id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // A payslip reflects an approved run; a cached copy of someone's pay is a bug.
+    res.setHeader('Cache-Control', 'no-store');
+    await this.payslipPdf.write(res, id);
+  }
+
   @Post('payslips/:id/paid')
   @RequirePermissions('hr:payslip')
   markPayslipPaid(@Param('id') id: string, @Body() dto: MarkPayslipPaidDto) {
@@ -652,6 +714,54 @@ export class HrController {
   @RequirePermissions('hr:payroll')
   updateBankPaymentStatus(@Param('id') id: string, @Body() dto: UpdateBankPaymentStatusDto) {
     return this.payroll.updateBankPaymentStatus(id, dto);
+  }
+
+  // ── Ad-hoc payroll inputs ──────────────────────────────────────────
+  //
+  // Capture is `hr:payroll_input`; APPROVING is `hr:payroll`, the same right
+  // needed to run payroll. That split is the separation of duties: keying a
+  // bonus list must not be the same act as authorising the money.
+
+  @Get('payroll/inputs')
+  @RequirePermissions('hr:payroll_input')
+  listPayrollInputs(@Query() query: ListPayrollInputsQueryDto) {
+    return this.payroll.listPayrollInputs(query);
+  }
+
+  @Post('payroll/inputs')
+  @RequirePermissions('hr:payroll_input')
+  createPayrollInput(@Body() dto: CreatePayrollInputDto) {
+    return this.payroll.createPayrollInput(dto);
+  }
+
+  @Post('payroll/inputs/bulk')
+  @RequirePermissions('hr:payroll_input')
+  createPayrollInputs(@Body() dto: CreatePayrollInputsDto) {
+    return this.payroll.createPayrollInputs(dto);
+  }
+
+  @Patch('payroll/inputs/:id')
+  @RequirePermissions('hr:payroll_input')
+  updatePayrollInput(@Param('id') id: string, @Body() dto: UpdatePayrollInputDto) {
+    return this.payroll.updatePayrollInput(id, dto);
+  }
+
+  @Post('payroll/inputs/approve')
+  @RequirePermissions('hr:payroll')
+  approvePayrollInputs(@Body() dto: ApprovePayrollInputsDto) {
+    return this.payroll.approvePayrollInputs(dto);
+  }
+
+  @Post('payroll/inputs/:id/cancel')
+  @RequirePermissions('hr:payroll_input')
+  cancelPayrollInput(@Param('id') id: string, @Body() dto: CancelPayrollInputDto) {
+    return this.payroll.cancelPayrollInput(id, dto);
+  }
+
+  @Delete('payroll/inputs/:id')
+  @RequirePermissions('hr:payroll_input')
+  deletePayrollInput(@Param('id') id: string) {
+    return this.payroll.deletePayrollInput(id);
   }
 
   // ── Advances + loans ─────────────────────────────────────────────────────
@@ -1321,6 +1431,28 @@ export class HrController {
   }
 
   /** The caller's own payslips. Never another employee's. */
+  /**
+   * An employee's OWN payslip PDF.
+   *
+   * The employee id is resolved from the signed-in user and passed into the
+   * lookup as a WHERE constraint. Checking ownership after the read would still
+   * have loaded a colleague's payslip into memory, and one early return away
+   * from serving it.
+   */
+  @Get('self/payslips/:id/pdf')
+  @RequirePermissions('hr:self')
+  async selfPayslipPdf(@Param('id') id: string, @Res() res: Response) {
+    const userId = this.tenant.userId;
+    if (!userId) throw new NotFoundException('No signed-in user');
+    const emp = await this.payroll.employeeForUser(userId);
+    if (!emp) throw new NotFoundException('No employee record for this user');
+    const filename = await this.payslipPdf.filenameFor(id, emp.id);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    await this.payslipPdf.write(res, id, emp.id);
+  }
+
   @Get('self/payslips')
   @RequirePermissions('hr:self')
   async selfPayslips() {

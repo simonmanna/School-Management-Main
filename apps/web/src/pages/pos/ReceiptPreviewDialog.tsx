@@ -1,10 +1,14 @@
 // Receipt preview + print / reprint / email actions.
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Printer, Download, RefreshCw, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+
+/** Screen-only height bounds for the preview paper (px). Long receipts scroll. */
+const PAPER_MIN_H = 320;
+const PAPER_MAX_H = 660;
 
 interface Props {
   open: boolean;
@@ -20,6 +24,21 @@ export const ReceiptPreviewDialog: React.FC<Props> = ({ open, invoiceId, invoice
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<'print' | 'email' | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [paperH, setPaperH] = useState<number>(PAPER_MIN_H);
+
+  // Shrink the preview paper to the receipt's real content height so short
+  // receipts don't float in a fixed 600px frame (the big blank gap). Only the
+  // same-origin HTML receipt is measurable — the PDF fallback runs in the
+  // browser's plugin viewer, whose contentDocument is empty.
+  const fitPaper = useCallback(() => {
+    if (!receiptHtml) return;
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc?.body) return;
+    const h = Math.ceil(doc.body.scrollHeight) + 2;
+    if (h > 0) setPaperH(Math.min(PAPER_MAX_H, Math.max(PAPER_MIN_H, h)));
+  }, [receiptHtml]);
+
+  const onIframeLoad = useCallback(() => fitPaper(), [fitPaper]);
 
   // (Re)load the PDF blob URL when the dialog opens or invoiceId changes (fallback
   // when receiptHtml isn't available).
@@ -92,7 +111,7 @@ export const ReceiptPreviewDialog: React.FC<Props> = ({ open, invoiceId, invoice
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-[820px] p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-[420px] p-0 overflow-hidden">
         <DialogHeader className="bg-gradient-to-r from-slate-700 to-slate-900 text-white p-4">
           <DialogTitle className="text-white text-base font-bold flex items-center gap-2">
             <Printer className="h-4 w-4" /> Receipt {invoiceNumber ?? ''}
@@ -102,13 +121,26 @@ export const ReceiptPreviewDialog: React.FC<Props> = ({ open, invoiceId, invoice
           </DialogDescription>
         </DialogHeader>
 
-        <div className="bg-slate-200 p-4 flex justify-center min-h-[500px]">
+        <div className="bg-slate-200 p-4 flex justify-center">
           {receiptHtml ? (
-            <iframe ref={iframeRef} srcDoc={receiptHtml} title="Receipt preview" className="bg-white shadow-md" style={{ width: 340, height: 600 }} />
+            <iframe
+              ref={iframeRef}
+              srcDoc={receiptHtml}
+              title="Receipt preview"
+              className="bg-white shadow-md"
+              style={{ width: 340, height: paperH }}
+              onLoad={onIframeLoad}
+            />
           ) : pdfUrl ? (
-            <iframe ref={iframeRef} src={pdfUrl} title="Receipt preview" className="bg-white shadow-md" style={{ width: 340, height: 600 }} />
+            <iframe
+              ref={iframeRef}
+              src={pdfUrl}
+              title="Receipt preview"
+              className="bg-white shadow-md"
+              style={{ width: 340, height: 600 }}
+            />
           ) : (
-            <div className="flex items-center justify-center text-slate-500 text-sm">
+            <div className="flex items-center justify-center text-slate-500 text-sm min-h-[200px]">
               <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Loading receipt…
             </div>
           )}
@@ -127,8 +159,8 @@ export const ReceiptPreviewDialog: React.FC<Props> = ({ open, invoiceId, invoice
                 <RefreshCw className="h-4 w-4 mr-1" /> Reprint
               </Button>
             )}
-            <Button variant="outline" onClick={onPrint} disabled={busy !== null} title="Send to thermal printer">
-              <Printer className="h-4 w-4 mr-1" /> {busy === 'print' ? 'Sending…' : 'Thermal'}
+            <Button onClick={onPrint} disabled={busy !== null} title="Send to thermal printer" style={{ background: '#16a34a' }}>
+              <Printer className="h-4 w-4 mr-1" /> {busy === 'print' ? 'Sending…' : 'Print'}
             </Button>
           </div>
         </DialogFooter>

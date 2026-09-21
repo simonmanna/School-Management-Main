@@ -27,6 +27,7 @@ import { MealBillingController } from './meal-billing.controller';
 import { MealKitchenService } from './meal-kitchen.service';
 import { MealReportsService } from './meal-reports.service';
 import { MealReportsController } from './meal-reports.controller';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 /**
  * School Meals module (Meals V1–V3). Operations (V1), wallet ledger + GL (V1.5/
@@ -34,7 +35,9 @@ import { MealReportsController } from './meal-reports.controller';
  * Payment/Posting (InvoicingModule + AccountingModule); stock reuses Inventory.
  */
 @Module({
-  imports: [InvoicingModule, AccountingModule, InventoryModule],
+  // PlacementLookupModule: meal sessions and billing resolve a learner class
+  // from placement history rather than the StudentProfile projection (ADR-027).
+  imports: [InvoicingModule, AccountingModule, InventoryModule, PlacementLookupModule],
   controllers: [
     MealProgramController,
     MealTypeController,

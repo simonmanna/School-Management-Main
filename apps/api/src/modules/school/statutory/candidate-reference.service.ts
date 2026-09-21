@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   AssignCandidateNumbersDto,
   ImportIndexNumbersDto,
@@ -36,6 +37,7 @@ export class CandidateReferenceService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   private get org() {
@@ -63,7 +65,7 @@ export class CandidateReferenceService {
     return rows
       .map((r) => ({ ...r, student: learners.get(r.studentProfileId) ?? null }))
       .filter((r) => {
-        if (query.classId && r.student?.currentClassId !== query.classId) return false;
+        if (query.classId && r.student?.classId !== query.classId) return false;
         if (query.search) {
           const hay = `${r.student?.name ?? ''} ${r.candidateNumber ?? ''} ${r.indexNumber ?? ''} ${r.student?.admissionNo ?? ''}`;
           if (!hay.toLowerCase().includes(query.search.toLowerCase())) return false;
@@ -170,7 +172,7 @@ export class CandidateReferenceService {
       where: {
         deletedAt: null,
         status: 'active',
-        ...(dto.classIds?.length ? { currentClassId: { in: dto.classIds } } : {}),
+        ...(dto.classIds?.length ? this.placements.studentWhere({ classIds: dto.classIds }) : {}),
       },
       select: { id: true, admissionNo: true, partner: { select: { name: true } } },
     });
@@ -358,23 +360,55 @@ export class CandidateReferenceService {
     }
   }
 
+  /**
+   * Name, admission number and CLASS for a set of learners.
+   *
+   * The class comes from placement history, not the StudentProfile projection
+   * (ADR-027). A candidate reference is a statutory identifier: naming the
+   * wrong class on a national submission is not a display bug, and the
+   * submission cannot be recalled once it has left the school.
+   */
   private async describeLearners(ids: string[]) {
-    if (ids.length === 0) return new Map<string, { name: string | null; admissionNo: string; currentClassId: string | null; className: string | null }>();
+    type Described = {
+      name: string | null;
+      admissionNo: string;
+      classId: string | null;
+      className: string | null;
+    };
+    if (ids.length === 0) return new Map<string, Described>();
+
     const rows = await this.prisma.client.studentProfile.findMany({
       where: { id: { in: [...new Set(ids)] } },
-      select: {
-        id: true,
-        admissionNo: true,
-        currentClassId: true,
-        partner: { select: { name: true } },
-        currentClass: { select: { name: true } },
-      },
+      select: { id: true, admissionNo: true, partner: { select: { name: true } } },
     });
-    return new Map(
-      rows.map((r) => [
-        r.id,
-        { name: r.partner?.name ?? null, admissionNo: r.admissionNo, currentClassId: r.currentClassId, className: r.currentClass?.name ?? null },
-      ]),
+    const placed = await this.placements.attach(rows);
+
+    const classNames = new Map<string, string>(
+      (
+        await this.prisma.client.schoolClass.findMany({
+          where: {
+            id: {
+              in: [...new Set(placed.map((r) => r.placement?.classId).filter(Boolean) as string[])],
+            },
+          },
+          select: { id: true, name: true },
+        })
+      ).map((c) => [c.id, c.name]),
+    );
+
+    return new Map<string, Described>(
+      placed.map((r) => {
+        const classId = r.placement?.classId ?? null;
+        return [
+          r.id,
+          {
+            name: r.partner?.name ?? null,
+            admissionNo: r.admissionNo,
+            classId,
+            className: classId ? (classNames.get(classId) ?? null) : null,
+          },
+        ];
+      }),
     );
   }
 }

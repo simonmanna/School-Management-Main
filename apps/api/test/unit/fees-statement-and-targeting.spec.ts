@@ -16,6 +16,7 @@
 import { BillingService } from '../../src/modules/school/fees/billing.service';
 import { PortalsService } from '../../src/modules/school/portals/portals.service';
 import { StudentService } from '../../src/modules/school/people/student.service';
+import { makePlacementLookupStub, placement } from './_placement-stub';
 
 /* ───────────────────── D1 · one canonical figure ───────────────────── */
 
@@ -41,11 +42,14 @@ describe('D1 · the parent portal reports received money, not forgiven money', (
       client: {
         studentProfile: {
           findMany: jest.fn().mockResolvedValue([
-            { id: 'stu_1', partnerId: 'p_1', currentClassId: 'c1' },
+            { id: 'stu_1', partnerId: 'p_1', placement: placement({ classId: 'c1' }) },
           ]),
         },
         studentAttendance: { findMany: jest.fn().mockResolvedValue([]) },
         announcement: { findMany: jest.fn().mockResolvedValue([]) },
+        // The portal resolves the class row a pupil is placed in (ADR-027).
+        schoolClass: { findMany: jest.fn().mockResolvedValue([{ id: 'c1', name: 'P1', gradeLevel: null }]) },
+        section: { findMany: jest.fn().mockResolvedValue([]) },
       },
     };
     const service = new PortalsService(
@@ -57,6 +61,7 @@ describe('D1 · the parent portal reports received money, not forgiven money', (
       { forUser: jest.fn().mockResolvedValue(null) } as any,
       { catalogByCode: jest.fn().mockResolvedValue({}) } as any,
       finance as any,
+      makePlacementLookupStub() as any,
     );
     return { service, finance };
   }
@@ -155,6 +160,7 @@ describe('D1 · the bursar statement agrees with the receipts printed beside it'
 describe('D2 · fee structures target class, grade level and residence', () => {
   const service = new BillingService(
     {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+    makePlacementLookupStub() as any,
   );
   const applies = (filter: any, axes: any) => (service as any).appliesTo(filter, axes);
 
@@ -195,8 +201,7 @@ describe('D2 · fee structures target class, grade level and residence', () => {
 
   it('reads the axes off a student profile, defaulting residence to day', () => {
     const axes = (service as any).targetingAxes({
-      currentClassId: 'c_p1a',
-      currentClass: { gradeLevelId: 'g_p1' },
+      placement: placement({ classId: 'c_p1a', gradeLevelId: 'g_p1' }),
     });
     expect(axes).toEqual({ classId: 'c_p1a', gradeLevelId: 'g_p1', residenceType: 'day' });
   });

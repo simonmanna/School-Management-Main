@@ -24,7 +24,6 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { GROUPING_MODES, type GroupingModeValue } from './grouping';
 import {
   ENROLLMENT_STATUSES,
   ENROLLMENT_TYPES,
@@ -34,7 +33,7 @@ import {
   type MovementReasonValue,
 } from './enrollment-fsm';
 
-const STAGES = ['PRIMARY_LOWER', 'PRIMARY_UPPER', 'LOWER_SECONDARY', 'ADVANCED_SECONDARY', 'OTHER'] as const;
+const STAGES = ['PRE_PRIMARY', 'PRIMARY', 'PRIMARY_LOWER', 'PRIMARY_UPPER', 'LOWER_SECONDARY', 'ADVANCED_SECONDARY', 'OTHER'] as const;
 const COHORT_STATUSES = ['PLANNED', 'ACTIVE', 'CLOSED', 'ARCHIVED'] as const;
 
 /* ───────────────────────────── Programmes ───────────────────────────── */
@@ -44,33 +43,27 @@ export class CreateProgrammeDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsIn([...STAGES]) stage?: (typeof STAGES)[number];
   @IsOptional() @IsString() curriculumAuthority?: string;
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
   @IsOptional() @IsISO8601() effectiveTo?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsObject() config?: Record<string, unknown>;
-  /** Grade levels this programme covers. Replaces the existing links wholesale. */
-  @IsOptional() @IsArray() @IsString({ each: true }) gradeLevelIds?: string[];
 }
 
 export class UpdateProgrammeDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsIn([...STAGES]) stage?: (typeof STAGES)[number];
   @IsOptional() @IsString() curriculumAuthority?: string;
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
   @IsOptional() @IsISO8601() effectiveTo?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
   @IsOptional() @IsObject() config?: Record<string, unknown>;
-  @IsOptional() @IsArray() @IsString({ each: true }) gradeLevelIds?: string[];
 }
 
 export class SeedUgandaProgrammesDto {
-  /** Attach each template to the grade levels whose names match (P1…S6). */
+  /** Band the grade levels whose names match (P1…S6) into each template's level. */
   @IsOptional() @IsBoolean() linkGradeLevels?: boolean;
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
 }
 
@@ -80,14 +73,16 @@ export class CreateClassCohortDto {
   @IsString() @IsNotEmpty() academicYearId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() programmeId?: string;
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
+  /** Per-year override of whether this class is divided into streams (ADR-029). */
+  @IsOptional() @IsBoolean() allowsSubdivision?: boolean | null;
   @IsOptional() @IsInt() @Min(0) capacity?: number;
   @IsOptional() @IsIn([...COHORT_STATUSES]) status?: (typeof COHORT_STATUSES)[number];
 }
 
 export class UpdateClassCohortDto {
   @IsOptional() @IsString() programmeId?: string;
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
+  /** Per-year override of whether this class is divided into streams (ADR-029). */
+  @IsOptional() @IsBoolean() allowsSubdivision?: boolean | null;
   @IsOptional() @IsInt() @Min(0) capacity?: number;
   @IsOptional() @IsIn([...COHORT_STATUSES]) status?: (typeof COHORT_STATUSES)[number];
 }
@@ -96,13 +91,8 @@ export class UpdateClassCohortDto {
 export class GenerateClassCohortsDto {
   @IsString() @IsNotEmpty() academicYearId!: string;
   @IsOptional() @IsArray() @IsString({ each: true }) classIds?: string[];
-  @IsOptional() @IsIn([...GROUPING_MODES]) groupingMode?: GroupingModeValue;
-}
-
-/** Attach a stream to a section (ADR-019 SECTION_AND_STREAM backfill). */
-export class AttachStreamToSectionDto {
-  /** Null detaches the stream from its section. */
-  @IsOptional() @IsString() sectionId?: string | null;
+  /** Per-year override of whether this class is divided into streams (ADR-029). */
+  @IsOptional() @IsBoolean() allowsSubdivision?: boolean | null;
 }
 
 /* ───────────────────────────── Enrollment ──────────────────────────── */
@@ -113,11 +103,16 @@ export class PlacementInputDto {
   @IsOptional() @IsString() classCohortId?: string;
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() sectionId?: string | null;
-  @IsOptional() @IsString() streamId?: string | null;
   @IsOptional() @IsString() rollNumber?: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
   @IsOptional() @IsIn([...MOVEMENT_REASONS]) movementReason?: MovementReasonValue;
   @IsOptional() @IsString() notes?: string;
+  /**
+   * Seat the learner even though the class or stream is full (ADR-030). Needs
+   * the `school:enrollment:capacity:override` permission and a reason.
+   */
+  @IsOptional() @IsBoolean() overrideCapacity?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
 }
 
 export class CreateStudentEnrollmentDto {
@@ -131,6 +126,11 @@ export class CreateStudentEnrollmentDto {
   @IsOptional() @IsIn([...ENROLLMENT_TYPES]) enrollmentType?: EnrollmentTypeValue;
   @IsOptional() @IsIn([...ENROLLMENT_STATUSES]) status?: EnrollmentStatusValue;
   @IsOptional() @IsString() notes?: string;
+  /**
+   * Set internally by admissions — deliberately undecorated, so the validation
+   * whitelist rejects it from an HTTP body. An application enrols once.
+   */
+  admissionApplicationId?: string;
 
   /** Opening placement. Omit only when the learner is PENDING with no seat yet. */
   @IsOptional() @ValidateNested() @Type(() => PlacementInputDto) placement?: PlacementInputDto;
@@ -157,12 +157,17 @@ export class MovePlacementDto {
   @IsOptional() @IsString() classCohortId?: string;
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() sectionId?: string | null;
-  @IsOptional() @IsString() streamId?: string | null;
   @IsOptional() @IsString() rollNumber?: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
   @IsIn([...MOVEMENT_REASONS]) movementReason!: MovementReasonValue;
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() @IsString() notes?: string;
+  /**
+   * Seat the learner even though the class or stream is full (ADR-030). Needs
+   * the `school:enrollment:capacity:override` permission and a reason.
+   */
+  @IsOptional() @IsBoolean() overrideCapacity?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
 }
 
 /** One row of a bulk placement request. */
@@ -171,7 +176,6 @@ export class BulkPlacementRowDto {
   @IsOptional() @IsString() classCohortId?: string;
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() sectionId?: string | null;
-  @IsOptional() @IsString() streamId?: string | null;
   @IsOptional() @IsString() rollNumber?: string;
 }
 
@@ -182,6 +186,19 @@ export class BulkPlacementDto {
   @IsOptional() @IsISO8601() effectiveFrom?: string;
   /** true = validate only, write nothing. The UI previews before it commits. */
   @IsOptional() @IsBoolean() dryRun?: boolean;
+  /**
+   * The token a dry run returned. When given, the commit is refused if the
+   * occupancy it was computed against has changed since — the operator is
+   * shown a fresh preview instead of committing against stale numbers.
+   */
+  @IsOptional() @IsString() previewToken?: string;
+  /**
+   * Seat the whole batch even though the class or stream is full (ADR-030). Needs
+   * the `school:enrollment:capacity:override` permission and a reason.
+   */
+  @IsOptional() @IsBoolean() overrideCapacity?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
+
   @IsArray()
   @ArrayNotEmpty()
   @ArrayMaxSize(1000)
@@ -205,9 +222,14 @@ export class RepeatGradeDto {
   @IsString() @IsNotEmpty() toTermId!: string;
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() sectionId?: string | null;
-  @IsOptional() @IsString() streamId?: string | null;
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
+  /**
+   * Seat the learner even though the class or stream is full (ADR-030). Needs
+   * the `school:enrollment:capacity:override` permission and a reason.
+   */
+  @IsOptional() @IsBoolean() overrideCapacity?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
 }
 
 /** Promote into the next grade in the next academic year. */
@@ -217,23 +239,13 @@ export class PromoteEnrollmentDto {
   /** Omit to let the grade-level ladder pick the next class. */
   @IsOptional() @IsString() toClassId?: string;
   @IsOptional() @IsString() sectionId?: string | null;
-  @IsOptional() @IsString() streamId?: string | null;
   @IsOptional() @IsString() rollNumber?: string;
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsISO8601() effectiveFrom?: string;
-}
-
-/* ────────────────────────────── Backfill ───────────────────────────── */
-
-export class BackfillDto {
-  /** Nothing is written unless this is explicitly false. */
-  @IsOptional() @IsBoolean() dryRun?: boolean;
-  @IsOptional() @IsString() academicYearId?: string;
-  /** Reuse a run id to make a re-run idempotent, or to roll one back. */
-  @IsOptional() @IsString() migrationRunId?: string;
-  @IsOptional() @IsIn([...GROUPING_MODES]) defaultGroupingMode?: GroupingModeValue;
-}
-
-export class ResolveExceptionDto {
-  @IsString() @IsNotEmpty() resolutionNote!: string;
+  /**
+   * Seat the learner even though the class or stream is full (ADR-030). Needs
+   * the `school:enrollment:capacity:override` permission and a reason.
+   */
+  @IsOptional() @IsBoolean() overrideCapacity?: boolean;
+  @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
 }

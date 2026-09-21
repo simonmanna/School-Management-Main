@@ -157,16 +157,14 @@ export class GenerateReportCardDto {
 export class GenerateClassReportCardsDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsString() @IsNotEmpty() termId!: string;
-  /** Optional stream/section filter, so one stream can be done at a time. */
+  /** Optional stream filter, so one stream can be done at a time. */
   @IsOptional() @IsString() sectionId?: string;
-  @IsOptional() @IsString() streamId?: string;
 }
 
 export class ClassReportCardPdfDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsOptional() @IsString() sectionId?: string;
-  @IsOptional() @IsString() streamId?: string;
 }
 
 export class UpdateReportCardCommentDto {

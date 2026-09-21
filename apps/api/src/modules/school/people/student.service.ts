@@ -6,10 +6,12 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
-import { EVENTS } from '@erp/shared';
+import { EVENTS, type PaginatedResult, type PaginationQuery } from '@erp/shared';
 import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
-import type { CreateStudentDto, UpdateStudentDto } from './dto.types';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { StudentAdmissionService } from './student-admission.service';
+import type { CreateStudentDto, StudentListQueryDto, UpdateStudentDto } from './dto.types';
 
 /**
  * P5: the student lifecycle. `active` is the working state (enrolled students).
@@ -44,8 +46,6 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     // partner carries the student's name/email/phone (the AR account); the UI
     // roster and every dropdown needs it, so include it by default.
     partner: true,
-    currentClass: { include: { gradeLevel: true } },
-    currentSection: true,
     guardians: true,
     medicalRecord: true,
   };
@@ -59,131 +59,119 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     // D1: the ONE canonical fee calculation. The statement must not compute a
     // balance of its own, or it will disagree with the parent portal.
     private readonly finance: SchoolFinanceQueryService,
+    private readonly placements: PlacementLookupService,
+    private readonly admission: StudentAdmissionService,
   ) {
     super(prisma.client.studentProfile as unknown as CrudDelegate);
   }
 
   /**
-   * Create the Partner + StudentProfile atomically. The Partner gets a unique
-   * sequential code (STU-...) and StudentProfile gets the user-provided
-   * admissionNo. School-specific scalars (house, bloodGroup, etc.) go into
-   * Partner.customFields AND are mirrored on StudentProfile where the school
-   * needs to query them efficiently.
+   * Where each learner sits now, from placement history, as read-only
+   * `currentClass` / `currentSection` objects on the response. Derived on every
+   * read — there is no class column on the profile to drift out of step.
+   */
+  private async withPlacement<T extends { id: string }>(rows: T[]) {
+    const described = await this.placements.describe(rows.map((r) => r.id));
+    return rows.map((r) => {
+      const d = described.get(r.id);
+      return {
+        ...r,
+        currentClass: d?.classId
+          ? { id: d.classId, name: d.className, gradeLevel: d.gradeLevelId ? { id: d.gradeLevelId, name: d.gradeLevelName } : null }
+          : null,
+        currentSection: d?.sectionId ? { id: d.sectionId, name: d.sectionName } : null,
+      };
+    });
+  }
+
+  /** Paginated roster, optionally narrowed to learners placed in a class or stream now. */
+  override async list(query: PaginationQuery & StudentListQueryDto): Promise<PaginatedResult<StudentProfile>> {
+    const target = {
+      ...(query.classId ? { classIds: [query.classId] } : {}),
+      ...(query.sectionId ? { sectionIds: [query.sectionId] } : {}),
+    };
+    if (Object.keys(target).length === 0) {
+      const page = await super.list(query);
+      return { ...page, data: (await this.withPlacement(page.data)) as any };
+    }
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(500, Math.max(1, Number(query.pageSize) || 50));
+    const where: Record<string, unknown> = { ...this.placements.studentWhere(target) };
+    if (query.search) where.admissionNo = { contains: query.search, mode: 'insensitive' };
+    const [rows, total] = await Promise.all([
+      this.prisma.client.studentProfile.findMany({
+        where,
+        orderBy: { admissionNo: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: this.defaultInclude,
+      }),
+      this.prisma.client.studentProfile.count({ where }),
+    ]);
+    return {
+      data: (await this.withPlacement(rows)) as any,
+      meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
+  }
+
+  override async findOne(id: string): Promise<StudentProfile> {
+    const row = await super.findOne(id);
+    return (await this.withPlacement([row]))[0] as any;
+  }
+
+  /**
+   * Create a learner. With a class, this is an admission: the learner is
+   * enrolled for the term's academic year and seated in one transaction by
+   * StudentAdmissionService. Without one they are created unplaced, to be
+   * enrolled later.
    */
   async create(dto: CreateStudentDto): Promise<StudentProfile> {
-    return this.prisma.client.$transaction(async (tx: any) => {
-      const organizationId = this.tenant.organizationId;
-      const code = dto.code ?? (await this.sequence.next(`student:${new Date().getUTCFullYear()}`, { prefix: 'STU-', padding: 6 }, tx));
-
-      // School-specific fields mirrored into customFields for partner-side searches.
-      const customFields = {
+    let termId = dto.termId ?? null;
+    if (dto.classId && !termId) {
+      const term = await this.prisma.client.term.findFirst({ where: { isCurrent: true }, select: { id: true } });
+      if (!term) {
+        throw new BadRequestException(
+          'No current term is set, so this learner cannot be placed in a class yet. Set the current term under ' +
+            'School → Academic Years, choose a term, or admit them without a class and enrol them afterwards.',
+        );
+      }
+      termId = term.id;
+    }
+    const { profile } = await this.admission.admit({
+      organizationId: this.tenant.organizationId,
+      name: dto.name,
+      email: dto.email ?? null,
+      phone: dto.phone ?? null,
+      admissionNo: dto.admissionNo,
+      enrollmentDate: dto.enrollmentDate,
+      dateOfBirth: dto.dateOfBirth ?? null,
+      gender: dto.gender ?? null,
+      nationality: dto.nationality ?? null,
+      religion: dto.religion ?? null,
+      residenceType: dto.residenceType ?? null,
+      house: dto.house ?? null,
+      partnerCustomFields: {
         ...(dto.customFields ?? {}),
-        dateOfBirth: dto.dateOfBirth ?? null,
-        gender: dto.gender ?? null,
-        nationality: dto.nationality ?? null,
-        religion: dto.religion ?? null,
-        house: dto.house ?? null,
         middleName: dto.middleName ?? null,
         preferredName: dto.preferredName ?? null,
         countryOfBirth: dto.countryOfBirth ?? null,
         placeOfBirth: dto.placeOfBirth ?? null,
         address: dto.address ?? null,
-      };
-
-      const partner = await tx.partner.create({
-        data: {
-          organizationId,
-          code,
-          name: dto.name,
-          isCompany: dto.isCompany ?? false,
-          isCustomer: true,
-          email: dto.email ?? null,
-          phone: dto.phone ?? null,
-          customFields,
-        },
-      });
-
-      const profile = await tx.studentProfile.create({
-        data: {
-          organizationId,
-          partnerId: partner.id,
-          admissionNo: dto.admissionNo,
-          currentClassId: dto.currentClassId ?? null,
-          currentSectionId: dto.currentSectionId ?? null,
-          enrollmentDate: new Date(dto.enrollmentDate),
-          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
-          gender: dto.gender ?? null,
-          nationality: dto.nationality ?? null,
-          religion: dto.religion ?? null,
-          residenceType: dto.residenceType ?? 'day',
-          house: dto.house ?? null,
-          customFields: {
-            ...(dto.customFields ?? {}),
-            middleName: dto.middleName ?? null,
-            preferredName: dto.preferredName ?? null,
-            countryOfBirth: dto.countryOfBirth ?? null,
-            placeOfBirth: dto.placeOfBirth ?? null,
-            address: dto.address ?? null,
-          },
-        },
-      });
-
-      // A class at admission means a placement, and a placement means an
-      // Enrollment. Writing only the profile mirror produced pupils who
-      // appeared in a class on their record but in no class list, no register
-      // and no result run — the same split the 360's class dropdown used to
-      // cause. The term is the current one; without a current term there is no
-      // period to enrol INTO, so the caller is told rather than silently left
-      // with a half-placement.
-      if (dto.currentClassId) {
-        const term = await tx.term.findFirst({
-          where: { organizationId, isCurrent: true },
-          select: { id: true },
-        });
-        if (!term) {
-          throw new BadRequestException(
-            'No current term is set, so this pupil cannot be placed in a class yet. Set the current term under School → Academic Years, or admit them without a class and place them afterwards.',
-          );
-        }
-        const enrollment = await tx.enrollment.create({
-          data: {
-            organizationId,
-            studentProfileId: profile.id,
-            classId: dto.currentClassId,
-            sectionId: dto.currentSectionId ?? null,
-            termId: term.id,
-            rollNumber: dto.admissionNo,
-            status: 'enrolled',
-          },
-        });
-        await tx.enrollmentHistory.create({
-          data: {
-            organizationId,
-            enrollmentId: enrollment.id,
-            fromStatus: null,
-            toStatus: 'enrolled',
-            reason: 'admitted with class placement',
-            changedById: this.tenant.userId ?? null,
-          },
-        });
-      }
-
-      await this.audit.recordInTx(tx, {
-        entity: 'StudentProfile',
-        entityId: profile.id,
-        action: 'create',
-        newValues: { partner, profile },
-      });
-
-      this.events.publish(EVENTS.SchoolStudentCreated, {
-        organizationId,
-        studentProfileId: profile.id,
-        partnerId: partner.id,
-        admissionNo: profile.admissionNo,
-      });
-
-      return profile;
+      },
+      customFields: {
+        ...(dto.customFields ?? {}),
+        middleName: dto.middleName ?? null,
+        preferredName: dto.preferredName ?? null,
+        countryOfBirth: dto.countryOfBirth ?? null,
+        placeOfBirth: dto.placeOfBirth ?? null,
+        address: dto.address ?? null,
+      },
+      placement:
+        dto.classId && termId
+          ? { termId, classId: dto.classId, sectionId: dto.sectionId ?? null, rollNumber: dto.admissionNo }
+          : null,
     });
+    return profile;
   }
 
   /**
@@ -238,10 +226,8 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       // we merge them in rather than overwrite the whole object.
       const profileUpdates: Record<string, unknown> = {};
       for (const k of [
-        // currentClassId / currentSectionId are absent by design — see
-        // UpdateStudentDto. Placement changes go through the enrollment or
-        // promotion endpoints, which write the Enrollment and the snapshot in
-        // one transaction.
+        // Class and stream are absent by design — see UpdateStudentDto.
+        // Moving a learner is a placement, through the enrollment endpoints.
         'dateOfBirth',
         'gender',
         'nationality',
@@ -289,80 +275,76 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     });
   }
 
+  /** Active learners placed in a class now, with their stream. */
   async listByClass(classId: string) {
-      return this.prisma.client.studentProfile.findMany({
-        where: { currentClassId: classId, status: 'active' },
-        orderBy: { admissionNo: 'asc' },
-        include: { currentSection: true, partner: true },
-      });
-    }
+    const rows = await this.prisma.client.studentProfile.findMany({
+      where: { status: 'active', ...this.placements.studentWhere({ classIds: [classId] }) },
+      orderBy: { admissionNo: 'asc' },
+      include: { partner: true },
+    });
+    return this.withPlacement(rows);
+  }
 
-    /**
-     * Bulk-import students from a parsed CSV row-set.
-     *
-     * Each row maps to one student (Partner + StudentProfile atomic). Rows with
-     * a duplicate admissionNo are skipped. The whole batch runs in a single
-     * transaction per row so a single bad row doesn't roll back the rest.
-     *
-     * Expected columns (header row required):
-     *   admissionNo, name, enrollmentDate, dateOfBirth?, gender?, classCode?, sectionCode?, house?, email?, phone?
-     *
-     * `classCode` matches SchoolClass.name (e.g. "P.1 A"). `sectionCode` matches
-     * Section.name within that class. Both optional — student just won't be
-     * assigned to one if the codes don't resolve.
-     */
-    async bulkImport(rows: Array<Record<string, string>>) {
-      const organizationId = this.tenant.organizationId;
-      const created: StudentProfile[] = [];
-      const skipped: Array<{ row: number; reason: string; admissionNo?: string }> = [];
+  /**
+   * Bulk-import learners from parsed CSV rows. The controller lowercases the
+   * headers, so keys arrive as `admissionno`, `classcode`, … .
+   *
+   * Columns: admissionNo, name, enrollmentDate?, dateOfBirth?, gender?,
+   * classCode?, sectionCode?, termId?, house?, email?, phone?
+   *
+   * Class and stream resolve by CODE (brief §27), never by display name — names
+   * change, codes do not. An unresolvable code fails that row with a reason;
+   * other rows still import, each in its own transaction.
+   */
+  async bulkImport(rows: Array<Record<string, string>>) {
+    const created: StudentProfile[] = [];
+    const skipped: Array<{ row: number; reason: string; admissionNo?: string }> = [];
+    const val = (row: Record<string, string>, key: string) => (row[key.toLowerCase()] ?? row[key] ?? '').trim();
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const admissionNo = (row.admissionNo ?? '').trim();
-        const name = (row.name ?? '').trim();
-        if (!admissionNo || !name) {
-          skipped.push({ row: i, reason: 'missing admissionNo or name' });
-          continue;
-        }
-        try {
-          // Resolve class + section codes.
-          let currentClassId: string | undefined;
-          let currentSectionId: string | undefined;
-          if (row.classCode) {
-            const cls = await this.prisma.client.schoolClass.findFirst({
-              where: { organizationId, name: row.classCode.trim() },
-            });
-            if (cls) {
-              currentClassId = cls.id;
-              if (row.sectionCode) {
-                const section = await this.prisma.client.section.findFirst({
-                  where: { organizationId, classId: cls.id, name: row.sectionCode.trim() },
-                });
-                if (section) currentSectionId = section.id;
-              }
-            }
-          }
-
-          const student = await this.create({
-            name,
-            admissionNo,
-            enrollmentDate: row.enrollmentDate || new Date().toISOString(),
-            email: row.email || undefined,
-            phone: row.phone || undefined,
-            dateOfBirth: row.dateOfBirth || undefined,
-            gender: (row.gender as any) || undefined,
-            house: row.house || undefined,
-            currentClassId,
-            currentSectionId,
-          });
-          created.push(student);
-        } catch (e: any) {
-          skipped.push({ row: i, admissionNo, reason: e?.message ?? 'unknown' });
-        }
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const admissionNo = val(row, 'admissionNo');
+      const name = val(row, 'name');
+      if (!admissionNo || !name) {
+        skipped.push({ row: i, reason: 'missing admissionNo or name' });
+        continue;
       }
-
-      return { created: created.length, skipped };
+      try {
+        let classId: string | undefined;
+        let sectionId: string | undefined;
+        const classCode = val(row, 'classCode').toUpperCase();
+        if (classCode) {
+          const cls = await this.prisma.client.schoolClass.findFirst({ where: { code: classCode } });
+          if (!cls) throw new BadRequestException(`Unknown class code "${classCode}".`);
+          classId = cls.id;
+          const sectionCode = val(row, 'sectionCode').toUpperCase();
+          if (sectionCode) {
+            const section = await this.prisma.client.section.findFirst({ where: { classId: cls.id, code: sectionCode } });
+            if (!section) throw new BadRequestException(`Unknown stream code "${sectionCode}" in class ${classCode}.`);
+            sectionId = section.id;
+          }
+        }
+        const student = await this.create({
+          name,
+          admissionNo,
+          enrollmentDate: val(row, 'enrollmentDate') || new Date().toISOString(),
+          email: val(row, 'email') || undefined,
+          phone: val(row, 'phone') || undefined,
+          dateOfBirth: val(row, 'dateOfBirth') || undefined,
+          gender: (val(row, 'gender').toLowerCase() as any) || undefined,
+          house: val(row, 'house') || undefined,
+          classId,
+          sectionId,
+          termId: val(row, 'termId') || undefined,
+        });
+        created.push(student);
+      } catch (e: any) {
+        skipped.push({ row: i, admissionNo, reason: e?.response?.message ?? e?.message ?? 'unknown' });
+      }
     }
+
+    return { created: created.length, skipped };
+  }
 
   async activitiesForStudent(studentProfileId: string) {
     return this.prisma.client.activity.findMany({
@@ -375,11 +357,23 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
       include: {
-        currentClass: { include: { gradeLevel: true } },
-        currentSection: true,
         guardians: true,
         medicalRecord: true,
-        enrollments: { include: { term: true, schoolClass: true } },
+        academicEnrollments: {
+          orderBy: { admissionDate: 'desc' },
+          include: {
+            academicYear: { select: { id: true, name: true } },
+            gradeLevel: { select: { id: true, name: true } },
+            placements: {
+              orderBy: { effectiveFrom: 'desc' },
+              include: {
+                term: { select: { id: true, name: true } },
+                classCohort: { select: { schoolClass: { select: { id: true, name: true } } } },
+                section: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!profile) throw new NotFoundException(`Student ${studentProfileId} not found`);
@@ -437,7 +431,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       studentId: profile.id,
       studentName: partner?.name ?? null,
       admissionNo: profile.admissionNo,
-      profile,
+      profile: (await this.withPlacement([profile]))[0],
       partner,
       totalBilled: b.billed,
       collected: b.collected,

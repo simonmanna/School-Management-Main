@@ -46,6 +46,31 @@ export class BadgesService {
   }
 
   awardsFor(studentProfileId: string) {
-    return this.prisma.client.lmsBadgeAward.findMany({ where: { organizationId: this.org, studentProfileId }, include: { badge: true } });
+    return this.prisma.client.lmsBadgeAward.findMany({
+      where: { organizationId: this.org, studentProfileId },
+      include: { badge: true },
+      orderBy: { awardedAt: 'desc' },
+    });
+  }
+
+  /** Everyone who holds one badge, named — the roll of honour behind a badge. */
+  async awardsForBadge(badgeId: string) {
+    const rows = await this.prisma.client.lmsBadgeAward.findMany({
+      where: { organizationId: this.org, badgeId },
+      orderBy: { awardedAt: 'desc' },
+    });
+    const ids = rows.map((r) => r.studentProfileId).filter((x): x is string => Boolean(x));
+    const profiles = ids.length
+      ? await this.prisma.client.studentProfile.findMany({
+          where: { id: { in: ids }, organizationId: this.org },
+          select: { id: true, admissionNo: true, partner: { select: { name: true } } },
+        })
+      : [];
+    const byId = new Map(profiles.map((p) => [p.id, p]));
+    return rows.map((r) => ({
+      ...r,
+      studentName: r.studentProfileId ? byId.get(r.studentProfileId)?.partner?.name ?? null : null,
+      admissionNo: r.studentProfileId ? byId.get(r.studentProfileId)?.admissionNo ?? null : null,
+    }));
   }
 }

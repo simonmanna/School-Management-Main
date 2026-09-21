@@ -35,6 +35,7 @@ import { BroadcastService } from './broadcast/broadcast.service';
 import { BroadcastMaterializerService } from './broadcast/broadcast-materializer.service';
 import { BroadcastWorker } from './broadcast/broadcast.worker';
 import { BroadcastController } from './broadcast/broadcast.controller';
+import { PlacementLookupModule } from '../school/enrollment/placement-lookup.module';
 
 /**
  * Communication platform — transport-independent messaging + provider adapters.
@@ -49,6 +50,7 @@ import { BroadcastController } from './broadcast/broadcast.controller';
  * inner flags — no change to conversations/messages/dispatcher.
  */
 @Module({
+  imports: [PlacementLookupModule],
   controllers: [CommunicationController, TelegramWebhookController, SmsWebhookController, BroadcastController],
   providers: [
     ConversationService,

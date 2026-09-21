@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock, Send } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, CheckCircle2, Clock, PenSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -145,9 +146,11 @@ export function GradePanel({ grade }: { grade: NonNullable<ActivityViewProps['vi
 }
 
 function AssignTeacher({ view }: ActivityViewProps) {
+  const nav = useNavigate();
   const inst = view.body?.instance ?? {};
   const submissions: any[] = view.body?.submissions ?? [];
   const graded = submissions.filter((s) => s.status === 'graded').length;
+  const mayGrade = can(view.capabilities, CAP.assignGrade);
   return (
     <div className="space-y-4">
       {inst.intro && (
@@ -156,10 +159,18 @@ function AssignTeacher({ view }: ActivityViewProps) {
         </CardContent></Card>
       )}
       <Card>
-        <CardHeader className="py-3">
+        <CardHeader className="flex flex-row items-center justify-between py-3">
           <CardTitle className="text-base">
             Submissions <span className="ml-2 text-sm font-normal text-muted-foreground">{graded} of {submissions.length} marked</span>
           </CardTitle>
+          {/* This list is read-only on purpose; marking happens in the workbench,
+              where the work, the score and the feedback are on one screen. */}
+          {mayGrade && submissions.length > 0 && (
+            <Button size="sm" onClick={() => nav(`/school/lms/modules/${view.module.id}/grade`)}>
+              <PenSquare className="mr-1 h-4 w-4" />
+              {submissions.length - graded > 0 ? `Mark ${submissions.length - graded} submission(s)` : 'Open marking'}
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {submissions.length === 0 ? (

@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaginationDto } from '../../../kernel/common/pagination.dto';
 
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
@@ -27,6 +28,12 @@ const CONTRACT = ['permanent', 'contract', 'temporary', 'probation'] as const;
 const STAFF_CATEGORY = ['teaching', 'non_teaching', 'admin', 'support'] as const;
 const STAFF_ATT_STATUS = ['present', 'absent', 'late', 'leave', 'off_duty'] as const;
 
+/** Roster query: pagination plus an optional class / stream filter. */
+export class StudentListQueryDto extends PaginationDto {
+  @IsOptional() @IsString() classId?: string;
+  @IsOptional() @IsString() sectionId?: string;
+}
+
 export class CreateStudentDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsString() code?: string;
@@ -36,8 +43,12 @@ export class CreateStudentDto {
 
   @IsString() @IsNotEmpty() admissionNo!: string;
   @IsString() @IsNotEmpty() enrollmentDate!: string;
-  @IsOptional() @IsString() currentClassId?: string;
-  @IsOptional() @IsString() currentSectionId?: string;
+  /** Admit straight into a class. Creates the enrollment and opening placement. */
+  @IsOptional() @IsString() classId?: string;
+  /** The class's stream (section), when the class is divided. */
+  @IsOptional() @IsString() sectionId?: string;
+  /** Term to place into; defaults to the current term. */
+  @IsOptional() @IsString() termId?: string;
   @IsOptional() @IsString() dateOfBirth?: string;
   @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
   @IsOptional() @IsString() nationality?: string;
@@ -60,20 +71,11 @@ export class UpdateStudentDto {
   @IsOptional() @IsBoolean() isCompany?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() admissionNo?: string;
   @IsOptional() @IsString() enrollmentDate?: string;
-  // NO currentClassId / currentSectionId / currentStreamId here, deliberately.
-  //
-  // Placement is an academic event, not a profile attribute. Enrollment is the
-  // authoritative record and StudentProfile.current* only mirrors it (see the
-  // note on StudentProfile in schema.prisma: "currentClassId is only ever an
-  // *input* to capture, never academic truth"). This endpoint used to let the
-  // Student 360 move a pupil between classes by writing the mirror alone, so
-  // the profile said P5 while every enrollment, register, mark sheet and
-  // result still said P4.
-  //
-  // Moving a pupil goes through POST /school/enrollments (transfer within the
-  // year) or POST /school/promotion/promote (into a new term), both of which
-  // write the Enrollment and the snapshot together. The global ValidationPipe
-  // runs forbidNonWhitelisted, so sending these fields here is a 400.
+  // NO class or stream here, deliberately. Placement is an academic event, not
+  // a profile attribute: moving a learner goes through
+  // POST /school/placements/:enrollmentId/move (or promotion), which appends an
+  // effective-dated placement. The global ValidationPipe runs
+  // forbidNonWhitelisted, so sending a class here is a 400.
   @IsOptional() @IsString() dateOfBirth?: string;
   @IsOptional() @IsIn([...GENDERS]) gender?: (typeof GENDERS)[number];
   @IsOptional() @IsString() nationality?: string;

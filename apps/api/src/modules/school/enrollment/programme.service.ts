@@ -1,8 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
-import type { GroupingModeValue } from './grouping';
 import type {
   CreateProgrammeDto,
   SeedUgandaProgrammesDto,
@@ -14,7 +13,7 @@ import type {
  *
  * These are DATA, not code branches. Nothing in the system may ever ask
  * `if (className === 'P2')`; it asks the learner's programme, and the programme
- * carries the stage, the grouping default and the versioned `config` that later
+ * carries the stage and the versioned `config` that later
  * phases read for assessment kinds, ranking and report templates.
  */
 export const UGANDA_PROGRAMME_TEMPLATES = [
@@ -90,7 +89,7 @@ export const UGANDA_PROGRAMME_TEMPLATES = [
 /**
  * Normalise a grade-level name for template matching: 'Primary 1', 'P.1',
  * 'p 1' and 'P1' are all the same grade. Anything that does not normalise to a
- * template grade simply stays unlinked — the seeder never guesses.
+ * template grade simply stays unbanded — the seeder never guesses.
  */
 export function normaliseGradeName(raw: string): string {
   const s = raw.trim().toUpperCase().replace(/[\s._-]/g, '');
@@ -114,7 +113,7 @@ export class ProgrammeService {
       where: { ...(opts.includeInactive ? {} : { isActive: true }) },
       orderBy: [{ stage: 'asc' }, { code: 'asc' }],
       include: {
-        gradeLevels: { include: { gradeLevel: true } },
+        defaultForLevels: { select: { id: true, code: true, name: true } },
         _count: { select: { cohorts: true, enrollments: true } },
       },
     });
@@ -123,7 +122,7 @@ export class ProgrammeService {
   async get(id: string) {
     const row = await this.prisma.client.academicProgramme.findFirst({
       where: { id },
-      include: { gradeLevels: { include: { gradeLevel: true } } },
+      include: { defaultForLevels: { select: { id: true, code: true, name: true } } },
     });
     if (!row) throw new NotFoundException(`Programme ${id} not found`);
     return row;
@@ -139,7 +138,6 @@ export class ProgrammeService {
           name: dto.name.trim(),
           stage: dto.stage ?? 'OTHER',
           curriculumAuthority: dto.curriculumAuthority ?? null,
-          groupingMode: dto.groupingMode ?? 'SECTION_ONLY',
           description: dto.description ?? null,
           effectiveFrom: dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date(),
           effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : null,
@@ -148,14 +146,11 @@ export class ProgrammeService {
           createdBy: this.tenant.userId ?? null,
         },
       });
-      if (dto.gradeLevelIds?.length) {
-        await this.replaceGradeLinks(tx, organizationId, programme.id, dto.gradeLevelIds);
-      }
       await this.audit.recordInTx(tx, {
         entity: 'AcademicProgramme',
         entityId: programme.id,
         action: 'create',
-        newValues: { code: programme.code, stage: programme.stage, groupingMode: programme.groupingMode },
+        newValues: { code: programme.code, stage: programme.stage },
       });
       return programme;
     });
@@ -171,7 +166,6 @@ export class ProgrammeService {
           ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
           ...(dto.stage !== undefined ? { stage: dto.stage } : {}),
           ...(dto.curriculumAuthority !== undefined ? { curriculumAuthority: dto.curriculumAuthority } : {}),
-          ...(dto.groupingMode !== undefined ? { groupingMode: dto.groupingMode } : {}),
           ...(dto.description !== undefined ? { description: dto.description } : {}),
           ...(dto.effectiveFrom !== undefined ? { effectiveFrom: new Date(dto.effectiveFrom) } : {}),
           ...(dto.effectiveTo !== undefined ? { effectiveTo: dto.effectiveTo ? new Date(dto.effectiveTo) : null } : {}),
@@ -180,54 +174,32 @@ export class ProgrammeService {
           updatedBy: this.tenant.userId ?? null,
         },
       });
-      if (dto.gradeLevelIds) {
-        await this.replaceGradeLinks(tx, organizationId, id, dto.gradeLevelIds);
-      }
       await this.audit.recordInTx(tx, {
         entity: 'AcademicProgramme',
         entityId: id,
         action: 'update',
-        oldValues: { stage: before.stage, groupingMode: before.groupingMode, isActive: before.isActive },
+        oldValues: { stage: before.stage, isActive: before.isActive },
         newValues: dto as any,
       });
-      return tx.academicProgramme.findFirst({ where: { id }, include: { gradeLevels: true } });
+      return tx.academicProgramme.findFirst({ where: { id } });
     });
   }
 
   /**
-   * A grade level maps to exactly ONE programme (schema-enforced), so linking it
-   * to a new programme detaches it from the old one rather than failing on the
-   * unique index — which is what an administrator actually means when they move
-   * P4 from Lower to Upper Primary.
+   * The programme a learner in this grade is enrolled under (ADR-028):
+   * `gradeLevel → academicLevel → defaultProgramme`. See `resolveProgrammeForGrade`.
    */
-  private async replaceGradeLinks(tx: any, organizationId: string, programmeId: string, gradeLevelIds: string[]) {
-    const unique = [...new Set(gradeLevelIds)];
-    const found = await tx.gradeLevel.findMany({ where: { id: { in: unique } }, select: { id: true } });
-    const missing = unique.filter((id) => !found.some((g: any) => g.id === id));
-    if (missing.length) {
-      throw new BadRequestException(`Unknown grade level(s): ${missing.join(', ')}`);
-    }
-    await tx.programmeGradeLevel.deleteMany({ where: { programmeId } });
-    await tx.programmeGradeLevel.deleteMany({ where: { gradeLevelId: { in: unique } } });
-    for (const gradeLevelId of unique) {
-      await tx.programmeGradeLevel.create({ data: { organizationId, programmeId, gradeLevelId } });
-    }
-  }
-
-  /** Resolve the programme that owns a grade level. */
   async programmeForGradeLevel(gradeLevelId: string, tx?: any) {
-    const client = tx ?? this.prisma.client;
-    const link = await client.programmeGradeLevel.findFirst({
-      where: { gradeLevelId },
-      include: { programme: true },
-    });
-    return link?.programme ?? null;
+    return resolveProgrammeForGrade(tx ?? this.prisma.client, gradeLevelId);
   }
 
   /**
-   * Install (or top up) the four Uganda programme templates and attach them to
-   * matching grade levels. Idempotent: re-running updates the template rows and
-   * relinks grades, so a school that adds P7 later just runs it again.
+   * Install (or top up) the Uganda programme templates. For each one, an
+   * Academic Level with the same code nominates it as the default programme,
+   * and the matching grade levels are banded into that level. Idempotent:
+   * re-running updates the template rows and re-bands unbanded grades, so a
+   * school that adds P7 later just runs it again. A grade the school already
+   * banded is left alone.
    */
   async seedUganda(dto: SeedUgandaProgrammesDto = {}) {
     const organizationId = this.tenant.organizationId;
@@ -249,15 +221,12 @@ export class ProgrammeService {
         name: template.name,
         stage: template.stage,
         curriculumAuthority: template.curriculumAuthority,
-        groupingMode: (dto.groupingMode ?? 'SECTION_ONLY') as GroupingModeValue,
         description: template.description,
         config: template.config as any,
       };
       let programmeId: string;
       if (existing) {
-        // Never clobber a school's own grouping choice on a re-run.
-        const { groupingMode: _ignoredMode, ...rest } = data;
-        await this.prisma.client.academicProgramme.updateMany({ where: { id: existing.id }, data: rest as any });
+        await this.prisma.client.academicProgramme.updateMany({ where: { id: existing.id }, data: data as any });
         programmeId = existing.id;
         updated.push(template.code);
       } else {
@@ -287,7 +256,26 @@ export class ProgrammeService {
         }
         if (ids.length) {
           await this.prisma.client.$transaction(async (tx: any) => {
-            await this.replaceGradeLinks(tx, organizationId, programmeId, ids);
+            const level =
+              (await tx.academicLevel.findFirst({ where: { code: template.code } })) ??
+              (await tx.academicLevel.create({
+                data: {
+                  organizationId,
+                  code: template.code,
+                  name: template.name,
+                  stage: template.stage,
+                  displayOrder: UGANDA_PROGRAMME_TEMPLATES.findIndex((t) => t.code === template.code) + 1,
+                  defaultProgrammeId: programmeId,
+                  createdBy: this.tenant.userId ?? null,
+                },
+              }));
+            if (!level.defaultProgrammeId) {
+              await tx.academicLevel.updateMany({ where: { id: level.id }, data: { defaultProgrammeId: programmeId } });
+            }
+            await tx.gradeLevel.updateMany({
+              where: { id: { in: ids }, academicLevelId: null },
+              data: { academicLevelId: level.id },
+            });
           });
         }
         linked[template.code] = ids;
@@ -309,4 +297,23 @@ export class ProgrammeService {
       unmatchedGrades: [...new Set(unmatchedGrades)],
     };
   }
+}
+
+/**
+ * Resolve the programme a grade enrols into (ADR-028).
+ *
+ * `gradeLevel → academicLevel → defaultProgramme` is deterministic: a grade
+ * belongs to one level and a level nominates one default programme. A school
+ * that runs a single programme and has not banded its grades gets that one;
+ * anything else is null, and the caller must refuse rather than guess.
+ */
+export async function resolveProgrammeForGrade(client: any, gradeLevelId: string) {
+  const grade = await client.gradeLevel.findFirst({
+    where: { id: gradeLevelId },
+    select: { academicLevel: { select: { defaultProgramme: true } } },
+  });
+  const viaLevel = grade?.academicLevel?.defaultProgramme ?? null;
+  if (viaLevel) return viaLevel;
+  const active = await client.academicProgramme.findMany({ where: { isActive: true }, take: 2 });
+  return active.length === 1 ? active[0] : null;
 }

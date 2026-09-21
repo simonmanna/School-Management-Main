@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { LeaveAccrualPanel } from './_components/leave-accrual-panel';
 
 const STATUS_STYLE: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-800',
@@ -65,6 +66,7 @@ export function HrLeavePage() {
           <TabsTrigger value="requests">Requests</TabsTrigger>
           <TabsTrigger value="balances">Balances</TabsTrigger>
           <TabsTrigger value="types">Leave types</TabsTrigger>
+          <TabsTrigger value="accrual">Accrual</TabsTrigger>
         </TabsList>
 
         <TabsContent value="requests" className="space-y-4">
@@ -151,6 +153,15 @@ export function HrLeavePage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="accrual" className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            How leave days come into existence. Every movement is written to an accrual ledger,
+            so a balance can always be explained line by line — and re-running a grant that has
+            already happened does nothing.
+          </p>
+          <LeaveAccrualPanel />
         </TabsContent>
       </Tabs>
 

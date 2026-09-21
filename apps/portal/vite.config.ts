@@ -59,7 +59,7 @@ export default defineConfig({
     // Bind all interfaces so a phone on the school wifi can reach the dev server.
     host: true,
     proxy: {
-      '/api/v1': { target: 'http://localhost:3001', changeOrigin: true },
+      '/api/v1': { target: 'http://localhost:3003', changeOrigin: true },
     },
   },
   build: {

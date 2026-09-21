@@ -22,6 +22,8 @@ const ADVANCE_STATUSES = ['PENDING', 'APPROVED', 'PAID', 'SETTLED', 'REJECTED'];
 const LOAN_STATUSES = ['ACTIVE', 'PAID', 'DEFAULTED'];
 const PAYMENT_METHODS = ['BANK', 'MOBILE_MONEY', 'CASH', 'CHEQUE'];
 const BANK_PAYMENT_STATUSES = ['DRAFT', 'GENERATED', 'SENT', 'PAID'];
+const PAYROLL_INPUT_TYPES = ['BONUS', 'COMMISSION', 'ALLOWANCE', 'DEDUCTION', 'REIMBURSEMENT'];
+const PAYROLL_INPUT_STATUSES = ['PENDING', 'APPROVED', 'APPLIED', 'CANCELLED'];
 
 const MONTHLY_HOURS = 173.33;
 const MONTHS_PER_YEAR = 12;
@@ -32,6 +34,48 @@ const OVERTIME_MULTIPLIER = 1.5;
  * which a real payroll (hundreds of payslips + GL posting) blows through.
  */
 const APPROVE_TX_TIMEOUT_MS = 120_000;
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Payroll arithmetic is CALENDAR arithmetic, so every date is reduced to a UTC
+ * midnight before it is compared or subtracted. Without this a `2026-09-01`
+ * stored as a local-midnight timestamp and one stored as a UTC-midnight
+ * timestamp differ by hours and a day count comes out one short.
+ */
+function startOfUtcDay(d: Date | string): Date {
+  const dt = d instanceof Date ? d : new Date(d);
+  return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+}
+
+function addUtcDays(d: Date, days: number): Date {
+  return new Date(d.getTime() + days * MS_PER_DAY);
+}
+
+/** Calendar days from `from` to `to`, counting BOTH ends. Sep 1 → Sep 30 is 30. */
+function dayCount(from: Date, to: Date): number {
+  const n = Math.round((startOfUtcDay(to).getTime() - startOfUtcDay(from).getTime()) / MS_PER_DAY) + 1;
+  return n > 0 ? n : 0;
+}
+
+/**
+ * Days covered by any of `ranges` that also fall inside [windowStart, windowEnd].
+ * Overlapping ranges are counted once — two unpaid leave requests spanning the
+ * same Friday cost the employee one day, not two.
+ */
+function overlapDays(
+  ranges: Array<{ start: Date; end: Date }>,
+  windowStart: Date,
+  windowEnd: Date,
+): number {
+  const days = new Set<number>();
+  for (const r of ranges) {
+    const from = r.start.getTime() > windowStart.getTime() ? r.start : windowStart;
+    const to = r.end.getTime() < windowEnd.getTime() ? r.end : windowEnd;
+    for (let t = from.getTime(); t <= to.getTime(); t += MS_PER_DAY) days.add(t);
+  }
+  return days.size;
+}
 
 /**
  * HrPayrollService — the payroll engine: components, tax tables, periods,
@@ -466,6 +510,14 @@ export class HrPayrollService {
    * Calculate every active employee's pay for the run. Idempotent: re-running
    * wipes and recomputes items (run must be DRAFT or CALCULATED).
    */
+  /**
+   * Recalculate a DRAFT/CALCULATED run from scratch.
+   *
+   * Everything time-sensitive resolves as at the PERIOD's last day, never as at
+   * the clock. A September run recalculated in November has to use September's
+   * tax table, September's attendance and September's headcount, or a routine
+   * correction silently reprices history.
+   */
   async calculateRun(id: string) {
     const orgId = this.tenant.organizationId;
     const userId = this.tenant.userId;
@@ -478,9 +530,16 @@ export class HrPayrollService {
       throw new BadRequestException('Only DRAFT/CALCULATED runs can be recalculated');
 
     const period = run.period;
-    const runDate = new Date();
-    const monthStart = new Date(period.startDate);
-    const monthEnd = new Date(period.endDate);
+    const periodStart = startOfUtcDay(period.startDate);
+    const periodEnd = startOfUtcDay(period.endDate);
+    if (periodEnd.getTime() < periodStart.getTime())
+      throw new BadRequestException('Payroll period ends before it starts');
+    // The closing day is INSIDE the period. A `lt: endDate` bound silently
+    // dropped every attendance record, leave day and input dated on it.
+    const periodEndExclusive = addUtcDays(periodEnd, 1);
+    const periodDays = dayCount(periodStart, periodEnd);
+    /** Every date-sensitive lookup below resolves as at this instant. */
+    const asOf = period.endDate;
 
     return this.prisma.client.$transaction(async (tx: any) => {
       // Delete stale items + their child lines/payslips.
@@ -495,23 +554,128 @@ export class HrPayrollService {
         await tx.hrPayrollItem.deleteMany({ where: { id: si.id } });
       }
 
-      const employees = await tx.hrEmployee.findMany({
-        where: { organizationId: orgId, isActive: true, deletedAt: null },
-        include: { department: true, position: true },
-      });
-      const payeTable = await this.activeTaxTable(tx, orgId, 'PAYE', runDate);
-      const pensionTable = await this.activeTaxTable(tx, orgId, 'PENSION', runDate);
-      const ssfTable = await this.activeTaxTable(tx, orgId, 'SOCIAL_SECURITY', runDate);
+      // ── Reference data, fetched ONCE ─────────────────────────────────────
+      // The per-employee loop below is pure computation. The previous shape
+      // issued an attendance aggregate and a component lookup per employee, so
+      // a 400-staff school spent ~800 round trips inside one interactive
+      // transaction and regularly ran up against the timeout.
 
-      // Advances/loans active during this period.
+      // Anyone hired on or before the closing day is a candidate; leavers are
+      // filtered by last working day below, because someone who left on the
+      // 12th must still be paid for the first twelve days.
+      const employees = await tx.hrEmployee.findMany({
+        where: {
+          organizationId: orgId,
+          deletedAt: null,
+          OR: [{ hireDate: null }, { hireDate: { lt: periodEndExclusive } }],
+        },
+        include: {
+          department: true,
+          position: true,
+          offboardings: {
+            where: { deletedAt: null, lastWorkingDay: { not: null } },
+            orderBy: { lastWorkingDay: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { employeeCode: 'asc' },
+      });
+
+      const payeTable = await this.activeTaxTable(tx, orgId, 'PAYE', asOf);
+
+      // Attendance summed in JS from one query — `groupBy` is avoided so the
+      // tenancy client extension has nothing to reinterpret.
+      const attendanceRows = await tx.hrAttendance.findMany({
+        where: {
+          organizationId: orgId,
+          deletedAt: null,
+          date: { gte: periodStart, lt: periodEndExclusive },
+        },
+        select: { employeeId: true, workedMinutes: true, overtimeMinutes: true },
+      });
+      const attendanceBy = new Map<string, { worked: number; overtime: number }>();
+      for (const a of attendanceRows) {
+        const acc = attendanceBy.get(a.employeeId) ?? { worked: 0, overtime: 0 };
+        acc.worked += a.workedMinutes ?? 0;
+        acc.overtime += a.overtimeMinutes ?? 0;
+        attendanceBy.set(a.employeeId, acc);
+      }
+
+      // Approved leave on an UNPAID leave type is the only leave that changes
+      // pay. Paid leave is already inside the salary.
+      const unpaidLeave = await tx.hrLeaveRequest.findMany({
+        where: {
+          organizationId: orgId,
+          deletedAt: null,
+          status: 'APPROVED',
+          startDate: { lt: periodEndExclusive },
+          endDate: { gte: periodStart },
+          leaveType: { isPaid: false },
+        },
+        select: { employeeId: true, startDate: true, endDate: true },
+      });
+      const unpaidLeaveBy = new Map<string, Array<{ start: Date; end: Date }>>();
+      for (const l of unpaidLeave) {
+        const list = unpaidLeaveBy.get(l.employeeId) ?? [];
+        list.push({ start: startOfUtcDay(l.startDate), end: startOfUtcDay(l.endDate) });
+        unpaidLeaveBy.set(l.employeeId, list);
+      }
+
+      // Ad-hoc inputs for this period. `APPLIED` rows are included only when
+      // they were applied by THIS run, so a recalculate is idempotent while a
+      // bonus already paid by another run in the same period is not paid twice.
+      const inputs = await tx.hrPayrollInput.findMany({
+        where: {
+          organizationId: orgId,
+          periodId: run.periodId,
+          deletedAt: null,
+          OR: [
+            { status: 'APPROVED' },
+            { status: 'APPLIED', appliedRunId: id },
+          ],
+        },
+      });
+      const inputsBy = new Map<string, any[]>();
+      for (const inp of inputs) {
+        const list = inputsBy.get(inp.employeeId) ?? [];
+        list.push(inp);
+        inputsBy.set(inp.employeeId, list);
+      }
+
+      // Component catalogue + grade structures, resolved per employee in JS.
+      const globalComponents = await tx.hrPayrollComponent.findMany({
+        where: { organizationId: orgId, isActive: true, deletedAt: null },
+      });
+      const structures = await tx.hrSalaryStructure.findMany({
+        where: { organizationId: orgId, isActive: true, deletedAt: null },
+        include: { component: true },
+      });
+      const structureByGrade = new Map<string, any[]>();
+      for (const st of structures) {
+        if (!st.component || st.component.isActive === false || st.component.deletedAt) continue;
+        const list = structureByGrade.get(st.gradeId) ?? [];
+        list.push({
+          ...st.component,
+          amount: st.amount ?? st.component.amount,
+          rate: st.rate ?? st.component.rate,
+        });
+        structureByGrade.set(st.gradeId, list);
+      }
+      const componentsFor = (emp: any) => {
+        const gradeId = emp.position?.gradeId ?? null;
+        const graded = gradeId ? structureByGrade.get(gradeId) : undefined;
+        return graded && graded.length > 0 ? graded : globalComponents;
+      };
+
+      // Advances/loans outstanding as at the period close.
       const advances = await tx.hrSalaryAdvance.findMany({
         where: {
           organizationId: orgId,
           deletedAt: null,
           status: { in: ['APPROVED', 'PAID'] },
           OR: [
-            { paidAt: null, approvedAt: { lte: runDate } },
-            { paidAt: { lte: runDate } },
+            { paidAt: null, approvedAt: { lte: asOf } },
+            { paidAt: { lte: asOf } },
           ],
         },
       });
@@ -520,50 +684,78 @@ export class HrPayrollService {
       });
 
       const items = [];
+      const appliedInputIds: string[] = [];
       for (const emp of employees) {
-        // 1. Base salary / hourly earnings.
+        // ── Eligibility + pro-rata ───────────────────────────────────────
+        // The window an employee was actually on the payroll during this
+        // period. Someone hired mid-month or leaving mid-month is paid for
+        // the days they held the post, not for the whole month.
+        const hire = emp.hireDate ? startOfUtcDay(emp.hireDate) : null;
+        const lastDayRaw = emp.offboardings?.[0]?.lastWorkingDay ?? null;
+        const lastDay = lastDayRaw ? startOfUtcDay(lastDayRaw) : null;
+        const payStart = hire && hire.getTime() > periodStart.getTime() ? hire : periodStart;
+        const payEnd = lastDay && lastDay.getTime() < periodEnd.getTime() ? lastDay : periodEnd;
+        if (payEnd.getTime() < payStart.getTime()) continue; // not employed in this period
+        // An inactive employee with no recorded last working day is a leaver
+        // from an earlier period; only a dated exit earns a final payslip.
+        if (!emp.isActive && !lastDay) continue;
+
+        const employedDays = dayCount(payStart, payEnd);
+        const unpaidLeaveDays = overlapDays(unpaidLeaveBy.get(emp.id) ?? [], payStart, payEnd);
+        const paidDaysRaw = employedDays - unpaidLeaveDays;
+        const paidDays = paidDaysRaw > 0 ? paidDaysRaw : 0;
+        const proRata = periodDays > 0 ? dec(paidDays).dividedBy(dec(periodDays)) : dec(1);
+        // Nobody on the payroll for zero paid days and with no worked hours
+        // belongs on the register at all — an empty payslip is noise.
+        const att = attendanceBy.get(emp.id) ?? { worked: 0, overtime: 0 };
+        if (paidDays === 0 && att.worked === 0 && att.overtime === 0) continue;
+
+        // ── 1. Base salary / hourly earnings ─────────────────────────────
         const payFreq = emp.payFrequency ?? 'MONTHLY';
         const baseSalary = emp.baseSalary ? dec(emp.baseSalary) : ZERO;
         const hourlyRate = emp.hourlyRate ? dec(emp.hourlyRate) : ZERO;
+        const workedMin = att.worked;
+        const overtimeMin = att.overtime;
 
-        // Attendance for the period (worked + overtime minutes).
-        const attAgg = await tx.hrAttendance.aggregate({
-          where: {
-            organizationId: orgId,
-            employeeId: emp.id,
-            deletedAt: null,
-            date: { gte: monthStart, lt: monthEnd },
-          },
-          _sum: { workedMinutes: true, overtimeMinutes: true },
-        });
-        const workedMin = attAgg._sum.workedMinutes ?? 0;
-        const overtimeMin = attAgg._sum.overtimeMinutes ?? 0;
-
-        // Falls back to a derived hourly rate when none is stored, matching
-        // the previous `hourlyRate || baseSalary / MONTHLY_HOURS` behaviour.
+        // Falls back to a derived hourly rate when none is stored. Derived
+        // from the FULL monthly salary — a rate is a rate, pro-rating it as
+        // well as the days would cut the pay twice.
         const derivedHourly = hourlyRate.greaterThan(ZERO)
           ? hourlyRate
           : baseSalary.dividedBy(dec(MONTHLY_HOURS));
+        // Hourly staff are paid for hours actually worked, which already
+        // reflect a short month — pro-rata applies to salaried pay only.
         const baseAmount =
           payFreq === 'HOURLY'
             ? dec(workedMin).dividedBy(60).times(derivedHourly)
-            : baseSalary;
+            : baseSalary.times(proRata);
         const overtimeHours = dec(overtimeMin).dividedBy(60);
         const overtimePay = overtimeHours
           .times(derivedHourly)
           .times(dec(OVERTIME_MULTIPLIER));
         const earningsBase = baseAmount.plus(overtimePay);
 
-        // 2. Allowances (recurring components + per-item allowance lines).
-        const components = await this.resolveComponents(tx, orgId, emp);
+        // Taxable pay is tracked separately from gross: an allowance flagged
+        // non-taxable (per-diem, receipted reimbursement) is money the
+        // employee receives but is not taxed on. The old code taxed the whole
+        // gross, which made `isTaxable` decorative.
+        let taxableEarnings = earningsBase;
+
+        // ── 2. Allowances (recurring components) ─────────────────────────
+        const components = componentsFor(emp);
         const allowanceLines: any[] = [];
         let allowancesTotal = ZERO;
         for (const c of components) {
           if (c.componentType !== 'ALLOWANCE' || !c.isRecurring) continue;
           if (c.appliesTo && !this.componentApplies(c.appliesTo, emp)) continue;
-          const amount = this.componentAmount(c, earningsBase);
+          let amount = this.componentAmount(c, earningsBase);
+          // A FIXED allowance is a monthly entitlement, so half a month earns
+          // half of it. A PERCENTAGE allowance already rides on a pro-rated
+          // earnings base and must not be scaled twice.
+          if (c.calcMethod !== 'PERCENTAGE') amount = amount.times(proRata);
           if (!amount.greaterThan(ZERO)) continue;
           allowancesTotal = allowancesTotal.plus(amount);
+          if (c.isTaxable) taxableEarnings = taxableEarnings.plus(amount);
           allowanceLines.push({
             organizationId: orgId,
             name: c.name,
@@ -573,7 +765,9 @@ export class HrPayrollService {
           });
         }
 
-        // 3. Recurring deductions (pension/SSF/insurance are config components).
+        // ── 3. Recurring deductions ──────────────────────────────────────
+        // Deliberately NOT pro-rated: a fixed deduction is an obligation
+        // (union dues, insurance premium), not a share of the month's pay.
         const deductionLines: any[] = [];
         const d = { pension: ZERO, ssf: ZERO, insurance: ZERO, other: ZERO };
         for (const c of components) {
@@ -595,12 +789,46 @@ export class HrPayrollService {
           });
         }
 
-        // 4. Gross (before loan/advance installments are capped).
-        const gross = earningsBase.plus(allowancesTotal);
+        // ── 4. Ad-hoc inputs for this period ─────────────────────────────
+        let bonusAmount = ZERO;
+        let commissionAmount = ZERO;
+        for (const inp of inputsBy.get(emp.id) ?? []) {
+          const amount = dec(inp.amount);
+          if (!amount.greaterThan(ZERO)) continue;
+          appliedInputIds.push(inp.id);
+          if (inp.inputType === 'DEDUCTION') {
+            d.other = d.other.plus(amount);
+            deductionLines.push({
+              organizationId: orgId,
+              name: inp.name,
+              amount,
+              isTaxable: false,
+              createdBy: userId,
+            });
+            continue;
+          }
+          if (inp.inputType === 'BONUS') bonusAmount = bonusAmount.plus(amount);
+          else if (inp.inputType === 'COMMISSION') commissionAmount = commissionAmount.plus(amount);
+          else allowancesTotal = allowancesTotal.plus(amount);
+          if (inp.isTaxable) taxableEarnings = taxableEarnings.plus(amount);
+          allowanceLines.push({
+            organizationId: orgId,
+            name: inp.name,
+            amount,
+            isTaxable: inp.isTaxable,
+            createdBy: userId,
+          });
+        }
 
-        // 5. Tax (PAYE on taxable gross minus pension/SSF, progressive —
-        // brackets are ANNUAL, so annualize then divide back to monthly).
-        const taxableRaw = gross.minus(d.pension).minus(d.ssf);
+        // ── 5. Gross ─────────────────────────────────────────────────────
+        const gross = earningsBase
+          .plus(allowancesTotal)
+          .plus(bonusAmount)
+          .plus(commissionAmount);
+
+        // ── 6. PAYE on taxable pay less pension/SSF ──────────────────────
+        // Brackets are ANNUAL, so annualise then divide back to the period.
+        const taxableRaw = taxableEarnings.minus(d.pension).minus(d.ssf);
         const taxableGross = taxableRaw.greaterThan(ZERO) ? taxableRaw : ZERO;
         const tax = payeTable
           ? this.computeProgressive(
@@ -617,9 +845,10 @@ export class HrPayrollService {
             createdBy: userId,
           });
 
-        // 6. Loan + advance installments — capped so net pay never goes
-        //    negative (keeps the GL journal balanced). Statutory deductions
-        //    get priority; the remainder is split loans → advances.
+        // ── 7. Loan + advance installments ───────────────────────────────
+        // Capped so net pay never goes negative (which would unbalance the GL
+        // journal). Statutory deductions take priority; the remainder is split
+        // loans → advances.
         const statutoryDeductions = sum([tax, d.pension, d.ssf, d.insurance, d.other]);
         const availableRaw = gross.minus(statutoryDeductions);
         let availableForInstallments = availableRaw.greaterThan(ZERO) ? availableRaw : ZERO;
@@ -677,14 +906,12 @@ export class HrPayrollService {
             regularHours: Math.round(workedMin / 60),
             // `overtimeHours` is an Int column, so it is a rounded DISPLAY
             // value. `overtimePay` above is computed from exact minutes and is
-            // unaffected. (The previous `Math.round(h * 100) / 100` produced a
-            // fractional value that Prisma rejects for an Int field — latent
-            // because attendance overtime is currently always zero.)
+            // unaffected.
             overtimeHours: overtimeHours.toDecimalPlaces(0).toNumber(),
             overtimePay,
             allowancesTotal,
-            commissionAmount: ZERO,
-            bonusAmount: ZERO,
+            commissionAmount,
+            bonusAmount,
             grossPay: gross,
             taxAmount: tax,
             pensionAmount: d.pension,
@@ -695,7 +922,11 @@ export class HrPayrollService {
             otherDeductions: d.other,
             totalDeductions,
             netPay,
-            absenceDays: ZERO,
+            absenceDays: dec(unpaidLeaveDays),
+            unpaidLeaveDays: dec(unpaidLeaveDays),
+            periodDays,
+            paidDays: dec(paidDays),
+            proRataFactor: proRata,
             createdBy: userId,
           },
         });
@@ -749,6 +980,7 @@ export class HrPayrollService {
           event: 'calculate',
           status: 'CALCULATED',
           employees: items.length,
+          inputsApplied: appliedInputIds.length,
           totalGross: grossSum.toString(),
           totalDeductions: dedSum.toString(),
           totalNet: netSum.toString(),
@@ -960,6 +1192,19 @@ export class HrPayrollService {
         }
       }
 
+      // Ad-hoc inputs consumed by this run are stamped APPLIED so a later run
+      // in the same period cannot pay the same bonus a second time. Inside the
+      // approval transaction: if the GL posting rolls back, so does this.
+      await tx.hrPayrollInput.updateMany({
+        where: {
+          organizationId: orgId,
+          periodId: run.periodId,
+          status: 'APPROVED',
+          deletedAt: null,
+        },
+        data: { status: 'APPLIED', appliedRunId: id, updatedBy: userId },
+      });
+
       const run2 = await tx.hrPayrollRun.update({
         where: { id },
         data: {
@@ -1039,6 +1284,81 @@ export class HrPayrollService {
           tx,
         );
       }
+
+      // Reversing has to undo everything approval did, not just the journal.
+      // The GL reversal alone left loan balances written down, payslips issued
+      // and one-off inputs consumed — so a reversed-and-rerun payroll recovered
+      // an installment the employee never repaid and dropped their bonus.
+      const items = await tx.hrPayrollItem.findMany({
+        where: { runId: id, organizationId: orgId, deletedAt: null },
+        select: { employeeId: true, loanDeduction: true, advanceDeduction: true },
+      });
+
+      // 1. Loan balances go back up by exactly what this run took.
+      const loans = await tx.hrEmployeeLoan.findMany({
+        where: { organizationId: orgId, deletedAt: null },
+      });
+      for (const loan of loans) {
+        const taken = sum(
+          items
+            .filter((i: any) => i.employeeId === loan.employeeId)
+            .map((i: any) => dec(i.loanDeduction)),
+        );
+        if (!taken.greaterThan(ZERO)) continue;
+        await tx.hrEmployeeLoan.update({
+          where: { id: loan.id },
+          data: {
+            balance: dec(loan.balance).plus(taken),
+            installmentsPaid: loan.installmentsPaid > 0 ? loan.installmentsPaid - 1 : 0,
+            // A loan closed by this run is open again now that the repayment
+            // has been unwound.
+            status: loan.status === 'PAID' ? 'ACTIVE' : loan.status,
+            updatedBy: userId,
+          },
+        });
+      }
+
+      // 2. Same for salary advances.
+      const advances = await tx.hrSalaryAdvance.findMany({
+        where: { organizationId: orgId, deletedAt: null },
+      });
+      for (const adv of advances) {
+        const taken = sum(
+          items
+            .filter((i: any) => i.employeeId === adv.employeeId)
+            .map((i: any) => dec(i.advanceDeduction)),
+        );
+        if (!taken.greaterThan(ZERO)) continue;
+        await tx.hrSalaryAdvance.update({
+          where: { id: adv.id },
+          data: {
+            balance: dec(adv.balance).plus(taken),
+            status: adv.status === 'SETTLED' ? 'APPROVED' : adv.status,
+            updatedBy: userId,
+          },
+        });
+      }
+
+      // 3. Payslips are cancelled, never deleted — an employee may already hold
+      //    a printed copy, so the number has to keep resolving to a voided slip.
+      const itemIds = (
+        await tx.hrPayrollItem.findMany({
+          where: { runId: id, organizationId: orgId },
+          select: { id: true },
+        })
+      ).map((i: any) => i.id);
+      await tx.hrPayslip.updateMany({
+        where: { organizationId: orgId, itemId: { in: itemIds } },
+        data: { status: 'CANCELLED', updatedBy: userId },
+      });
+
+      // 4. One-off inputs this run consumed return to APPROVED so the corrected
+      //    run picks them up again.
+      await tx.hrPayrollInput.updateMany({
+        where: { organizationId: orgId, appliedRunId: id, status: 'APPLIED' },
+        data: { status: 'APPROVED', appliedRunId: null, updatedBy: userId },
+      });
+
       const reversed = await tx.hrPayrollRun.update({
         where: { id },
         data: {
@@ -1053,7 +1373,12 @@ export class HrPayrollService {
         entityId: id,
         action: 'reverse',
         oldValues: { status: run.status, journalEntryId: run.journalEntryId, glPosted: true },
-        newValues: { status: 'REVERSED', glPosted: false, reason: dto.reason ?? null },
+        newValues: {
+          status: 'REVERSED',
+          glPosted: false,
+          reason: dto.reason ?? null,
+          payslipsCancelled: itemIds.length,
+        },
       });
       return reversed;
     });
@@ -1244,6 +1569,217 @@ export class HrPayrollService {
         processedById: userId,
         updatedBy: userId,
       },
+    });
+  }
+
+  // ── Ad-hoc payroll inputs (one-off bonuses, commissions, deductions) ─────
+  //
+  // Recurring money is a payroll COMPONENT — configuration that applies to a
+  // grade, a department or everyone. One-off money for one person in one period
+  // is an INPUT. Keeping them apart is what stops the component catalogue from
+  // filling up with "Term 2 bonus — Sarah" rows that then quietly apply forever.
+
+  async listPayrollInputs(query: any = {}) {
+    const orgId = this.tenant.organizationId;
+    const where: any = { organizationId: orgId, deletedAt: null };
+    if (query.periodId) where.periodId = query.periodId;
+    if (query.employeeId) where.employeeId = query.employeeId;
+    if (query.status) {
+      if (!PAYROLL_INPUT_STATUSES.includes(query.status))
+        throw new BadRequestException(`status must be one of ${PAYROLL_INPUT_STATUSES.join(', ')}`);
+      where.status = query.status;
+    }
+    if (query.inputType) {
+      if (!PAYROLL_INPUT_TYPES.includes(query.inputType))
+        throw new BadRequestException(`inputType must be one of ${PAYROLL_INPUT_TYPES.join(', ')}`);
+      where.inputType = query.inputType;
+    }
+    return this.prisma.client.hrPayrollInput.findMany({
+      where,
+      include: {
+        employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
+        period: { select: { id: true, periodCode: true, startDate: true, endDate: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+  }
+
+  async createPayrollInput(dto: any) {
+    return this.createPayrollInputs({ inputs: [dto] }).then((rows) => rows[0]);
+  }
+
+  /**
+   * Capture one or many inputs in a single act. Bulk is the normal case — a
+   * bursar keys a whole bonus list off one memo — and doing it in one
+   * transaction means a bad row rejects the entire list instead of leaving half
+   * a bonus run behind.
+   */
+  async createPayrollInputs(dto: any) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const rows: any[] = Array.isArray(dto?.inputs) ? dto.inputs : [];
+    if (rows.length === 0) throw new BadRequestException('inputs must be a non-empty array');
+
+    const prepared = rows.map((r, idx) => {
+      const at = `inputs[${idx}]`;
+      if (!r.employeeId) throw new BadRequestException(`${at}.employeeId is required`);
+      if (!r.periodId) throw new BadRequestException(`${at}.periodId is required`);
+      if (!r.name) throw new BadRequestException(`${at}.name is required`);
+      if (!PAYROLL_INPUT_TYPES.includes(r.inputType))
+        throw new BadRequestException(`${at}.inputType must be one of ${PAYROLL_INPUT_TYPES.join(', ')}`);
+      const amount = dec(r.amount ?? 0);
+      if (!amount.greaterThan(ZERO))
+        throw new BadRequestException(`${at}.amount must be positive`);
+      return {
+        organizationId: orgId,
+        employeeId: r.employeeId,
+        periodId: r.periodId,
+        inputType: r.inputType,
+        name: String(r.name),
+        amount,
+        // A reimbursement pays back a cost the employee already bore, so it is
+        // not income and defaults to untaxed. Everything else defaults taxable.
+        isTaxable: r.isTaxable ?? r.inputType !== 'REIMBURSEMENT',
+        reference: r.reference ?? null,
+        notes: r.notes ?? null,
+        status: 'PENDING',
+        createdBy: userId,
+      };
+    });
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const periodIds = [...new Set(prepared.map((p) => p.periodId))];
+      const periods = await tx.hrPayrollPeriod.findMany({
+        where: { id: { in: periodIds }, organizationId: orgId, deletedAt: null },
+      });
+      const byId = new Map(periods.map((p: any) => [p.id, p]));
+      for (const p of prepared) {
+        const period: any = byId.get(p.periodId);
+        if (!period) throw new NotFoundException(`Payroll period ${p.periodId} not found`);
+        // A closed period's numbers are already reported. New money for it has
+        // to go through a fresh period, not through a back-dated edit.
+        if (period.status !== 'OPEN')
+          throw new BadRequestException(`Payroll period ${period.periodCode} is ${period.status} — inputs can only be added to an OPEN period`);
+      }
+      const employeeIds = [...new Set(prepared.map((p) => p.employeeId))];
+      const found = await tx.hrEmployee.findMany({
+        where: { id: { in: employeeIds }, organizationId: orgId, deletedAt: null },
+        select: { id: true },
+      });
+      const known = new Set(found.map((e: any) => e.id));
+      for (const p of prepared) {
+        if (!known.has(p.employeeId))
+          throw new NotFoundException(`Employee ${p.employeeId} not found`);
+      }
+
+      const created = [];
+      for (const p of prepared) {
+        created.push(await tx.hrPayrollInput.create({ data: p }));
+      }
+      await this.audit.recordInTx(tx, {
+        entity: 'HrPayrollInput',
+        entityId: created.map((c: any) => c.id).join(','),
+        action: 'create',
+        newValues: { count: created.length, periodIds },
+      });
+      return created;
+    });
+  }
+
+  async updatePayrollInput(id: string, dto: any) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrPayrollInput.findFirst({
+      where: { id, organizationId: orgId, deletedAt: null },
+    });
+    if (!row) throw new NotFoundException('Payroll input not found');
+    // Once a run has paid it, the input is history.
+    if (row.status === 'APPLIED')
+      throw new BadRequestException('An APPLIED input cannot be edited — reverse the payroll run first');
+    const data: any = { updatedBy: userId };
+    if (dto.name !== undefined) data.name = String(dto.name);
+    if (dto.amount !== undefined) {
+      const amount = dec(dto.amount);
+      if (!amount.greaterThan(ZERO)) throw new BadRequestException('amount must be positive');
+      data.amount = amount;
+    }
+    if (dto.isTaxable !== undefined) data.isTaxable = !!dto.isTaxable;
+    if (dto.reference !== undefined) data.reference = dto.reference;
+    if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.inputType !== undefined) {
+      if (!PAYROLL_INPUT_TYPES.includes(dto.inputType))
+        throw new BadRequestException(`inputType must be one of ${PAYROLL_INPUT_TYPES.join(', ')}`);
+      data.inputType = dto.inputType;
+    }
+    // Editing an approved input drops it back to PENDING: whoever approved an
+    // amount did not approve the new one.
+    if (row.status === 'APPROVED' && (data.amount || data.inputType))
+      Object.assign(data, { status: 'PENDING', approvedById: null, approvedAt: null });
+    return this.prisma.client.hrPayrollInput.update({ where: { id }, data });
+  }
+
+  /** Approve inputs so `calculateRun` will pick them up. Bulk by design. */
+  async approvePayrollInputs(dto: any) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const ids: string[] = Array.isArray(dto?.ids) ? dto.ids : [];
+    if (ids.length === 0) throw new BadRequestException('ids must be a non-empty array');
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const rows = await tx.hrPayrollInput.findMany({
+        where: { id: { in: ids }, organizationId: orgId, deletedAt: null },
+      });
+      if (rows.length !== ids.length)
+        throw new NotFoundException('One or more payroll inputs were not found');
+      for (const r of rows) {
+        if (r.status !== 'PENDING')
+          throw new BadRequestException(`Input ${r.name} is ${r.status} — only PENDING inputs can be approved`);
+      }
+      const approvedAt = new Date();
+      await tx.hrPayrollInput.updateMany({
+        where: { id: { in: ids }, organizationId: orgId },
+        data: { status: 'APPROVED', approvedById: userId, approvedAt, updatedBy: userId },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'HrPayrollInput',
+        entityId: ids.join(','),
+        action: 'approve',
+        newValues: { count: ids.length, total: sum(rows.map((r: any) => dec(r.amount))).toString() },
+      });
+      return tx.hrPayrollInput.findMany({ where: { id: { in: ids }, organizationId: orgId } });
+    });
+  }
+
+  async cancelPayrollInput(id: string, dto: any = {}) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrPayrollInput.findFirst({
+      where: { id, organizationId: orgId, deletedAt: null },
+    });
+    if (!row) throw new NotFoundException('Payroll input not found');
+    if (row.status === 'APPLIED')
+      throw new BadRequestException('An APPLIED input cannot be cancelled — reverse the payroll run first');
+    return this.prisma.client.hrPayrollInput.update({
+      where: { id },
+      data: {
+        status: 'CANCELLED',
+        notes: dto.reason ? `${row.notes ? row.notes + ' | ' : ''}cancelled: ${dto.reason}` : row.notes,
+        updatedBy: userId,
+      },
+    });
+  }
+
+  async deletePayrollInput(id: string) {
+    const orgId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const row = await this.prisma.client.hrPayrollInput.findFirst({
+      where: { id, organizationId: orgId, deletedAt: null },
+    });
+    if (!row) throw new NotFoundException('Payroll input not found');
+    if (row.status === 'APPLIED')
+      throw new BadRequestException('An APPLIED input cannot be deleted — reverse the payroll run first');
+    return this.prisma.client.hrPayrollInput.update({
+      where: { id },
+      data: { deletedAt: new Date(), updatedBy: userId },
     });
   }
 
@@ -1589,31 +2125,5 @@ export class HrPayrollService {
     });
   }
 
-  // ── Grade-aware component resolution (extend calculate) ─────────────────────
-
-  /**
-   * Builds the component list for an employee, preferring grade-specific salary
-   * structures when the employee's position has a grade, falling back to global
-   * recurring components. Returns allowance/deduction component descriptors.
-   */
-  private async resolveComponents(tx: any, orgId: string, emp: any) {
-    const gradeId = emp.position?.gradeId ?? null;
-    if (gradeId) {
-      const structures = await tx.hrSalaryStructure.findMany({
-        where: { organizationId: orgId, gradeId, isActive: true, deletedAt: null },
-        include: { component: true },
-      });
-      if (structures.length > 0) {
-        return structures.map((s: any) => ({
-          ...s.component,
-          calcMethod: s.component.calcMethod,
-          isTaxable: s.component.isTaxable,
-          amount: s.amount ?? s.component.amount,
-          rate: s.rate ?? s.component.rate,
-        }));
-      }
-    }
-    return tx.hrPayrollComponent.findMany({ where: { organizationId: orgId, isActive: true, deletedAt: null } });
-  }
 }
 

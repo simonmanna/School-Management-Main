@@ -7,14 +7,15 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import type { CaptureRosterDto, RosterMemberDto } from './dto.types';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /**
  * AcademicRoster — the enrollment-independent academic cohort.
  *
- * A roster is captured (from `currentClassId` or a manual list), reviewed, and
+ * A roster is captured (from the class's placements or a manual list), reviewed, and
  * then FROZEN. Frozen rosters are immutable: members can no longer be added or
  * removed, so an assignment's fan-out and a result run (A3) always bind to a
- * stable set of students. `currentClassId` is only ever an input to capture —
+ * stable set of students. Live class membership is only ever an input to capture —
  * never academic truth — which is how results stay correctly attributed after a
  * mid-term promotion.
  */
@@ -29,6 +30,7 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
+    private readonly placements: PlacementLookupService,
   ) {
     super(prisma.client.academicRoster as unknown as CrudDelegate);
   }
@@ -58,19 +60,29 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
         },
       });
 
-      // Derive members from the class roster (active students in the class).
+      // Derive members from the class's live membership. `derived_current_class`
+      // is kept as the persisted source value (clients send it and stored
+      // rosters carry it); what it is derived FROM is now placement history,
+      // not the StudentProfile projection (ADR-027).
       if ((dto.source ?? 'derived_current_class') === 'derived_current_class' && dto.classId) {
-        const students = await tx.studentProfile.findMany({
-          where: { currentClassId: dto.classId, status: 'active', ...(dto.sectionId ? { currentSectionId: dto.sectionId } : {}) },
+        const found = await tx.studentProfile.findMany({
+          where: {
+            status: 'active',
+            ...this.placements.studentWhere({
+              classIds: [dto.classId],
+              ...(dto.sectionId ? { sectionIds: [dto.sectionId] } : {}),
+            }),
+          },
         });
+        const students = await this.placements.attach(found);
         if (students.length > 0) {
           await tx.academicRosterMember.createMany({
             data: students.map((s: any) => ({
               organizationId,
               rosterId: roster.id,
               studentProfileId: s.id,
-              classId: s.currentClassId,
-              sectionId: s.currentSectionId,
+              classId: s.placement?.classId ?? dto.classId,
+              sectionId: s.placement?.sectionId ?? null,
               gradeLevelId: klass?.gradeLevelId ?? null,
               joinReason: 'captured_from_current_class',
             })),
@@ -98,16 +110,17 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
   async addMember(rosterId: string, dto: RosterMemberDto) {
     return this.prisma.client.$transaction(async (tx: any) => {
       await this.assertUnfrozen(tx, rosterId);
-      const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
-      if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+      const found = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
+      if (!found) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+      const [student] = await this.placements.attach([found]);
       const row = await tx.academicRosterMember.upsert({
         where: { rosterId_studentProfileId: { rosterId, studentProfileId: dto.studentProfileId } },
         create: {
           organizationId: this.tenant.organizationId,
           rosterId,
           studentProfileId: dto.studentProfileId,
-          classId: dto.classId ?? student.currentClassId,
-          sectionId: dto.sectionId ?? student.currentSectionId,
+          classId: dto.classId ?? student.placement?.classId ?? null,
+          sectionId: dto.sectionId ?? student.placement?.sectionId ?? null,
           gradeLevelId: dto.gradeLevelId ?? null,
           joinReason: dto.joinReason ?? 'manual_add',
         },

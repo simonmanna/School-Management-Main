@@ -1,17 +1,20 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
-import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentService } from './student.service';
-import { CreateStudentDto, UpdateStudentDto } from './dto.types';
+import { CreateStudentDto, StudentListQueryDto, UpdateStudentDto } from './dto.types';
+import { RegisterStudentDto, StudentAdmissionService } from './student-admission.service';
 
 @Controller('school/students')
 export class StudentController {
-  constructor(private readonly students: StudentService) {}
+  constructor(
+    private readonly students: StudentService,
+    private readonly admission: StudentAdmissionService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
-  list(@Query() q: PaginationDto) {
+  list(@Query() q: StudentListQueryDto) {
     return this.students.list(q);
   }
 
@@ -43,6 +46,16 @@ export class StudentController {
   @RequirePermissions(PERMISSIONS.school.manageStudents)
   create(@Body() dto: CreateStudentDto) {
     return this.students.create(dto);
+  }
+
+  /**
+   * Front-desk "register & place": create the learner, enrol them for the
+   * term's year and seat them in a class (and stream) in one action.
+   */
+  @Post('register')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  register(@Body() dto: RegisterStudentDto) {
+    return this.admission.register(dto);
   }
 
   @Patch(':id')

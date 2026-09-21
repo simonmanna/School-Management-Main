@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EVENTS } from '@erp/shared';
 import { OPEN_FEE_WHERE } from './fee-document.constants';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -58,6 +59,7 @@ export class FeeNotificationsSubscriber implements OnModuleInit {
     private readonly notifications: NotificationsService,
     private readonly tenant: TenantContextService,
     private readonly finance: SchoolFinanceQueryService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   onModuleInit() {
@@ -165,7 +167,7 @@ export class FeeNotificationsSubscriber implements OnModuleInit {
         organizationId,
         partnerId: { in: partnerIds },
         status: 'active',
-        ...(classId ? { currentClassId: classId } : {}),
+        ...(classId ? this.placements.studentWhere({ classIds: [classId] }) : {}),
       },
       select: { id: true, partnerId: true },
     });

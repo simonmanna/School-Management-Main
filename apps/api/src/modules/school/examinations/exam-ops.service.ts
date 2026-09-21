@@ -4,6 +4,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   AllocateSeatsDto,
   CreateExamVenueDto,
@@ -32,6 +33,7 @@ export class ExamRegistrationService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /** Register every active student in a class for an exam. Idempotent. */
@@ -40,7 +42,11 @@ export class ExamRegistrationService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const exam = await tx.exam.findFirst({ where: { id: examId } });
       if (!exam) throw new NotFoundException(`Exam ${examId} not found`);
-      const studentsInClass = await tx.studentProfile.findMany({ where: { currentClassId: classId, status: 'active' } });
+      // Candidates are the learners placed in the class (ADR-027), not the
+      // projection on StudentProfile.
+      const studentsInClass = await tx.studentProfile.findMany({
+        where: { status: 'active', ...this.placements.studentWhere({ classIds: [classId] }) },
+      });
       let created = 0;
       for (const s of studentsInClass) {
         const existing = await tx.examRegistration.findFirst({ where: { examId, studentProfileId: s.id } });

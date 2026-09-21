@@ -47,13 +47,14 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 5175,
     // Bind all interfaces so other devices on the cafe LAN can open the
-    // terminal at http://<this-machine-ip>:5173.
+    // terminal at http://<this-machine-ip>:5175.
     host: true,
+    strictPort: true,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3003',
         changeOrigin: true,
       },
     },

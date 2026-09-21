@@ -28,7 +28,10 @@ export class LmsCourseController {
   // ── Courses ──
   @Get('courses')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
-  listCourses(@Query() q: { termId?: string; classId?: string; subjectId?: string; categoryId?: string }) {
+  listCourses(@Query() q: {
+    termId?: string; classId?: string; subjectId?: string; categoryId?: string;
+    q?: string; visible?: string; mine?: string;
+  }) {
     return this.courses.listCourses(q);
   }
 

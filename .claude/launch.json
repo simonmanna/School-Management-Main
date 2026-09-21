@@ -10,10 +10,10 @@
         "exec",
         "vite",
         "--port",
-        "5199",
+        "5175",
         "--strictPort"
       ],
-      "port": 5199,
+      "port": 5175,
       "autoPort": false
     },
     {
@@ -42,7 +42,7 @@
         "--max-http-header-size=65536",
         "dist/main.js"
       ],
-      "port": 3001,
+      "port": 3003,
       "autoPort": false
     }
   ]

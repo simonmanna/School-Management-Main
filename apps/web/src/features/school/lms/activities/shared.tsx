@@ -72,3 +72,48 @@ export function isOverdue(cm: CourseModuleView): boolean {
   if (cm.grade?.submissionStatus && cm.grade.submissionStatus !== 'assigned') return false;
   return new Date(cm.dueAt).getTime() < Date.now();
 }
+
+/**
+ * One-line "what is this for" per activity type, plus the Moodle-style grouping
+ * the activity chooser lays out.
+ *
+ * A palette of 18 bare labels forces a teacher to guess what "Lesson" or "H5P"
+ * does; the chooser shows this text next to each tile so the choice is readable
+ * rather than remembered. Keep an entry here for every registered type — an
+ * unlisted type still appears, under "Other", with no blurb.
+ */
+export const ACTIVITY_GROUP: Record<string, 'Content' | 'Activities' | 'Collaboration' | 'External'> = {
+  page: 'Content', resource: 'Content', url: 'Content', label: 'Content', folder: 'Content', lesson: 'Content',
+  assign: 'Activities', quiz: 'Activities', choice: 'Activities', feedback: 'Activities', attendance: 'Activities',
+  forum: 'Collaboration', wiki: 'Collaboration', glossary: 'Collaboration', workshop: 'Collaboration',
+  scorm: 'External', lti: 'External', h5p: 'External',
+};
+
+export const ACTIVITY_BLURB: Record<string, string> = {
+  page: 'A single formatted web page of notes, images or embedded media.',
+  resource: 'A file pupils download — a worksheet, PDF or slide deck.',
+  url: 'A link out to a website, kept alongside the rest of the course.',
+  label: 'A heading or note placed between activities to break the page up.',
+  folder: 'A set of files shown as one collapsible item.',
+  lesson: 'Branching pages with questions that decide what a pupil sees next.',
+  assign: 'Work handed in online — text, files or both — then marked and fed back.',
+  quiz: 'Auto-marked questions drawn from the question bank, with attempts and timing.',
+  choice: 'A single question with options; use it for a quick poll or a sign-up.',
+  feedback: 'An anonymous or named survey with your own questions.',
+  attendance: 'Register-taking attached to the course rather than the timetable.',
+  forum: 'Threaded discussion. Announcements, Q&A, or open debate.',
+  wiki: 'Pages the class edits together, with a history of every change.',
+  glossary: 'A shared list of terms and definitions pupils can add to.',
+  workshop: 'Peer assessment: pupils submit, then mark each other against criteria.',
+  scorm: 'A packaged SCORM course that reports its own completion and score.',
+  lti: 'An external tool launched with LTI 1.3; grades come back automatically.',
+  h5p: 'Interactive content — drag-and-drop, hotspots, interactive video.',
+};
+
+export function blurbFor(type: string): string | null {
+  return ACTIVITY_BLURB[type] ?? null;
+}
+
+export function groupFor(type: string): string {
+  return ACTIVITY_GROUP[type] ?? 'Other';
+}

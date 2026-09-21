@@ -8,6 +8,7 @@ import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-
 import { EVENTS } from '@erp/shared';
 import { LmsExecutionService } from './lms-execution.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   CreateAnnouncementDto,
   CreateHomeworkDto,
@@ -32,6 +33,7 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
     private readonly audit: AuditService,
     private readonly execution: LmsExecutionService,
     private readonly mint: AssessmentMintService,
+    private readonly placements: PlacementLookupService,
   ) {
     super(prisma.client.homeworkAssignment as unknown as CrudDelegate);
   }
@@ -85,9 +87,11 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
       const assignment = await tx.homeworkAssignment.findFirst({ where: { id: dto.assignmentId } });
       if (!assignment) throw new NotFoundException(`Assignment ${dto.assignmentId} not found`);
 
-      const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
-      if (!student) throw new NotFoundException(`Student profile ${dto.studentProfileId} not found`);
-      if (student.currentClassId !== assignment.classId) {
+      const found = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
+      if (!found) throw new NotFoundException(`Student profile ${dto.studentProfileId} not found`);
+      // Class membership from placement history (ADR-027).
+      const [student] = await this.placements.attach([found]);
+      if (student.placement?.classId !== assignment.classId) {
         throw new BadRequestException(
           `Student ${dto.studentProfileId} is not in the class this assignment was set for`,
         );
@@ -181,7 +185,13 @@ export class HomeworkService extends BaseCrudService<HomeworkAssignment, CreateH
 
     const [students, submissions] = await Promise.all([
       this.prisma.client.studentProfile.findMany({
-        where: { currentClassId: hw.classId, status: 'active', ...(hw.sectionId ? { currentSectionId: hw.sectionId } : {}) },
+        where: {
+          status: 'active',
+          ...this.placements.studentWhere({
+            classIds: [hw.classId],
+            ...(hw.sectionId ? { sectionIds: [hw.sectionId] } : {}),
+          }),
+        },
         include: { partner: true },
       }),
       this.prisma.client.homeworkSubmission.findMany({ where: { assignmentId: id } }),

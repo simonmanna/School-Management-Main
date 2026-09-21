@@ -15,58 +15,29 @@ import { api } from '@/lib/api';
  */
 const R = '/school/reports/v2';
 
-export type ReportShape = 'table' | 'grouped' | 'matrix' | 'summary';
-export type ColumnType =
-  | 'string' | 'int' | 'money' | 'percent' | 'date' | 'datetime' | 'bool' | 'enum';
-export type ExportFormat = 'csv' | 'xlsx' | 'pdf';
+// The engine contract now lives in `features/reports/types.ts` — HR runs its own
+// catalogue on the same engine, and having its client import types from the
+// school client would reproduce on the frontend exactly the school -> hr
+// coupling the API forbids. Re-exported here so existing imports keep working.
+export type {
+  ReportShape,
+  ColumnType,
+  ExportFormat,
+  AsOfMode,
+  ReportColumnLink,
+  ReportColumn,
+  ReportCatalogEntry,
+  ReportRow,
+  ReportRunResult,
+} from '@/features/reports/types';
+import type {
+  ReportCatalogEntry,
+  ExportFormat,
+  ReportRunResult,
+} from '@/features/reports/types';
+
+/** School's own notion of which cohort a report means. */
 export type ClassBasis = 'current' | 'enrollment' | 'roster';
-export type AsOfMode = 'live' | 'as-of' | 'current-only';
-
-export type ReportColumnLink =
-  | { reportKey: string; paramFrom: Record<string, string> }
-  | { route: string; paramFrom: Record<string, string> };
-
-export interface ReportColumn {
-  key: string;
-  label: string;
-  type: ColumnType;
-  align?: 'left' | 'right' | 'center';
-  width?: number;
-  format?: string;
-  total?: 'sum' | 'avg' | 'count' | 'none';
-  hideOn?: Array<'screen' | ExportFormat>;
-  link?: ReportColumnLink;
-}
-
-export interface ReportCatalogEntry {
-  key: string;
-  title: string;
-  domain: string;
-  description: string;
-  shape: ReportShape;
-  filters: string[];
-  requiredFilters: string[];
-  classBasisDefault?: ClassBasis;
-  asOfMode: AsOfMode;
-  columns?: ReportColumn[];
-  defaultSort?: { key: string; order: 'asc' | 'desc' };
-  groupBy?: string;
-  exportFormats: ExportFormat[];
-}
-
-export type ReportRow = Record<string, unknown>;
-
-export interface ReportRunResult {
-  key: string;
-  title: string;
-  columns: ReportColumn[];
-  data: ReportRow[];
-  meta: { page: number; pageSize: number; total: number; totalPages: number };
-  totals?: ReportRow;
-  groups?: Array<{ key: string; label: string; rows: ReportRow[]; totals?: ReportRow }>;
-  caption?: string;
-  notes: string[];
-}
 
 export interface ReportFilters {
   academicYearId?: string;

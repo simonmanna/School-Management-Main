@@ -263,9 +263,8 @@ export class ReportCardController {
     @Query('classId') classId: string,
     @Query('termId') termId: string,
     @Query('sectionId') sectionId?: string,
-    @Query('streamId') streamId?: string,
   ) {
-    return this.service.classRoll({ classId, termId, sectionId, streamId });
+    return this.service.classRoll({ classId, termId, sectionId });
   }
 
   /**
@@ -282,9 +281,8 @@ export class ReportCardController {
     @Query('termId') termId: string,
     @Res({ passthrough: true }) res: Response,
     @Query('sectionId') sectionId?: string,
-    @Query('streamId') streamId?: string,
   ) {
-    const { ids, filename } = await this.service.publishedClassCardIds({ classId, termId, sectionId, streamId });
+    const { ids, filename } = await this.service.publishedClassCardIds({ classId, termId, sectionId });
     const buf = await this.pdf.generateClassPdf(ids);
     res.set({
       'Content-Type': 'application/pdf',

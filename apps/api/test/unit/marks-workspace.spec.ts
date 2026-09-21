@@ -15,6 +15,7 @@
  */
 import { ConflictException } from '@nestjs/common';
 import { MarksWorkspaceService } from '../../src/modules/school/examinations/marks-workspace.service';
+import { PlacementLookupService } from '../../src/modules/school/enrollment/placement-lookup.service';
 
 const EXAM = {
   id: 'exam_1',
@@ -64,6 +65,8 @@ function makeService(overrides: Record<string, any> = {}) {
   // stub has to be able to open one.
   client.$transaction = jest.fn((fn: any) => (typeof fn === 'function' ? fn(client) : Promise.all(fn)));
   client.studentAssessment = { count: jest.fn().mockResolvedValue(0), ...(overrides.studentAssessment ?? {}) };
+  client.enrollmentPlacement = client.enrollmentPlacement ?? { findMany: jest.fn().mockResolvedValue([]) };
+  client.section = client.section ?? { findMany: jest.fn().mockResolvedValue([]) };
 
   const service = new MarksWorkspaceService(
     { client } as any,
@@ -75,6 +78,10 @@ function makeService(overrides: Record<string, any> = {}) {
     } as any,
     { bandFor: jest.fn().mockResolvedValue({ grade: 'B', gpa: 3, min: 60, max: 79 }) } as any,
     { forExamSchedules: jest.fn().mockResolvedValue(0), forExamSchedule: jest.fn().mockResolvedValue(null) } as any,
+    // A REAL lookup service over the same mock client, not a stub: with no
+    // placements seeded it takes the ADR-027 compat fallback onto the projection,
+    // so these specs exercise the path production takes for un-backfilled schools.
+    new PlacementLookupService({ client } as any),
   );
   return { service, client, grades: (service as any).grades };
 }

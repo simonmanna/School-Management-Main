@@ -12,6 +12,7 @@ import { ReportCardTemplateService } from './report-card-template.service';
 import { MarkingService } from '../assessment/marking.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { ResultRunService } from '../assessment/result-run.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   BulkGradeEntryDto,
   CreateExamDto,
@@ -516,6 +517,7 @@ export class ReportCardService {
     private readonly templates: ReportCardTemplateService,
     private readonly audit: AuditService,
     private readonly results: ResultRunService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /** Report cards for a student, newest first. */
@@ -580,7 +582,6 @@ export class ReportCardService {
     classId: string;
     termId: string;
     sectionId?: string;
-    streamId?: string;
   }): Promise<{
     termId: string;
     classId: string;
@@ -614,21 +615,20 @@ export class ReportCardService {
   /**
    * The pupils a class report-card run covers.
    *
-   * Reads the `Enrollment` for the term — the authoritative placement — rather
-   * than the `StudentProfile.current*` snapshot, so a pupil who moved class
+   * Reads the placements held during the term, so a pupil who moved class
    * mid-term is printed with the class they actually sat the term in.
    */
-  async classRoll(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
-    const enrolments = await this.prisma.client.enrollment.findMany({
-      where: {
-        classId: dto.classId,
-        termId: dto.termId,
-        status: 'enrolled',
-        ...(dto.sectionId ? { sectionId: dto.sectionId } : {}),
-        ...(dto.streamId ? { streamId: dto.streamId } : {}),
-      },
-      select: { studentProfileId: true, rollNumber: true },
-    });
+  async classRoll(dto: { classId: string; termId: string; sectionId?: string }) {
+    const sectionId = dto.sectionId;
+    const placedIds = await this.placements.studentIdsIn(
+      { classIds: [dto.classId], ...(sectionId ? { sectionIds: [sectionId] } : {}) },
+      { termId: dto.termId },
+    );
+    const resolved = await this.placements.resolve(placedIds, { termId: dto.termId });
+    const enrolments = placedIds.map((id) => ({
+      studentProfileId: id,
+      rollNumber: resolved.get(id)?.rollNumber ?? null,
+    }));
     if (enrolments.length === 0) return [];
 
     const profiles = await this.prisma.client.studentProfile.findMany({
@@ -657,7 +657,7 @@ export class ReportCardService {
    * time: the decision is made for the class, once. Cards that are already
    * released are left alone rather than counted as failures.
    */
-  async publishForClass(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
+  async publishForClass(dto: { classId: string; termId: string; sectionId?: string }) {
     const pupils = await this.classRoll(dto);
     const cards = await this.prisma.client.reportCard.findMany({
       where: { termId: dto.termId, studentProfileId: { in: pupils.map((p) => p.id) } },
@@ -682,7 +682,7 @@ export class ReportCardService {
    * fail because one pupil's marks are still in approval — it should print the
    * rest and let the caller see the shortfall in the count.
    */
-  async publishedClassCardIds(dto: { classId: string; termId: string; sectionId?: string; streamId?: string }) {
+  async publishedClassCardIds(dto: { classId: string; termId: string; sectionId?: string }) {
     const pupils = await this.classRoll(dto);
     const order = new Map(pupils.map((p, i) => [p.id, i]));
 

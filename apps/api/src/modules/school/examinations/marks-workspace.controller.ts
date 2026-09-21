@@ -56,9 +56,9 @@ export class MarksWorkspaceController {
     @Query('examId') examId: string,
     @Query('classId') classId: string,
     @Query('subjectId') subjectId: string,
-    @Query('streamId') streamId?: string,
+    @Query('sectionId') sectionId?: string,
   ) {
-    return this.service.sheet({ examId, classId, subjectId, streamId: streamId || undefined });
+    return this.service.sheet({ examId, classId, subjectId, sectionId: sectionId || undefined });
   }
 
   @Post('entry')
@@ -72,9 +72,9 @@ export class MarksWorkspaceController {
   grid(
     @Query('examId') examId: string,
     @Query('classId') classId: string,
-    @Query('streamId') streamId?: string,
+    @Query('sectionId') sectionId?: string,
   ) {
-    return this.service.grid({ examId, classId, streamId: streamId || undefined });
+    return this.service.grid({ examId, classId, sectionId: sectionId || undefined });
   }
 
   @Post('lock')

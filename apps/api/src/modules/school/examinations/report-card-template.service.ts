@@ -118,7 +118,6 @@ export class ReportCardTemplateService {
   }> {
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId },
-      include: { currentClass: { include: { gradeLevel: true } } },
     });
     if (!profile) throw new NotFoundException(`Student ${studentProfileId} not found`);
 

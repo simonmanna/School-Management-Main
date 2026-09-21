@@ -6,6 +6,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { PlacementService } from './placement.service';
 import { ClassCohortService } from './class-cohort.service';
+import { ProgrammeService } from './programme.service';
 import {
   canTransition,
   closeReasonFor,
@@ -42,6 +43,7 @@ export class StudentEnrollmentService {
     private readonly events: EventBus,
     private readonly placements: PlacementService,
     private readonly cohorts: ClassCohortService,
+    private readonly programmes: ProgrammeService,
   ) {}
 
   /* ─────────────────────────────── Reads ──────────────────────────────── */
@@ -84,7 +86,7 @@ export class StudentEnrollmentService {
         include: {
           student: { include: { partner: { select: { id: true, name: true, phone: true } } } },
           academicYear: { select: { id: true, name: true } },
-          programme: { select: { id: true, code: true, name: true, stage: true, groupingMode: true } },
+          programme: { select: { id: true, code: true, name: true, stage: true } },
           gradeLevel: { select: { id: true, name: true, order: true } },
           placements: {
             where: { effectiveTo: null },
@@ -92,7 +94,6 @@ export class StudentEnrollmentService {
               term: { select: { id: true, name: true } },
               classCohort: { include: { schoolClass: { select: { id: true, name: true } } } },
               section: { select: { id: true, name: true } },
-              stream: { select: { id: true, name: true } },
             },
           },
         },
@@ -181,6 +182,7 @@ export class StudentEnrollmentService {
           admissionDate: dto.admissionDate ? new Date(dto.admissionDate) : new Date(),
           status: dto.status ?? 'ACTIVE',
           enrollmentType: dto.enrollmentType ?? 'NEW',
+          admissionApplicationId: dto.admissionApplicationId ?? null,
           notes: dto.notes ?? null,
           createdBy: this.tenant.userId ?? null,
         },
@@ -289,19 +291,20 @@ export class StudentEnrollmentService {
       // The placement rows themselves are never deleted — a withdrawn learner
       // stays visible in the roster that produced last term's results.
       if (holdsPlacement(from) && !holdsPlacement(to)) {
-        await this.placements.closeOpen(tx, id, at, closeReasonFor(to) ?? 'CORRECTION');
-        await this.placements.syncProjection(tx, enrollment.studentProfileId);
+        const closed = await this.placements.closeOpen(tx, id, at, closeReasonFor(to) ?? 'CORRECTION');
+        if (closed) await this.adjustAdmissionSeat(tx, enrollment, closed, -1);
       } else if (!holdsPlacement(from) && holdsPlacement(to)) {
         if (!dto.placement) {
           throw new BadRequestException(
-            'Reinstating a learner needs a placement: say which class, section and stream they are coming back to.',
+            'Reinstating a learner needs a placement: say which class and stream they are coming back to.',
           );
         }
-        await this.placements.appendPlacement(tx, enrollment, {
+        const { placement } = await this.placements.appendPlacement(tx, enrollment, {
           ...dto.placement,
           movementReason: dto.placement.movementReason ?? 'RE_ENTRY',
           effectiveFrom: dto.placement.effectiveFrom ?? at.toISOString(),
         } as PlacementInputDto & { movementReason: MovementReasonValue });
+        await this.adjustAdmissionSeat(tx, enrollment, placement, +1);
       }
 
       const profileStatus = profileStatusFor(to);
@@ -333,6 +336,50 @@ export class StudentEnrollmentService {
     }
   }
 
+  /**
+   * Keep the admission seat ledger (`AdmissionCapacity.claimedSeats`) true when
+   * a learner admitted through an application leaves or returns. Admission
+   * claims a seat; ending the enrollment must give it back, or a class silently
+   * shrinks by one seat each time a pupil leaves. Returning re-claims it, and is
+   * refused if the class filled up meanwhile. No capacity row configured means
+   * the class is unconstrained for admissions, so there is nothing to do.
+   */
+  private async adjustAdmissionSeat(tx: any, enrollment: any, placement: any, delta: 1 | -1) {
+    if (!enrollment.admissionApplicationId || !placement) return;
+    const application = await tx.admissionApplication.findFirst({
+      where: { id: enrollment.admissionApplicationId },
+      select: { admissionCycleId: true },
+    });
+    if (!application?.admissionCycleId) return;
+    const cohort = await tx.classCohort.findFirst({ where: { id: placement.classCohortId }, select: { classId: true } });
+    if (!cohort) return;
+    const row = await tx.admissionCapacity.findFirst({
+      where: {
+        admissionCycleId: application.admissionCycleId,
+        classId: cohort.classId,
+        sectionId: placement.sectionId ?? '__none__',
+      },
+    });
+    if (!row) return;
+    if (delta < 0) {
+      await tx.admissionCapacity.updateMany({
+        where: { id: row.id, claimedSeats: { gt: 0 } },
+        data: { claimedSeats: { decrement: 1 } },
+      });
+      return;
+    }
+    const claimed = await tx.admissionCapacity.updateMany({
+      where: { id: row.id, claimedSeats: { lt: row.capacity - row.reservedCapacity } },
+      data: { claimedSeats: { increment: 1 } },
+    });
+    if (claimed.count === 0) {
+      throw new BadRequestException(
+        `No admission seat is free in this class (capacity ${row.capacity}, reserved ${row.reservedCapacity}, ` +
+          `claimed ${row.claimedSeats}).`,
+      );
+    }
+  }
+
   withdraw(id: string, dto: WithdrawEnrollmentDto) {
     return this.changeStatus(id, { toStatus: 'WITHDRAWN', reason: dto.reason, effectiveAt: dto.effectiveAt });
   }
@@ -355,23 +402,28 @@ export class StudentEnrollmentService {
    * so both years stay separately reportable.
    */
   async repeat(id: string, dto: RepeatGradeDto) {
-    const current = await this.prisma.client.studentEnrollment.findFirst({ where: { id } });
+    return this.prisma.client.$transaction(async (tx: any) => this.repeatInTx(tx, id, dto));
+  }
+
+  /** Transaction-bound repeat, for bulk promotion runs and decision boards. */
+  async repeatInTx(tx: any, id: string, dto: RepeatGradeDto) {
+    const current = await tx.studentEnrollment.findFirst({ where: { id } });
     if (!current) throw new NotFoundException(`Enrollment ${id} not found`);
     if (current.academicYearId === dto.toAcademicYearId) {
       throw new BadRequestException('A repeat places the learner in the NEXT academic year, not the current one.');
     }
 
-    const openPlacement = await this.placements.openPlacementOf(this.prisma.client, id);
-    const classId =
-      dto.classId ??
-      (openPlacement
-        ? (await this.prisma.client.classCohort.findFirst({ where: { id: openPlacement.classCohortId } }))?.classId
-        : null);
+    const openPlacement = await tx.enrollmentPlacement.findFirst({
+      where: { enrollmentId: id },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+      include: { classCohort: { select: { classId: true } } },
+    });
+    const classId = dto.classId ?? openPlacement?.classCohort?.classId ?? null;
     if (!classId) {
       throw new BadRequestException('No class to repeat into — supply classId.');
     }
 
-    return this.prisma.client.$transaction(async (tx: any) => {
+    {
       if (current.status === 'ACTIVE' || current.status === 'SUSPENDED') {
         await this.changeStatusInTx(tx, id, { toStatus: 'COMPLETED', reason: `Repeating: ${dto.reason}` });
       }
@@ -387,24 +439,41 @@ export class StudentEnrollmentService {
         placement: {
           termId: dto.toTermId,
           classId,
-          sectionId: dto.sectionId ?? null,
-          streamId: dto.streamId ?? null,
+          sectionId: dto.sectionId !== undefined ? dto.sectionId : (openPlacement?.sectionId ?? null),
+          overrideCapacity: dto.overrideCapacity,
+          overrideReason: dto.overrideReason,
           rollNumber: openPlacement?.rollNumber ?? undefined,
           effectiveFrom: dto.effectiveFrom,
           movementReason: 'REPEAT',
           notes: dto.reason,
         },
       });
-    });
+    }
   }
 
   /**
-   * Promote into the next grade in the next academic year. With no target class
-   * the grade-level ladder picks the next one; a learner at the top grade is
-   * COMPLETED instead of being promoted into nothing.
+   * Promote into the next grade in the next academic year (brief §13-14).
+   *
+   * The destination is CONFIGURED, never inferred: `GradeLevel.nextGradeLevelId`
+   * names the grade a learner moves into, and a grade marked terminal (P7) ends
+   * the ladder — the learner is COMPLETED and their seat closes as GRADUATION.
+   * This replaces picking "the next grade by `order`, then the alphabetically
+   * first class in it", which guessed.
+   *
+   * The previous year's enrollment and placements are closed, never modified:
+   * "2025 → P3 North" stays exactly as it was when "2026 → P4 North" is created.
+   *
+   * With no stream given, the learner keeps their stream across the move when
+   * the next class has one with the same CODE — "P3 North → P4 North" — matched
+   * on code rather than name so a renamed stream still carries over.
    */
   async promote(id: string, dto: PromoteEnrollmentDto) {
-    const current = await this.prisma.client.studentEnrollment.findFirst({
+    return this.prisma.client.$transaction(async (tx: any) => this.promoteInTx(tx, id, dto));
+  }
+
+  /** Transaction-bound promotion, for bulk promotion runs and decision boards. */
+  async promoteInTx(tx: any, id: string, dto: PromoteEnrollmentDto) {
+    const current = await tx.studentEnrollment.findFirst({
       where: { id },
       include: { gradeLevel: true },
     });
@@ -413,22 +482,44 @@ export class StudentEnrollmentService {
       throw new BadRequestException('Promotion places the learner in the NEXT academic year, not the current one.');
     }
 
-    const targetClassId = dto.toClassId ?? (await this.nextClassId(current.gradeLevel.order));
+    const open = await tx.enrollmentPlacement.findFirst({
+      where: { enrollmentId: id },
+      orderBy: [{ effectiveFrom: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        classCohort: { select: { classId: true, schoolClass: { select: { campusId: true } } } },
+        section: { select: { code: true } },
+      },
+    });
+
+    let targetClassId = dto.toClassId ?? null;
     if (!targetClassId) {
-      const completed = await this.changeStatus(id, {
-        toStatus: 'COMPLETED',
-        reason: dto.reason ?? 'Completed the highest grade offered',
-      });
-      return { graduated: true, enrollment: completed, placement: null, warnings: [] as string[] };
+      const next = await this.nextStep(tx, current.gradeLevel, open?.classCohort?.schoolClass?.campusId ?? null);
+      if (next.kind === 'graduate') {
+        const completed = await this.graduateInTx(tx, id, dto.reason ?? `Completed ${current.gradeLevel.name}`);
+        return { graduated: true, enrollment: completed, placement: null, warnings: [] as string[] };
+      }
+      targetClassId = next.classId;
     }
 
-    const targetClass = await this.prisma.client.schoolClass.findFirst({
+    const targetClass = await tx.schoolClass.findFirst({
       where: { id: targetClassId },
-      select: { id: true, gradeLevelId: true },
+      select: { id: true, gradeLevelId: true, isActive: true, name: true },
     });
     if (!targetClass) throw new NotFoundException(`Class ${targetClassId} not found`);
+    if (!targetClass.isActive) {
+      throw new BadRequestException(`"${targetClass.name}" has been deactivated and cannot receive new learners.`);
+    }
 
-    const created = await this.prisma.client.$transaction(async (tx: any) => {
+    let sectionId: string | null | undefined = dto.sectionId;
+    if (sectionId === undefined && open?.section?.code) {
+      const sameCode = await tx.section.findFirst({
+        where: { classId: targetClass.id, code: open.section.code, isActive: true },
+        select: { id: true },
+      });
+      sectionId = sameCode?.id ?? null;
+    }
+
+    const created = await (async () => {
       if (current.status === 'ACTIVE' || current.status === 'SUSPENDED') {
         await this.changeStatusInTx(tx, id, {
           toStatus: 'COMPLETED',
@@ -445,41 +536,80 @@ export class StudentEnrollmentService {
         notes: dto.reason,
         placement: {
           termId: dto.toTermId,
-          classId: targetClassId,
-          sectionId: dto.sectionId ?? null,
-          streamId: dto.streamId ?? null,
+          classId: targetClass.id,
+          sectionId: sectionId ?? null,
+          overrideCapacity: dto.overrideCapacity,
+          overrideReason: dto.overrideReason,
           rollNumber: dto.rollNumber,
           effectiveFrom: dto.effectiveFrom,
           movementReason: 'PROMOTION',
           notes: dto.reason,
-        },
+        } as any,
       });
-    });
+    })();
     return { graduated: false, ...created };
+  }
+
+  /**
+   * Where the ladder goes next from `grade`.
+   *
+   * Terminal → graduate. A configured next grade with exactly one active class →
+   * that class. Several classes in the next grade (S3 East / S3 West) → the one on
+   * the learner's campus if that settles it; otherwise refuse and ask, because
+   * choosing between two classes is a placement decision, not a default. An
+   * unconfigured ladder is refused rather than guessed.
+   */
+  async nextStep(
+    client: any,
+    grade: { id: string; name: string; nextGradeLevelId: string | null; isTerminal: boolean },
+    campusId: string | null,
+  ): Promise<{ kind: 'graduate' } | { kind: 'class'; classId: string }> {
+    if (!grade.nextGradeLevelId) {
+      if (grade.isTerminal) return { kind: 'graduate' };
+      throw new BadRequestException(
+        `The progression for "${grade.name}" is not configured. Set the grade it promotes into ` +
+          '(or mark it as the end of the ladder), or choose the destination class explicitly.',
+      );
+    }
+    const classes = await client.schoolClass.findMany({
+      where: { gradeLevelId: grade.nextGradeLevelId, isActive: true },
+      select: { id: true, name: true, campusId: true },
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+    });
+    if (classes.length === 0) {
+      const next = await client.gradeLevel.findFirst({
+        where: { id: grade.nextGradeLevelId },
+        select: { name: true },
+      });
+      throw new BadRequestException(`"${next?.name ?? 'The next grade'}" has no active class to promote into.`);
+    }
+    if (classes.length === 1) return { kind: 'class', classId: classes[0].id };
+    const onCampus = classes.filter((c: any) => c.campusId && c.campusId === campusId);
+    if (onCampus.length === 1) return { kind: 'class', classId: onCampus[0].id };
+    throw new BadRequestException(
+      `The next grade has ${classes.length} classes (${classes.map((c: any) => c.name).join(', ')}). ` +
+        'Choose the destination class.',
+    );
+  }
+
+  /**
+   * Finish the ladder: COMPLETED, with the seat closed as GRADUATION rather than
+   * a generic COMPLETION, so "left because they finished P7" is distinguishable
+   * from any other completed enrollment. No next-year enrollment is created.
+   */
+  async graduateInTx(tx: any, id: string, reason: string, at: Date = new Date()) {
+    const enrollment = await tx.studentEnrollment.findFirst({ where: { id } });
+    if (!enrollment) throw new NotFoundException(`Enrollment ${id} not found`);
+    await this.placements.closeOpen(tx, id, at, 'GRADUATION');
+    return this.changeStatusInTx(tx, id, { toStatus: 'COMPLETED', reason, effectiveAt: at.toISOString() });
   }
 
   /* ────────────────────────────── Helpers ─────────────────────────────── */
 
-  /** The first class one rung up the grade ladder, or null at the top. */
-  private async nextClassId(currentOrder: number): Promise<string | null> {
-    const next = await this.prisma.client.gradeLevel.findFirst({
-      where: { order: { gt: currentOrder } },
-      orderBy: { order: 'asc' },
-      select: { id: true },
-    });
-    if (!next) return null;
-    const cls = await this.prisma.client.schoolClass.findFirst({
-      where: { gradeLevelId: next.id },
-      orderBy: { name: 'asc' },
-      select: { id: true },
-    });
-    return cls?.id ?? null;
-  }
-
   /**
    * Work out the grade level and programme for a new enrollment. Either may be
    * given explicitly; otherwise the grade comes from the placement class and the
-   * programme from the grade level's programme link.
+   * programme from the grade level's academic level.
    */
   private async resolveGradeAndProgramme(tx: any, dto: CreateStudentEnrollmentDto) {
     let gradeLevelId = dto.gradeLevelId ?? null;
@@ -500,14 +630,14 @@ export class StudentEnrollmentService {
 
     let programmeId = dto.programmeId ?? null;
     if (!programmeId) {
-      const link = await tx.programmeGradeLevel.findFirst({ where: { gradeLevelId }, select: { programmeId: true } });
-      programmeId = link?.programmeId ?? null;
+      // ADR-028: grade → academic level → default programme.
+      programmeId = (await this.programmes.programmeForGradeLevel(gradeLevelId as string, tx))?.id ?? null;
     }
     if (!programmeId) {
       const grade = await tx.gradeLevel.findFirst({ where: { id: gradeLevelId }, select: { name: true } });
       throw new BadRequestException(
         `No academic programme covers grade level "${grade?.name ?? gradeLevelId}". ` +
-          'Create the programme (or run the Uganda templates) and link the grade level before enrolling.',
+          'Give its academic level a default programme before enrolling.',
       );
     }
 

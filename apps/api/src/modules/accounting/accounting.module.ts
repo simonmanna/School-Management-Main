@@ -50,6 +50,8 @@ import { CostCenterController } from './cost-center/cost-center.controller';
 import { CostCenterService } from './cost-center/cost-center.service';
 import { FiscalPeriodCrudController } from './posting/fiscal-period-crud.controller';
 import { InventoryValuationController } from './reporting/inventory-valuation.controller';
+import { FinancialReportsService } from './reporting/financial-reports.service';
+import { FinancialReportsController } from './reporting/financial-reports.controller';
 
 /**
  * Phase 2 — the financial engine. Exports PostingService + account
@@ -74,6 +76,7 @@ import { InventoryValuationController } from './reporting/inventory-valuation.co
     CurrencyController,
     BankReconciliationController,
     AccountingReportingController,
+    FinancialReportsController,
     ReportsDashboardController,
     ExportController,
   ],
@@ -98,6 +101,7 @@ import { InventoryValuationController } from './reporting/inventory-valuation.co
     CurrencyService,
     RevaluationService,
     AccountingReportingService,
+    FinancialReportsService,
     PnLReportService,
     BalanceSheetReportService,
     CashFlowReportService,
@@ -122,6 +126,7 @@ exports: [
       SnapshotRebuildService,
       TieOutService,
       AccountingReportingService,
+      FinancialReportsService,
       PnLReportService,
       BalanceSheetReportService,
       CashFlowReportService,

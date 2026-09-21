@@ -182,12 +182,34 @@ export class LearnerService {
       }));
   }
 
+  /**
+   * Badges this learner has earned. Same subject resolution as everything else
+   * here, so a guardian sees their own child's and nobody else's.
+   */
+  async myBadges(asStudent?: string) {
+    const studentProfileId = await this.subject(asStudent);
+    const rows = await this.prisma.client.lmsBadgeAward.findMany({
+      where: { organizationId: this.org, studentProfileId },
+      include: { badge: true },
+      orderBy: { awardedAt: 'desc' },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      badgeId: r.badgeId,
+      name: r.badge?.name ?? 'Badge',
+      description: r.badge?.description ?? null,
+      imageUrl: r.badge?.imageUrl ?? null,
+      awardedAt: r.awardedAt.toISOString(),
+    }));
+  }
+
   /** The whole dashboard in one round trip. */
   async dashboard(asStudent?: string) {
-    const [{ studentProfileId, courses }, due, grades] = await Promise.all([
+    const [{ studentProfileId, courses }, due, grades, badges] = await Promise.all([
       this.myCourses(asStudent),
       this.dueSoon(asStudent),
       this.recentGrades(asStudent),
+      this.myBadges(asStudent).catch(() => []),
     ]);
     const names = await this.envelope.studentNames([studentProfileId]);
     return {
@@ -199,6 +221,7 @@ export class LearnerService {
       courses,
       dueSoon: due,
       recentGrades: grades,
+      badges,
       viewingAs: this.portalIdentity.principal().kind,
     };
   }

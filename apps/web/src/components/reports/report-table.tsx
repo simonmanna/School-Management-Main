@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { DataTable, type Column } from '@/components/data-table';
-import type { ReportColumn, ReportRow, ReportRunResult } from '@/features/school/reports-api';
+import type { ReportColumn, ReportRow, ReportRunResult } from '@/features/reports/types';
 
 /**
  * Renders any report the engine can produce: flat tables, grouped tables with

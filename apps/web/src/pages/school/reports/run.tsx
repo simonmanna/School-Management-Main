@@ -12,7 +12,7 @@ import {
   type ReportFilters,
 } from '@/features/school/reports-api';
 import { ReportFilterBar } from './_components/report-filter-bar';
-import { ReportTable } from './_components/report-table';
+import { ReportTable } from '@/components/reports/report-table';
 
 /**
  * The runner — one page for every report in the catalogue.

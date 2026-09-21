@@ -25,6 +25,20 @@ export function formatMoney(value?: string | number | null, currency?: string): 
   return money(value, currency);
 }
 
+/**
+ * A money formatter bound to the ORG's base currency.
+ *
+ * Exists because page after page had grown its own
+ * `` const fmt = (n) => `Rp ${Number(n).toLocaleString('id-ID')}` ``. That is a
+ * hardcoded Indonesian Rupiah, so a Ugandan school's payslips and payroll
+ * screens read "Rp 3,000,000" — wrong symbol, wrong grouping, and wrong on the
+ * one screen where a number must be unambiguous.
+ */
+export function useMoneyFormatter(): (value?: string | number | null) => string {
+  const currency = useOrgCurrency();
+  return (value) => money(value, currency);
+}
+
 export function date(value?: string | Date | null): string {
   if (!value) return '-';
   const d = typeof value === 'string' ? new Date(value) : value;

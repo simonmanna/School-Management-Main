@@ -1,0 +1,11 @@
+[
+  "modules/school/academics/timetable-advanced.service.ts",
+  "modules/school/admissions/admissions.service.ts",
+  "modules/school/enrollment/enrollment-backfill.service.ts",
+  "modules/school/examinations/examinations.service.ts",
+  "modules/school/foundation/class.service.ts",
+  "modules/school/people/enrollment.service.ts",
+  "modules/school/people/promotion.service.ts",
+  "modules/school/people/student.service.ts",
+  "modules/school/reporting/filter-resolver.service.ts"
+]

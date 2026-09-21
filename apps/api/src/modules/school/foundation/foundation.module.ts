@@ -5,6 +5,8 @@ import { AcademicYearService, TermService } from './academic-year.service';
 import { AcademicYearController, TermController } from './academic-year.controller';
 import { DepartmentService } from './department.service';
 import { DepartmentController } from './department.controller';
+import { AcademicLevelService } from './academic-level.service';
+import { AcademicLevelController } from './academic-level.controller';
 import { GradeLevelService } from './grade-level.service';
 import { GradeLevelController } from './grade-level.controller';
 import { SchoolClassService, SectionService } from './class.service';
@@ -13,8 +15,6 @@ import { SubjectService } from './subject.service';
 import { SubjectController } from './subject.controller';
 import { SubjectCategoryService } from './subject-category.service';
 import { SubjectCategoryController } from './subject-category.controller';
-import { StreamService } from './stream.service';
-import { StreamController } from './stream.controller';
 import { StudentCategoryService } from './student-category.service';
 import { StudentCategoryController } from './student-category.controller';
 import { CalendarService, PeriodService } from './period-calendar.service';
@@ -36,12 +36,12 @@ import { CustomFieldController } from './custom-field.controller';
     AcademicYearController,
     TermController,
     DepartmentController,
+    AcademicLevelController,
     GradeLevelController,
     SchoolClassController,
     SectionController,
     SubjectController,
     SubjectCategoryController,
-    StreamController,
     StudentCategoryController,
     PeriodController,
     CalendarController,
@@ -54,12 +54,12 @@ import { CustomFieldController } from './custom-field.controller';
     AcademicYearService,
     TermService,
     DepartmentService,
+    AcademicLevelService,
     GradeLevelService,
     SchoolClassService,
     SectionService,
     SubjectService,
     SubjectCategoryService,
-    StreamService,
     StudentCategoryService,
     PeriodService,
     CalendarService,
@@ -69,6 +69,7 @@ import { CustomFieldController } from './custom-field.controller';
   ],
   exports: [
     CampusService,
+    AcademicLevelService,
     AcademicYearService,
     TermService,
     DepartmentService,
@@ -77,7 +78,6 @@ import { CustomFieldController } from './custom-field.controller';
     SectionService,
     SubjectService,
     SubjectCategoryService,
-    StreamService,
     StudentCategoryService,
     PeriodService,
     CalendarService,

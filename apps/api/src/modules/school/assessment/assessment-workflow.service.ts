@@ -36,7 +36,7 @@ export class AssessmentWorkflowService {
     return row;
   }
 
-  /** Snapshot official course enrollment, never StudentProfile.currentClassId. */
+  /** Snapshot official course enrollment, never the StudentProfile class projection. */
   async captureRoster(courseOfferingId: string) {
     await this.marking.assertMayTeachOffering(courseOfferingId);
     return this.db.$transaction(async (tx: any) => {

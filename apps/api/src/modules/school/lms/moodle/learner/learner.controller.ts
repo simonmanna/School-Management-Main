@@ -44,6 +44,12 @@ export class LearnerController {
     return this.learner.recentGrades(asStudent);
   }
 
+  @Get('badges')
+  @RequirePermissions(PERMISSIONS.school.portalSelf)
+  badges(@Query('asStudent') asStudent?: string) {
+    return this.learner.myBadges(asStudent);
+  }
+
   /** Children a guardian may switch between. Empty for a student or staff. */
   @Get('children')
   @RequirePermissions(PERMISSIONS.school.portalSelf)

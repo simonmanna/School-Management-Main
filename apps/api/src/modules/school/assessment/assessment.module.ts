@@ -17,6 +17,7 @@ import { CbtResultBridgeService } from './cbt-result-bridge.service';
 import { GradebookService } from './gradebook.service';
 import { GradebookController } from './gradebook.controller';
 import { AcademicReminderWorker } from './academic-reminder.worker';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 import {
   AcademicRosterController,
   AssessmentComponentController,
@@ -38,7 +39,8 @@ import {
 @Module({
   // Phase 5 applies a promotion decision through the canonical placement
   // spine rather than writing a placement itself — one writer, not two.
-  imports: [SchoolEnrollmentModule],
+  // PlacementLookupModule: rosters read placement history (ADR-027).
+  imports: [SchoolEnrollmentModule, PlacementLookupModule],
   controllers: [
     AssessmentPolicyController,
     AssessmentComponentController,

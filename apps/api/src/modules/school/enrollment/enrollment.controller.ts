@@ -5,11 +5,8 @@ import { ProgrammeService } from './programme.service';
 import { ClassCohortService } from './class-cohort.service';
 import { StudentEnrollmentService } from './student-enrollment.service';
 import { PlacementService } from './placement.service';
-import { EnrollmentBackfillService } from './enrollment-backfill.service';
 import type { EnrollmentStatusValue } from './enrollment-fsm';
 import {
-  AttachStreamToSectionDto,
-  BackfillDto,
   BulkPlacementDto,
   ChangeEnrollmentStatusDto,
   CreateClassCohortDto,
@@ -19,7 +16,6 @@ import {
   MovePlacementDto,
   PromoteEnrollmentDto,
   RepeatGradeDto,
-  ResolveExceptionDto,
   SeedUgandaProgrammesDto,
   TermRolloverDto,
   UpdateClassCohortDto,
@@ -87,7 +83,7 @@ export class ClassCohortController {
     return this.service.get(id);
   }
 
-  /** Effective grouping mode plus the sections and streams legally available. */
+  /** Whether the cohort is subdivided, and the sections legally available. */
   @Get(':id/grouping-options')
   @RequirePermissions(PERMISSIONS.school.read)
   groupingOptions(@Param('id') id: string) {
@@ -110,19 +106,6 @@ export class ClassCohortController {
   @RequirePermissions(PERMISSIONS.school.manageProgrammes)
   update(@Param('id') id: string, @Body() dto: UpdateClassCohortDto) {
     return this.service.update(id, dto);
-  }
-}
-
-/* ─────────── Stream → Section attachment (ADR-019 grouping) ─────────── */
-
-@Controller('school/streams')
-export class StreamGroupingController {
-  constructor(private readonly service: ClassCohortService) {}
-
-  @Patch(':id/section')
-  @RequirePermissions(PERMISSIONS.school.manageProgrammes)
-  attach(@Param('id') id: string, @Body() dto: AttachStreamToSectionDto) {
-    return this.service.attachStreamToSection(id, dto);
   }
 }
 
@@ -255,10 +238,9 @@ export class PlacementController {
     @Param('cohortId') cohortId: string,
     @Query('at') at?: string,
     @Query('sectionId') sectionId?: string,
-    @Query('streamId') streamId?: string,
     @Query('termId') termId?: string,
   ) {
-    return this.service.roster(cohortId, { at: at ? new Date(at) : undefined, sectionId, streamId, termId });
+    return this.service.roster(cohortId, { at: at ? new Date(at) : undefined, sectionId, termId });
   }
 
   /** Validate a move without writing anything. */
@@ -284,45 +266,5 @@ export class PlacementController {
   @RequirePermissions(PERMISSIONS.school.manageEnrollment)
   termRollover(@Body() dto: TermRolloverDto) {
     return this.service.termRollover(dto);
-  }
-}
-
-/* ────────────────── Backfill / reconciliation / rollback ────────────── */
-
-@Controller('school/enrollment-migration')
-export class EnrollmentMigrationController {
-  constructor(private readonly service: EnrollmentBackfillService) {}
-
-  @Post('backfill')
-  @RequirePermissions(PERMISSIONS.school.runAcademicMigration)
-  backfill(@Body() dto: BackfillDto) {
-    return this.service.run(dto);
-  }
-
-  @Get('reconcile')
-  @RequirePermissions(PERMISSIONS.school.runAcademicMigration)
-  reconcile(@Query('academicYearId') academicYearId?: string) {
-    return this.service.reconcile(academicYearId);
-  }
-
-  @Get('exceptions')
-  @RequirePermissions(PERMISSIONS.school.runAcademicMigration)
-  exceptions(@Query('migrationRunId') migrationRunId?: string, @Query('resolved') resolved?: string) {
-    return this.service.listExceptions({
-      migrationRunId,
-      resolved: resolved === undefined ? undefined : resolved === 'true',
-    });
-  }
-
-  @Post('exceptions/:id/resolve')
-  @RequirePermissions(PERMISSIONS.school.runAcademicMigration)
-  resolveException(@Param('id') id: string, @Body() dto: ResolveExceptionDto) {
-    return this.service.resolveException(id, dto);
-  }
-
-  @Post('rollback/:migrationRunId')
-  @RequirePermissions(PERMISSIONS.school.runAcademicMigration)
-  rollback(@Param('migrationRunId') migrationRunId: string) {
-    return this.service.rollback(migrationRunId);
   }
 }

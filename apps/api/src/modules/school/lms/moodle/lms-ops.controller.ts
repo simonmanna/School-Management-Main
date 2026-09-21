@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../../kernel/auth/decorators/require-permissions.decorator';
 import { EnrolmentService } from './enrolment/enrolment.service';
@@ -74,6 +74,10 @@ export class LmsOpsController {
   @Get('groups/:id/members')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
   members(@Param('id') id: string) { return this.groups.members(id); }
+
+  @Delete('group-members/:id')
+  @RequirePermissions(PERMISSIONS.school.manageCourses)
+  removeMember(@Param('id') id: string) { return this.groups.removeMember(id); }
 
   @Get('courses/:id/groupings')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
@@ -175,6 +179,21 @@ export class LmsOpsController {
   @RequireCapability(CAP.gradeEdit, 'courseParam')
   override(@Body() dto: { studentAssessmentId: string; score: number; reason?: string }) { return this.gradebook.override(dto); }
 
+  /**
+   * Hide or lock one gradebook column. Hidden withholds the mark from pupils and
+   * parents; locked stops further edits. Both live on the Assessment, so this is
+   * the same switch the marks workspace flips — not a second visibility flag.
+   */
+  @Patch('courses/:id/gradebook/column')
+  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.gradeEdit, 'courseParam')
+  async setColumnFlags(@Body() dto: { assessmentId: string; hidden?: boolean; locked?: boolean }) {
+    if (dto.hidden !== undefined) await this.gradebook.setHidden(dto.assessmentId, dto.hidden);
+    if (dto.locked !== undefined) await this.gradebook.setLocked(dto.assessmentId, dto.locked);
+    return { ok: true };
+  }
+
   @Get('courses/:id/gradebook/export')
   @RequirePermissions(PERMISSIONS.school.lmsRead)
   exportGrades(@Param('id') id: string) { return this.gradebook.exportCsv(id); }
@@ -220,6 +239,22 @@ export class LmsOpsController {
   @Post('badges/:id/award')
   @RequirePermissions(PERMISSIONS.school.manageCourses)
   awardBadge(@Param('id') id: string, @Body() dto: any) { return this.badges.award(id, dto); }
+
+  /** Everyone who holds a given badge. */
+  @Get('badges/:id/awards')
+  @RequirePermissions(PERMISSIONS.school.lmsRead)
+  badgeAwards(@Param('id') id: string) { return this.badges.awardsForBadge(id); }
+
+  /**
+   * Badges held by one pupil. Guarded by the same claim check every per-student
+   * read uses, so a family cannot enumerate another pupil's achievements.
+   */
+  @Get('students/:studentProfileId/badges')
+  @RequirePermissions(PERMISSIONS.school.lmsRead)
+  async studentBadges(@Param('studentProfileId') sp: string) {
+    await this.assertMaySeeStudent(sp);
+    return this.badges.awardsFor(sp);
+  }
 
   // ── Maintenance (L0.4) ──
 

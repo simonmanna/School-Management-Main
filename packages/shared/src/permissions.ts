@@ -382,6 +382,10 @@ export const PERMISSIONS = {
     // academic-integrity action, while `students:write` is the front-desk
     // grant that edits a pupil's phone number.
     manageEnrollment: 'school:enrollment:write',
+    /// Seat a learner beyond a class or stream's configured capacity (ADR-030).
+    /// Split from `manageEnrollment` so exceeding a limit is a separately
+    /// delegable decision; every use is recorded with a reason on the placement.
+    overrideCapacity: 'school:enrollment:capacity:override',
     /// Programmes, annual class cohorts and grouping modes — configuration that
     /// changes how every downstream academic rule is resolved.
     manageProgrammes: 'school:programmes:write',
@@ -764,6 +768,22 @@ export const PERMISSIONS = {
     leave: 'hr:leave',
     holiday: 'hr:holiday',
     payroll: 'hr:payroll',
+    /**
+     * Capture and edit one-off payroll inputs (bonuses, commissions, ad-hoc
+     * deductions). Split from `hr:payroll` so a bursar's clerk can key a bonus
+     * list without also being able to approve it into a payment — approving an
+     * input, like approving a run, needs `hr:payroll`.
+     */
+    payrollInput: 'hr:payroll_input',
+    /**
+     * Run the HR report centre. Separate from `hr:read` for the same reason
+     * `school:reports:read` is separate from `school:read`: `hr:read` sits on
+     * most HR routes, so gating the report centre on it would be decorative,
+     * and a payroll register is not the same disclosure as an employee list.
+     */
+    readReports: 'hr:reports:read',
+    /** Download a report as CSV/XLSX/PDF — the point where data leaves the app. */
+    exportReports: 'hr:reports:export',
     payslip: 'hr:payslip',
     advance: 'hr:advance',
     loan: 'hr:loan',
@@ -965,6 +985,9 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'hr:employee': { label: 'Manage employees', description: 'CRUD employee records.', group: 'HR', subgroup: 'Employees' },
   'hr:employee_identity': { label: 'Link employee to login', description: 'Bind an HrEmployee to a user account.', group: 'HR', subgroup: 'Employees', risk: 'high' },
   'hr:payroll': { label: 'Manage payroll', description: 'Run/configure payroll.', group: 'HR', subgroup: 'Payroll' },
+  'hr:reports:read': { label: 'Run HR reports', description: 'Run the HR/payroll report centre.', group: 'HR', subgroup: 'Reporting' },
+  'hr:reports:export': { label: 'Export HR reports', description: 'Download HR/payroll reports as CSV, Excel or PDF.', group: 'HR', subgroup: 'Reporting', risk: 'high' },
+  'hr:payroll_input': { label: 'Capture payroll inputs', description: 'Key one-off bonuses, commissions and deductions (approval still needs hr:payroll).', group: 'HR', subgroup: 'Payroll' },
   'hr:payslip': { label: 'Manage payslips', description: 'Issue/adjust payslips.', group: 'HR', subgroup: 'Payroll' },
   'hr:audit': { label: 'HR audit', description: 'Read HR audit trails.', group: 'HR', subgroup: 'Compliance' },
 };
@@ -1350,6 +1373,9 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'hr:leave',
       'hr:holiday',
       'hr:payroll',
+      'hr:payroll_input',
+      'hr:reports:read',
+      'hr:reports:export',
       'hr:payslip',
       'hr:advance',
       'hr:loan',

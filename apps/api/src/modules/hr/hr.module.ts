@@ -15,7 +15,10 @@ import { HrRecruitmentService } from './hr-recruitment.service';
 import { HrTrainingService } from './hr-training.service';
 import { HrAlertsSubscriber } from './hr-alerts.subscriber';
 import { HrPeopleService } from './hr-people.service';
+import { HrPayslipPdfService } from './hr-payslip-pdf.service';
+import { HrLeaveAccrualService } from './hr-leave-accrual.service';
 import { HrReconciliationService } from './hr-reconciliation.service';
+import { HrReportsModule } from './reporting/hr-reports.module';
 
 /**
  * Workforce Management (HR) — attendance, timesheets, leave and payroll.
@@ -26,7 +29,7 @@ import { HrReconciliationService } from './hr-reconciliation.service';
  * employee lifecycle (contracts/onboarding/offboarding), recruitment, training.
  */
 @Module({
-  imports: [AccountingModule, NotificationsModule],
+  imports: [AccountingModule, NotificationsModule, HrReportsModule],
   controllers: [HrController],
   providers: [
     HrOrgService,
@@ -40,6 +43,8 @@ import { HrReconciliationService } from './hr-reconciliation.service';
     HrTrainingService,
     HrAlertsSubscriber,
     HrPeopleService,
+    HrPayslipPdfService,
+    HrLeaveAccrualService,
     HrReconciliationService,
   ],
   exports: [HrPayrollService, HrAttendanceService],

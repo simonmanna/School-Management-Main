@@ -15,6 +15,7 @@ import { EVENTS } from '@erp/shared';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const LEAVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
+const ACCRUAL_METHODS = ['ANNUAL_UPFRONT', 'MONTHLY', 'NONE'];
 
 /**
  * Leave days are Decimal(10,2) (half-days are real). Decimal arithmetic only:
@@ -71,6 +72,8 @@ export class HrLeaveService {
       where: { organizationId_code: { organizationId: orgId, code: dto.code } },
     });
     if (existing) throw new BadRequestException(`Leave type code "${dto.code}" already exists`);
+    if (dto.accrualMethod && !ACCRUAL_METHODS.includes(dto.accrualMethod))
+      throw new BadRequestException(`accrualMethod must be one of ${ACCRUAL_METHODS.join(', ')}`);
     return this.prisma.client.hrLeaveType.create({
       data: {
         organizationId: orgId,
@@ -81,6 +84,12 @@ export class HrLeaveService {
         carryForwardDays: dto.carryForwardDays ?? 0,
         maxConsecutiveDays: dto.maxConsecutiveDays ?? null,
         isActive: dto.isActive ?? true,
+        // ANNUAL_UPFRONT preserves the historical behaviour for any caller that
+        // does not state a method.
+        accrualMethod: dto.accrualMethod ?? 'ANNUAL_UPFRONT',
+        accrualStartsAfterMonths: dto.accrualStartsAfterMonths ?? 0,
+        carryForwardExpiryMonths: dto.carryForwardExpiryMonths ?? null,
+        maxBalanceDays: dto.maxBalanceDays ?? null,
         createdBy: userId,
       },
     });
@@ -92,7 +101,12 @@ export class HrLeaveService {
     const row = await this.prisma.client.hrLeaveType.findFirst({ where: { id, organizationId: orgId } });
     if (!row) throw new NotFoundException('Leave type not found');
     const data: any = {};
-    for (const f of ['name', 'daysPerYear', 'isPaid', 'carryForwardDays', 'maxConsecutiveDays', 'isActive']) {
+    if (dto.accrualMethod && !ACCRUAL_METHODS.includes(dto.accrualMethod))
+      throw new BadRequestException(`accrualMethod must be one of ${ACCRUAL_METHODS.join(', ')}`);
+    for (const f of [
+      'name', 'daysPerYear', 'isPaid', 'carryForwardDays', 'maxConsecutiveDays', 'isActive',
+      'accrualMethod', 'accrualStartsAfterMonths', 'carryForwardExpiryMonths', 'maxBalanceDays',
+    ]) {
       if (dto[f] !== undefined) data[f] = dto[f];
     }
     data.updatedBy = userId;
@@ -132,13 +146,31 @@ export class HrLeaveService {
     });
     if (balance) return balance;
     const leaveType = await tx.hrLeaveType.findUnique({ where: { id: leaveTypeId } });
+    // Only an ANNUAL_UPFRONT type is entitled to the whole year on day one.
+    // A MONTHLY type earns its days month by month through
+    // HrLeaveAccrualService, and seeding the full entitlement here would let an
+    // employee take a year's leave in January and then resign. A NONE type is
+    // granted case by case and starts at nothing by definition.
+    //
+    // Any accrual already recorded in the ledger wins over both: this row is a
+    // cache of that ledger, so it must never be created disagreeing with it.
+    const accrued = await tx.hrLeaveAccrual.findMany({
+      where: { organizationId: orgId, employeeId, leaveTypeId, year },
+      select: { days: true },
+    });
+    const fromLedger = accrued.reduce((a: Money, r: any) => a.plus(dec(r.days)), ZERO);
+    const seed = accrued.length > 0
+      ? fromLedger
+      : (leaveType?.accrualMethod ?? 'ANNUAL_UPFRONT') === 'ANNUAL_UPFRONT'
+        ? dec(leaveType?.daysPerYear ?? 0)
+        : ZERO;
     return tx.hrLeaveBalance.create({
       data: {
         organizationId: orgId,
         employeeId,
         leaveTypeId,
         year,
-        accruedDays: leaveType?.daysPerYear ?? 0,
+        accruedDays: seed,
       },
     });
   }

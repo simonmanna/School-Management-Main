@@ -6,6 +6,7 @@ import { GradeEntryService } from './examinations.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { GradingService } from './grading.service';
 import type { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './marks-workspace.dto';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /** Participation values that mean "resolved, but no numeric mark". */
 const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice']);
@@ -14,9 +15,8 @@ type StudentRow = {
   studentProfileId: string;
   name: string;
   admissionNo: string;
-  streamId: string | null;
-  streamName: string | null;
   sectionId: string | null;
+  sectionName: string | null;
 };
 
 /**
@@ -43,6 +43,7 @@ export class MarksWorkspaceService {
     private readonly grades: GradeEntryService,
     private readonly grading: GradingService,
     private readonly mint: AssessmentMintService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /* ─────────────────────────── Step 1: exams ─────────────────────────── */
@@ -294,7 +295,7 @@ export class MarksWorkspaceService {
    * come back with `marks: null`, which is the whole point: you cannot type a
    * mark for a student the screen does not show.
    */
-  async sheet(params: { examId: string; classId: string; subjectId: string; streamId?: string }) {
+  async sheet(params: { examId: string; classId: string; subjectId: string; sectionId?: string }) {
     const [exam, klass, subject] = await Promise.all([
       this.prisma.client.exam.findFirst({ where: { id: params.examId }, include: { term: true, examType: true } }),
       this.prisma.client.schoolClass.findFirst({ where: { id: params.classId } }),
@@ -308,7 +309,7 @@ export class MarksWorkspaceService {
       where: { examId: params.examId, classId: params.classId, subjectId: params.subjectId },
     });
 
-    const students = await this.studentsOfClass(params.classId, params.streamId);
+    const students = await this.studentsOfClass(params.classId, params.sectionId);
 
     // The assessment IS the paper now. Its `lockedAt` is the lock that bites
     // (postMark enforces it everywhere); the schedule column is the legacy
@@ -471,7 +472,7 @@ export class MarksWorkspaceService {
    * actually reads, and it is computed from the same marks that were typed —
    * no separate "compute" step to forget.
    */
-  async grid(params: { examId: string; classId: string; streamId?: string }) {
+  async grid(params: { examId: string; classId: string; sectionId?: string }) {
     const exam = await this.prisma.client.exam.findFirst({
       where: { id: params.examId },
       include: { term: true, examType: true },
@@ -493,7 +494,7 @@ export class MarksWorkspaceService {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const students = await this.studentsOfClass(params.classId, params.streamId);
+    const students = await this.studentsOfClass(params.classId, params.sectionId);
 
     // Off the spine, keyed back to the paper it came from. The grid stays RAW —
     // one column per paper, no weighting — because it answers "how did the
@@ -684,47 +685,26 @@ export class MarksWorkspaceService {
     return subjects.map((s) => ({ id: s.id, name: s.name, code: s.code, isCore: s.isCore }));
   }
 
-  /** Active students of a class, optionally one stream, ordered by name. */
-  private async studentsOfClass(classId: string, streamId?: string): Promise<StudentRow[]> {
-    const students = await this.prisma.client.studentProfile.findMany({
-      where: {
-        currentClassId: classId,
-        status: 'active',
-        // The subdivision a school calls a "stream" can be stored as either a
-        // Section or a Stream row: the schema has both, attendance/class-teacher/
-        // rosters only ever hang off Section, and the mark screens only ever
-        // filtered on Stream — so whichever a school picked, half the system
-        // could not see its P4 West. Matching either column makes both work
-        // while Section becomes the one the UI creates.
-        ...(streamId
-          ? { OR: [{ currentSectionId: streamId }, { currentStreamId: streamId }] }
-          : {}),
-      },
-      include: { partner: true, currentStream: true, currentSection: true },
+  /** Active students of a class, optionally one stream, ordered by name — from placement history. */
+  private async studentsOfClass(classId: string, sectionId?: string): Promise<StudentRow[]> {
+    const roster = await this.placements.roster({
+      classIds: [classId],
+      ...(sectionId ? { sectionIds: [sectionId] } : {}),
     });
-    return students
-      .map((s) => ({
-        studentProfileId: s.id,
-        name: s.partner?.name ?? s.admissionNo,
-        admissionNo: s.admissionNo,
-        // Report whichever subdivision the pupil actually sits in, so the sheet
-        // labels "P4 West" the same way whether the school stored West as a
-        // Section or a Stream.
-        streamId: s.currentStreamId ?? s.currentSectionId,
-        streamName: s.currentStream?.name ?? s.currentSection?.name ?? null,
-        sectionId: s.currentSectionId,
+    return roster
+      .map((r) => ({
+        studentProfileId: r.student.id,
+        name: r.student.partner?.name ?? r.student.admissionNo,
+        admissionNo: r.student.admissionNo,
+        sectionId: r.sectionId,
+        sectionName: r.sectionName,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /** Active learners per class, placed or (during the compat window) projected. */
   private async classSizes(classIds: string[]): Promise<Map<string, number>> {
-    if (classIds.length === 0) return new Map();
-    const counts = await this.prisma.client.studentProfile.groupBy({
-      by: ['currentClassId'],
-      where: { currentClassId: { in: classIds }, status: 'active' },
-      _count: { _all: true },
-    });
-    return new Map(counts.map((c) => [c.currentClassId as string, c._count._all]));
+    return this.placements.classSizes(classIds);
   }
 
   /** Find the paper, creating it if a mark is being entered for a missing one. */

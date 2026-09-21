@@ -35,6 +35,7 @@ import {
   type SchoolReportDeps,
 } from './school-report-deps';
 import { SchoolReportsController } from './school-reports.controller';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 
 /**
  * The school report catalogue, mounted over the domain-free core engine.
@@ -50,7 +51,7 @@ import { SchoolReportsController } from './school-reports.controller';
  * engine, and the web catalogue page merges the two.
  */
 @Module({
-  imports: [
+  imports: [PlacementLookupModule, 
     CoreReportingModule,
     FeesModule,
     AttendanceModule,

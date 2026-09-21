@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EXAM_LEVEL_STAGE } from './candidate-reference.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /** One thing standing between the school and a submittable file. */
 export interface CaFinding {
@@ -79,6 +80,7 @@ export class UnebCaService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /**
@@ -115,7 +117,7 @@ export class UnebCaService {
       where: {
         id: { in: enrollments.map((e) => e.studentProfileId) },
         deletedAt: null,
-        ...(query.classIds?.length ? { currentClassId: { in: query.classIds } } : {}),
+        ...(query.classIds?.length ? this.placements.studentWhere({ classIds: query.classIds }) : {}),
       },
       select: {
         id: true,
@@ -123,14 +125,14 @@ export class UnebCaService {
         gender: true,
         dateOfBirth: true,
         partner: { select: { name: true } },
-        currentClass: { select: { id: true, name: true } },
-        currentStream: { select: { name: true } },
       },
     });
     if (learners.length === 0) {
       return this.emptyBoard(term, query.level, registrationYear, 'No learner in the selected classes sits this level.');
     }
     const studentIds = learners.map((l) => l.id);
+    // Class and stream from placement history for the term (ADR-027).
+    const placedCandidates = await this.placements.describe(studentIds, { termId: term.id });
 
     // Requirements are the UNION across the programmes the selected learners are
     // enrolled on, not the first one's. A level can be sat under more than one
@@ -342,8 +344,8 @@ export class UnebCaService {
         admissionNo: learner.admissionNo,
         sex: normaliseSex(learner.gender),
         dateOfBirth: learner.dateOfBirth,
-        className: learner.currentClass?.name ?? null,
-        streamName: learner.currentStream?.name ?? null,
+        className: placedCandidates.get(learner.id)?.className ?? null,
+        streamName: placedCandidates.get(learner.id)?.sectionName ?? null,
         centreNumber: ref?.centreNumber ?? null,
         candidateNumber: ref?.candidateNumber ?? null,
         indexNumber: ref?.indexNumber ?? null,

@@ -43,6 +43,7 @@ export class CreateCourseOfferingDto {
   @IsOptional() @IsString() classCohortId?: string;
   @IsOptional() @IsString() subjectId?: string;
   @IsOptional() @IsString() sectionId?: string;
+  /** DEPRECATED (ADR-029): refused. Streams are sections; use sectionId. */
   @IsOptional() @IsString() streamId?: string;
   @IsOptional() @IsString() curriculumId?: string;
   @IsOptional() @IsString() competencyId?: string;

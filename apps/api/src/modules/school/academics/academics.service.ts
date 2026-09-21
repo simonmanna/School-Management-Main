@@ -273,7 +273,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
   ): Promise<string | null> {
     if (slot.courseOfferingId) {
       const explicit = await tx.courseOffering.findFirst({ where: { id: slot.courseOfferingId, organizationId: this.tenant.organizationId } });
-      if (!explicit || ['CLOSED', 'ARCHIVED'].includes(explicit.status) || explicit.classId !== slot.classId || explicit.subjectId !== slot.subjectId || (explicit.sectionId ?? null) !== (slot.sectionId ?? null) || (explicit.streamId ?? null) !== (slot.streamId ?? null)) {
+      if (!explicit || ['CLOSED', 'ARCHIVED'].includes(explicit.status) || explicit.classId !== slot.classId || explicit.subjectId !== slot.subjectId || (explicit.sectionId ?? null) !== (slot.sectionId ?? null)) {
         throw new BadRequestException('Course offering does not match the timetable class, grouping and subject.');
       }
       return explicit.id;
@@ -282,7 +282,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
       organizationId: this.tenant.organizationId,
       classId: slot.classId,
       sectionId: slot.sectionId ?? null,
-      streamId: slot.streamId ?? null,
+      streamId: null,
       subjectId: slot.subjectId,
       status: { notIn: ['CLOSED', 'ARCHIVED'] },
     };
@@ -389,7 +389,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     const courseOfferingId = await this.resolveCourseOffering(this.prisma.client, {
       classId: dto.classId,
       sectionId: dto.sectionId ?? null,
-      streamId: (dto as any).streamId ?? null,
+      streamId: null,
       subjectId: dto.subjectId,
       courseOfferingId: dto.courseOfferingId,
     });
@@ -410,7 +410,8 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
     const merged: CreateTimetableSlotDto = {
       classId: dto.classId ?? existing.classId,
       sectionId: dto.sectionId ?? existing.sectionId ?? undefined,
-      streamId: dto.streamId ?? existing.streamId ?? undefined,
+      // Streams are sections (ADR-029); a slot's subdivision is its sectionId.
+      streamId: undefined,
       dayOfWeek: dto.dayOfWeek ?? existing.dayOfWeek,
       periodId: dto.periodId ?? existing.periodId,
       subjectId: dto.subjectId ?? existing.subjectId,
@@ -476,7 +477,7 @@ export class TimetableService extends BaseCrudService<TimetableSlot, CreateTimet
         const courseOfferingId = await this.resolveCourseOffering(tx, {
           classId: dto.classId,
           sectionId: dto.sectionId ?? null,
-          streamId: slot.streamId ?? null,
+          streamId: null,
           subjectId: slot.subjectId,
           courseOfferingId: slot.courseOfferingId,
         });

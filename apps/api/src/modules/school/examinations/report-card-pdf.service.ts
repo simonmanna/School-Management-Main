@@ -7,6 +7,7 @@ import { ReportCardSettingsService } from './report-card-settings.service';
 import { GradingService, type GradeBand } from './grading.service';
 import { ResultRunService } from '../assessment/result-run.service';
 import type { ColumnItem } from './report-card-settings.schema';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /**
  * ReportCardPdfService — renders a student's report card to PDF.
@@ -65,6 +66,7 @@ export class ReportCardPdfService {
     private readonly settingsService: ReportCardSettingsService,
     private readonly grading: GradingService,
     private readonly results: ResultRunService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   async generatePdf(reportCardId: string): Promise<Buffer> {
@@ -97,8 +99,12 @@ export class ReportCardPdfService {
 
     const profile = await this.prisma.client.studentProfile.findFirst({
       where: { id: card.studentProfileId },
-      include: { currentClass: { include: { gradeLevel: true } }, currentStream: true },
     });
+    // Class and stream from placement history for the card's term (ADR-027): a
+    // card printed after a pupil moved must still name the class they sat in.
+    const placed = profile
+      ? (await this.placements.describe([profile.id], { termId: card.termId })).get(profile.id)
+      : undefined;
     const [partner, term, school, settings] = await Promise.all([
       profile ? this.prisma.client.partner.findFirst({ where: { id: profile.partnerId } }) : Promise.resolve(null),
       this.prisma.client.term.findFirst({ where: { id: card.termId }, include: { academicYear: true } }),
@@ -151,8 +157,8 @@ export class ReportCardPdfService {
         name: partner?.name ?? 'Student',
         admissionNo: profile?.admissionNo ?? '—',
         gender: profile?.gender ?? '—',
-        className: profile?.currentClass?.name ?? '—',
-        stream: (profile as any)?.currentStream?.name ?? '—',
+        className: placed?.className ?? '—',
+        stream: placed?.sectionName ?? '—',
         dateOfBirth: profile?.dateOfBirth ?? null,
         house: profile?.house ?? null,
       },

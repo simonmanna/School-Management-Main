@@ -7,7 +7,7 @@ import type { SchoolReportDeps } from '../school-report-deps';
  *
  * `enrollment.by-class` is the capacity view management actually asks for:
  * "P1: 48 / 50 → 96%". Capacity comes from `SchoolClass.capacity`; the head
- * count comes from Enrollment for the term, NOT from `currentClassId`, so a
+ * count comes from placements held in the term, NOT from the live class, so a
  * pupil moved after enrollment does not silently inflate one class and deflate
  * another mid-term.
  */

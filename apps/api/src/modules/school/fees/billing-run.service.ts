@@ -4,6 +4,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventBus } from '../../../kernel/events/event-bus';
 import { BillingService } from './billing.service';
 import { FinanceControlsService } from './finance-controls.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 /**
  * Phase 1.5 — billing as a resumable, auditable job (P1-10).
@@ -26,6 +27,7 @@ export class BillingRunService {
     private readonly events: EventBus,
     private readonly billing: BillingService,
     private readonly controls: FinanceControlsService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /** Create the run + one pending item per targeted active student. */
@@ -33,7 +35,9 @@ export class BillingRunService {
     const organizationId = this.tenant.organizationId;
     await this.controls.assertTermOpen(termId);
     const where: any = { organizationId, status: 'active' };
-    if (classId) where.currentClassId = classId;
+    // Placement history rather than the StudentProfile projection (ADR-027).
+    // Compat: a learner not yet backfilled still matches on their projection.
+    if (classId) Object.assign(where, this.placements.studentWhere({ classIds: [classId] }));
     const students = await this.prisma.client.studentProfile.findMany({ where, select: { id: true } });
     if (students.length === 0) throw new BadRequestException('No active students found for billing');
 

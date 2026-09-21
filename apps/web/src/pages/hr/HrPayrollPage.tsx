@@ -6,8 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { useMoneyFormatter } from '@/lib/format';
 
-const fmt = (n: number | string) => `Rp ${Number(n || 0).toLocaleString('id-ID')}`;
 
 const RUN_STATUS: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
@@ -18,6 +18,7 @@ const RUN_STATUS: Record<string, string> = {
 };
 
 export function HrPayrollPage() {
+  const fmt = useMoneyFormatter();
   const [periodId, setPeriodId] = useState('');
   const [detailId, setDetailId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
