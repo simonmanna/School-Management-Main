@@ -8689,6 +8689,31 @@ enum HrTimesheetWorkType {
   OTHER
 }
 
+/// How an employee earns leave days.
+///
+///   ANNUAL_UPFRONT — the whole year's entitlement is granted on 1 January (or
+///                    on joining, pro-rated). Simple; over-grants a leaver.
+///   MONTHLY        — daysPerYear / 12 earned at each month end. What most
+///                    labour codes and every serious HR system actually do,
+///                    because it is what makes a final settlement correct.
+///   NONE           — no automatic accrual; days come only from manual
+///                    adjustment. For compassionate or study leave, which is
+///                    granted case by case rather than earned.
+enum HrLeaveAccrualMethod {
+  ANNUAL_UPFRONT
+  MONTHLY
+  NONE
+}
+
+/// Why a leave balance moved. Every automatic movement writes one of these.
+enum HrLeaveAccrualReason {
+  ANNUAL_GRANT
+  MONTHLY_ACCRUAL
+  CARRY_FORWARD
+  CARRY_FORWARD_EXPIRY
+  FORFEITURE
+}
+
 enum HrLeaveStatus {
   PENDING
   APPROVED
@@ -8711,6 +8736,26 @@ enum HrTaxType {
   PENSION
   SOCIAL_SECURITY
   LOCAL
+}
+
+/// Ad-hoc, one-off money attached to an employee for a single payroll period
+/// (Odoo calls these "other inputs"). Recurring money is a payroll COMPONENT;
+/// anything that happens once — a term bonus, a phone reimbursement, a fine —
+/// is an INPUT, so the component catalogue stays a stable configuration and
+/// never accumulates single-employee noise.
+enum HrPayrollInputType {
+  BONUS
+  COMMISSION
+  ALLOWANCE
+  DEDUCTION
+  REIMBURSEMENT
+}
+
+enum HrPayrollInputStatus {
+  PENDING
+  APPROVED
+  APPLIED
+  CANCELLED
 }
 
 enum HrPayrollPeriodType {
@@ -8738,6 +8783,7 @@ enum HrPayslipStatus {
   DRAFT
   ISSUED
   PAID
+  CANCELLED
 }
 
 enum HrAdvanceStatus {
@@ -8895,6 +8941,8 @@ model HrEmployee {
   skills              HrEmployeeSkill[]
   experiences         HrExperience[]
   documents           HrEmployeeDocument[]
+  payrollInputs       HrPayrollInput[]
+  leaveAccruals       HrLeaveAccrual[]
 
   @@unique([organizationId, employeeCode])
   @@index([organizationId, deletedAt])
@@ -9055,23 +9103,35 @@ model HrTimesheetEntry {
 }
 
 model HrLeaveType {
-  id                 String    @id @default(uuid())
-  organizationId     String
-  code               String
-  name               String
-  daysPerYear        Int       @default(0)
-  isPaid             Boolean   @default(true)
-  carryForwardDays   Int       @default(0)
-  maxConsecutiveDays Int?
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  createdBy          String?
-  updatedBy          String?
-  deletedAt          DateTime?
+  id                       String               @id @default(uuid())
+  organizationId           String
+  code                     String
+  name                     String
+  daysPerYear              Int                  @default(0)
+  isPaid                   Boolean              @default(true)
+  carryForwardDays         Int                  @default(0)
+  maxConsecutiveDays       Int?
+  isActive                 Boolean              @default(true)
+  /// ANNUAL_UPFRONT keeps the historical behaviour, so existing rows are
+  /// unchanged by this column arriving.
+  accrualMethod            HrLeaveAccrualMethod @default(ANNUAL_UPFRONT)
+  /// Months of service before accrual starts — the probation bar. 0 = from day one.
+  accrualStartsAfterMonths Int                  @default(0)
+  /// Months into the new year that carried-forward days survive. Null = they do
+  /// not expire. Six is the common rule: carry your leave, but take it by June.
+  carryForwardExpiryMonths Int?
+  /// Hard ceiling on accrued days, so an employee who never takes leave does not
+  /// accumulate an unbounded liability on the school's books. Null = no cap.
+  maxBalanceDays           Int?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+  createdBy                String?
+  updatedBy                String?
+  deletedAt                DateTime?
 
   balances HrLeaveBalance[]
   requests HrLeaveRequest[]
+  accruals HrLeaveAccrual[]
 
   @@unique([organizationId, code])
   @@index([organizationId, deletedAt])
@@ -9096,6 +9156,41 @@ model HrLeaveBalance {
 
   @@unique([organizationId, employeeId, leaveTypeId, year])
   @@index([organizationId, deletedAt])
+}
+
+/// One movement of a leave balance, and the reason for it.
+///
+/// The balance row is a running total; THIS is the evidence. Two things depend
+/// on that split:
+///
+///  1. Idempotence. `(employee, leaveType, periodKey)` is unique, so re-running
+///     September's accrual — which a scheduled job will do, on a retry or a
+///     restart — grants nothing a second time. Without it the job could not
+///     safely run more than once.
+///  2. Explanation. "Why do I have 14.5 days?" is answerable line by line,
+///     years later, without recomputing against configuration that has since
+///     changed.
+model HrLeaveAccrual {
+  id             String               @id @default(uuid())
+  organizationId String
+  employeeId     String
+  leaveTypeId    String
+  year           Int
+  /// The accrual bucket: "2026" for an annual grant, "2026-09" for a monthly
+  /// one, "2026-CF" for a carry-forward. Its uniqueness is the idempotence key.
+  periodKey      String
+  /// Signed: negative for an expiry or forfeiture.
+  days           Decimal              @db.Decimal(10, 2)
+  reason         HrLeaveAccrualReason
+  notes          String?
+  createdAt      DateTime             @default(now())
+  createdBy      String?
+
+  employee  HrEmployee  @relation(fields: [employeeId], references: [id])
+  leaveType HrLeaveType @relation(fields: [leaveTypeId], references: [id])
+
+  @@unique([organizationId, employeeId, leaveTypeId, periodKey])
+  @@index([organizationId, year, leaveTypeId])
 }
 
 model HrLeaveRequest {
@@ -9219,7 +9314,8 @@ model HrPayrollPeriod {
   updatedBy      String?
   deletedAt      DateTime?
 
-  runs HrPayrollRun[]
+  runs   HrPayrollRun[]
+  inputs HrPayrollInput[]
 
   @@unique([organizationId, periodCode])
   @@index([organizationId, deletedAt])
@@ -9278,6 +9374,16 @@ model HrPayrollItem {
   totalDeductions      Decimal   @default(0) @db.Decimal(20, 6)
   netPay               Decimal   @default(0) @db.Decimal(20, 6)
   absenceDays          Decimal   @default(0) @db.Decimal(10, 2)
+  /// Calendar days in the payroll period. Denominator of the pro-rata factor,
+  /// stored so an old payslip can still be explained after the period is gone.
+  periodDays           Int       @default(0)
+  /// Days the employee was actually on the payroll and paid: period days minus
+  /// days before hire, after last working day, and on unpaid leave.
+  paidDays             Decimal   @default(0) @db.Decimal(10, 2)
+  /// paidDays / periodDays. 1 for a full-month employee. Applied to base salary
+  /// and to FIXED allowances, never to hourly pay (hours are already actual).
+  proRataFactor        Decimal   @default(1) @db.Decimal(10, 6)
+  unpaidLeaveDays      Decimal   @default(0) @db.Decimal(10, 2)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   createdBy            String?
@@ -9324,6 +9430,43 @@ model HrPayrollDeduction {
   item HrPayrollItem @relation(fields: [itemId], references: [id])
 
   @@index([organizationId, itemId])
+}
+
+/// One-off payroll money for a single employee in a single period.
+///
+/// Only `APPROVED` inputs are picked up by `calculateRun`; approving is a
+/// separate act from capturing so a clerk can key a bonus list without being
+/// able to pay it. When a run is approved the input flips to `APPLIED` and
+/// records `appliedRunId`, which is what stops the same bonus being paid twice
+/// across a recalculate or a second run in the same period.
+model HrPayrollInput {
+  id             String               @id @default(uuid())
+  organizationId String
+  employeeId     String
+  periodId       String
+  inputType      HrPayrollInputType
+  name           String
+  amount         Decimal              @db.Decimal(20, 6)
+  /// Taxable inputs join the PAYE base; a reimbursement of a receipted expense
+  /// is not income and must not be taxed.
+  isTaxable      Boolean              @default(true)
+  status         HrPayrollInputStatus @default(PENDING)
+  appliedRunId   String?
+  approvedById   String?
+  approvedAt     DateTime?
+  reference      String?
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  createdBy      String?
+  updatedBy      String?
+  deletedAt      DateTime?
+
+  employee HrEmployee      @relation(fields: [employeeId], references: [id])
+  period   HrPayrollPeriod @relation(fields: [periodId], references: [id])
+
+  @@index([organizationId, periodId, status, deletedAt])
+  @@index([organizationId, employeeId, deletedAt])
 }
 
 model HrPayslip {
@@ -10559,8 +10702,8 @@ model Campus {
 }
 
 model SchoolProfile {
-  id             String   @id @default(uuid())
-  organizationId String   @unique
+  id             String         @id @default(uuid())
+  organizationId String         @unique
   name           String
   motto          String?
   logoUrl        String?
@@ -10569,32 +10712,64 @@ model SchoolProfile {
   email          String?
   website        String?
   /// Country-specific config (Uganda defaults: UGX currency, primary/secondary cycle).
-  country        String   @default("UG")
-  currencyCode   String   @default("UGX")
+  country        String         @default("UG")
+  currencyCode   String         @default("UGX")
   /// School system: 'primary' | 'secondary' | 'mixed' | 'tertiary'.
-  educationLevel String   @default("mixed")
+  educationLevel String         @default("mixed")
   /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
-  gradingSystem  String   @default("UCE")
+  gradingSystem  String         @default("UCE")
   /// P5: 'daily' (one register per class per day) or 'period' (per class period,
   /// for subject-teacher secondary schools). Attendance marking honours this.
-  attendanceMode String   @default("daily")
-  contacts       Json     @default("{}")
-  customFields   Json     @default("{}")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  attendanceMode String         @default("daily")
+  /// Per-school display vocabulary (brief para 2), for example
+  /// { "class": "Grade", "section": "Stream", "academicLevel": "Section" }.
+  /// A handful of display strings with no relations and no history, so a JSON
+  /// column rather than a table. Defaults and validation live in
+  /// packages/shared/src/terminology.ts so API error messages and UI labels
+  /// cannot drift apart. An empty object means use the defaults.
+  terminology    Json           @default("{}")
+  /// How class/stream capacity is applied when a learner is placed (ADR-030).
+  /// ENFORCE refuses an over-capacity placement unless the user holds the
+  /// override permission and gives a reason; WARN seats and reports; OFF
+  /// ignores capacity. A NULL capacity is unlimited under every policy.
+  capacityPolicy CapacityPolicy @default(ENFORCE)
+  contacts       Json           @default("{}")
+  customFields   Json           @default("{}")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@index([organizationId])
 }
 
+/// Lifecycle of an academic year. `isCurrent` answers which year the school is
+/// working in today; this answers whether it may still be written to. They are
+/// not the same question: a CLOSED year is never current, but a non-current year
+/// may be PLANNING (next year, being set up) or CLOSED (last year, read-only).
+enum CapacityPolicy {
+  ENFORCE
+  WARN
+  OFF
+}
+
+enum AcademicYearStatus {
+  PLANNING
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
 model AcademicYear {
-  id             String    @id @default(uuid())
+  id             String             @id @default(uuid())
   organizationId String
   name           String
   startDate      DateTime
   endDate        DateTime
-  isCurrent      Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  isCurrent      Boolean            @default(false)
+  status         AcademicYearStatus @default(PLANNING)
+  closedAt       DateTime?
+  closedById     String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
   createdBy      String?
   updatedBy      String?
   deletedAt      DateTime?
@@ -10631,7 +10806,6 @@ model Term {
 
   academicYear        AcademicYear           @relation(fields: [academicYearId], references: [id])
   feeSchedules        FeeSchedule[]
-  enrollments         Enrollment[]
   lessonPlans         LessonPlan[]
   teacherAssignments  TeacherAssignment[]
   exams               Exam[]
@@ -10689,23 +10863,48 @@ model SubjectCategory {
 }
 
 model GradeLevel {
-  id             String    @id @default(uuid())
-  organizationId String
-  name           String
-  /// Display order (e.g. P1=1, P7=7, S1=8, S6=13).
-  order          Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id               String    @id @default(uuid())
+  organizationId   String
+  name             String
+  /// Stable identifier used by imports and integrations. Display names change
+  /// (P4 becomes Primary 4); codes do not, which is why CSV import resolves on
+  /// this and never on `name`.
+  code             String?
+  description      String?
+  /// Sort order. Deactivating is preferred to deleting once history exists.
+  order            Int       @default(0)
+  isActive         Boolean   @default(true)
+  /// The band this grade belongs to (ADR-028). Nullable until the Phase 2
+  /// backfill has drained its exception queue; it becomes required once every
+  /// grade in every tenant has a band.
+  academicLevelId  String?
+  /// Configurable progression (brief para 13). The grade a learner moves INTO
+  /// on promotion. Null on a terminal grade, where promotion offers COMPLETED
+  /// instead. Replaces deriving the ladder from `order` plus alphabetical class
+  /// name, which silently guessed the destination.
+  nextGradeLevelId String?
+  /// True where the grade ends this school ladder (P7, S6, or Top in a nursery
+  /// that does not continue into primary). Kept separate from a null
+  /// `nextGradeLevelId` so not-configured-yet and deliberately-terminal stay
+  /// distinguishable.
+  isTerminal       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
 
-  classes            SchoolClass[]
-  programmeLinks     ProgrammeGradeLevel[]
-  studentEnrollments StudentEnrollment[]
+  academicLevel       AcademicLevel?      @relation(fields: [academicLevelId], references: [id], onDelete: Restrict)
+  classes             SchoolClass[]
+  studentEnrollments  StudentEnrollment[]
+  nextGradeLevel      GradeLevel?         @relation("GradeProgression", fields: [nextGradeLevelId], references: [id], onDelete: SetNull)
+  previousGradeLevels GradeLevel[]        @relation("GradeProgression")
 
   @@unique([organizationId, name])
+  @@unique([organizationId, code])
   @@index([organizationId])
+  @@index([nextGradeLevelId])
+  @@index([academicLevelId])
 }
 
 model SchoolClass {
@@ -10714,8 +10913,26 @@ model SchoolClass {
   campusId          String?
   gradeLevelId      String
   name              String
+  /// Stable identifier for imports and integrations. See GradeLevel.code.
+  code              String?
+  description       String?
   homeroomTeacherId String?
-  capacity          Int       @default(40)
+  /// Default seat count for cohorts of this class. NULL means unlimited, which
+  /// is a real configuration rather than a missing value: a school that does not
+  /// cap its classes leaves it null (brief para 11). A ClassCohort may override
+  /// it for one year. There is deliberately no separate `defaultCapacity`
+  /// column - this IS the default, and two capacity fields on one table would
+  /// eventually disagree.
+  capacity          Int?
+  /// Whether this class is subdivided at all. False means learners enrol
+  /// straight into the class, the common case in a small school (brief para 10).
+  /// A class's subdivisions are its Sections, shown as "Streams" by default
+  /// terminology (ADR-029).
+  allowsStreams     Boolean   @default(true)
+  /// Explicit ordering. Academic order is not alphabetical order: P10 sorts
+  /// before P2 by name, and North/South/East/West has no alphabetical meaning.
+  displayOrder      Int       @default(0)
+  isActive          Boolean   @default(true)
   customFields      Json      @default("{}")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -10729,20 +10946,19 @@ model SchoolClass {
   sections              Section[]
   teacherAssignments    TeacherAssignment[]
   timetableSlots        TimetableSlot[]
-  studentProfiles       StudentProfile[]
   studentAttendance     StudentAttendance[]
-  enrollments           Enrollment[]
   homeworks             HomeworkAssignment[]
   announcements         Announcement[]
   examSchedules         ExamSchedule[]
-  streams               Stream[]
   admissionApplications AdmissionApplication[] @relation("AdmissionApplyingForClass")
   classCohorts          ClassCohort[]
 
   @@unique([organizationId, name])
+  @@unique([organizationId, code])
   @@index([organizationId])
   @@index([campusId])
   @@index([gradeLevelId])
+  @@index([organizationId, isActive, displayOrder])
 }
 
 model Section {
@@ -10750,7 +10966,15 @@ model Section {
   organizationId String
   classId        String
   name           String
-  capacity       Int       @default(40)
+  /// Stable identifier, unique within the class. Import resolves on
+  /// (classCode, sectionCode), so North in P4 and North in P5 stay distinct
+  /// without relying on display names.
+  code           String?
+  description    String?
+  /// NULL means unlimited. See SchoolClass.capacity.
+  capacity       Int?
+  displayOrder   Int       @default(0)
+  isActive       Boolean   @default(true)
   classTeacherId String? // Homeroom/class teacher (StaffProfile)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -10760,52 +10984,18 @@ model Section {
 
   schoolClass        SchoolClass           @relation(fields: [classId], references: [id])
   classTeacher       StaffProfile?         @relation(fields: [classTeacherId], references: [id], onDelete: SetNull)
-  studentProfiles    StudentProfile[]
-  enrollments        Enrollment[]
   teacherAssignments TeacherAssignment[]
   timetableSlots     TimetableSlot[]
   studentAttendance  StudentAttendance[]
   homeworks          HomeworkAssignment[]
-  /// ADR-019 SECTION_AND_STREAM: streams that hang off this section.
-  streams            Stream[]
   placements         EnrollmentPlacement[]
   courseOfferings    CourseOffering[]
 
   @@unique([organizationId, classId, name])
+  @@unique([organizationId, classId, code])
   @@index([organizationId])
   @@index([classId])
   @@index([classTeacherId])
-}
-
-/// Stream: a sub-grouping of a class distinct from a Section (e.g. S1 → Section A →
-/// Stream East). Optional — many schools only use sections.
-model Stream {
-  id             String    @id @default(uuid())
-  organizationId String
-  classId        String
-  /// ADR-019: in SECTION_AND_STREAM mode a stream belongs to one section of the
-  /// same class. Null in STREAM_ONLY mode.
-  sectionId      String?
-  name           String
-  capacity       Int       @default(40)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
-
-  schoolClass        SchoolClass           @relation(fields: [classId], references: [id])
-  section            Section?              @relation(fields: [sectionId], references: [id])
-  studentProfiles    StudentProfile[]
-  enrollments        Enrollment[]
-  teacherAssignments TeacherAssignment[]
-  timetableSlots     TimetableSlot[]
-  placements         EnrollmentPlacement[]
-  courseOfferings    CourseOffering[]
-
-  @@unique([organizationId, classId, name])
-  @@index([organizationId])
-  @@index([classId])
 }
 
 model Subject {
@@ -10919,9 +11109,6 @@ model StudentProfile {
   partnerId         String           @unique
   partner           Partner          @relation("StudentPartner", fields: [partnerId], references: [id])
   admissionNo       String
-  currentClassId    String?
-  currentSectionId  String?
-  currentStreamId   String?
   enrollmentDate    DateTime
   status            StudentStatus    @default(active)
   /// Date-of-birth mirror for fast filtering (also stored on Partner customFields).
@@ -10943,16 +11130,12 @@ model StudentProfile {
   updatedBy         String?
   deletedAt         DateTime?
 
-  currentClass        SchoolClass?                  @relation(fields: [currentClassId], references: [id])
-  currentSection      Section?                      @relation(fields: [currentSectionId], references: [id])
-  currentStream       Stream?                       @relation(fields: [currentStreamId], references: [id])
   guardians           StudentGuardian[]
   medicalRecord       MedicalRecord?
   documents           StudentDocument[]
   statusHistory       StudentStatusHistory[]
   attendances         StudentAttendance[]
   homeworks           HomeworkSubmission[]
-  enrollments         Enrollment[]
   gradeEntries        GradeEntry[]
   feeAssignments      StudentFeeAssignment[]
   optionalFees        StudentOptionalFee[]
@@ -10976,16 +11159,13 @@ model StudentProfile {
 
   outcomeAchievements StudentOutcomeAchievement[]
   borrowings          Borrowing[]
-  /// Phase 1 canonical membership (ADR-018). `currentClassId` and friends above
-  /// are compatibility projections of the newest effective placement.
+  /// Canonical membership (ADR-018): class and stream come from the placement
+  /// history under these enrollments, never from a column on the profile.
   academicEnrollments StudentEnrollment[]
   mobileMoneyRequests MobileMoneyRequest[]
 
   @@unique([organizationId, admissionNo])
   @@index([organizationId])
-  @@index([currentClassId])
-  @@index([currentSectionId])
-  @@index([currentStreamId])
 }
 
 model StudentStatusHistory {
@@ -11424,7 +11604,6 @@ model AdmissionCapacity {
   admissionCycleId String
   classId          String
   sectionId        String?
-  streamId         String?
   campusId         String?
   capacity         Int     @default(0)
   reservedCapacity Int     @default(0)
@@ -11438,7 +11617,7 @@ model AdmissionCapacity {
 
   admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
 
-  @@unique([organizationId, admissionCycleId, classId, sectionId, streamId])
+  @@unique([organizationId, admissionCycleId, classId, sectionId])
   @@index([organizationId])
   @@index([admissionCycleId])
   @@index([classId])
@@ -11580,7 +11759,7 @@ model AdmissionApplication {
   waitingList         WaitingList?
   fee                 AdmissionFee?
   offerLetter         OfferLetter?
-  enrollment          Enrollment?
+  studentEnrollment   StudentEnrollment?
   identityMatches     ApplicantIdentityMatch[]
   decision            AdmissionDecision?
   guardians           AdmissionGuardian[]
@@ -11911,95 +12090,33 @@ model OfferLetter {
   @@index([applicationId])
 }
 
-model Enrollment {
-  id               String    @id @default(uuid())
-  organizationId   String
-  applicationId    String?   @unique
-  studentProfileId String
-  classId          String
-  sectionId        String?
-  streamId         String?
-  termId           String
-  rollNumber       String
-  enrolledAt       DateTime  @default(now())
-  /// Date the enrollment became effective (may differ from enrolledAt for mid-year entries).
-  effectiveDate    DateTime  @default(now())
-  /// 'enrolled' | 'completed' | 'transferred_out' | 'withdrawn'.
-  status           String    @default("enrolled")
-  /// Set when the enrollment ends (transfer/withdraw). History is append-only in EnrollmentHistory.
-  endedAt          DateTime?
-  endReason        String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  application AdmissionApplication? @relation(fields: [applicationId], references: [id])
-  student     StudentProfile        @relation(fields: [studentProfileId], references: [id])
-  schoolClass SchoolClass           @relation(fields: [classId], references: [id])
-  section     Section?              @relation(fields: [sectionId], references: [id])
-  stream      Stream?               @relation(fields: [streamId], references: [id])
-  term        Term                  @relation(fields: [termId], references: [id])
-  history     EnrollmentHistory[]
-
-  @@unique([organizationId, studentProfileId, termId])
-  @@index([organizationId])
-  @@index([classId])
-  @@index([sectionId])
-  @@index([streamId])
-  @@index([termId])
-}
-
-/// Append-only history of every enrollment status change (enroll / transfer / withdraw /
-/// re-enroll). This is the auditable record that makes Student Academic Enrollment a
-/// first-class historical entity.
-model EnrollmentHistory {
-  id             String   @id @default(uuid())
-  organizationId String
-  enrollmentId   String
-  fromStatus     String?
-  toStatus       String
-  reason         String?
-  changedById    String?
-  changedAt      DateTime @default(now())
-
-  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId])
-  @@index([enrollmentId])
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// PHASE 1 — Enrollment and grouping integrity (ADR-018, ADR-019).
-//
-// `Enrollment` (above) stays as the legacy compatibility row and is MIGRATE-d,
-// not deleted, per the Phase 0.5 register. The canonical academic truth is:
+// Enrollment and grouping (ADR-018, ADR-029). The academic truth is:
 //
 //   AcademicProgramme   → which curriculum/assessment rules a learner is under
 //   ClassCohort         → one class in one academic year (the annual cohort)
 //   StudentEnrollment   → official school membership for a programme + year
 //   EnrollmentPlacement → append-only effective-dated term/cohort/section/stream
 //
-// `StudentProfile.currentClassId/currentSectionId/currentStreamId` become
-// PROJECTIONS of the newest effective placement. They are never read as truth.
+// A learner's class and stream at any date are read from the placement open on
+// that date. There is no "current class" column to drift out of step.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Uganda NCDC stage bands. Kept as an enum because programme *behaviour*
 /// (grading, ranking defaults, report templates) is keyed off the stage, but the
 /// actual rules live in versioned configuration, never in code branches.
 enum ProgrammeStage {
+  /// Nursery / kindergarten. Assessment here is developmental rather than
+  /// mark-based, which is why the stage exists separately from PRIMARY_LOWER.
+  PRE_PRIMARY
+  /// A school that runs primary as one undivided band rather than the
+  /// NCDC lower/upper split.
+  PRIMARY
   PRIMARY_LOWER
   PRIMARY_UPPER
   LOWER_SECONDARY
   ADVANCED_SECONDARY
   OTHER
-}
-
-/// How a school subdivides a class. ADR-019: Section and Stream stay distinct
-/// concepts; the mode says which of them the school actually uses.
-enum GroupingMode {
-  NONE
-  SECTION_ONLY
-  STREAM_ONLY
-  SECTION_AND_STREAM
 }
 
 enum StudentEnrollmentStatus {
@@ -12039,6 +12156,9 @@ enum PlacementMovementReason {
   COMPLETION
   CORRECTION
   BACKFILL
+  /// Left the ladder by finishing it: a terminal grade (P7) promoted into
+  /// nothing. Distinct from COMPLETION, which any enrollment can reach.
+  GRADUATION
 }
 
 enum ClassCohortStatus {
@@ -12061,7 +12181,6 @@ enum CourseOfferingType {
 enum CourseOfferingAudienceScope {
   COHORT
   SECTION
-  STREAM
   CUSTOM
   SCHOOL
 }
@@ -12097,6 +12216,52 @@ enum CourseEnrollmentStatus {
   WITHDRAWN
 }
 
+/// The band above a grade: Pre-Primary, Primary, Secondary, Vocational
+/// (ADR-028, brief para 4).
+///
+/// This is the layer a school actually manages: it renames it, reorders it and
+/// deactivates it. `AcademicProgramme` keeps only the curriculum and assessment
+/// rules, because a school changing what it calls its nursery section should not
+/// be editing the row that decides how marks are computed.
+///
+/// Nothing here is Uganda-specific. "Pre-Primary" and "Primary" are seeded DATA;
+/// another school seeds "Junior School" and "Senior School" against the same
+/// model.
+model AcademicLevel {
+  id                 String         @id @default(uuid())
+  organizationId     String
+  name               String
+  /// Stable identifier (PRE_PRIMARY, PRIMARY). Import and integrations resolve
+  /// on this, never on `name`.
+  code               String
+  description        String?
+  /// Explicit ordering. Nursery sorts before Primary because the school says so,
+  /// not because of where the names fall in the alphabet.
+  displayOrder       Int            @default(0)
+  isActive           Boolean        @default(true)
+  /// Behavioural band. Drives assessment defaults; the rules themselves live in
+  /// versioned programme configuration, never in a code branch on this value.
+  stage              ProgrammeStage @default(OTHER)
+  /// The programme a learner entering this band is enrolled under: a grade
+  /// level has one level and a level has one default programme, so
+  /// gradeLevel -> programme is deterministic.
+  defaultProgrammeId String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  createdBy          String?
+  updatedBy          String?
+  deletedAt          DateTime?
+
+  defaultProgramme AcademicProgramme? @relation("LevelDefaultProgramme", fields: [defaultProgrammeId], references: [id], onDelete: SetNull)
+  gradeLevels      GradeLevel[]
+
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([organizationId, isActive, displayOrder])
+  @@index([defaultProgrammeId])
+}
+
 /// A versioned academic programme (P1–P3, P4–P7, S1–S4, S5–S6, …). Uganda rules
 /// are configuration on this row and its grade-level links — never a hard-coded
 /// `if (className === 'P2')`.
@@ -12108,8 +12273,6 @@ model AcademicProgramme {
   stage               ProgrammeStage @default(OTHER)
   /// e.g. 'NCDC', 'UNEB', 'CAMBRIDGE'. Free text so non-Uganda tenants fit.
   curriculumAuthority String?
-  /// Default subdivision mode for cohorts created under this programme.
-  groupingMode        GroupingMode   @default(SECTION_ONLY)
   description         String?
   effectiveFrom       DateTime
   effectiveTo         DateTime?
@@ -12124,54 +12287,35 @@ model AcademicProgramme {
   updatedBy           String?
   deletedAt           DateTime?
 
-  gradeLevels     ProgrammeGradeLevel[]
-  cohorts         ClassCohort[]
-  enrollments     StudentEnrollment[]
-  courseOfferings CourseOffering[]
+  cohorts          ClassCohort[]
+  enrollments      StudentEnrollment[]
+  courseOfferings  CourseOffering[]
+  /// Levels that enrol into this programme by default (ADR-028).
+  defaultForLevels AcademicLevel[]     @relation("LevelDefaultProgramme")
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@index([organizationId, stage])
 }
 
-/// Which grade levels a programme covers (P4–P7 → four rows). Drives programme
-/// resolution when a learner is enrolled into a grade level.
-model ProgrammeGradeLevel {
-  id             String   @id @default(uuid())
-  organizationId String
-  programmeId    String
-  gradeLevelId   String
-  createdAt      DateTime @default(now())
-
-  programme  AcademicProgramme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
-  gradeLevel GradeLevel        @relation(fields: [gradeLevelId], references: [id], onDelete: Cascade)
-
-  @@unique([organizationId, programmeId, gradeLevelId])
-  /// A grade level belongs to exactly one programme per organization, so
-  /// programme resolution from a grade level is deterministic.
-  @@unique([organizationId, gradeLevelId])
-  @@index([organizationId])
-  @@index([programmeId])
-}
-
-/// One class in one academic year — the *annual* cohort. Section and Stream are
-/// always tied to the same cohort (ADR-019), which is what makes "a teacher
-/// cannot pick a stream belonging to another class" enforceable.
+/// One class in one academic year — the *annual* cohort. A placement's section
+/// must belong to the cohort's class, which is what makes "a teacher cannot pick
+/// a stream belonging to another class" enforceable.
 model ClassCohort {
-  id             String            @id @default(uuid())
-  organizationId String
-  academicYearId String
-  classId        String
-  programmeId    String?
-  /// Overrides the programme default when a school runs one class differently.
-  groupingMode   GroupingMode?
-  capacity       Int?
-  status         ClassCohortStatus @default(ACTIVE)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id                String            @id @default(uuid())
+  organizationId    String
+  academicYearId    String
+  classId           String
+  programmeId       String?
+  /// Per-year override of `SchoolClass.allowsStreams`. NULL means "use the class".
+  allowsSubdivision Boolean?
+  capacity          Int?
+  status            ClassCohortStatus @default(ACTIVE)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
 
   academicYear    AcademicYear          @relation(fields: [academicYearId], references: [id])
   schoolClass     SchoolClass           @relation(fields: [classId], references: [id])
@@ -12190,33 +12334,35 @@ model ClassCohort {
 /// This is NOT a placement: a learner keeps one enrollment across all three
 /// terms and moves between classes/sections via EnrollmentPlacement rows.
 model StudentEnrollment {
-  id                 String                  @id @default(uuid())
-  organizationId     String
-  studentProfileId   String
-  academicYearId     String
-  programmeId        String
-  gradeLevelId       String
-  admissionDate      DateTime
-  completionDate     DateTime?
-  status             StudentEnrollmentStatus @default(ACTIVE)
-  enrollmentType     EnrollmentType          @default(NEW)
-  /// Kept so reconciliation can prove every legacy row was mapped exactly once.
-  legacyEnrollmentId String?                 @unique
+  id                     String                  @id @default(uuid())
+  organizationId         String
+  studentProfileId       String
+  academicYearId         String
+  programmeId            String
+  gradeLevelId           String
+  admissionDate          DateTime
+  completionDate         DateTime?
+  status                 StudentEnrollmentStatus @default(ACTIVE)
+  enrollmentType         EnrollmentType          @default(NEW)
   /// Tags rows written by a backfill so a failed gate can remove only those.
-  migrationRunId     String?
-  notes              String?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  createdBy          String?
-  updatedBy          String?
+  migrationRunId         String?
+  /// The admission application this enrollment came from, when it came from
+  /// one. Unique: an application enrols exactly one learner exactly once.
+  admissionApplicationId String?                 @unique
+  notes                  String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  createdBy              String?
+  updatedBy              String?
 
-  student           StudentProfile           @relation(fields: [studentProfileId], references: [id])
-  academicYear      AcademicYear             @relation(fields: [academicYearId], references: [id])
-  programme         AcademicProgramme        @relation(fields: [programmeId], references: [id])
-  gradeLevel        GradeLevel               @relation(fields: [gradeLevelId], references: [id])
-  placements        EnrollmentPlacement[]
-  events            StudentEnrollmentEvent[]
-  courseEnrollments CourseEnrollment[]
+  student              StudentProfile           @relation(fields: [studentProfileId], references: [id])
+  academicYear         AcademicYear             @relation(fields: [academicYearId], references: [id])
+  programme            AcademicProgramme        @relation(fields: [programmeId], references: [id])
+  gradeLevel           GradeLevel               @relation(fields: [gradeLevelId], references: [id])
+  admissionApplication AdmissionApplication?    @relation(fields: [admissionApplicationId], references: [id])
+  placements           EnrollmentPlacement[]
+  events               StudentEnrollmentEvent[]
+  courseEnrollments    CourseEnrollment[]
 
   /// One membership per learner per academic year. A repeater gets the NEXT
   /// year's enrollment with enrollmentType REPEAT, never a second row for the
@@ -12236,40 +12382,38 @@ model StudentEnrollment {
 /// stream in place. Exactly one row per enrollment may be open at a time; the
 /// service enforces it and a partial unique index backs it in the database.
 model EnrollmentPlacement {
-  id                 String                   @id @default(uuid())
-  organizationId     String
-  enrollmentId       String
-  termId             String
-  classCohortId      String
-  sectionId          String?
-  streamId           String?
-  rollNumber         String?
-  effectiveFrom      DateTime
-  effectiveTo        DateTime?
-  movementReason     PlacementMovementReason  @default(INITIAL_PLACEMENT)
+  id                     String                   @id @default(uuid())
+  organizationId         String
+  enrollmentId           String
+  termId                 String
+  classCohortId          String
+  sectionId              String?
+  rollNumber             String?
+  effectiveFrom          DateTime
+  effectiveTo            DateTime?
+  movementReason         PlacementMovementReason  @default(INITIAL_PLACEMENT)
   /// Reason the row was CLOSED (set at the same time as effectiveTo).
-  endReason          PlacementMovementReason?
-  notes              String?
-  changedById        String?
-  migrationRunId     String?
-  /// The legacy `Enrollment` row this placement was backfilled from. Unique, so
-  /// a re-run maps each legacy row exactly once and reconciliation can prove it.
-  legacyEnrollmentId String?                  @unique
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
+  endReason              PlacementMovementReason?
+  notes                  String?
+  /// Set when a placement exceeded capacity under the override permission
+  /// (ADR-030). Who decided, and why — next to the audit row.
+  capacityOverriddenById String?
+  capacityOverrideReason String?
+  changedById            String?
+  migrationRunId         String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
 
   enrollment  StudentEnrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
   term        Term              @relation(fields: [termId], references: [id])
   classCohort ClassCohort       @relation(fields: [classCohortId], references: [id])
   section     Section?          @relation(fields: [sectionId], references: [id])
-  stream      Stream?           @relation(fields: [streamId], references: [id])
 
   @@index([organizationId])
   @@index([enrollmentId])
   @@index([termId])
   @@index([classCohortId])
   @@index([sectionId])
-  @@index([streamId])
   @@index([organizationId, effectiveFrom])
   @@index([migrationRunId])
 }
@@ -12571,7 +12715,6 @@ model CourseOffering {
   subjectId            String?
   classId              String?
   sectionId            String?
-  streamId             String?
   /// Specific Curriculum version row (point at a published Curriculum, not a bare class).
   curriculumId         String?
   competencyId         String?
@@ -12602,7 +12745,6 @@ model CourseOffering {
   classCohort        ClassCohort?               @relation(fields: [classCohortId], references: [id])
   subject            Subject?                   @relation(fields: [subjectId], references: [id])
   section            Section?                   @relation(fields: [sectionId], references: [id])
-  stream             Stream?                    @relation(fields: [streamId], references: [id])
   curriculum         Curriculum?                @relation(fields: [curriculumId], references: [id])
   competency         Competency?                @relation(fields: [competencyId], references: [id])
   activityDefinition LearningActivity?          @relation(fields: [activityDefinitionId], references: [id])
@@ -13165,7 +13307,6 @@ model TeacherAssignment {
   subjectId        String
   classId          String
   sectionId        String?
-  streamId         String?
   termId           String?
   periodsPerWeek   Int      @default(0)
   createdAt        DateTime @default(now())
@@ -13175,14 +13316,12 @@ model TeacherAssignment {
   subject     Subject      @relation(fields: [subjectId], references: [id])
   schoolClass SchoolClass  @relation(fields: [classId], references: [id])
   section     Section?     @relation(fields: [sectionId], references: [id])
-  stream      Stream?      @relation(fields: [streamId], references: [id])
   term        Term?        @relation(fields: [termId], references: [id])
 
-  @@unique([organizationId, teacherPartnerId, subjectId, classId, sectionId, streamId, termId])
+  @@unique([organizationId, teacherPartnerId, subjectId, classId, sectionId, termId])
   @@index([organizationId])
   @@index([teacherPartnerId])
   @@index([classId])
-  @@index([streamId])
 }
 
 model TimetableSlot {
@@ -13190,7 +13329,6 @@ model TimetableSlot {
   organizationId      String
   classId             String
   sectionId           String?
-  streamId            String?
   dayOfWeek           Int // 1=Monday ... 7=Sunday
   periodId            String
   subjectId           String
@@ -13218,7 +13356,6 @@ model TimetableSlot {
 
   schoolClass SchoolClass   @relation(fields: [classId], references: [id])
   section     Section?      @relation(fields: [sectionId], references: [id])
-  stream      Stream?       @relation(fields: [streamId], references: [id])
   period      Period        @relation(fields: [periodId], references: [id])
   subject     Subject       @relation(fields: [subjectId], references: [id])
   campus      Campus?       @relation(fields: [campusId], references: [id])
@@ -13232,7 +13369,6 @@ model TimetableSlot {
   @@index([classId, dayOfWeek])
   @@index([teacherPartnerId, dayOfWeek])
   @@index([periodId, dayOfWeek])
-  @@index([streamId])
   @@index([teachingRoomId])
   @@index([courseOfferingId])
 }
@@ -14333,6 +14469,13 @@ model StudentAssessment {
   @@index([organizationId])
   @@index([organizationId, studentProfileId])
   @@index([organizationId, studentProfileId, termId])
+  /// Mark-entry hot paths. These shipped as raw CREATE INDEX in
+  /// 20260908000000_phase6_statutory_portal but were never declared here, so
+  /// `migrate diff` proposed dropping them on every run. Declared now with their
+  /// original names so schema and database agree and the indexes survive.
+  @@index([assessmentId, deletedAt, studentProfileId], map: "StudentAssessment_assessment_student_idx")
+  @@index([studentProfileId, approvalStatus, updatedAt(sort: Desc)], map: "StudentAssessment_student_approval_updated_idx")
+  @@index([organizationId, termId, approvalStatus], map: "StudentAssessment_org_term_approval_idx")
 }
 
 /// A single marker's score in one marking round. Multiple rounds support
@@ -14907,7 +15050,6 @@ model ExamCandidateEntry {
   examRegistrationId String?
   classId            String?
   sectionId          String?
-  streamId           String?
   /// School candidate number, and the national index number where one exists.
   candidateNumber    String?
   indexNumber        String?
@@ -15179,7 +15321,6 @@ model PromotionDecision {
   /// sections or streams needs the subdivision named here, not guessed at the
   /// moment the placement is written (ADR-019).
   toSectionId           String?
-  toStreamId            String?
   status                PromotionDecisionStatus  @default(proposed)
   /// The numbers the recommendation was derived from, frozen at proposal time.
   basis                 Json                     @default("{}")
@@ -15964,6 +16105,13 @@ model MobileMoneyRequest {
   paymentId        String?
   settledAt        DateTime?
   requestedById    String?
+  /// Gateway account the request was sent through; its org + secret verify the callback.
+  gatewayAccountId String?
+  /// What the provider reported it actually collected (may differ from `amount`).
+  receivedAmount   Decimal?  @db.Decimal(20, 6)
+  currency         String?
+  /// Set once a MobileMoneySettlement has swept this collection from clearing to bank.
+  settlementId     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -15974,6 +16122,62 @@ model MobileMoneyRequest {
   @@index([organizationId])
   @@index([studentProfileId])
   @@index([organizationId, status])
+}
+
+/// Per-organization mobile-money / card gateway. Credentials are encrypted at
+/// rest (EncryptionService); the public callback resolves its tenant from here
+/// before reading any tenant-scoped data.
+model PaymentGatewayAccount {
+  id                  String    @id @default(uuid())
+  organizationId      String
+  /// mtn | airtel
+  provider            String
+  label               String
+  /// sandbox | production
+  environment         String    @default("sandbox")
+  merchantCode        String?
+  baseUrl             String?
+  currency            String    @default("UGX")
+  /// Encrypted JSON of provider credentials (subscription key, access token, ...).
+  credentialsCipher   String?
+  credentialsIv       String?
+  credentialsTag      String?
+  /// Encrypted HMAC secret used to verify provider callbacks.
+  callbackSecretCipher String?
+  callbackSecretIv    String?
+  callbackSecretTag   String?
+  /// GL clearing account collections are debited to until the provider settles.
+  clearingAccountId   String?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  createdBy           String?
+  updatedBy           String?
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+}
+
+/// A provider payout: collections swept from the clearing account to the bank,
+/// net of provider charges. Dr Bank + Dr Charges / Cr Clearing.
+model MobileMoneySettlement {
+  id               String   @id @default(uuid())
+  organizationId   String
+  gatewayAccountId String
+  provider         String
+  reference        String
+  settlementDate   DateTime
+  grossAmount      Decimal  @db.Decimal(20, 6)
+  charges          Decimal  @default(0) @db.Decimal(20, 6)
+  netAmount        Decimal  @db.Decimal(20, 6)
+  bankAccountId    String
+  journalEntryId   String?
+  notes            String?
+  createdAt        DateTime @default(now())
+  createdBy        String?
+
+  @@unique([organizationId, provider, reference])
+  @@index([organizationId])
 }
 
 model FeeCreditAllocation {
@@ -16079,6 +16283,7 @@ model BillingRunItem {
 model TermFinancialClose {
   id             String    @id @default(uuid())
   organizationId String
+  academicYearId String?
   termId         String
   /// open | closed
   status         String    @default("open")
@@ -16088,6 +16293,7 @@ model TermFinancialClose {
   reopenedAt     DateTime?
   reopenReason   String?
   /// Frozen totals at close (billed/collected/waived/credited/outstanding).
+  snapshotAt     DateTime?
   snapshot       Json      @default("{}")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -16136,6 +16342,8 @@ model PaymentImportRow {
   matchStatus             String    @default("imported")
   /// high | medium | low | none
   matchConfidence         String    @default("none")
+  /// Why the matcher chose this student (e.g. 'external_ref', 'admission_no', 'phone').
+  matchReason             String?
   matchedStudentProfileId String?
   paymentId               String?
   error                   String?

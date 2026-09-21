@@ -32,6 +32,7 @@ import {
 import { notify } from '@/lib/notify';
 import { ACTION_LABELS, NEEDS_REASON, STAGE_LABELS, statusMeta } from './_components/admission-status';
 import { DecisionDialog } from './_components/DecisionDialog';
+import { ApplicationFeeDialog, applicationFeeBadge } from './fees-integrity';
 
 export function SchoolAdmissionsPage() {
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
@@ -41,6 +42,7 @@ export function SchoolAdmissionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   // Decision-reason dialog state (Task 1): replaces the legacy window.prompt.
   const [decision, setDecision] = useState<{ app: AdmissionApplication; action: AdmissionAction } | null>(null);
+  const [feeFor, setFeeFor] = useState<AdmissionApplication | null>(null);
 
   const navigate = useNavigate();
   const { data, isLoading } = useAdmissions({ pageSize: 50 });
@@ -251,15 +253,16 @@ export function SchoolAdmissionsPage() {
                   <th className="px-4 py-2 font-medium">Applying for</th>
                   <th className="px-4 py-2 font-medium">Academic year</th>
                   <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Fee</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {isLoading && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
                 )}
                 {!isLoading && rows.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
                     {statusFilter ? 'No applications in this status.' : 'No applications yet. Create the first one.'}
                   </td></tr>
                 )}
@@ -329,6 +332,11 @@ export function SchoolAdmissionsPage() {
                       <td className="px-4 py-2">
                         <Badge className={meta.cls}>{meta.label}</Badge>
                       </td>
+                      <td className="px-4 py-2">
+                        <button type="button" onClick={() => setFeeFor(a)} title="Application fee">
+                          {applicationFeeBadge(a.feeStatus)}
+                        </button>
+                      </td>
                       <td className="px-4 py-2 text-right">
                         {(() => {
                           const required = (wf?.requiredActions ?? []).filter((a) => !isSpecialAction(a));
@@ -359,6 +367,9 @@ export function SchoolAdmissionsPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onSelect={() => navigate(`/school/applications/${a.id}?mode=edit`)}>
                                   Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onSelect={() => setFeeFor(a)}>
+                                  Application fee…
                                 </DropdownMenuItem>
                                 {dropdownActions.map((action) => renderDropdownAction(action, 
                                   (wf?.requiredActions ?? []).includes(action) ? 'required' :
@@ -437,6 +448,11 @@ export function SchoolAdmissionsPage() {
               <ul className="mt-1 list-disc pl-5">
                 {eligibility.missing.map((m) => <li key={m}>{m}</li>)}
               </ul>
+              {eligibility.missing.some((m) => m.includes('application fee')) && enrollFor && (
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => setFeeFor(enrollFor)}>
+                  Take fee payment
+                </Button>
+              )}
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -491,6 +507,8 @@ export function SchoolAdmissionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ApplicationFeeDialog application={feeFor} onClose={() => setFeeFor(null)} />
 
       {/* Decision-reason dialog (Task 1) */}
       <DecisionDialog

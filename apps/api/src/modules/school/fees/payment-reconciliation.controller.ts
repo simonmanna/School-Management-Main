@@ -42,4 +42,11 @@ export class PaymentReconciliationController {
   ) {
     return this.recon.confirmRow(batchId, rowId, body?.studentProfileId);
   }
+
+  /** Post every HIGH-confidence matched row through the payment engine. */
+  @Post(':batchId/confirm-high')
+  @RequirePermissions(PERMISSIONS.school.reconcilePayments)
+  confirmHigh(@Param('batchId') batchId: string) {
+    return this.recon.confirmHighConfidence(batchId);
+  }
 }

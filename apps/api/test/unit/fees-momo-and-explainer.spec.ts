@@ -9,48 +9,80 @@
 import { createHmac } from 'node:crypto';
 import { MobileMoneyService } from '../../src/modules/school/fees/mobile-money.service';
 import { SchoolFinanceQueryService } from '../../src/modules/school/fees/school-finance-query.service';
+import { makePlacementLookupStub } from './_placement-stub';
 
 /* ───────────────────── Mobile money ───────────────────── */
 
-function makeMomo(overrides: { request?: any; collectResult?: any } = {}) {
-  const mmUpdate = jest.fn().mockResolvedValue({});
+const SECRET = 'test-secret';
+
+function makeMomo(
+  overrides: { request?: any; gateway?: any; collectResult?: any; claimCount?: number } = {},
+) {
+  const request =
+    overrides.request === undefined
+      ? {
+          id: 'req_1',
+          organizationId: 'org_a',
+          studentProfileId: 'stu_1',
+          amount: 300_000,
+          providerRef: 'REF-1',
+          provider: 'mtn',
+          status: 'pending',
+          currency: 'UGX',
+          gatewayAccountId: 'gw_1',
+        }
+      : overrides.request;
+  const gateway =
+    overrides.gateway === undefined
+      ? { id: 'gw_1', organizationId: 'org_a', provider: 'mtn', currency: 'UGX', clearingAccountId: 'acc_clr', callbackSecretCipher: 'c', callbackSecretIv: 'i', callbackSecretTag: 't' }
+      : overrides.gateway;
+
+  const updateMany = jest.fn().mockResolvedValue({ count: overrides.claimCount ?? 1 });
+  const update = jest.fn().mockResolvedValue({});
   const mmCreate = jest.fn().mockResolvedValue({ id: 'req_1' });
   const collect = jest.fn().mockResolvedValue(
-    overrides.collectResult ?? { payment: { id: 'pay_1', paymentNumber: 'PAY-1' }, replayed: false },
+    overrides.collectResult ?? { payment: { id: 'pay_1', paymentNumber: 'PAY-1', amount: 300_000 }, replayed: false },
   );
+  const tx = { mobileMoneyRequest: { findFirst: jest.fn().mockResolvedValue(request), updateMany, update } };
   const prisma = {
+    raw: {
+      mobileMoneyRequest: { findFirst: jest.fn().mockResolvedValue(request) },
+      paymentGatewayAccount: { findFirst: jest.fn().mockResolvedValue(gateway) },
+    },
     client: {
+      $transaction: jest.fn(async (fn: any) => fn(tx)),
       studentProfile: {
         findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', admissionNo: 'ADM-1', partner: { name: 'Nakato' } }),
       },
-      mobileMoneyRequest: {
-        create: mmCreate,
-        update: mmUpdate,
-        findFirst: jest.fn().mockResolvedValue(
-          overrides.request === undefined
-            ? { id: 'req_1', organizationId: 'org', studentProfileId: 'stu_1', amount: 300_000, providerRef: 'REF-1' }
-            : overrides.request,
-        ),
-        findMany: jest.fn().mockResolvedValue([]),
-      },
+      mobileMoneyRequest: { create: mmCreate, update, findMany: jest.fn().mockResolvedValue([]) },
     },
+  };
+  const tenantRun = jest.fn((_store: any, fn: any) => fn());
+  const encryption = {
+    encrypt: jest.fn((v: string) => ({ ciphertext: v, iv: 'i', tag: 't' })),
+    decrypt: jest.fn((payload: any) => (payload?.ciphertext === 'c' ? SECRET : payload?.ciphertext ?? null)),
   };
   const service = new MobileMoneyService(
     prisma as any,
-    { organizationId: 'org', userId: 'u1' } as any,
+    { organizationId: 'org_a', userId: 'u1', run: tenantRun } as any,
     { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any,
     { collect } as any,
     { studentBalance: jest.fn().mockResolvedValue({ balance: 300_000, billed: 900_000, collected: 600_000 }) } as any,
+    encryption as any,
+    { post: jest.fn() } as any,
+    { settlementAccount: jest.fn().mockResolvedValue('acc_default_clr') } as any,
+    { ensureByCode: jest.fn() } as any,
   );
-  return { service, collect, mmUpdate, mmCreate };
+  return { service, collect, updateMany, update, tenantRun, prisma };
 }
+
+const sign = (raw: string) => createHmac('sha256', SECRET).update(raw).digest('hex');
 
 describe('mobile money · phone numbers', () => {
   const { service } = makeMomo();
   const norm = (p: string) => (service as any).toMsisdn(p);
 
   it('accepts every shape a Ugandan parent actually types', () => {
-    // A provider given the wrong shape reports "payer not found" with no clue why.
     expect(norm('0772123456')).toBe('256772123456');
     expect(norm('+256 772 123 456')).toBe('256772123456');
     expect(norm('256772123456')).toBe('256772123456');
@@ -63,20 +95,9 @@ describe('mobile money · phone numbers', () => {
 });
 
 describe('mobile money · callback safety', () => {
-  const raw = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '300000' });
-  const secret = 'test-secret';
-  const goodSig = createHmac('sha256', secret).update(raw).digest('hex');
-
-  beforeEach(() => {
-    process.env.MTN_MOMO_CALLBACK_SECRET = secret;
-  });
-  afterEach(() => {
-    delete process.env.MTN_MOMO_CALLBACK_SECRET;
-  });
+  const raw = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '300000', currency: 'UGX' });
 
   it('rejects a callback with no signature', async () => {
-    // This endpoint is public by necessity. An unsigned callback would let
-    // anyone credit a pupil's account with money nobody paid.
     const { service, collect } = makeMomo();
     await expect(service.handleCallback('mtn', raw, undefined)).rejects.toThrow(/Invalid callback signature/);
     expect(collect).not.toHaveBeenCalled();
@@ -88,19 +109,24 @@ describe('mobile money · callback safety', () => {
     expect(collect).not.toHaveBeenCalled();
   });
 
-  it('refuses to run at all when no secret is configured', async () => {
-    delete process.env.MTN_MOMO_CALLBACK_SECRET;
-    const { service } = makeMomo();
-    await expect(service.handleCallback('mtn', raw, goodSig)).rejects.toThrow(/No callback secret configured/);
+  it("refuses when the school's gateway has no callback secret", async () => {
+    const { service } = makeMomo({ gateway: { id: 'gw_1', organizationId: 'org_a', provider: 'mtn', currency: 'UGX' } });
+    await expect(service.handleCallback('mtn', raw, sign(raw))).rejects.toThrow(/No callback secret configured/);
   });
 
-  it('posts a verified success through the single payment writer', async () => {
+  it('refuses a callback whose raw bytes are unavailable rather than re-serialising', async () => {
     const { service, collect } = makeMomo();
-    const res: any = await service.handleCallback('mtn', raw, goodSig);
+    await expect(service.handleCallback('mtn', undefined, sign(raw))).rejects.toThrow(/raw body unavailable/);
+    expect(collect).not.toHaveBeenCalled();
+  });
+
+  it("resolves the tenant from the request, then posts to the gateway's clearing account in one transaction", async () => {
+    const { service, collect, tenantRun, prisma } = makeMomo();
+    const res: any = await service.handleCallback('mtn', raw, sign(raw));
 
     expect(res).toMatchObject({ matched: true, status: 'succeeded', posted: true });
-    // The provider's transaction id becomes the idempotency key, so the
-    // at-least-once retries every provider performs collapse to one Payment.
+    expect(tenantRun).toHaveBeenCalledWith({ organizationId: 'org_a' }, expect.any(Function));
+    expect(prisma.client.$transaction).toHaveBeenCalledTimes(1);
     expect(collect).toHaveBeenCalledWith(
       expect.objectContaining({
         studentProfileId: 'stu_1',
@@ -108,35 +134,68 @@ describe('mobile money · callback safety', () => {
         paymentMethod: 'mobile_money',
         externalReference: 'REF-1',
         externalReferenceType: 'mobile_money_txn',
-        convertOverpaymentToCredit: true,
       }),
+      expect.objectContaining({ settlementAccountId: 'acc_clr', tx: expect.anything() }),
     );
   });
 
-  it('does not post money for a failed or pending callback', async () => {
-    const failedRaw = JSON.stringify({ externalId: 'REF-1', status: 'FAILED' });
-    const sig = createHmac('sha256', secret).update(failedRaw).digest('hex');
+  it('posts what the provider says it collected, not what was requested', async () => {
+    const partial = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '250000', currency: 'UGX' });
     const { service, collect } = makeMomo();
-    const res: any = await service.handleCallback('mtn', failedRaw, sig);
+    await service.handleCallback('mtn', partial, sign(partial));
+    expect(collect).toHaveBeenCalledWith(expect.objectContaining({ amount: 250_000 }), expect.anything());
+  });
+
+  it('holds money in a foreign currency for review instead of posting it', async () => {
+    const usd = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '100', currency: 'USD' });
+    const { service, collect, updateMany } = makeMomo();
+    const res: any = await service.handleCallback('mtn', usd, sign(usd));
+    expect(res.status).toBe('needs_review');
+    expect(collect).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'needs_review' }) }),
+    );
+  });
+
+  it('does not post money for a failed callback', async () => {
+    const failedRaw = JSON.stringify({ externalId: 'REF-1', status: 'FAILED' });
+    const { service, collect } = makeMomo();
+    const res: any = await service.handleCallback('mtn', failedRaw, sign(failedRaw));
     expect(res.posted).toBe(false);
     expect(collect).not.toHaveBeenCalled();
   });
 
-  it('acknowledges an unknown reference instead of erroring', async () => {
-    // A provider that receives an error retries forever, and a reference we
-    // cannot place will never become placeable by being resent.
-    const { service, collect } = makeMomo({ request: null });
-    const res: any = await service.handleCallback('mtn', raw, goodSig);
+  it('acknowledges an unknown reference without touching tenant data', async () => {
+    const { service, collect, tenantRun } = makeMomo({ request: null });
+    const res: any = await service.handleCallback('mtn', raw, sign(raw));
     expect(res).toMatchObject({ matched: false });
+    expect(collect).not.toHaveBeenCalled();
+    expect(tenantRun).not.toHaveBeenCalled();
+  });
+
+  it('treats a replay of an already-succeeded request as a no-op', async () => {
+    const { service, collect } = makeMomo({
+      request: { id: 'req_1', organizationId: 'org_a', studentProfileId: 'stu_1', amount: 300_000, providerRef: 'REF-1', provider: 'mtn', status: 'succeeded', gatewayAccountId: 'gw_1' },
+    });
+    const res: any = await service.handleCallback('mtn', raw, sign(raw));
+    expect(res.replayed).toBe(true);
     expect(collect).not.toHaveBeenCalled();
   });
 
-  it('reports a replayed callback as such rather than as a new payment', async () => {
-    const { service } = makeMomo({
-      collectResult: { payment: { id: 'pay_1', paymentNumber: 'PAY-1' }, replayed: true },
+  it('a late failure never un-posts a succeeded request', async () => {
+    const failedRaw = JSON.stringify({ externalId: 'REF-1', status: 'FAILED' });
+    const { service, updateMany } = makeMomo({
+      request: { id: 'req_1', organizationId: 'org_a', studentProfileId: 'stu_1', amount: 300_000, providerRef: 'REF-1', provider: 'mtn', status: 'succeeded', gatewayAccountId: 'gw_1' },
     });
-    const res: any = await service.handleCallback('mtn', raw, goodSig);
+    await service.handleCallback('mtn', failedRaw, sign(failedRaw));
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('loses the race cleanly when a concurrent callback claimed the request first', async () => {
+    const { service, collect } = makeMomo({ claimCount: 0 });
+    const res: any = await service.handleCallback('mtn', raw, sign(raw));
     expect(res.replayed).toBe(true);
+    expect(collect).not.toHaveBeenCalled();
   });
 });
 
@@ -156,7 +215,7 @@ describe('"why does this pupil owe this?"', () => {
         },
       },
     };
-    const s = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any);
+    const s = new SchoolFinanceQueryService(prisma as any, { organizationId: 'org' } as any, {} as any, makePlacementLookupStub() as any);
     jest.spyOn(s, 'studentBalance').mockResolvedValue(balance);
     jest.spyOn(s, 'studentLedger').mockResolvedValue({
       studentProfileId: 'stu_1',

@@ -89,13 +89,34 @@ Handlers given an explicit policy: `ApprovalsController` (4 — `decide` now nee
 
 ---
 
-## 5. Mobile-money collection is disabled, not fixed
+## 5. Mobile-money collection — CLOSED
 
-**Status:** deferred with control. **Closes in:** a separate certification phase. **Owner:** integrations.
+**Status:** closed 2026-09-21.
 
-`MobileMoneyRequest` is registered as tenant-scoped while the callback route is `@Public()`, so the scoped lookup calls the throwing tenant getter and **every genuine callback returns 500**. Beyond that: the parsed amount and currency are discarded in favour of the requested amount, settlement and payment posting are separate transactions, there is no request state-machine guard, and a missing raw-body middleware silently invalidates real signatures via a `JSON.stringify` fallback.
+Every defect listed here is fixed and covered by `test/unit/fees-momo-and-explainer.spec.ts`
+and the DB-backed `test/integration/fees-accounting-hardening.spec.ts`:
 
-Gated off by `ENABLE_MOMO=false` (see `docker-compose.prod.yml`). Live provider collection is out of the first release.
+- Tenant: the callback finds its request by the globally-unique `providerRef` on
+  the unscoped client, verifies the signature with that organization's
+  `PaymentGatewayAccount` secret (encrypted at rest), and only then enters the
+  tenant context.
+- Amount/currency: the provider-reported amount is posted; a foreign currency
+  goes to `needs_review` instead of posting.
+- Atomicity: the request state transition and the payment commit in one
+  transaction (`SchoolPaymentService.collect(dto, { tx })`).
+- State machine: `pending|failed → succeeded|failed|needs_review`; `succeeded`
+  and `needs_review` are terminal; the transition is a conditional update.
+- Raw body: a missing raw body is refused, never re-serialised.
+- Money lands in a clearing account (Dr MoMo Clearing / Cr AR); payouts post
+  Dr Bank + Dr Charges / Cr Clearing.
+
+The `ENABLE_MOMO` flag is removed; availability is per-school gateway
+configuration.
+
+Also fixed while closing this: `EncryptionService.decrypt` compared a 3-byte
+prefix against the 2-byte `v1` version tag, so it rejected every ciphertext it
+produced (MFA secrets, NIN reveal, LTI keys, gateway credentials). Covered by
+`src/kernel/encryption/encryption.service.spec.ts`.
 
 ---
 

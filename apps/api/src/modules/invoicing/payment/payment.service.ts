@@ -158,13 +158,13 @@ export class PaymentService {
           );
         }
       }
-      const cashAccount =
-        dto.accountId ?? (await this.determination.mapped(method === 'bank' ? 'default_bank' : 'default_cash', tx));
+      const cashAccount = dto.accountId ?? (await this.determination.settlementAccount(method, tx));
       const counterAccount =
         counterType === 'receivable'
           ? await this.determination.receivableAccount(partner, tx)
           : await this.determination.payableAccount(partner, tx);
-      const journalCode = method === 'bank' ? 'BANK' : (method as string) === 'store_credit' ? 'GEN' : 'CASH';
+      const journalCode =
+        (method as string) === 'store_credit' ? 'GEN' : method === 'cash' ? 'CASH' : 'BANK';
 
       const year = new Date(dto.paymentDate).getUTCFullYear();
       const seq =

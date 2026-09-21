@@ -52,6 +52,13 @@ export class FinanceControlsController {
     return this.controls.getTermCloseStatus(termId);
   }
 
+  /** Term-scoped totals exactly as a close would freeze them. */
+  @Get('terms/:termId/close-preview')
+  @RequirePermissions(PERMISSIONS.school.read)
+  closePreview(@Param('termId') termId: string) {
+    return this.controls.termTotalsSnapshot(termId);
+  }
+
   @Post('terms/:termId/close')
   @Idempotent()
   @RequirePermissions(PERMISSIONS.school.closePeriod)

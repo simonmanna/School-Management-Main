@@ -55,6 +55,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { notify } from '@/lib/notify';
 import { exportCSV } from '@/lib/export-csv';
 import { money, sel, Stat, apiError } from './fees-shared';
+import { JournalTrail } from './fees-integrity';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -291,6 +292,16 @@ export function SchoolReceiptsPage() {
                 value={money(detail.balance?.balance ?? 0)}
                 tone={(detail.balance?.balance ?? 0) > 0 ? 'rose' : 'emerald'}
               />
+            </div>
+
+            <div className="space-y-2 print:hidden">
+              <p className="text-xs font-medium text-muted-foreground">Accounting trail</p>
+              <JournalTrail journalEntryId={detail.payment?.journalEntryId} label={`Receipt journal · ${detail.payment?.paymentMethod?.replace('_', ' ')}`} />
+              {(detail.payment?.allocations ?? [])
+                .filter((a: any) => a.document?.journalEntryId)
+                .map((a: any) => (
+                  <JournalTrail key={a.id} journalEntryId={a.document.journalEntryId} label={`Invoice ${a.document.documentNumber}`} />
+                ))}
             </div>
           </CardContent>
         </Card>

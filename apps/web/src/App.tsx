@@ -52,6 +52,7 @@ import {
   SchoolFeeOverridesPage,
 } from '@/pages/school/fees-operations';
 import { SchoolMobileMoneyPage, SchoolBalanceExplainerPage } from '@/pages/school/fees-momo';
+import { SchoolTermClosePage } from '@/pages/school/fees-integrity';
 import {
   SchoolStudentLedgerPage,
   SchoolFinanceDashboardPage,
@@ -149,6 +150,11 @@ import { SchoolLmsPackagePlayerPage } from '@/pages/school/lms/package-player';
 import { SchoolLmsCoursePage } from '@/pages/school/lms/course-page';
 import { SchoolLmsModuleViewPage } from '@/pages/school/lms/module-view';
 import { SchoolLmsParticipantsPage } from '@/pages/school/lms/participants';
+import { SchoolLmsEnrolmentPage } from '@/pages/school/lms/enrolment';
+import { SchoolLmsGroupsPage } from '@/pages/school/lms/groups';
+import { SchoolLmsBadgesPage } from '@/pages/school/lms/badges';
+import { SchoolLmsAdminPage } from '@/pages/school/lms/admin';
+import { SchoolLmsGradingWorkbenchPage } from '@/pages/school/lms/grading-workbench';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
 import { BackupPage } from '@/pages/settings/BackupPage';
@@ -277,6 +283,9 @@ import { HrTrainingPage } from '@/pages/hr/HrTrainingPage';
 import { HrOffboardingPage } from '@/pages/hr/HrOffboardingPage';
 import { HrReconciliationPage } from '@/pages/hr/HrReconciliationPage';
 import { HrPayrollPreviewPage } from '@/pages/hr/HrPayrollPreviewPage';
+import { HrPayrollInputsPage } from '@/pages/hr/HrPayrollInputsPage';
+import HrReportCentrePage from '@/pages/hr/reports';
+import RunHrReportPage from '@/pages/hr/reports/run';
 import { HrMyPage } from '@/pages/hr/HrMyPage';
 import { StockLedgerPage } from '@/pages/inventory/StockLedgerPage';
 import LocationsPage from '@/pages/inventory/LocationsPage';
@@ -292,6 +301,7 @@ import TablesPage from '@/pages/tables/TablesPage';
 import ReservationsPage from '@/pages/tables/ReservationsPage';
 import TableReportsPage from '@/pages/tables/TableReportsPage';
 import ReportCenterPage from '@/pages/reports/ReportCenterPage';
+import AccountingReportsPage from '@/pages/accounting/reports/AccountingReportsPage';
 import { StaffPage } from '@/pages/staff/StaffPage';
 import { RolesPage } from '@/pages/staff/RolesPage';
 import { RoleEditPage } from '@/pages/staff/RoleEditPage';
@@ -401,6 +411,7 @@ export function App() {
           <Route path="/year-end-close" element={<YearEndClosePage />} />
           <Route path="/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/reports" element={<ReportCenterPage />} />
+          <Route path="/accounting/reports" element={<AccountingReportsPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/approval-workflows" element={<ApprovalWorkflowsPage />} />
           <Route path="/approval-policies" element={<ApprovalPoliciesPage />} />
@@ -473,7 +484,15 @@ export function App() {
           <Route path="/hr/payroll/settings" element={<HrPayrollSettingsPage />} />
           <Route path="/hr/payslips" element={<HrPayslipsPage />} />
           <Route path="/hr/advances-loans" element={<HrAdvancesLoansPage />} />
-          <Route path="/hr/reports" element={<HrReportsPage />} />
+          <Route path="/hr/payroll/inputs" element={<HrPayrollInputsPage />} />
+          {/* The registry-driven centre IS the HR report centre. The older
+              three-tab view survives at /hr/reports/quick-view because it is
+              linked from the dashboard; its three tabs are now exportable
+              reports in the catalogue. The wildcard runner MUST come last, or
+              it would swallow /hr/reports/quick-view. */}
+          <Route path="/hr/reports" element={<HrReportCentrePage />} />
+          <Route path="/hr/reports/quick-view" element={<HrReportsPage />} />
+          <Route path="/hr/reports/*" element={<RunHrReportPage />} />
           <Route path="/hr/job-grades" element={<HrJobGradesPage />} />
           <Route path="/hr/contracts" element={<HrContractsPage />} />
           <Route path="/hr/recruitment" element={<HrRecruitmentPage />} />
@@ -529,6 +548,7 @@ export function App() {
           <Route path="/school/fees/billing-runs" element={<SchoolBillingRunsPage />} />
           <Route path="/school/fees/adjustments" element={<SchoolAdjustmentsPage />} />
           <Route path="/school/fees/reconciliation" element={<SchoolReconciliationPage />} />
+          <Route path="/school/fees/term-close" element={<SchoolTermClosePage />} />
           <Route path="/school/students/:id/ledger" element={<SchoolStudentLedgerPage />} />
           <Route path="/school/fees/ledger" element={<SchoolStudentLedgerPage />} />
           <Route path="/school/attendance" element={<SchoolAttendancePage />} />
@@ -636,6 +656,11 @@ export function App() {
           <Route path="/school/lms/courses" element={<SchoolLmsCoursesPage />} />
           <Route path="/school/lms/courses/:id" element={<SchoolLmsCoursePage />} />
           <Route path="/school/lms/courses/:id/participants" element={<SchoolLmsParticipantsPage />} />
+          <Route path="/school/lms/courses/:id/enrolment" element={<SchoolLmsEnrolmentPage />} />
+          <Route path="/school/lms/courses/:id/groups" element={<SchoolLmsGroupsPage />} />
+          <Route path="/school/lms/badges" element={<SchoolLmsBadgesPage />} />
+          <Route path="/school/lms/admin" element={<SchoolLmsAdminPage />} />
+          <Route path="/school/lms/modules/:id/grade" element={<SchoolLmsGradingWorkbenchPage />} />
           <Route path="/school/lms/modules/:id" element={<SchoolLmsModuleViewPage />} />
           <Route path="/school/course-offerings" element={<SchoolLmsCourseOfferingsPage />} />
           <Route path="/school/lms/course-offerings" element={<Navigate to="/school/course-offerings" replace />} />

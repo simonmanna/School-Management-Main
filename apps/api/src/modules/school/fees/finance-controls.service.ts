@@ -10,6 +10,7 @@ import { AccountResolverService } from '../../accounting/posting/account-resolve
 import { dec, ZERO } from '../../../kernel/common/money';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { POSTED_FEE_WHERE } from './fee-document.constants';
+import { SCHOOL_ACCOUNTS } from './school-accounts';
 
 /**
  * Finance controls (A2 FeeAdjustment, A4.1 TermFinancialClose).
@@ -130,14 +131,10 @@ export class FinanceControlsService {
       });
 
       const arAccount = await this.accounts.receivableAccount(null, tx);
-      const adjIncome = await this.resolver.ensureByCode(
-        'FEE-ADJ-INC',
-        { name: 'Fee Adjustment Income', categoryKey: 'revenue', mappingKey: 'fee_adjustment_income' },
+      const adjIncome = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeAdjustmentIncome.code, SCHOOL_ACCOUNTS.feeAdjustmentIncome,
         tx,
       );
-      const adjExpense = await this.resolver.ensureByCode(
-        'FEE-ADJ-EXP',
-        { name: 'Fee Adjustment Expense', categoryKey: 'expense', mappingKey: 'fee_adjustment_expense' },
+      const adjExpense = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeAdjustmentExpense.code, SCHOOL_ACCOUNTS.feeAdjustmentExpense,
         tx,
       );
       const lines = isDebit
@@ -234,12 +231,8 @@ export class FinanceControlsService {
     if (ids.length === 0) return;
     const organizationId = this.tenant.organizationId;
     const db = tx ?? this.prisma.client;
-
-    const invoices = await db.schoolFeeInvoice.findMany({
-      where: { organizationId, documentId: { in: ids } },
-      select: { termId: true, invoiceNumber: true },
-    });
-    const termIds = [...new Set(invoices.map((i: any) => i.termId).filter(Boolean))] as string[];
+    const termByDoc = await this.termsOfDocuments(ids, db);
+    const termIds = [...new Set(termByDoc.values())];
     if (termIds.length === 0) return;
 
     const closes = await db.termFinancialClose.findMany({
@@ -249,12 +242,47 @@ export class FinanceControlsService {
     if (closes.length === 0) return;
 
     const closedTermIds = new Set(closes.map((c: any) => c.termId));
-    const blocked = invoices.filter((i: any) => i.termId && closedTermIds.has(i.termId));
+    const blocked = ids.filter((id) => closedTermIds.has(termByDoc.get(id) ?? ''));
+    if (blocked.length === 0) return;
+    const docs = await db.document.findMany({ where: { id: { in: blocked } }, select: { documentNumber: true } });
     throw new BadRequestException(
       `This would post against ${blocked.length} invoice(s) in a financially closed term ` +
-        `(${blocked.map((b: any) => b.invoiceNumber).slice(0, 5).join(', ')}). ` +
+        `(${docs.map((d: any) => d.documentNumber).slice(0, 5).join(', ')}). ` +
         'Reopen the term (maker-checker) before posting.',
     );
+  }
+
+  /**
+   * The academic term each fee document belongs to. Tuition carries it on its
+   * SchoolFeeInvoice; a penalty inherits its source invoice's term; meal and
+   * transport invoices carry it in their term reference. Admission fees are
+   * not term-bound.
+   */
+  async termsOfDocuments(documentIds: string[], db: any = this.prisma.client): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (documentIds.length === 0) return out;
+    const docs = await db.document.findMany({
+      where: { id: { in: documentIds } },
+      select: { id: true, sourceType: true, sourceId: true, reference: true },
+    });
+    const penaltySources = docs
+      .filter((d: any) => d.sourceType === 'school_penalty' && d.sourceId)
+      .map((d: any) => d.sourceId as string);
+    const sfis = await db.schoolFeeInvoice.findMany({
+      where: { documentId: { in: [...documentIds, ...penaltySources] } },
+      select: { documentId: true, termId: true },
+    });
+    const sfiTerm = new Map<string, string>(
+      sfis.filter((r: any) => r.termId).map((r: any) => [r.documentId as string, r.termId as string]),
+    );
+    for (const d of docs) {
+      const direct = sfiTerm.get(d.id);
+      const viaSource = d.sourceType === 'school_penalty' && d.sourceId ? sfiTerm.get(d.sourceId) : undefined;
+      const viaRef = /^(MEALS|TRANSPORT)-(.+)$/.exec(d.reference ?? '')?.[2];
+      const term = direct ?? viaSource ?? viaRef;
+      if (term) out.set(d.id, term);
+    }
+    return out;
   }
 
   getTermCloseStatus(termId: string) {
@@ -262,70 +290,100 @@ export class FinanceControlsService {
     return this.prisma.client.termFinancialClose.findFirst({ where: { organizationId, termId } });
   }
 
-  /**
-   * Org-wide fee totals, by grouped aggregate (P2-E). Mirrors the balance
-   * identity `SchoolFinanceQueryService.studentBalance` computes per student —
-   * `collected` is SUM(PaymentAllocation), never `Document.amountPaid`, which
-   * the P0-3 defect polluted with forgiven and credited value.
-   *
-   * Throws rather than returning partial totals: its only caller freezes the
-   * result as the permanent record of a closed term.
-   */
-  private async termTotalsSnapshot(organizationId: string) {
-    const studentPartners = await this.prisma.client.studentProfile.findMany({
-      where: { organizationId },
-      select: { partnerId: true },
+  /** Every financially active fee document that belongs to a term. */
+  private async termDocuments(termId: string) {
+    const tuition = await this.prisma.client.schoolFeeInvoice.findMany({
+      where: { termId },
+      select: { documentId: true },
     });
-    const partnerIds = [...new Set(studentPartners.map((s) => s.partnerId))];
+    const tuitionIds = tuition.map((t) => t.documentId);
+    return this.prisma.client.document.findMany({
+      where: {
+        ...POSTED_FEE_WHERE,
+        OR: [
+          { id: { in: tuitionIds } },
+          { sourceType: 'school_penalty', sourceId: { in: tuitionIds } },
+          { sourceType: 'school_meal', reference: `MEALS-${termId}` },
+          { sourceType: 'school_transport', reference: `TRANSPORT-${termId}` },
+        ],
+      },
+      select: { id: true, partnerId: true, sourceType: true, totalAmount: true, amountResidual: true, amountWaived: true },
+    });
+  }
 
-    const docs = await this.prisma.client.document.findMany({
-      where: { ...POSTED_FEE_WHERE, organizationId, partnerId: { in: partnerIds } },
-      select: { id: true, totalAmount: true },
+  /**
+   * Term-scoped fee totals. Every figure is restricted to the term's own
+   * documents and to rows in a valid state: posted allocations (reversed ones
+   * excluded), posted credit allocations, the waived share recorded on each
+   * document, and posted adjustments against those documents. `balance` is transaction-derived;
+   * `residual` is the sum of stored residuals — they must agree.
+   *
+   * Throws rather than returning partial totals: the result is frozen as the
+   * permanent record of a closed term.
+   */
+  async termTotalsSnapshot(termId: string) {
+    const term = await this.prisma.client.term.findFirst({
+      where: { id: termId },
+      select: { id: true, name: true, academicYearId: true },
     });
+    if (!term) throw new NotFoundException(`Term ${termId} not found`);
+
+    const docs = await this.termDocuments(termId);
     const docIds = docs.map((d) => d.id);
 
-    const [collectedAgg, creditedAgg, waivedAgg, adjustments] = await Promise.all([
-      docIds.length
-        ? this.prisma.client.paymentAllocation.aggregate({
-            where: { organizationId, documentId: { in: docIds } },
-            _sum: { amount: true },
-          })
-        : Promise.resolve({ _sum: { amount: null } }),
-      docIds.length
-        ? this.prisma.client.feeCreditAllocation.aggregate({
-            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
-            _sum: { amount: true },
-          })
-        : Promise.resolve({ _sum: { amount: null } }),
-      this.prisma.client.waiver.aggregate({
-        where: { organizationId, applied: true },
+    const [collectedAgg, creditedAgg, adjustments] = await Promise.all([
+      this.prisma.client.paymentAllocation.aggregate({
+        where: { documentId: { in: docIds }, status: 'posted' },
+        _sum: { amount: true },
+      }),
+      this.prisma.client.feeCreditAllocation.aggregate({
+        where: { documentId: { in: docIds }, status: 'posted' },
         _sum: { amount: true },
       }),
       this.prisma.client.feeAdjustment.findMany({
-        where: { organizationId, status: 'posted' },
+        where: { documentId: { in: docIds }, status: 'posted' },
         select: { direction: true, amount: true },
       }),
     ]);
 
-    const billed = docs.reduce((t, d) => t + Number(d.totalAmount), 0);
-    const collected = Number(collectedAgg._sum.amount ?? 0);
-    const credited = Number(creditedAgg._sum.amount ?? 0);
-    const waived = Number(waivedAgg._sum.amount ?? 0);
+    const billed = docs.reduce((t, d) => t.plus(dec(d.totalAmount)), ZERO);
+    const residual = docs.reduce((t, d) => t.plus(dec(d.amountResidual)), ZERO);
+    const collected = dec(collectedAgg._sum.amount ?? 0);
+    const credited = dec(creditedAgg._sum.amount ?? 0);
+    // Waivers (incl. bad-debt write-offs) spread across a student's invoices;
+    // each invoice records its share in amountWaived, which is term-attributable.
+    const waived = docs.reduce((t, d) => t.plus(dec(d.amountWaived ?? 0)), ZERO);
     const adjusted = adjustments.reduce(
-      (t, a) => t + (a.direction === 'debit' ? Number(a.amount) : -Number(a.amount)),
-      0,
+      (t, a) => (a.direction === 'debit' ? t.plus(dec(a.amount)) : t.minus(dec(a.amount))),
+      ZERO,
     );
+    const balance = billed.minus(collected).minus(credited).minus(waived).plus(adjusted);
+
+    const bySource: Record<string, { invoices: number; billed: number; outstanding: number }> = {};
+    for (const d of docs) {
+      const k = d.sourceType ?? 'other';
+      const row = (bySource[k] ??= { invoices: 0, billed: 0, outstanding: 0 });
+      row.invoices += 1;
+      row.billed += Number(d.totalAmount);
+      row.outstanding += Number(d.amountResidual);
+    }
 
     return {
-      billed,
-      collected,
-      waived,
-      credited,
-      adjusted,
-      balance: billed - collected - waived - credited + adjusted,
-      studentCount: partnerIds.length,
+      termId,
+      termName: term.name,
+      academicYearId: term.academicYearId,
+      billed: billed.toNumber(),
+      collected: collected.toNumber(),
+      credited: credited.toNumber(),
+      waived: waived.toNumber(),
+      adjusted: adjusted.toNumber(),
+      balance: balance.toNumber(),
+      residual: residual.toNumber(),
+      residualVariance: residual.minus(balance).toNumber(),
+      studentCount: new Set(docs.map((d) => d.partnerId)).size,
       invoiceCount: docs.length,
-      closedAt: new Date().toISOString(),
+      bySource,
+      computedAt: new Date().toISOString(),
     };
   }
 
@@ -350,12 +408,21 @@ export class FinanceControlsService {
     //
     // P2-E: computed by grouped aggregates rather than an N+1 loop over up to
     // 5000 students, which is also why it could time out in the first place.
-    const snapshot = await this.termTotalsSnapshot(organizationId);
+    const snapshot = await this.termTotalsSnapshot(termId);
+    const now = new Date();
+    const fields = {
+      status: 'closed',
+      academicYearId: snapshot.academicYearId,
+      closedById,
+      closedAt: now,
+      snapshotAt: now,
+      snapshot: snapshot as any,
+    };
 
     const row = await this.prisma.client.termFinancialClose.upsert({
       where: { organizationId_termId: { organizationId, termId } },
-      create: { organizationId, termId, status: 'closed', closedById, closedAt: new Date(), snapshot },
-      update: { status: 'closed', closedById, closedAt: new Date(), snapshot },
+      create: { organizationId, termId, ...fields },
+      update: fields,
     });
     await this.audit.record({ entity: 'TermFinancialClose', entityId: row.id, action: 'update', newValues: { event: 'close', termId, snapshot } });
     this.events.publish('school.fee.term.closed', { organizationId, termId, closedById: closedById ?? 'system' });

@@ -3,6 +3,14 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
+import { EncryptionService } from '../../../kernel/encryption/encryption.service';
+import { dec, round, sum, ZERO } from '../../../kernel/common/money';
+import { PostingService } from '../../accounting/posting/posting.service';
+import {
+  AccountDeterminationService,
+  GATEWAY_CHARGES_ACCOUNT,
+} from '../../accounting/posting/account-determination.service';
+import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { SchoolPaymentService } from './billing.service';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 
@@ -11,36 +19,35 @@ import { SchoolFinanceQueryService } from './school-finance-query.service';
 /**
  * Live mobile-money collection — MTN MoMo and Airtel Money.
  *
- * In a Ugandan school this changes the cash cycle more than any other feature:
- * a parent pays from a phone in the village and the pupil's balance moves
- * immediately, instead of the parent travelling to the school with cash or
- * bringing a printed bank slip days later.
- *
- * ─── What this service is, and is not ───
- *
- * It is the school's side of the conversation: a request-to-pay that names the
- * pupil, a callback that posts the money, and a status query for reconciliation.
- * The provider HTTP calls sit behind `MobileMoneyProvider` so MTN, Airtel and a
- * sandbox all look the same to the rest of the module.
- *
  * It deliberately does NOT introduce a second way to record money. Every
  * successful callback funnels into `SchoolPaymentService.collect`, the same
- * path a bursar's cash receipt takes — so a MoMo payment gets the same
- * allocation rules, the same GL posting, the same period control, and the same
- * receipt. There is one payment writer, and this is not it.
+ * path a bursar's cash receipt takes — same allocation rules, GL posting,
+ * period control and receipt.
  *
- * ─── Why replay safety is already solved ───
+ * ─── Tenancy ───
  *
- * Providers retry callbacks aggressively and deliver at-least-once; a timeout on
- * their side means the same payment arrives two or three times. The provider's
- * transaction id goes in as `externalReference` with the matching
- * `externalReferenceType`, which carries a database unique index
- * (organizationId, type, value, direction). A replayed callback therefore
- * cannot create a second payment — the database refuses it, not an application
- * check that two concurrent callbacks would both pass
- * (FINANCIAL_INVARIANTS §Idempotency, §Concurrency).
+ * The callback is public (no JWT), so there is no tenant context on arrival.
+ * The request row is found by its globally-unique `providerRef` on the unscoped
+ * client, its organization's gateway secret verifies the signature, and only
+ * then does processing enter that tenant's context. Nothing tenant-scoped is
+ * read or written before the signature checks out.
+ *
+ * ─── Where the money lands ───
+ *
+ * Collections debit the gateway's clearing account (Dr MoMo Clearing / Cr AR),
+ * never cash in hand. A provider payout is recorded as a settlement:
+ * Dr Bank (net) + Dr Gateway Charges / Cr MoMo Clearing (gross).
+ *
+ * ─── Replay safety ───
+ *
+ * Providers deliver at-least-once. The request row's status transition is
+ * claimed with a conditional update under a row lock, and the provider
+ * reference goes in as `Payment.externalReference`, which carries a database
+ * unique index. The request update and the payment commit in ONE transaction.
  */
+
 export type MobileMoneyProviderName = 'mtn' | 'airtel';
+export const MOBILE_MONEY_PROVIDERS: readonly MobileMoneyProviderName[] = ['mtn', 'airtel'];
 
 export interface CollectionRequest {
   studentProfileId: string;
@@ -51,40 +58,54 @@ export interface CollectionRequest {
 }
 
 export interface ProviderChargeResult {
-  /** The provider's own id for this request. Becomes `externalReference`. */
   providerRef: string;
   status: 'pending' | 'succeeded' | 'failed';
   message?: string;
 }
 
+/** Resolved, decrypted gateway configuration handed to an adapter. */
+export interface GatewayConfig {
+  baseUrl?: string | null;
+  environment: string;
+  currency: string;
+  credentials: Record<string, string>;
+}
+
+export interface ParsedCallback {
+  providerRef: string;
+  status: 'succeeded' | 'failed' | 'pending';
+  amount: number;
+  currency?: string;
+  msisdn?: string;
+  reason?: string;
+}
+
 /** What a provider adapter must do. Keeps MTN/Airtel differences out of here. */
 export interface MobileMoneyProvider {
   readonly name: MobileMoneyProviderName;
-  requestToPay(input: { amountMinor: number; msisdn: string; reference: string; note?: string }): Promise<ProviderChargeResult>;
+  requestToPay(
+    cfg: GatewayConfig,
+    input: { amountMinor: number; msisdn: string; reference: string; note?: string },
+  ): Promise<ProviderChargeResult>;
   verifySignature(rawBody: string, signature: string | undefined, secret: string): boolean;
-  parseCallback(body: any): { providerRef: string; status: 'succeeded' | 'failed' | 'pending'; amount: number; msisdn?: string };
+  parseCallback(body: any): ParsedCallback;
 }
 
 /* ───────────────────────── Provider adapters ───────────────────────── */
 
-/**
- * MTN MoMo Collections. Signature is an HMAC-SHA256 of the raw body, which is
- * why the controller must hand us the RAW string — re-serialising the parsed
- * object changes key order and the signature stops matching.
- */
+/** MTN MoMo Collections. Signature: hex HMAC-SHA256 of the raw body. */
 class MtnProvider implements MobileMoneyProvider {
   readonly name = 'mtn' as const;
-
   constructor(private readonly log: Logger) {}
 
-  async requestToPay(input: { amountMinor: number; msisdn: string; reference: string; note?: string }) {
-    const base = process.env.MTN_MOMO_BASE_URL;
-    const key = process.env.MTN_MOMO_SUBSCRIPTION_KEY;
-    const token = process.env.MTN_MOMO_ACCESS_TOKEN;
+  async requestToPay(cfg: GatewayConfig, input: { amountMinor: number; msisdn: string; reference: string; note?: string }) {
+    const base = cfg.baseUrl;
+    const key = cfg.credentials.subscriptionKey;
+    const token = cfg.credentials.accessToken;
     if (!base || !key || !token) {
       throw new BadRequestException(
-        'MTN MoMo is not configured. Set MTN_MOMO_BASE_URL, MTN_MOMO_SUBSCRIPTION_KEY and ' +
-          'MTN_MOMO_ACCESS_TOKEN, or use the bank/MoMo statement import instead.',
+        'MTN MoMo gateway is missing its base URL, subscription key or access token. ' +
+          'Complete it under Fees › Mobile money › Gateways.',
       );
     }
     const res = await fetch(`${base}/collection/v1_0/requesttopay`, {
@@ -92,14 +113,13 @@ class MtnProvider implements MobileMoneyProvider {
       headers: {
         'Content-Type': 'application/json',
         'X-Reference-Id': input.reference,
-        'X-Target-Environment': process.env.MTN_MOMO_ENVIRONMENT ?? 'sandbox',
+        'X-Target-Environment': cfg.environment,
         'Ocp-Apim-Subscription-Key': key,
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        // MoMo takes the major unit as a string; UGX has no minor unit.
         amount: String(Math.round(input.amountMinor)),
-        currency: process.env.MTN_MOMO_CURRENCY ?? 'UGX',
+        currency: cfg.currency,
         externalId: input.reference,
         payer: { partyIdType: 'MSISDN', partyId: input.msisdn },
         payerMessage: input.note?.slice(0, 160) ?? 'School fees',
@@ -111,7 +131,6 @@ class MtnProvider implements MobileMoneyProvider {
       this.log.warn(`MTN requestToPay ${res.status}: ${text}`);
       return { providerRef: input.reference, status: 'failed' as const, message: `MTN refused the request (${res.status})` };
     }
-    // 202 Accepted: the parent has been prompted; the callback tells us what happened.
     return { providerRef: input.reference, status: 'pending' as const };
   }
 
@@ -121,44 +140,46 @@ class MtnProvider implements MobileMoneyProvider {
     return safeEqualHex(expected, signature);
   }
 
-  parseCallback(body: any) {
+  parseCallback(body: any): ParsedCallback {
     const status = String(body?.status ?? '').toUpperCase();
     return {
       providerRef: String(body?.externalId ?? body?.referenceId ?? ''),
-      status: status === 'SUCCESSFUL' ? ('succeeded' as const) : status === 'PENDING' ? ('pending' as const) : ('failed' as const),
+      status: status === 'SUCCESSFUL' ? 'succeeded' : status === 'PENDING' ? 'pending' : 'failed',
       amount: Number(body?.amount ?? 0),
+      currency: body?.currency ? String(body.currency) : undefined,
       msisdn: body?.payer?.partyId,
+      reason: body?.reason ? String(body.reason?.message ?? body.reason) : undefined,
     };
   }
 }
 
-/** Airtel Money Collections. Same shape, different field names. */
+/** Airtel Money Collections. Signature: base64 HMAC-SHA256 of the raw body. */
 class AirtelProvider implements MobileMoneyProvider {
   readonly name = 'airtel' as const;
-
   constructor(private readonly log: Logger) {}
 
-  async requestToPay(input: { amountMinor: number; msisdn: string; reference: string; note?: string }) {
-    const base = process.env.AIRTEL_BASE_URL;
-    const token = process.env.AIRTEL_ACCESS_TOKEN;
+  async requestToPay(cfg: GatewayConfig, input: { amountMinor: number; msisdn: string; reference: string; note?: string }) {
+    const base = cfg.baseUrl;
+    const token = cfg.credentials.accessToken;
+    const country = cfg.credentials.country || 'UG';
     if (!base || !token) {
       throw new BadRequestException(
-        'Airtel Money is not configured. Set AIRTEL_BASE_URL and AIRTEL_ACCESS_TOKEN, or use ' +
-          'the bank/MoMo statement import instead.',
+        'Airtel Money gateway is missing its base URL or access token. ' +
+          'Complete it under Fees › Mobile money › Gateways.',
       );
     }
     const res = await fetch(`${base}/merchant/v1/payments/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Country': process.env.AIRTEL_COUNTRY ?? 'UG',
-        'X-Currency': process.env.AIRTEL_CURRENCY ?? 'UGX',
+        'X-Country': country,
+        'X-Currency': cfg.currency,
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         reference: input.note?.slice(0, 60) ?? 'School fees',
-        subscriber: { country: process.env.AIRTEL_COUNTRY ?? 'UG', currency: process.env.AIRTEL_CURRENCY ?? 'UGX', msisdn: input.msisdn },
-        transaction: { amount: Math.round(input.amountMinor), country: process.env.AIRTEL_COUNTRY ?? 'UG', currency: process.env.AIRTEL_CURRENCY ?? 'UGX', id: input.reference },
+        subscriber: { country, currency: cfg.currency, msisdn: input.msisdn },
+        transaction: { amount: Math.round(input.amountMinor), country, currency: cfg.currency, id: input.reference },
       }),
     });
     if (!res.ok) {
@@ -175,19 +196,20 @@ class AirtelProvider implements MobileMoneyProvider {
     return safeEqualUtf8(expected, signature);
   }
 
-  parseCallback(body: any) {
+  parseCallback(body: any): ParsedCallback {
     const t = body?.transaction ?? body;
     const status = String(t?.status ?? t?.status_code ?? '').toUpperCase();
     return {
       providerRef: String(t?.id ?? t?.airtel_money_id ?? ''),
-      status: status === 'TS' || status === 'SUCCESS' ? ('succeeded' as const) : status === 'TIP' ? ('pending' as const) : ('failed' as const),
+      status: status === 'TS' || status === 'SUCCESS' ? 'succeeded' : status === 'TIP' ? 'pending' : 'failed',
       amount: Number(t?.amount ?? 0),
+      currency: t?.currency ? String(t.currency) : undefined,
       msisdn: t?.msisdn,
+      reason: t?.message ? String(t.message) : undefined,
     };
   }
 }
 
-/** Constant-time compare that cannot throw on a length mismatch. */
 function safeEqualHex(a: string, b: string) {
   try {
     const bufA = Buffer.from(a, 'hex');
@@ -197,10 +219,50 @@ function safeEqualHex(a: string, b: string) {
     return false;
   }
 }
+
 function safeEqualUtf8(a: string, b: string) {
   const bufA = Buffer.from(a, 'utf8');
   const bufB = Buffer.from(b, 'utf8');
   return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Request lifecycle on the callback path. `succeeded` and `needs_review` are
+ * terminal: a replayed success returns the original payment, and a late
+ * failure can never un-post money already collected.
+ */
+export const CALLBACK_TRANSITIONS: Record<string, readonly string[]> = {
+  pending: ['succeeded', 'failed', 'pending', 'needs_review'],
+  failed: ['succeeded', 'failed', 'needs_review'],
+  succeeded: [],
+  needs_review: [],
+};
+
+export interface UpsertGatewayDto {
+  label?: string;
+  environment?: 'sandbox' | 'production';
+  merchantCode?: string | null;
+  baseUrl?: string | null;
+  currency?: string;
+  /** Provider credentials; omitted keys keep their stored value, empty string clears. */
+  credentials?: Record<string, string>;
+  /** Omit to keep, empty string to clear. */
+  callbackSecret?: string;
+  clearingAccountId?: string | null;
+  isActive?: boolean;
+}
+
+export interface RecordSettlementDto {
+  provider: MobileMoneyProviderName;
+  reference: string;
+  settlementDate?: string;
+  grossAmount: number;
+  charges?: number;
+  /** GL bank account the net payout landed in. */
+  bankAccountId: string;
+  /** Collections this payout covers; they are marked settled. */
+  requestIds?: string[];
+  notes?: string;
 }
 
 /* ───────────────────────── The service ───────────────────────── */
@@ -216,6 +278,10 @@ export class MobileMoneyService {
     private readonly events: EventBus,
     private readonly payments: SchoolPaymentService,
     private readonly finance: SchoolFinanceQueryService,
+    private readonly encryption: EncryptionService,
+    private readonly posting: PostingService,
+    private readonly determination: AccountDeterminationService,
+    private readonly resolver: AccountResolverService,
   ) {
     this.providers = {
       mtn: new MtnProvider(this.log),
@@ -223,28 +289,133 @@ export class MobileMoneyService {
     };
   }
 
-  /** Which providers are configured, so the UI can offer only those. */
-  availability() {
+  /* ─────────────── Gateway accounts ─────────────── */
+
+  async listGateways() {
+    const rows = await this.prisma.client.paymentGatewayAccount.findMany({ orderBy: { provider: 'asc' } });
+    return Promise.all(rows.map((r) => this.presentGateway(r)));
+  }
+
+  async upsertGateway(providerName: string, dto: UpsertGatewayDto) {
+    const provider = this.providerFor(providerName).name;
+    const organizationId = this.tenant.organizationId;
+    const existing = await this.prisma.client.paymentGatewayAccount.findFirst({ where: { provider } });
+
+    if (dto.clearingAccountId) {
+      const acct = await this.prisma.client.account.findFirst({ where: { id: dto.clearingAccountId } });
+      if (!acct) throw new BadRequestException('Clearing account not found in this organization.');
+    }
+
+    const credentials: Record<string, string> = existing ? this.decryptCredentials(existing) : {};
+    for (const [k, v] of Object.entries(dto.credentials ?? {})) {
+      if (v === '') delete credentials[k];
+      else if (typeof v === 'string') credentials[k] = v;
+    }
+    const credEnc = Object.keys(credentials).length ? this.encryption.encrypt(JSON.stringify(credentials)) : null;
+
+    const data: any = {
+      label: dto.label ?? existing?.label ?? (provider === 'mtn' ? 'MTN MoMo' : 'Airtel Money'),
+      environment: dto.environment ?? existing?.environment ?? 'sandbox',
+      merchantCode: dto.merchantCode !== undefined ? dto.merchantCode : (existing?.merchantCode ?? null),
+      baseUrl: dto.baseUrl !== undefined ? dto.baseUrl : (existing?.baseUrl ?? null),
+      currency: dto.currency ?? existing?.currency ?? 'UGX',
+      clearingAccountId:
+        dto.clearingAccountId !== undefined ? dto.clearingAccountId : (existing?.clearingAccountId ?? null),
+      isActive: dto.isActive ?? existing?.isActive ?? true,
+      credentialsCipher: credEnc?.ciphertext ?? null,
+      credentialsIv: credEnc?.iv ?? null,
+      credentialsTag: credEnc?.tag ?? null,
+      updatedBy: this.tenant.userId ?? null,
+    };
+    if (dto.callbackSecret !== undefined) {
+      const secretEnc = dto.callbackSecret === '' ? null : this.encryption.encrypt(dto.callbackSecret);
+      data.callbackSecretCipher = secretEnc?.ciphertext ?? null;
+      data.callbackSecretIv = secretEnc?.iv ?? null;
+      data.callbackSecretTag = secretEnc?.tag ?? null;
+    }
+    const row = existing
+      ? await this.prisma.client.paymentGatewayAccount.update({ where: { id: existing.id }, data })
+      : await this.prisma.client.paymentGatewayAccount.create({
+          data: { ...data, organizationId, provider, createdBy: this.tenant.userId ?? null },
+        });
+    return this.presentGateway(row);
+  }
+
+  /** Never returns secrets — only which ones are set. */
+  private async presentGateway(r: any) {
+    const creds = this.decryptCredentials(r);
+    const clearing = r.clearingAccountId
+      ? await this.prisma.client.account.findFirst({
+          where: { id: r.clearingAccountId },
+          select: { id: true, code: true, name: true },
+        })
+      : null;
     return {
-      mtn: Boolean(process.env.MTN_MOMO_BASE_URL && process.env.MTN_MOMO_SUBSCRIPTION_KEY),
-      airtel: Boolean(process.env.AIRTEL_BASE_URL && process.env.AIRTEL_ACCESS_TOKEN),
+      id: r.id,
+      provider: r.provider,
+      label: r.label,
+      environment: r.environment,
+      merchantCode: r.merchantCode,
+      baseUrl: r.baseUrl,
+      currency: r.currency,
+      isActive: r.isActive,
+      credentialKeys: Object.keys(creds),
+      hasCallbackSecret: Boolean(r.callbackSecretCipher),
+      clearingAccount: clearing,
+      callbackPath: `/school/mobile-money/${r.provider}/callback`,
+      updatedAt: r.updatedAt,
     };
   }
 
-  /**
-   * Normalise a Ugandan phone number to the MSISDN the providers expect
-   * (256XXXXXXXXX). Parents type `0772…`, `+256772…` and `256772…`
-   * interchangeably, and a provider that receives the wrong shape simply
-   * reports "payer not found" with no clue why.
-   */
+  private decryptCredentials(r: any): Record<string, string> {
+    if (!r?.credentialsCipher) return {};
+    try {
+      return JSON.parse(
+        this.encryption.decrypt({ ciphertext: r.credentialsCipher, iv: r.credentialsIv, tag: r.credentialsTag }) ?? '{}',
+      );
+    } catch {
+      this.log.error(`Gateway ${r.id} credentials could not be decrypted`);
+      return {};
+    }
+  }
+
+  private decryptSecret(r: any): string | null {
+    if (!r?.callbackSecretCipher) return null;
+    try {
+      return this.encryption.decrypt({ ciphertext: r.callbackSecretCipher, iv: r.callbackSecretIv, tag: r.callbackSecretTag });
+    } catch {
+      return null;
+    }
+  }
+
+  private configOf(r: any): GatewayConfig {
+    return { baseUrl: r.baseUrl, environment: r.environment, currency: r.currency, credentials: this.decryptCredentials(r) };
+  }
+
+  /** Clearing account for a gateway: its own, else the org's mobile-money clearing mapping. */
+  private async clearingAccount(gateway: any, tx?: any): Promise<string> {
+    return gateway?.clearingAccountId ?? this.determination.settlementAccount('mobile_money', tx);
+  }
+
+  /** Which providers have an active, complete gateway, so the UI offers only those. */
+  async availability() {
+    const rows = await this.prisma.client.paymentGatewayAccount.findMany({ where: { isActive: true } });
+    const ready = (p: MobileMoneyProviderName) => {
+      const r = rows.find((x) => x.provider === p);
+      if (!r || !r.callbackSecretCipher || !r.baseUrl) return false;
+      const c = this.decryptCredentials(r);
+      return p === 'mtn' ? Boolean(c.subscriptionKey && c.accessToken) : Boolean(c.accessToken);
+    };
+    return { mtn: ready('mtn'), airtel: ready('airtel') };
+  }
+
+  /** Normalise a Ugandan phone number to the MSISDN providers expect (256XXXXXXXXX). */
   private toMsisdn(phone: string): string {
     const digits = (phone ?? '').replace(/\D/g, '');
     if (digits.startsWith('256')) return digits;
     if (digits.startsWith('0')) return `256${digits.slice(1)}`;
     if (digits.length === 9) return `256${digits}`;
-    throw new BadRequestException(
-      `'${phone}' is not a recognisable Ugandan mobile number. Use 07XXXXXXXX or +2567XXXXXXXX.`,
-    );
+    throw new BadRequestException(`'${phone}' is not a recognisable Ugandan mobile number. Use 07XXXXXXXX or +2567XXXXXXXX.`);
   }
 
   private providerFor(name: string): MobileMoneyProvider {
@@ -254,27 +425,26 @@ export class MobileMoneyService {
   }
 
   /**
-   * Ask the parent's phone to approve a payment.
-   *
-   * Nothing is recorded as money here — a request-to-pay is a prompt, not a
-   * receipt. The `MobileMoneyRequest` row exists so the school can see what was
-   * asked for and chase it; the money only becomes a Payment when the provider
-   * confirms, in `handleCallback`.
+   * Ask the parent's phone to approve a payment. Nothing is recorded as money
+   * here; the money only becomes a Payment when the provider confirms.
    */
   async requestPayment(providerName: string, dto: CollectionRequest) {
     const organizationId = this.tenant.organizationId;
     const provider = this.providerFor(providerName);
-
+    const gateway = await this.prisma.client.paymentGatewayAccount.findFirst({
+      where: { provider: provider.name, isActive: true },
+    });
+    if (!gateway) {
+      throw new BadRequestException(`No active ${provider.name.toUpperCase()} gateway is configured for this school.`);
+    }
     const student = await this.prisma.client.studentProfile.findFirst({
-      where: { id: dto.studentProfileId, organizationId },
+      where: { id: dto.studentProfileId },
       include: { partner: true },
     });
     if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
     if (!(Number(dto.amount) > 0)) throw new BadRequestException('Amount must be above zero');
 
     const msisdn = this.toMsisdn(dto.phone);
-    // Our reference IS the idempotency key. Generated here so a provider that
-    // echoes it back lets the callback find its way home.
     const reference = `SCH-${organizationId.slice(0, 6)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
 
     const row = await this.prisma.client.mobileMoneyRequest.create({
@@ -284,15 +454,17 @@ export class MobileMoneyService {
         provider: provider.name,
         providerRef: reference,
         msisdn,
-        amount: Number(dto.amount),
+        amount: round(dec(dto.amount), 6),
+        currency: gateway.currency,
         status: 'pending',
         note: dto.note ?? null,
         requestedById: this.tenant.userId ?? null,
+        gatewayAccountId: gateway.id,
       },
     });
 
     try {
-      const result = await provider.requestToPay({
+      const result = await provider.requestToPay(this.configOf(gateway), {
         amountMinor: Number(dto.amount),
         msisdn,
         reference,
@@ -313,34 +485,15 @@ export class MobileMoneyService {
   }
 
   /**
-   * A provider callback. This is the only place mobile money becomes a receipt.
-   *
-   * Security: the signature is verified against the RAW body before anything is
-   * read from it. An unsigned or mis-signed callback is rejected outright —
-   * this endpoint is public by necessity and a forged callback would otherwise
-   * credit a pupil's account with money nobody paid.
-   *
-   * Safety: the provider's transaction id is passed as `externalReference`,
-   * which carries a unique index, so the at-least-once retries every provider
-   * performs collapse into exactly one Payment.
+   * Provider callback. Resolve the tenant from the request row and its gateway,
+   * verify the signature with that gateway's secret, and only then enter the
+   * tenant and touch money.
    */
-  async handleCallback(providerName: string, rawBody: string, signature: string | undefined) {
+  async handleCallback(providerName: string, rawBody: string | undefined, signature: string | undefined) {
     const provider = this.providerFor(providerName);
-    const secret =
-      providerName === 'mtn' ? process.env.MTN_MOMO_CALLBACK_SECRET : process.env.AIRTEL_CALLBACK_SECRET;
-
-    if (!secret) {
-      // Refusing is the safe default: without a secret we cannot tell a genuine
-      // callback from a forged one, and crediting fees on an unverified request
-      // is worse than not collecting at all.
-      throw new BadRequestException(
-        `No callback secret configured for ${providerName}. Set ${providerName.toUpperCase()}_CALLBACK_SECRET ` +
-          'before enabling live collection.',
-      );
-    }
-    if (!provider.verifySignature(rawBody, signature, secret)) {
-      this.log.warn(`Rejected ${providerName} callback: bad signature`);
-      throw new BadRequestException('Invalid callback signature.');
+    if (typeof rawBody !== 'string' || rawBody.length === 0) {
+      // Re-serialising a parsed body changes its bytes; refuse rather than guess.
+      throw new BadRequestException('Callback raw body unavailable; cannot verify signature.');
     }
 
     let body: any;
@@ -352,73 +505,252 @@ export class MobileMoneyService {
     const parsed = provider.parseCallback(body);
     if (!parsed.providerRef) throw new BadRequestException('Callback carries no transaction reference.');
 
-    const request = await this.prisma.client.mobileMoneyRequest.findFirst({
-      where: { providerRef: parsed.providerRef },
-      include: { studentProfile: true },
+    const request = await this.prisma.raw.mobileMoneyRequest.findFirst({
+      where: { providerRef: parsed.providerRef, provider: provider.name },
     });
     if (!request) {
-      // Not an error worth failing the provider's retry loop over — log it and
-      // acknowledge, or they will hammer us forever for a payment we cannot place.
-      this.log.warn(`${providerName} callback for unknown reference ${parsed.providerRef}`);
+      // Unknown reference: nothing to verify against and nothing to write. 2xx
+      // so the provider stops retrying a reference that will never be known.
+      this.log.warn(`${provider.name} callback for unknown reference ${parsed.providerRef}`);
       return { matched: false, status: parsed.status };
     }
 
-    if (parsed.status !== 'succeeded') {
-      await this.prisma.client.mobileMoneyRequest.update({
-        where: { id: request.id },
-        data: { status: parsed.status, failureReason: body?.reason ?? null },
-      });
-      return { matched: true, status: parsed.status, posted: false };
+    const gateway = request.gatewayAccountId
+      ? await this.prisma.raw.paymentGatewayAccount.findFirst({
+          where: { id: request.gatewayAccountId, organizationId: request.organizationId },
+        })
+      : await this.prisma.raw.paymentGatewayAccount.findFirst({
+          where: { organizationId: request.organizationId, provider: provider.name },
+        });
+    const secret = this.decryptSecret(gateway);
+    if (!secret) {
+      throw new BadRequestException(`No callback secret configured for this school's ${provider.name} gateway.`);
+    }
+    if (!provider.verifySignature(rawBody, signature, secret)) {
+      this.log.warn(`Rejected ${provider.name} callback for ${parsed.providerRef}: bad signature`);
+      throw new BadRequestException('Invalid callback signature.');
     }
 
-    // Succeeded. Post it through the SAME writer a cash receipt uses, so the
-    // allocation rules, GL posting, period control and receipt are identical.
-    const collected: any = await this.payments.collect({
-      studentProfileId: request.studentProfileId,
-      amount: Number(request.amount),
-      paymentMethod: 'mobile_money',
-      reference: `${provider.name.toUpperCase()} ${parsed.providerRef}`,
-      externalReference: parsed.providerRef,
-      externalReferenceType: 'mobile_money_txn',
-      // A parent paying from a phone is usually paying the balance; anything
-      // over it is held as credit rather than rejected.
-      convertOverpaymentToCredit: true,
-    } as any);
+    return this.tenant.run({ organizationId: request.organizationId }, () =>
+      this.applyCallback(request.id, gateway, parsed),
+    );
+  }
 
-    await this.prisma.client.mobileMoneyRequest.update({
-      where: { id: request.id },
-      data: {
-        status: 'succeeded',
-        paymentId: collected?.payment?.id ?? null,
-        settledAt: new Date(),
-      },
+  private async applyCallback(requestId: string, gateway: any, parsed: ParsedCallback) {
+    const outcome = await this.prisma.client.$transaction(async (tx: any) => {
+      const request = await tx.mobileMoneyRequest.findFirst({ where: { id: requestId } });
+      if (!request) throw new NotFoundException('Mobile-money request not found.');
+
+      let target: string = parsed.status;
+      let reason: string | null = parsed.reason ?? null;
+      const received = parsed.amount > 0 ? round(dec(parsed.amount), 6) : dec(request.amount);
+      const currency = parsed.currency ?? request.currency ?? gateway?.currency ?? null;
+      if (target === 'succeeded' && currency && gateway?.currency && currency !== gateway.currency) {
+        // Money in a currency the books are not kept in: record, do not post.
+        target = 'needs_review';
+        reason = `Received ${currency}, gateway is ${gateway.currency}`;
+      }
+
+      if (!(CALLBACK_TRANSITIONS[request.status] ?? []).includes(target)) {
+        return { replayed: true, request, payment: null as any, status: request.status as string };
+      }
+
+      // Claim the transition under a row lock; a concurrent duplicate callback
+      // re-evaluates the predicate after we commit and matches nothing.
+      const claimed = await tx.mobileMoneyRequest.updateMany({
+        where: { id: request.id, status: request.status },
+        data: {
+          status: target,
+          failureReason: target === 'succeeded' ? null : reason,
+          ...(target === 'pending' ? {} : { receivedAmount: received }),
+          currency,
+        },
+      });
+      if (claimed.count !== 1) {
+        return { replayed: true, request, payment: null as any, status: 'raced' };
+      }
+      if (target !== 'succeeded') return { replayed: false, request, payment: null as any, status: target };
+
+      const collected: any = await this.payments.collect(
+        {
+          studentProfileId: request.studentProfileId,
+          amount: received.toNumber(),
+          paymentMethod: 'mobile_money',
+          reference: `${request.provider.toUpperCase()} ${request.providerRef}`,
+          externalReference: request.providerRef,
+          externalReferenceType: 'mobile_money_txn',
+          convertOverpaymentToCredit: true,
+        } as any,
+        { tx, settlementAccountId: await this.clearingAccount(gateway, tx) },
+      );
+      await tx.mobileMoneyRequest.update({
+        where: { id: request.id },
+        data: { paymentId: collected?.payment?.id ?? null, settledAt: new Date() },
+      });
+      return { replayed: Boolean(collected?.replayed), request, payment: collected?.payment, status: 'succeeded' };
     });
 
-    this.events.publish('school.fee.momo.settled', {
-      organizationId: request.organizationId,
-      requestId: request.id,
-      studentProfileId: request.studentProfileId,
-      provider: provider.name,
-      amount: String(request.amount),
-      paymentId: collected?.payment?.id ?? null,
-      replayed: Boolean(collected?.replayed),
-    });
-
+    if (outcome.status === 'succeeded' && !outcome.replayed) {
+      this.events.publish('school.fee.momo.settled' as any, {
+        organizationId: outcome.request.organizationId,
+        requestId: outcome.request.id,
+        studentProfileId: outcome.request.studentProfileId,
+        provider: outcome.request.provider,
+        amount: String(outcome.payment?.amount ?? outcome.request.amount),
+        paymentId: outcome.payment?.id ?? null,
+        replayed: false,
+      } as any);
+    }
     return {
       matched: true,
-      status: 'succeeded',
-      posted: true,
-      replayed: Boolean(collected?.replayed),
-      paymentNumber: collected?.payment?.paymentNumber,
+      status: outcome.status,
+      posted: outcome.status === 'succeeded' && !outcome.replayed,
+      replayed: outcome.replayed,
+      paymentNumber: outcome.payment?.paymentNumber,
     };
+  }
+
+  /* ─────────────── Settlement (provider payout) ─────────────── */
+
+  /** Dr Bank (net) + Dr Gateway Charges / Cr Clearing (gross). */
+  async recordSettlement(dto: RecordSettlementDto) {
+    const provider = this.providerFor(dto.provider).name;
+    const organizationId = this.tenant.organizationId;
+    const gross = round(dec(dto.grossAmount), 6);
+    const charges = round(dec(dto.charges ?? 0), 6);
+    if (gross.lessThanOrEqualTo(ZERO)) throw new BadRequestException('Gross amount must be above zero.');
+    if (charges.lessThan(ZERO) || charges.greaterThanOrEqualTo(gross)) {
+      throw new BadRequestException('Charges must be zero or more and less than the gross amount.');
+    }
+    const net = gross.minus(charges);
+    const reference = dto.reference?.trim();
+    if (!reference) throw new BadRequestException('Settlement reference is required.');
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const gateway = await tx.paymentGatewayAccount.findFirst({ where: { provider } });
+      if (!gateway) throw new BadRequestException(`No ${provider.toUpperCase()} gateway configured.`);
+      const bank = await tx.account.findFirst({ where: { id: dto.bankAccountId } });
+      if (!bank) throw new BadRequestException('Bank account not found in this organization.');
+
+      const dup = await tx.mobileMoneySettlement.findFirst({ where: { provider, reference } });
+      if (dup) throw new BadRequestException(`Settlement ${reference} is already recorded.`);
+
+      let requests: any[] = [];
+      if (dto.requestIds?.length) {
+        requests = await tx.mobileMoneyRequest.findMany({
+          where: { id: { in: dto.requestIds }, provider, status: 'succeeded', settlementId: null },
+        });
+        if (requests.length !== new Set(dto.requestIds).size) {
+          throw new BadRequestException(
+            'Some selected collections are not succeeded, belong to another provider, or are already settled.',
+          );
+        }
+        const covered = sum(requests.map((r) => dec(r.receivedAmount ?? r.amount)));
+        if (!covered.equals(gross)) {
+          throw new BadRequestException(
+            `Selected collections total ${covered.toString()} but the settlement gross is ${gross.toString()}.`,
+          );
+        }
+      }
+
+      const clearing = await this.clearingAccount(gateway, tx);
+      const date = dto.settlementDate ? new Date(dto.settlementDate) : new Date();
+      const tag = provider.toUpperCase();
+      const lines: any[] = [{ accountId: bank.id, debit: net.toString(), description: `${tag} payout ${reference}` }];
+      if (charges.greaterThan(ZERO)) {
+        const chargesAccount = await this.resolver.ensureByCode(GATEWAY_CHARGES_ACCOUNT.code, GATEWAY_CHARGES_ACCOUNT, tx);
+        lines.push({ accountId: chargesAccount, debit: charges.toString(), description: `${tag} charges` });
+      }
+      lines.push({ accountId: clearing, credit: gross.toString(), description: `${tag} clearing swept` });
+
+      const settlement = await tx.mobileMoneySettlement.create({
+        data: {
+          organizationId,
+          gatewayAccountId: gateway.id,
+          provider,
+          reference,
+          settlementDate: date,
+          grossAmount: gross,
+          charges,
+          netAmount: net,
+          bankAccountId: bank.id,
+          notes: dto.notes ?? null,
+          createdBy: this.tenant.userId ?? null,
+        },
+      });
+      const entry = await this.posting.post(
+        {
+          journalCode: 'BANK',
+          date,
+          description: `${tag} settlement ${reference}`,
+          sourceType: 'mobile_money_settlement',
+          sourceId: settlement.id,
+          postingKey: `momo_settlement:${settlement.id}`,
+          lines,
+        },
+        tx,
+      );
+      if (requests.length) {
+        await tx.mobileMoneyRequest.updateMany({
+          where: { id: { in: requests.map((r) => r.id) } },
+          data: { settlementId: settlement.id },
+        });
+      }
+      return tx.mobileMoneySettlement.update({ where: { id: settlement.id }, data: { journalEntryId: entry.id } });
+    });
+  }
+
+  listSettlements() {
+    return this.prisma.client.mobileMoneySettlement.findMany({ orderBy: { settlementDate: 'desc' }, take: 200 });
+  }
+
+  /**
+   * What each provider still holds: the clearing account's GL balance next to
+   * the operational figure (succeeded collections not yet settled).
+   */
+  async clearingPosition() {
+    const gateways = await this.prisma.client.paymentGatewayAccount.findMany();
+    const out: any[] = [];
+    for (const gateway of gateways) {
+      const accountId = await this.clearingAccount(gateway);
+      const [gl, unsettled] = await Promise.all([
+        this.prisma.client.journalLine.aggregate({
+          where: { accountId, entry: { status: { in: ['posted', 'reversed'] } } },
+          _sum: { baseDebit: true, baseCredit: true },
+        }),
+        this.prisma.client.mobileMoneyRequest.findMany({
+          where: { provider: gateway.provider, status: 'succeeded', settlementId: null },
+          select: {
+            id: true,
+            amount: true,
+            receivedAmount: true,
+            providerRef: true,
+            settledAt: true,
+            msisdn: true,
+            studentProfileId: true,
+            paymentId: true,
+          },
+          orderBy: { settledAt: 'asc' },
+        }),
+      ]);
+      const glBalance = dec(gl._sum?.baseDebit ?? 0).minus(dec(gl._sum?.baseCredit ?? 0));
+      const operational = sum(unsettled.map((r) => dec(r.receivedAmount ?? r.amount)));
+      out.push({
+        provider: gateway.provider,
+        clearingAccountId: accountId,
+        glBalance: glBalance.toNumber(),
+        unsettledCollections: operational.toNumber(),
+        variance: glBalance.minus(operational).toNumber(),
+        unsettled: unsettled.map((r) => ({ ...r, amount: Number(r.receivedAmount ?? r.amount), receivedAmount: undefined })),
+      });
+    }
+    return out;
   }
 
   /** What a bursar sees: recent requests and where each one got to. */
   async listRequests(params: { studentProfileId?: string; status?: string; limit?: number }) {
-    const organizationId = this.tenant.organizationId;
     return this.prisma.client.mobileMoneyRequest.findMany({
       where: {
-        organizationId,
         ...(params.studentProfileId ? { studentProfileId: params.studentProfileId } : {}),
         ...(params.status ? { status: params.status } : {}),
       },

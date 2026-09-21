@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Printer, Play, RefreshCw, ShieldCheck, CheckCircle2, XCircle, Upload, Lock, Unlock } from 'lucide-react';
+import { Printer, Play, RefreshCw, ShieldCheck, CheckCircle2, XCircle, Upload, Zap } from 'lucide-react';
 import {
   useStudents,
   useStudent,
@@ -23,10 +23,10 @@ import {
   usePaymentImportBatch,
   useImportPayments,
   useConfirmImportRow,
-  useTermCloseStatus,
-  useCloseTerm,
-  useReopenTerm,
   useSchoolInvoices,
+  useCachedProjectionReconciliation,
+  useMomoClearing,
+  useConfirmHighImportRows,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -150,8 +150,11 @@ export function SchoolFinanceDashboardPage() {
   const byClass = useSchoolOutstandingByClass();
   const arGl = useArGlReconciliation();
   const credit = useCreditLiabilityReconciliation();
+  const projections = useCachedProjectionReconciliation();
+  const clearing = useMomoClearing();
 
   const reconOk = (v?: number) => Math.abs(v ?? 0) <= 0.01;
+  const drifted = projections.data?.drifted ?? [];
 
   return (
     <div className="p-4 space-y-4">
@@ -175,8 +178,27 @@ export function SchoolFinanceDashboardPage() {
             detail={`subledger ${money(arGl.data?.subledgerTotal ?? 0)} vs GL ${money(arGl.data?.glTotal ?? 0)}`} />
           <ReconLine label="Fee-credit liability = GL" ok={reconOk(credit.data?.variance)}
             detail={`outstanding ${money(credit.data?.outstanding ?? 0)} vs GL ${money(credit.data?.glBalance ?? 0)}`} />
+          <ReconLine label="Invoice balances = transactions behind them" ok={projections.isSuccess && drifted.length === 0}
+            detail={projections.data ? `${projections.data.checked} checked, ${drifted.length} drifted` : 'checking…'} />
+          {(clearing.data ?? []).map((c) => (
+            <ReconLine key={c.provider} label={`${c.provider.toUpperCase()} clearing = unsettled receipts`} ok={reconOk(c.variance)}
+              detail={`GL ${money(c.glBalance)} vs receipts awaiting payout ${money(c.unsettledCollections)}`} />
+          ))}
           {arGl.data && arGl.data.perStudent.length > 0 && (
             <p className="text-rose-600">{arGl.data.perStudent.length} student(s) with a variance — investigate before closing the period.</p>
+          )}
+          {drifted.length > 0 && (
+            <div className="rounded-md border border-rose-200 p-2 text-xs">
+              <p className="mb-1 font-medium text-rose-700">Financial integrity alert — cached balances that disagree with their transactions:</p>
+              {drifted.slice(0, 10).map((d) => (
+                <div key={`${d.kind}-${d.id}`} className="flex gap-2">
+                  <span className="font-mono">{d.reference}</span>
+                  <span className="text-muted-foreground">{d.kind}</span>
+                  <span className="ml-auto tabular-nums">stored {money(d.cached)} · expected {money(d.subledger)}</span>
+                </div>
+              ))}
+              {drifted.length > 10 && <p className="text-muted-foreground">…and {drifted.length - 10} more</p>}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -368,6 +390,22 @@ export function SchoolReconciliationPage() {
   const batch = usePaymentImportBatch(selected);
   const importPayments = useImportPayments();
   const confirmRow = useConfirmImportRow();
+  const confirmHigh = useConfirmHighImportRows();
+  const [assignFor, setAssignFor] = useState<any | null>(null);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [assignStudent, setAssignStudent] = useState('');
+  const assignCandidates = useStudents({ search: assignSearch || undefined, pageSize: 20 });
+
+  const assignAndPost = () => {
+    if (!selected || !assignFor || !assignStudent) return;
+    confirmRow.mutate(
+      { batchId: selected, rowId: assignFor.id, studentProfileId: assignStudent },
+      {
+        onSuccess: () => { notify.success('Assigned and posted'); setAssignFor(null); setAssignStudent(''); setAssignSearch(''); },
+        onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
+      },
+    );
+  };
 
   const parseCsv = (): any[] => {
     // externalRef,amount,payerPhone,payerName,transactionDate,narration
@@ -381,8 +419,9 @@ export function SchoolReconciliationPage() {
     <div className="p-4 space-y-4">
       <h1 className="text-lg font-semibold">Payment Reconciliation</h1>
       <p className="text-sm text-muted-foreground">
-        Import an MTN MoMo / Airtel Money / bank statement. Rows carrying an exact admission number auto-match (HIGH);
-        everything else needs manual assignment. A row is only posted once the payment engine actually records it — matching alone never posts.
+        Import an MTN MoMo / Airtel Money / bank statement. Matching confidence: HIGH for our own MoMo request reference or an
+        exact admission number; MEDIUM (review) for a unique guardian phone or exact name; LOW needs manual assignment. A
+        reference already received is flagged, never posted twice. Nothing posts until you confirm it.
       </p>
 
       <Card>
@@ -429,7 +468,16 @@ export function SchoolReconciliationPage() {
 
         {selected && batch.data && (
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">Rows — {batch.data.batch.originalFilename}</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Rows — {batch.data.batch.originalFilename}</CardTitle>
+              <Button size="sm" variant="outline" disabled={confirmHigh.isPending}
+                onClick={() => confirmHigh.mutate(selected, {
+                  onSuccess: (r) => notify.success(`Posted ${r.posted} of ${r.attempted} high-confidence rows`),
+                  onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
+                })}>
+                <Zap className="mr-1 h-4 w-4" /> Post all HIGH
+              </Button>
+            </CardHeader>
             <CardContent className="p-0 max-h-96 overflow-auto">
               <Table>
                 <TableHeader><TableRow><TableHead>Ref</TableHead><TableHead className="text-right">Amount</TableHead><TableHead>Match</TableHead><TableHead /></TableRow></TableHeader>
@@ -440,17 +488,26 @@ export function SchoolReconciliationPage() {
                       <TableCell className="text-right">{money(r.amount)}</TableCell>
                       <TableCell>
                         <Badge variant={r.matchStatus === 'posted' ? 'default' : r.matchStatus === 'matched' ? 'outline' : 'secondary'}>
-                          {r.matchStatus} {r.matchConfidence !== 'none' ? `· ${r.matchConfidence}` : ''}
+                          {r.matchStatus.replace('_', ' ')} {r.matchConfidence !== 'none' ? `· ${r.matchConfidence}` : ''}
                         </Badge>
+                        {r.matchReason && <div className="text-xs text-muted-foreground">{r.matchReason.replace(/_/g, ' ')}</div>}
+                        {r.error && <div className="text-xs text-rose-600">{r.error}</div>}
                       </TableCell>
-                      <TableCell className="text-right">
-                        {r.matchStatus !== 'posted' && r.matchStatus !== 'duplicate' && (
-                          <Button size="sm" variant="outline" disabled={confirmRow.isPending || !r.matchedStudentProfileId}
-                            title={r.matchedStudentProfileId ? 'Post this payment' : 'Assign a student first (manual review)'}
-                            onClick={() => confirmRow.mutate({ batchId: selected, rowId: r.id },
-                              { onSuccess: () => notify.success('Posted'), onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed') })}>
-                            Confirm
-                          </Button>
+                      <TableCell className="whitespace-nowrap text-right">
+                        {!['posted', 'duplicate', 'already_received', 'posting'].includes(r.matchStatus) && (
+                          <>
+                            {r.matchedStudentProfileId && (
+                              <Button size="sm" variant="outline" className="mr-1" disabled={confirmRow.isPending}
+                                title="Post this payment to the matched student"
+                                onClick={() => confirmRow.mutate({ batchId: selected, rowId: r.id },
+                                  { onSuccess: () => notify.success('Posted'), onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed') })}>
+                                Confirm
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" onClick={() => { setAssignFor(r); setAssignStudent(r.matchedStudentProfileId ?? ''); }}>
+                              Assign
+                            </Button>
+                          </>
                         )}
                       </TableCell>
                     </TableRow>
@@ -461,38 +518,31 @@ export function SchoolReconciliationPage() {
           </Card>
         )}
       </div>
+
+      {assignFor && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Assign {assignFor.externalRef} · {money(assignFor.amount)}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p className="text-muted-foreground">
+              Payer: {assignFor.payerName || '—'} {assignFor.payerPhone ? `· ${assignFor.payerPhone}` : ''} {assignFor.narration ? `· ${assignFor.narration}` : ''}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Input className="max-w-xs" placeholder="Search pupil…" value={assignSearch} onChange={(e) => setAssignSearch(e.target.value)} />
+              <select className={`${sel} max-w-sm`} value={assignStudent} onChange={(e) => setAssignStudent(e.target.value)}>
+                <option value="">Select pupil…</option>
+                {(assignCandidates.data?.data ?? []).map((st: any) => (
+                  <option key={st.id} value={st.id}>{st.admissionNo} · {st.partner?.name ?? `${st.firstName ?? ''} ${st.lastName ?? ''}`}</option>
+                ))}
+              </select>
+              <Button disabled={!assignStudent || confirmRow.isPending} onClick={assignAndPost}>Assign &amp; post</Button>
+              <Button variant="ghost" onClick={() => setAssignFor(null)}>Cancel</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
-  );
-}
-
-/* ═══════════════════════════ Term Financial Close (A4.1) ═══════════════════════════ */
-
-export function SchoolTermCloseCard({ termId }: { termId: string }) {
-  const status = useTermCloseStatus(termId);
-  const close = useCloseTerm();
-  const reopen = useReopenTerm();
-  const isClosed = status.data?.status === 'closed';
-
-  return (
-    <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2">
-        {isClosed ? <Lock className="h-4 w-4 text-rose-600" /> : <Unlock className="h-4 w-4 text-emerald-600" />}
-        Term financial close
-      </CardTitle></CardHeader>
-      <CardContent className="space-y-2 text-sm">
-        <p className="text-muted-foreground">
-          A school-domain control, separate from the accounting fiscal period — closing a term blocks new fee postings
-          without touching the organisation&apos;s books.
-        </p>
-        {isClosed
-          ? <Button variant="outline" disabled={reopen.isPending} onClick={() => reopen.mutate({ termId, reason: 'correction' }, { onSuccess: () => notify.success('Term reopened') })}>
-              <Unlock className="mr-1 h-4 w-4" /> Reopen term
-            </Button>
-          : <Button variant="destructive" disabled={close.isPending} onClick={() => close.mutate(termId, { onSuccess: () => notify.success('Term closed') })}>
-              <Lock className="mr-1 h-4 w-4" /> Close term
-            </Button>}
-      </CardContent>
-    </Card>
   );
 }
 

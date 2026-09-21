@@ -45,6 +45,13 @@ export class SchoolFinanceQueryController {
     return this.finance.getInvoice(id);
   }
 
+  /** Accounting trail for fee-produced journal entries (receipts, invoices, settlements). */
+  @Get('journal/:id')
+  @RequirePermissions(PERMISSIONS.school.read)
+  feeJournal(@Param('id') id: string) {
+    return this.finance.feeJournal(id);
+  }
+
   @Get('reconciliation/ar-gl')
   @RequirePermissions(PERMISSIONS.school.read)
   reconcileArGl() {

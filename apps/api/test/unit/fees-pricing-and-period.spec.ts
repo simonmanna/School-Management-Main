@@ -13,13 +13,13 @@
 import { BillingService } from '../../src/modules/school/fees/billing.service';
 import { FeeStructureService } from '../../src/modules/school/fees/catalog.service';
 import { FinanceControlsService } from '../../src/modules/school/fees/finance-controls.service';
+import { makePlacementLookupStub, placement } from './_placement-stub';
 
 const student = {
   id: 's1',
   partnerId: 'p1',
   admissionNo: 'ADM-001',
-  currentClassId: 'c1',
-  currentClass: { gradeLevelId: 'g1' },
+  placement: placement({ classId: 'c1', gradeLevelId: 'g1' }),
 };
 
 /* ───────────────────────── pricing provenance ───────────────────────── */
@@ -52,6 +52,7 @@ function makeBilling(feeStructure: any, items: any[] = []) {
     { mapped: jest.fn() } as any,
     { resolveIdByCode: jest.fn() } as any,
     { assertTermOpen: jest.fn().mockResolvedValue(undefined) } as any,
+    makePlacementLookupStub() as any,
   );
   return { service, prisma };
 }
@@ -168,6 +169,17 @@ describe('period control covers every affected document (P1-B)', () => {
   function makeControls(invoices: any[], closedTermIds: string[]) {
     const prisma = {
       client: {
+        document: {
+          findMany: jest.fn(async (args: any) =>
+            (args.where.id.in as string[]).map((id) => ({
+              id,
+              documentNumber: invoices.find((i) => i.documentId === id)?.invoiceNumber ?? id,
+              sourceType: 'school_fee',
+              sourceId: 'sch',
+              reference: 'TERM-x',
+            })),
+          ),
+        },
         schoolFeeInvoice: { findMany: jest.fn().mockResolvedValue(invoices) },
         termFinancialClose: {
           findMany: jest.fn().mockResolvedValue(closedTermIds.map((termId) => ({ termId }))),
@@ -192,14 +204,14 @@ describe('period control covers every affected document (P1-B)', () => {
     // payment taken in an open Term 2 could still be allocated to a Term 1
     // invoice after Term 1 was closed and reconciled.
     const controls = makeControls(
-      [{ termId: 'term_1', invoiceNumber: 'SFI-000001' }],
+      [{ documentId: 'doc_1', termId: 'term_1', invoiceNumber: 'SFI-000001' }],
       ['term_1'],
     );
     await expect(controls.assertDocumentsPeriodOpen(['doc_1'])).rejects.toThrow(/financially closed term/);
   });
 
   it('allows the same allocation when the term is open', async () => {
-    const controls = makeControls([{ termId: 'term_1', invoiceNumber: 'SFI-000001' }], []);
+    const controls = makeControls([{ documentId: 'doc_1', termId: 'term_1', invoiceNumber: 'SFI-000001' }], []);
     await expect(controls.assertDocumentsPeriodOpen(['doc_1'])).resolves.toBeUndefined();
   });
 

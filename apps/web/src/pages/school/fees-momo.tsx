@@ -24,12 +24,15 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
 import { money, sel, Stat, apiError } from './fees-shared';
+import { MomoClearingCard, MomoGatewaysCard } from './fees-integrity';
 
 const statusPill = (s: MomoRequest['status']) =>
   s === 'succeeded' ? (
     <Badge className="gap-1"><CheckCircle2 className="h-3 w-3" /> Paid</Badge>
   ) : s === 'pending' ? (
     <Badge variant="secondary" className="gap-1"><Clock className="h-3 w-3" /> Waiting on phone</Badge>
+  ) : s === 'needs_review' ? (
+    <Badge variant="outline" className="gap-1 border-amber-500 text-amber-700"><Clock className="h-3 w-3" /> Needs review</Badge>
   ) : (
     <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" /> Failed</Badge>
   );
@@ -86,11 +89,11 @@ export function SchoolMobileMoneyPage() {
       {!anyConfigured && (
         <Card>
           <CardContent className="p-4 text-sm">
-            <p className="font-medium">No mobile-money provider is configured yet.</p>
+            <p className="font-medium">No mobile-money gateway is ready yet.</p>
             <p className="mt-1 text-muted-foreground">
-              Set the MTN or Airtel credentials to enable live collection. Until then you can still
-              import a MoMo or bank statement under Payment Reconciliation, which posts the same
-              receipts a day later.
+              Complete a gateway below (base URL, credentials and callback secret) to enable live
+              collection. Until then you can still import a MoMo or bank statement under Payment
+              Reconciliation, which posts the same receipts a day later.
             </p>
           </CardContent>
         </Card>
@@ -158,7 +161,12 @@ export function SchoolMobileMoneyPage() {
                   </TableCell>
                   <TableCell className="uppercase">{r.provider}</TableCell>
                   <TableCell className="font-mono text-xs">{r.msisdn}</TableCell>
-                  <TableCell className="text-right tabular-nums">{money(r.amount)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {money(r.amount)}
+                    {r.receivedAmount != null && Number(r.receivedAmount) !== Number(r.amount) && (
+                      <div className="text-xs text-amber-700">received {money(r.receivedAmount)}</div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {statusPill(r.status)}
                     {r.failureReason && <div className="mt-1 text-xs text-destructive">{r.failureReason}</div>}
@@ -175,6 +183,9 @@ export function SchoolMobileMoneyPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <MomoClearingCard />
+      <MomoGatewaysCard />
     </div>
   );
 }

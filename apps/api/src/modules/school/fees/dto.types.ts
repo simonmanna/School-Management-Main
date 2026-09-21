@@ -458,3 +458,36 @@ export class UpdateBudgetDto {
   @IsOptional() @IsString() notes?: string;
   @IsOptional() @IsIn(['draft', 'approved', 'closed']) status?: string;
 }
+
+/* ─────────────── Mobile money ─────────────── */
+
+export class MobileMoneyRequestDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsNumber() @IsPositive() amount!: number;
+  @IsString() @IsNotEmpty() phone!: string;
+  @IsOptional() @IsString() note?: string;
+}
+
+export class UpsertGatewayBody {
+  @IsOptional() @IsString() label?: string;
+  @IsOptional() @IsIn(['sandbox', 'production']) environment?: 'sandbox' | 'production';
+  @IsOptional() @IsString() merchantCode?: string | null;
+  @IsOptional() @IsString() baseUrl?: string | null;
+  @IsOptional() @IsString() currency?: string;
+  /** e.g. { subscriptionKey, accessToken, country }. Empty string clears a key. */
+  @IsOptional() @IsObject() credentials?: Record<string, string>;
+  @IsOptional() @IsString() callbackSecret?: string;
+  @IsOptional() @IsString() clearingAccountId?: string | null;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class RecordSettlementBody {
+  @IsIn(['mtn', 'airtel']) provider!: 'mtn' | 'airtel';
+  @IsString() @IsNotEmpty() reference!: string;
+  @IsOptional() @IsString() settlementDate?: string;
+  @IsNumber() @IsPositive() grossAmount!: number;
+  @IsOptional() @IsNumber() @Min(0) charges?: number;
+  @IsString() @IsNotEmpty() bankAccountId!: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) requestIds?: string[];
+  @IsOptional() @IsString() notes?: string;
+}

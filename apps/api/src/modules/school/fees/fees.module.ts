@@ -1,6 +1,7 @@
 import { Module, OnApplicationBootstrap } from '@nestjs/common';
 import { AccountingModule } from '../../accounting/accounting.module';
 import { InvoicingModule } from '../../invoicing/invoicing.module';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 import {
   DiscountService,
   FeeCategoryService,
@@ -59,26 +60,14 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
  * On bootstrap the PenaltyCronWorker self-schedules a daily assessment of
  * overdue fee schedules (see PENALTY_RUN_INTERVAL_HOURS / PENALTY_CRON_ENABLED).
  */
-/**
- * SCOPE-01 — live mobile-money collection is out of the first release.
- *
- * It is not merely unfinished: `MobileMoneyRequest` is a tenant-scoped model
- * while the callback route is `@Public()`, so the scoped lookup in
- * `handleCallback` calls the throwing tenant getter and every genuine provider
- * callback fails. The parsed amount and currency are also discarded in favour
- * of the amount we requested, and settlement is not in the same transaction as
- * the payment posting. See docs/audit/KNOWN_FAILURES.md #5.
- *
- * Fail-closed: the HTTP surface only exists when ENABLE_MOMO is explicitly
- * "true". The service stays registered so dependent providers still resolve —
- * this removes the public endpoint, it does not pretend the defect is fixed.
- */
-const momoEnabled = process.env.ENABLE_MOMO === 'true';
+
 
 @Module({
-  imports: [InvoicingModule, AccountingModule],
+  // PlacementLookupModule: billing resolves a learner class from placement
+  // history rather than the StudentProfile projection (ADR-027).
+  imports: [InvoicingModule, AccountingModule, PlacementLookupModule],
   controllers: [
-    ...(momoEnabled ? [MobileMoneyController] : []),
+    MobileMoneyController,
     FeeStructureController,
     FeeCategoryController,
     FeeScheduleController,

@@ -123,9 +123,16 @@ export class EventOutboxService {
       // for forensic replay if needed).
       return;
     }
+    // Handlers run from the outbox worker, outside any request. Re-enter the
+    // publishing tenant so tenant-scoped reads inside handlers work.
+    const organizationId = (row.payload as { organizationId?: unknown } | null)?.organizationId;
+    const inTenant = <T>(fn: () => Promise<T>): Promise<T> =>
+      typeof organizationId === 'string' && organizationId && !this.tenant.optionalOrganizationId
+        ? this.tenant.run({ organizationId }, fn)
+        : fn();
     for (const h of handlers) {
       try {
-        await h(row.payload);
+        await inTenant(async () => h(row.payload));
       } catch (err) {
         this.logger.error(`Handler for ${row.eventName} failed: ${String(err)}`);
         throw err;

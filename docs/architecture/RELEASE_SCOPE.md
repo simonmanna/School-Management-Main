@@ -33,7 +33,6 @@ Two mechanisms control scope, and both are used:
 
 | Area | Control | Why |
 |---|---|---|
-| Live mobile-money collection | `ENABLE_MOMO=false` (default) | The callback cannot execute at all — see [KNOWN_FAILURES #5](../audit/KNOWN_FAILURES.md). The controller is not registered when the flag is off. |
 | Advanced LMS / LTI / SCORM / badges | `ENABLE_ADVANCED_LMS=false`, `VITE_ENABLE_ADVANCED_LMS=false` | No established school need for the first term. Lesson planning and delivery stay in scope; the Moodle-shaped capability layer does not. |
 | Manufacturing | `ENABLE_MANUFACTURING=false` | Not a school function. |
 | Rental | `ENABLE_RENTAL=false` | Not a school function. |

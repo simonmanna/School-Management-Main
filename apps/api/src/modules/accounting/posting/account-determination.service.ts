@@ -14,6 +14,23 @@ import { AccountResolverService } from './account-resolver.service';
  * the façade means the ~15 modules that already call `mapped(...)` need no
  * change.
  */
+/**
+ * Where money received by a given method sits until it is banked. Digital money
+ * held by a provider is NOT cash in hand: it lands in a clearing account and is
+ * swept to the bank when the provider settles (net of charges).
+ */
+export const SETTLEMENT_CLEARING_ACCOUNTS = {
+  mobile_money: { code: 'MOMO-CLR', name: 'Mobile Money Clearing', categoryKey: 'mobile_money', mappingKey: 'mobile_money_clearing' },
+  card: { code: 'CARD-CLR', name: 'Card Processor Clearing', categoryKey: 'current_asset', mappingKey: 'card_clearing' },
+} as const;
+
+export const GATEWAY_CHARGES_ACCOUNT = {
+  code: 'PAY-CHG',
+  name: 'Payment Gateway Charges',
+  categoryKey: 'operating_expense',
+  mappingKey: 'payment_gateway_charges',
+} as const;
+
 @Injectable()
 export class AccountDeterminationService {
   constructor(
@@ -24,6 +41,25 @@ export class AccountDeterminationService {
   /** Resolve an org-level mapping (e.g. 'accounts_receivable'); throws if unconfigured. */
   async mapped(key: string, client: any = this.prisma.client): Promise<string> {
     return this.resolver.byMapping(key, client);
+  }
+
+  /**
+   * Settlement (debit-side) account for a payment method:
+   * cash → default_cash, bank/cheque → default_bank, mobile_money / card → clearing.
+   */
+  async settlementAccount(method: string | null | undefined, client: any = this.prisma.client): Promise<string> {
+    switch (method) {
+      case 'bank':
+      case 'cheque':
+        return this.mapped('default_bank', client);
+      case 'mobile_money':
+      case 'card': {
+        const def = SETTLEMENT_CLEARING_ACCOUNTS[method];
+        return this.resolver.ensureByCode(def.code, def, client);
+      }
+      default:
+        return this.mapped('default_cash', client);
+    }
   }
 
   async receivableAccount(

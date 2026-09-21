@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Headers, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { Public } from '../../../kernel/auth/decorators/public.decorator';
 import { MobileMoneyService } from './mobile-money.service';
+import { MobileMoneyRequestDto, RecordSettlementBody, UpsertGatewayBody } from './dto.types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,9 +42,42 @@ export class MobileMoneyController {
   @RequirePermissions(PERMISSIONS.school.collectPayments)
   request(
     @Param('provider') provider: string,
-    @Body() dto: { studentProfileId: string; amount: number; phone: string; note?: string },
+    @Body() dto: MobileMoneyRequestDto,
   ) {
     return this.momo.requestPayment(provider, dto);
+  }
+
+  @Get('gateways')
+  @RequirePermissions(PERMISSIONS.school.read)
+  gateways() {
+    return this.momo.listGateways();
+  }
+
+  /** Create or update this school's gateway. Secrets are write-only. */
+  @Put('gateways/:provider')
+  @RequirePermissions(PERMISSIONS.school.manageFees)
+  upsertGateway(@Param('provider') provider: string, @Body() dto: UpsertGatewayBody) {
+    return this.momo.upsertGateway(provider, dto);
+  }
+
+  /** Clearing balance per provider: GL vs unsettled collections. */
+  @Get('clearing')
+  @RequirePermissions(PERMISSIONS.school.read)
+  clearing() {
+    return this.momo.clearingPosition();
+  }
+
+  @Get('settlements')
+  @RequirePermissions(PERMISSIONS.school.read)
+  settlements() {
+    return this.momo.listSettlements();
+  }
+
+  /** Record a provider payout: Dr Bank + Dr Charges / Cr Clearing. */
+  @Post('settlements')
+  @RequirePermissions(PERMISSIONS.school.reconcilePayments)
+  recordSettlement(@Body() dto: RecordSettlementBody) {
+    return this.momo.recordSettlement(dto);
   }
 
   @Get('requests')
@@ -65,6 +99,7 @@ export class MobileMoneyController {
    * an unknown reference will never become known by being resent.
    */
   @Public()
+  @HttpCode(200)
   @Post(':provider/callback')
   async callback(
     @Param('provider') provider: string,
@@ -72,15 +107,13 @@ export class MobileMoneyController {
     @Headers('x-signature') xSignature?: string,
     @Headers('x-authorization') xAuthorization?: string,
   ) {
-    // `rawBody` is populated by the raw-body middleware; fall back to
-    // re-serialising only if it is absent, and accept that a signature check
-    // may then fail rather than silently skipping verification.
-    const raw: string =
+    // Only the bytes the provider signed; never a re-serialised body.
+    const raw: string | undefined =
       typeof req.rawBody === 'string'
         ? req.rawBody
         : Buffer.isBuffer(req.rawBody)
           ? req.rawBody.toString('utf8')
-          : JSON.stringify(req.body ?? {});
+          : undefined;
 
     return this.momo.handleCallback(provider, raw, xSignature ?? xAuthorization);
   }

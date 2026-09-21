@@ -53,10 +53,11 @@ export class EncryptionService {
     const iv = Buffer.from(payload.iv, 'base64');
     const tag = Buffer.from(payload.tag, 'base64');
     const raw = Buffer.from(payload.ciphertext, 'base64');
-    if (raw.length < 3 || raw.subarray(0, 3).toString('utf8') !== EncryptionService.VERSION) {
+    const version = Buffer.from(EncryptionService.VERSION, 'utf8');
+    if (raw.length <= version.length || !raw.subarray(0, version.length).equals(version)) {
       throw new Error('Encrypted payload has unknown version; cannot decrypt');
     }
-    const ct = raw.subarray(3);
+    const ct = raw.subarray(version.length);
     const decipher = createDecipheriv(EncryptionService.ALGO, this.key, iv);
     decipher.setAuthTag(tag);
     const pt = Buffer.concat([decipher.update(ct), decipher.final()]);

@@ -18,6 +18,7 @@ import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import { EVENTS } from '@erp/shared';
 import type { WalletTopUpDto, WalletPurchaseDto, WalletAdjustDto } from './dto.types';
+import { SCHOOL_ACCOUNTS } from '../fees/school-accounts';
 
 @Injectable()
 export class MealWalletService {
@@ -46,9 +47,7 @@ export class MealWalletService {
     const journal = await tx.journal.findFirst({ where: { code: journalCode } });
     if (!journal) return null; // accounting not configured — ledger-only.
 
-    const liabilityId = await this.accounts.ensureByCode(
-      'MEAL-SVL',
-      { name: 'Cafeteria Stored Value', categoryKey: 'current_liability', mappingKey: 'meal_stored_value' },
+    const liabilityId = await this.accounts.ensureByCode(SCHOOL_ACCOUNTS.mealStoredValue.code, SCHOOL_ACCOUNTS.mealStoredValue,
       tx,
     );
 
@@ -63,9 +62,7 @@ export class MealWalletService {
         { accountId: liabilityId, credit: amount.toString(), description: 'Cafeteria stored value' },
       ];
     } else {
-      const revenueId = await this.accounts.ensureByCode(
-        'MEAL-REV',
-        { name: 'Cafeteria Revenue', categoryKey: 'revenue', mappingKey: 'meal_revenue' },
+      const revenueId = await this.accounts.ensureByCode(SCHOOL_ACCOUNTS.mealRevenue.code, SCHOOL_ACCOUNTS.mealRevenue,
         tx,
       );
       lines = [

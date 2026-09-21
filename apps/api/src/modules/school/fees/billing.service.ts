@@ -1,11 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { dec, round, ZERO } from '../../../kernel/common/money';
-import { OPEN_FEE_WHERE, POSTED_FEE_WHERE } from './fee-document.constants';
+import { COLLECTABLE_FEE_WHERE, OPEN_COLLECTABLE_FEE_WHERE } from './fee-document.constants';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
@@ -18,9 +18,11 @@ import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
 import { EVENTS } from '@erp/shared';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { FinanceControlsService } from './finance-controls.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { PaymentAllocationReversalService } from './allocation-reversal.service';
 import { AdvancedFinanceService } from './advanced.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
+import { SCHOOL_ACCOUNTS } from './school-accounts';
 
 /**
  * BillingService — the keystone of the school vertical.
@@ -42,6 +44,8 @@ import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeD
  */
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
@@ -52,6 +56,7 @@ export class BillingService {
     private readonly determination: AccountDeterminationService,
     private readonly dmsTypes: DmsTypeResolver,
     private readonly controls: FinanceControlsService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /**
@@ -90,12 +95,41 @@ export class BillingService {
     await this.controls.assertTermOpen(dto.termId);
 
     const studentWhere: any = { status: 'active' };
-    if (dto.classId) studentWhere.currentClassId = dto.classId;
-    const students = await this.prisma.client.studentProfile.findMany({
+    // Placement history, not the projection on StudentProfile. Billing is
+    // term-scoped: a learner who moved in week six must be billed against the
+    // class they held for THIS term, not wherever they sit today (ADR-027).
+    if (dto.classId) {
+      Object.assign(
+        studentWhere,
+        this.placements.studentWhere({ classIds: [dto.classId] }, { termId: dto.termId }),
+      );
+    }
+    const rawStudents = await this.prisma.client.studentProfile.findMany({
       where: studentWhere,
-      include: { currentClass: { include: { gradeLevel: true } } },
     });
-    if (students.length === 0) throw new BadRequestException('No active students found for billing');
+    if (rawStudents.length === 0) throw new BadRequestException('No active students found for billing');
+
+    // One batched resolve for the whole run, then every downstream read uses
+    // the attached placement. Resolving per student inside the billing loop is
+    // where the previous N+1 came from.
+    // Compat during the ADR-027 window: a backfilled learner prices from their
+    // placement for THIS term; one not yet backfilled prices from the projection
+    // exactly as before. Switch to `attach` once the projection columns go.
+    const placed = await this.placements.attach(rawStudents, { termId: dto.termId });
+    // Still no class either way: pricing off a blank class silently produced an
+    // invoice at the wrong rate, so skip and report rather than bill wrongly.
+    const students = placed.filter((s) => s.placement);
+    const unplaced = placed.filter((s) => !s.placement);
+    if (unplaced.length > 0) {
+      this.logger.warn(
+        `${unplaced.length} active student(s) have no class for term ${dto.termId} ` +
+          'and were not billed.',
+      );
+    }
+    if (students.length === 0) {
+      throw new BadRequestException('No active students found for billing');
+    }
+
 
     const schedules = await this.prisma.client.feeSchedule.findMany({
       where: { termId: dto.termId },
@@ -412,8 +446,11 @@ export class BillingService {
      */
     prorationFactor = 1,
   ): Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> {
-    const classId = student.currentClassId ?? '';
-    const gradeLevelId = student.currentClass?.gradeLevelId ?? '';
+    // Resolved placement (see generateForTerm). `student.placement` is the
+    // effective placement for the billing term; the projection it replaced
+    // answered "today" regardless of which term was being billed.
+    const classId = student.placement?.classId ?? '';
+    const gradeLevelId = student.placement?.gradeLevelId ?? '';
 
     // P3 — the optional-fee gate. A MANDATORY component bills every student in
     // the structure's scope; an OPTIONAL one only bills a student who has a
@@ -533,11 +570,16 @@ export class BillingService {
     reason?: string;
   }> {
     const organizationId = this.tenant.organizationId;
-    const s = await this.prisma.client.studentProfile.findFirst({
+    const found = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId, status: 'active' },
-      include: { currentClass: { include: { gradeLevel: true } } },
     });
-    if (!s) return { status: 'skipped' };
+    if (!found) return { status: 'skipped' };
+
+    // Same resolution as the bulk run. `targetingAxes` and `componentsFor` read
+    // the attached placement, so a student loaded without one targets nothing and
+    // is silently skipped — which is exactly what happened when this path was
+    // missed during the conversion.
+    const [s] = await this.placements.attach([found], { termId });
 
     const schedules = await this.prisma.client.feeSchedule.findMany({
       where: { termId },
@@ -653,21 +695,7 @@ export class BillingService {
           // tax — an unbalanced entry that PostingService rejected, killing the
           // run mid-way on any taxable fee. We now debit AR by totalAmount and
           // let the tax legs balance it.
-          const { counterAccount, itemByAccount, taxByAccount } = await this.documentBuilder.groupForPosting(
-            tx,
-            full,
-            'sales',
-          );
-          const totalAmount = dec(full.totalAmount);
-          const journalLines: any[] = [
-            { accountId: counterAccount, debit: totalAmount.toString(), partnerId: full.partnerId, description: `Invoice ${full.documentNumber}` },
-          ];
-          for (const [accountId, amount] of itemByAccount) {
-            journalLines.push({ accountId, credit: amount.toString(), partnerId: full.partnerId, description: 'Revenue' });
-          }
-          for (const [accountId, amount] of taxByAccount) {
-            journalLines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
-          }
+          const journalLines = await this.documentBuilder.salesPostingLines(tx, full, { revenue: 'Fee revenue' });
 
           const entry = await this.posting.post(
             {
@@ -704,8 +732,8 @@ export class BillingService {
               studentProfileId: s.id,
               academicYearId: feeStructure.academicYearId,
               termId: dto.termId,
-              classId: s.currentClassId ?? null,
-              sectionId: s.currentSectionId ?? null,
+              classId: s.placement?.classId ?? null,
+              sectionId: s.placement?.sectionId ?? null,
               // P0-A: the pricing version this invoice was billed from. Without
               // it the business-key unique index above is INERT — Postgres
               // treats NULLs as distinct, so every row's key was unique by
@@ -770,11 +798,17 @@ export class BillingService {
     return true;
   }
 
-  /** The axes `appliesTo` filters on, read off a student profile. */
+  /**
+   * The axes `appliesTo` filters on.
+   *
+   * Read from the resolved placement rather than the StudentProfile
+   * projection: a discount scoped to "P4" must apply to whoever was in P4 for
+   * the term being billed.
+   */
   private targetingAxes(s: any): { classId: string; gradeLevelId: string; residenceType: string } {
     return {
-      classId: s.currentClassId ?? '',
-      gradeLevelId: s.currentClass?.gradeLevelId ?? '',
+      classId: s.placement?.classId ?? '',
+      gradeLevelId: s.placement?.gradeLevelId ?? '',
       residenceType: s.residenceType ?? 'day',
     };
   }
@@ -831,19 +865,31 @@ export class BillingService {
       const cutoff = new Date(due);
       cutoff.setUTCDate(cutoff.getUTCDate() + rule.graceDays);
 
-      // Find unpaid invoices tied to this schedule and past the grace window.
+      // Open tuition invoices on this schedule past the grace window. Lifecycle
+      // and settlement are filtered separately (FINANCIAL_INVARIANTS §Document).
       const overdueDocs = await tx.document.findMany({
         where: {
           organizationId,
+          documentType: 'sales_invoice',
           sourceType: 'school_fee',
           sourceId: scheduleId,
-          status: { in: ['posted', 'partial'] },
+          status: 'posted',
+          paymentStatus: { in: ['not_paid', 'partial'] },
           dueDate: { lt: cutoff },
           amountResidual: { gt: 0 },
         },
       });
 
-      // ── Create the PenaltyRun header. ──
+      // A late fee is assessed once per invoice per rule, not once per cron day.
+      const alreadyAssessed = new Set<string>(
+        (
+          await tx.penaltyAssessment.findMany({
+            where: { organizationId, ruleId: rule.id, sourceDocumentId: { in: overdueDocs.map((d: any) => d.id) } },
+            select: { sourceDocumentId: true },
+          })
+        ).map((r: any) => r.sourceDocumentId),
+      );
+
       const run = await tx.penaltyRun.create({
         data: {
           organizationId,
@@ -855,35 +901,25 @@ export class BillingService {
       });
 
       const newInvoices: string[] = [];
-      let totalAssessed = 0;
-      for (const doc of overdueDocs) {
-        // Per-source idempotency: a previous run on a different day
-        // may have already produced a PenaltyAssessment for this
-        // source for the *same* run (rare but possible with manual
-        // invocations). The unique index is the hard guarantee.
-        const existing = await tx.penaltyAssessment.findFirst({
-          where: { sourceDocumentId: doc.id, penaltyRunId: run.id },
-        });
-        if (existing) continue;
+      let totalAssessed = ZERO;
+      const now = new Date();
 
-        const outstanding = Number(doc.amountResidual);
-        const penalty =
-          rule.type === 'percent'
-            ? (outstanding * Number(rule.value)) / 100
-            : Number(rule.value);
-        if (penalty <= 0) continue;
+      for (const doc of overdueDocs) {
+        if (alreadyAssessed.has(doc.id)) continue;
+
+        const outstanding = dec(doc.amountResidual);
+        const penalty = round(
+          rule.type === 'percent' ? outstanding.times(dec(rule.value)).dividedBy(100) : dec(rule.value),
+          2,
+        );
+        if (penalty.lessThanOrEqualTo(ZERO)) continue;
 
         const documentNumber = await this.sequence.next(
-          `feeinvoice:${new Date().getUTCFullYear()}`,
+          `feeinvoice:${now.getUTCFullYear()}`,
           { prefix: 'PEN-', padding: 6 },
           tx,
         );
 
-        // ── Create the penalty Document (with a DocumentLine) ──
-        // This stays a raw create (not documentBuilder.createDocument) because a
-        // late fee has no product line for the builder to price. It must still
-        // set documentTypeId — the required DMS-registry FK the fork predated —
-        // resolved via the @Global DmsTypeResolver.
         const penaltyDoc = await tx.document.create({
           data: {
             organizationId,
@@ -891,9 +927,9 @@ export class BillingService {
             documentType: 'sales_invoice',
             documentTypeId: await this.dmsTypes.resolveIdByCode('sales_invoice', tx),
             partnerId: doc.partnerId,
-            issueDate: new Date(),
-            dueDate: new Date(),
-            status: 'draft',  // promoted to 'posted' after GL post below
+            issueDate: now,
+            dueDate: now,
+            status: 'draft', // promoted to 'posted' after the GL post below
             reference: `PENALTY-${doc.documentNumber}`,
             notes: `Late fee for ${doc.documentNumber}`,
             sourceType: 'school_penalty',
@@ -903,16 +939,10 @@ export class BillingService {
             amountResidual: penalty,
           },
         });
-        // Create the DocumentLine explicitly (separate from the
-        // Document insert for clarity in the audit trail and to keep
-        // each line attributable in the prisma query log).
         await tx.documentLine.create({
           data: {
             organizationId,
             documentId: penaltyDoc.id,
-            // No productId — late-fee income is tracked at the
-            // account-mapping level. A future "Late Fee" product
-            // can be added and the line description updated.
             description: `Late fee — ${rule.type} ${rule.value} on ${doc.documentNumber}`,
             quantity: 1,
             unitPrice: penalty,
@@ -924,52 +954,29 @@ export class BillingService {
           },
         });
 
-        // ── Post to the GL (P0-2 H6 fix). ──
-        const { counterAccount, itemByAccount } = await this.documentBuilder.groupForPosting(
-          tx,
-          penaltyDoc,
-          'sales',
-        );
-        const journalLines: any[] = [
-          {
-            accountId: counterAccount,
-            debit: penalty.toString(),
-            partnerId: penaltyDoc.partnerId,
-            description: `Penalty invoice ${documentNumber}`,
-          },
-        ];
-        for (const [accountId, amount] of itemByAccount) {
-          journalLines.push({
-            accountId,
-            credit: amount.toString(),
-            partnerId: penaltyDoc.partnerId,
-            description: 'Penalty revenue',
-          });
-        }
+        const fullPenalty = await tx.document.findFirst({ where: { id: penaltyDoc.id }, include: { lines: true } });
+        const journalLines = await this.documentBuilder.salesPostingLines(tx, fullPenalty, {
+          receivable: `Penalty invoice ${documentNumber}`,
+          revenue: 'Penalty revenue',
+        });
         const entry = await this.posting.post(
           {
             journalCode: 'SALES',
-            date: new Date(),
+            date: now,
             description: `School penalty · ${documentNumber}`,
             sourceType: 'school_penalty_invoice',
             sourceId: penaltyDoc.id,
+            postingKey: `school_penalty:${penaltyDoc.id}`,
             lines: journalLines,
           },
           tx,
         );
 
-        // Promote the Document to 'posted'.
         const postedDoc = await tx.document.update({
           where: { id: penaltyDoc.id },
-          data: {
-            status: 'posted',
-            paymentStatus: 'not_paid',
-            journalEntryId: entry.id,
-            postedAt: new Date(),
-          },
+          data: { status: 'posted', paymentStatus: 'not_paid', journalEntryId: entry.id, postedAt: now },
         });
 
-        // ── Create the PenaltyAssessment (links source → penalty). ──
         await tx.penaltyAssessment.create({
           data: {
             organizationId,
@@ -983,7 +990,7 @@ export class BillingService {
         });
 
         newInvoices.push(postedDoc.id);
-        totalAssessed += penalty;
+        totalAssessed = totalAssessed.plus(penalty);
       }
 
       // ── Update the PenaltyRun header with totals. ──
@@ -1050,9 +1057,14 @@ export class SchoolPaymentService {
    * invoices. Returns the Payment row (with allocations) and the unallocated
    * remainder.
    */
-  async collect(dto: CollectFeePaymentDto) {
+  /**
+   * `opts` is programmatic only (never on the HTTP DTO): `tx` lets a caller
+   * such as the MoMo callback commit its own state change atomically with the
+   * payment; `settlementAccountId` debits a gateway clearing account.
+   */
+  async collect(dto: CollectFeePaymentDto, opts: { tx?: any; settlementAccountId?: string } = {}) {
     const organizationId = this.tenant.organizationId;
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const run = async (tx: any) => {
       const student = await tx.studentProfile.findFirst({
         where: { id: dto.studentProfileId },
       });
@@ -1109,7 +1121,7 @@ export class SchoolPaymentService {
         // draft or cancelled invoice used to settle it — real money allocated
         // against a receivable that does not exist.
         const docsById = await tx.document.findMany({
-          where: { ...POSTED_FEE_WHERE, id: { in: ids }, organizationId, partnerId },
+          where: { ...COLLECTABLE_FEE_WHERE, id: { in: ids }, organizationId, partnerId },
         });
         const docMap = new Map<string, any>(docsById.map((d: any) => [d.id, d]));
         for (const a of dto.allocations) {
@@ -1125,14 +1137,14 @@ export class SchoolPaymentService {
       } else {
         const docs = dto.documentIds?.length
           ? await tx.document.findMany({
-              where: { ...POSTED_FEE_WHERE, id: { in: dto.documentIds }, organizationId, partnerId },
+              where: { ...COLLECTABLE_FEE_WHERE, id: { in: dto.documentIds }, organizationId, partnerId },
               orderBy: { issueDate: 'asc' },
             })
           : await tx.document.findMany({
               // P0-7: OPEN_FEE_WHERE adds the `status` predicate this query
               // never had. Without it the oldest-first auto-fill would happily
               // spend a parent's tender on a cancelled invoice.
-              where: { ...OPEN_FEE_WHERE, organizationId, partnerId },
+              where: { ...OPEN_COLLECTABLE_FEE_WHERE, organizationId, partnerId },
               orderBy: { issueDate: 'asc' },
             });
 
@@ -1177,7 +1189,7 @@ export class SchoolPaymentService {
             paymentDate: paymentDate.toISOString(),
             amount: dto.amount,
             paymentMethod: method,
-            accountId: method === 'bank' ? dto.bankAccountId : undefined,
+            accountId: opts.settlementAccountId ?? (method === 'bank' ? dto.bankAccountId : undefined),
             reference: dto.reference,
             externalReference: dto.externalReference,
             externalReferenceType: dto.externalReferenceType,
@@ -1188,6 +1200,7 @@ export class SchoolPaymentService {
         );
       } catch (err: any) {
         if (
+          !opts.tx &&
           err?.code === 'P2002' &&
           dto.externalReference &&
           err?.meta?.target?.includes('externalReference')
@@ -1275,7 +1288,8 @@ export class SchoolPaymentService {
         overpaymentCredit,
         replayed: false,
       };
-    });
+    };
+    return opts.tx ? run(opts.tx) : this.prisma.client.$transaction(run);
   }
 
   /**
@@ -1602,9 +1616,7 @@ export class SchoolPaymentService {
       const creditFunded = creditsSpent.reduce((acc, c) => acc.plus(dec(c.amount)), dec(0));
       if (creditFunded.greaterThan(ZERO)) {
         const arAccount = await this.accounts.receivableAccount(null, tx);
-        const liabilityAccount = await this.resolver.ensureByCode(
-          'FEE-CR',
-          { name: 'Fee Credit Liability', categoryKey: 'current_liability', mappingKey: 'fee_credit' },
+        const liabilityAccount = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeCredit.code, SCHOOL_ACCOUNTS.feeCredit,
           tx,
         );
         await this.posting.post(

@@ -13,6 +13,7 @@ import { dec, round, ZERO } from '../../../kernel/common/money';
 import { ACTIVE_FEE_STATUSES, OPEN_FEE_WHERE, SCHOOL_FEE_SOURCE_TYPES } from './fee-document.constants';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { FinanceControlsService } from './finance-controls.service';
+import { SCHOOL_ACCOUNTS } from './school-accounts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -390,9 +391,7 @@ export class AdvancedFinanceService {
       // open so the remainder can attach to future invoices.
       if (appliedAmount.greaterThan(ZERO)) {
         const arAccount = await this.accounts.receivableAccount(null, tx);
-        const waiverAccount = await this.resolver.ensureByCode(
-          'FEE-WAIVER',
-          { name: 'Fee Waiver Expense', categoryKey: 'expense', mappingKey: 'fee_waiver' },
+        const waiverAccount = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeWaiver.code, SCHOOL_ACCOUNTS.feeWaiver,
           tx,
         );
         await this.posting.post(
@@ -508,9 +507,7 @@ export class AdvancedFinanceService {
       // GL: Dr AR / Cr Fee-Credit Liability (the school now owes the student a
       // credit it will apply to future fees).
       const arAccount = await this.accounts.receivableAccount(null, tx);
-      const liabilityAccount = await this.resolver.ensureByCode(
-        'FEE-CR',
-        { name: 'Fee Credit Liability', categoryKey: 'current_liability', mappingKey: 'fee_credit' },
+      const liabilityAccount = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeCredit.code, SCHOOL_ACCOUNTS.feeCredit,
         tx,
       );
       await this.posting.post(
@@ -580,9 +577,7 @@ export class AdvancedFinanceService {
         orderBy: { issueDate: 'asc' },
       });
 
-      const liabilityAccount = await this.resolver.ensureByCode(
-        'FEE-CR',
-        { name: 'Fee Credit Liability', categoryKey: 'current_liability', mappingKey: 'fee_credit' },
+      const liabilityAccount = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeCredit.code, SCHOOL_ACCOUNTS.feeCredit,
         tx,
       );
       const arAccount = await this.accounts.receivableAccount(null, tx);
@@ -948,7 +943,26 @@ export class AdvancedFinanceService {
        FROM "Document" d
        JOIN "StudentProfile" sp ON sp."partnerId" = d."partnerId" AND sp."organizationId" = d."organizationId"
        LEFT JOIN "Partner" p ON p."id" = sp."partnerId"
-       LEFT JOIN "SchoolClass" c ON c."id" = sp."currentClassId"
+       -- The class the learner actually held as at $1, from placement history
+       -- rather than the StudentProfile projection (ADR-027). A debtors report
+       -- run for last term must group a mid-term mover under the class that
+       -- incurred the debt, not wherever they sit today.
+       LEFT JOIN LATERAL (
+         SELECT cc."classId"
+           FROM "EnrollmentPlacement" ep
+           JOIN "StudentEnrollment" se ON se."id" = ep."enrollmentId"
+           JOIN "ClassCohort" cc ON cc."id" = ep."classCohortId"
+          WHERE se."studentProfileId" = sp."id"
+            AND se."status" IN ('ACTIVE','PENDING')
+            AND ep."effectiveFrom" <= $1::timestamp
+            AND (ep."effectiveTo" IS NULL OR ep."effectiveTo" > $1::timestamp)
+          ORDER BY ep."effectiveFrom" DESC, ep."createdAt" DESC
+          LIMIT 1
+       ) plc ON TRUE
+       -- COALESCE is the ADR-027 compatibility window: a learner who has been
+       -- backfilled resolves from placement, one who has not still resolves from
+       -- the projection exactly as before. Drop the fallback with the column.
+       LEFT JOIN "SchoolClass" c ON c."id" = COALESCE(plc."classId", sp."currentClassId")
        LEFT JOIN (
          SELECT "studentProfileId", SUM("amount") AS "waived"
          FROM "Waiver" WHERE "organizationId" = $2 AND "applied" = true GROUP BY "studentProfileId"
@@ -965,7 +979,7 @@ export class AdvancedFinanceService {
          AND d."amountResidual" > 0
          AND d."sourceType" = ANY($4::text[])
          AND ($1::timestamp >= d."issueDate")
-         AND ($5::text IS NULL OR sp."currentClassId" = $5)
+         AND ($5::text IS NULL OR COALESCE(plc."classId", sp."currentClassId") = $5)
          AND ($6::text IS NULL OR sp."id" = $6)
        GROUP BY sp."id", sp."partnerId", p."name", sp."admissionNo", c."name", w."waived"
        HAVING SUM(d."amountResidual") > 0`,

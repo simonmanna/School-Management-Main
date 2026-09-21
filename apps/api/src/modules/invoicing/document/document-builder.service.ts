@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { dec, sum, ZERO } from '../../../kernel/common/money';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -322,5 +322,46 @@ export class DocumentBuilderService {
     }
 
     return { counterAccount, itemByAccount, taxByAccount };
+  }
+
+  /**
+   * The one way a sales-invoice Document becomes journal lines:
+   * Dr receivable (document total) / Cr revenue per account / Cr output tax per account.
+   * Debiting anything other than `totalAmount` leaves a taxed invoice unbalanced,
+   * so callers never assemble these lines themselves.
+   */
+  async salesPostingLines(
+    client: any,
+    doc: any,
+    labels: { receivable?: string; revenue?: string } = {},
+  ): Promise<Array<{ accountId: string; debit?: string; credit?: string; partnerId?: string; description?: string }>> {
+    const { counterAccount, itemByAccount, taxByAccount } = await this.groupForPosting(client, doc, 'sales');
+    const total = dec(doc.totalAmount);
+    const credited = sum([...itemByAccount.values(), ...taxByAccount.values()]);
+    // PostingService absorbs <= 0.01 of rounding; anything larger means the
+    // document header and its lines disagree and must not reach the ledger.
+    if (total.minus(credited).abs().greaterThan('0.01')) {
+      throw new BadRequestException(
+        `Document ${doc.documentNumber ?? doc.id} total ${total.toString()} does not equal ` +
+          `revenue + tax ${credited.toString()}; refusing to post an unbalanced invoice.`,
+      );
+    }
+    const lines: Array<{ accountId: string; debit?: string; credit?: string; partnerId?: string; description?: string }> = [
+      {
+        accountId: counterAccount,
+        debit: total.toString(),
+        partnerId: doc.partnerId,
+        description: labels.receivable ?? `Invoice ${doc.documentNumber ?? ''}`.trim(),
+      },
+    ];
+    for (const [accountId, amount] of itemByAccount) {
+      if (amount.isZero()) continue;
+      lines.push({ accountId, credit: amount.toString(), partnerId: doc.partnerId, description: labels.revenue ?? 'Revenue' });
+    }
+    for (const [accountId, amount] of taxByAccount) {
+      if (amount.isZero()) continue;
+      lines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
+    }
+    return lines;
   }
 }

@@ -265,13 +265,10 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
 
           // Post Dr Receivable / Cr fine income, then promote to 'posted'.
           const full = await tx.document.findFirst({ where: { id: invoice.id }, include: { lines: true, partner: true } });
-          const { counterAccount, itemByAccount } = await this.documentBuilder.groupForPosting(tx, full, 'sales');
-          const journalLines: any[] = [
-            { accountId: counterAccount, debit: fineAmount.toString(), partnerId: student.partnerId, description: `Library fine ${number}` },
-          ];
-          for (const [accountId, amount] of itemByAccount) {
-            journalLines.push({ accountId, credit: amount.toString(), description: 'Library fine income' });
-          }
+          const journalLines = await this.documentBuilder.salesPostingLines(tx, full, {
+            receivable: `Library fine ${number}`,
+            revenue: 'Library fine income',
+          });
           const entry = await this.posting.post(
             {
               journalCode: 'SALES',

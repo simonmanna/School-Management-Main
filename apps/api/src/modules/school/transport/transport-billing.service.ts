@@ -136,14 +136,10 @@ export class TransportBillingService {
           await tx.document.update({ where: { id: createdDoc.id }, data: { sourceId } });
 
           const full = await tx.document.findFirst({ where: { id: createdDoc.id }, include: { lines: true, partner: true } });
-          const subtotal = full!.lines.reduce((s: number, l: any) => s + Number(l.subtotal), 0);
-
-          const { counterAccount, itemByAccount, taxByAccount } = await this.documentBuilder.groupForPosting(tx, full!, 'sales');
-          const journalLines: any[] = [
-            { accountId: counterAccount, debit: subtotal.toString(), partnerId: full!.partnerId, description: `Transport invoice ${full!.documentNumber}` },
-          ];
-          for (const [accountId, amount] of itemByAccount) journalLines.push({ accountId, credit: amount.toString(), partnerId: full!.partnerId, description: 'Transport revenue' });
-          for (const [accountId, amount] of taxByAccount) journalLines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
+          const journalLines = await this.documentBuilder.salesPostingLines(tx, full!, {
+            receivable: `Transport invoice ${full!.documentNumber}`,
+            revenue: 'Transport revenue',
+          });
 
           const entry = await this.posting.post(
             {
@@ -161,9 +157,7 @@ export class TransportBillingService {
           await tx.document.update({
             where: { id: full!.id },
             data: {
-              subtotal,
-              totalAmount: subtotal,
-              amountResidual: subtotal,
+              amountResidual: full!.totalAmount,
               amountPaid: 0,
               paymentStatus: 'not_paid',
               status: 'posted',

@@ -22,8 +22,10 @@ describe('fee document constants (P0-1, P0-7)', () => {
     // P0-1: the parent portal filtered sourceType 'school_fee' alone, so
     // penalties, library fines and meal charges silently vanished from the
     // balance a parent was shown.
+    // Transport and admission fees are receivables too — leaving them out made
+    // a posted invoice invisible to balance, aging, portal and clearance.
     expect([...SCHOOL_FEE_SOURCE_TYPES].sort()).toEqual(
-      ['library_fine', 'school_fee', 'school_meal', 'school_penalty'].sort(),
+      ['library_fine', 'school_admission_fee', 'school_fee', 'school_meal', 'school_penalty', 'school_transport'].sort(),
     );
   });
 

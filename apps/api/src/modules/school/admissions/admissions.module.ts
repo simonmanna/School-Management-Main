@@ -12,9 +12,14 @@ import { AdmissionsNotificationsSubscriber } from './admissions-notifications.su
 import { OfferExpiryWorker } from './offer-expiry.worker';
 import { PeopleModule } from '../people/people.module';
 import { NotificationsModule } from '../../../kernel/notifications/notifications.module';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
+import { SchoolEnrollmentModule } from '../enrollment/enrollment.module';
+import { AccountingModule } from '../../accounting/accounting.module';
+import { InvoicingModule } from '../../invoicing/invoicing.module';
+import { AdmissionFeeService } from './admission-fee.service';
 
 @Module({
-  imports: [PeopleModule, NotificationsModule],
+  imports: [PlacementLookupModule, SchoolEnrollmentModule, PeopleModule, NotificationsModule, InvoicingModule, AccountingModule],
   // Order matters: AdmissionsController declares `@Get(':id')` (findOne). If it is
   // registered before the config/portal controllers, that `:id` param route shadows
   // their static GETs (`requirements`, `offer-templates`, `enquiries`), returning 404.
@@ -22,6 +27,7 @@ import { NotificationsModule } from '../../../kernel/notifications/notifications
   controllers: [AdmissionsConfigController, AdmissionsPortalController, AdmissionsController],
   providers: [
     AdmissionsService,
+    AdmissionFeeService,
     AdmissionsConfigService,
     AdmissionsWorkflowService,
     AdmissionsCommitteeService,

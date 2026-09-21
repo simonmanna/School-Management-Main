@@ -1,12 +1,17 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AdmissionsService } from './admissions.service';
+import { AdmissionFeeService } from './admission-fee.service';
+import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
+import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import {
   AddExamScoreDto,
   BulkEnrollDto,
   ChargeFeeDto,
+  PayApplicationFeeDto,
+  WaiveApplicationFeeDto,
   CreateApplicationDto,
   CreateNationalityDto,
   EnrollApplicationDto,
@@ -23,7 +28,10 @@ import {
 
 @Controller('school/admissions')
 export class AdmissionsController {
-  constructor(private readonly admissions: AdmissionsService) {}
+  constructor(
+    private readonly admissions: AdmissionsService,
+    private readonly admissionFees: AdmissionFeeService,
+  ) {}
 
   /**
    * Each row carries its resolved workflow actions so the pipeline table can render
@@ -192,27 +200,34 @@ export class AdmissionsController {
     return this.admissions.declineOffer(id);
   }
 
+  /** Fee position read from the invoice subledger: invoice, allocations, state. */
+  @Get(':id/fee')
+  @RequirePermissions(PERMISSIONS.school.read)
+  applicationFeeStatus(@Param('id') id: string) {
+    return this.admissionFees.status(id);
+  }
+
+  /** Charge (or re-charge an unpaid) application fee as a posted invoice. */
   @Post(':id/fee')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
   chargeApplicationFee(@Param('id') id: string, @Body() dto: ChargeFeeDto) {
-    return this.admissions.chargeApplicationFee(id, dto);
+    return this.admissionFees.charge(id, dto);
   }
 
-  /**
-   * Settle (or waive) the application fee. `markFeePaid` previously had no
-   * caller at all, so a raised fee invoice could never be marked paid and the
-   * enrollment fee gate could never be satisfied.
-   *
-   * NOTE (Phase 2): the fine-grained grants `school:admissions:fee`,
-   * `:interview` and `:offer` exist in PERMISSIONS but are not applied here yet.
-   * PermissionsGuard ANDs the required list, so narrowing these routes without
-   * first backfilling the grant onto existing admissions roles would lock out
-   * every current user. Do the role backfill and the narrowing together.
-   */
-  @Post(':id/fee/settle')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  settleApplicationFee(@Param('id') id: string, @Body('waived') waived?: boolean) {
-    return this.admissions.markFeePaid(id, waived === true);
+  /** Receive payment against the fee invoice through the payment engine. */
+  @Post(':id/fee/pay')
+  @UseInterceptors(IdempotencyInterceptor)
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.collectPayments)
+  payApplicationFee(@Param('id') id: string, @Body() dto: PayApplicationFeeDto) {
+    return this.admissionFees.pay(id, dto);
+  }
+
+  /** Waive an unpaid fee: the invoice is voided and its journal reversed. */
+  @Post(':id/fee/waive')
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.approveWaivers)
+  waiveApplicationFee(@Param('id') id: string, @Body() dto: WaiveApplicationFeeDto) {
+    return this.admissionFees.waive(id, dto.reason);
   }
 
   /** Expire every issued offer whose expiresAt has passed. Safe to re-run. */
@@ -255,7 +270,7 @@ export class AdmissionsController {
 
   @Post('capacity')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  setCapacity(@Body() dto: { admissionCycleId: string; classId: string; capacity: number; sectionId?: string; streamId?: string; campusId?: string; reservedCapacity?: number }) {
+  setCapacity(@Body() dto: { admissionCycleId: string; classId: string; capacity: number; sectionId?: string; campusId?: string; reservedCapacity?: number }) {
     return this.admissions.setCapacity(dto);
   }
 
@@ -310,7 +325,7 @@ export class AdmissionsController {
 
   @Post('enroll/bulk/preview')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  bulkEnrollPreview(@Body('items') items: Array<{ applicationId: string; classId: string; sectionId?: string; streamId?: string; termId: string; rollNumber: string }>) {
+  bulkEnrollPreview(@Body('items') items: Array<{ applicationId: string; classId: string; sectionId?: string; termId: string; rollNumber: string }>) {
     return this.admissions.bulkEnrollPreview(items);
   }
 

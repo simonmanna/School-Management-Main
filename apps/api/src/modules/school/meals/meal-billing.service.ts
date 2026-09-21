@@ -3,10 +3,9 @@
  *
  * For each active `term_plan` assignment in a term, raise ONE posted AR invoice
  * (`Document`, sourceType='school_meal') from the plan's fee Product +
- * pricePerTerm, exactly like tuition. Unlike `fees/billing.service.ts`
- * `generateForTerm` (which posts to the GL OUTSIDE the tx — roadmap P1.1), the
- * create + line build + GL post + promote-to-posted all run in ONE
- * `$transaction`, so a crash can never leave an orphaned unposted invoice.
+ * pricePerTerm, exactly like tuition. Create + line build + GL post +
+ * promote-to-posted run in ONE `$transaction`, so a crash can never leave an
+ * orphaned unposted invoice.
  * Idempotent on (org, sourceType, sourceId, reference) + the GL postingKey.
  */
 import { Injectable, BadRequestException } from '@nestjs/common';
@@ -17,6 +16,7 @@ import { DocumentBuilderService } from '../../invoicing/document/document-builde
 import { PostingService } from '../../accounting/posting/posting.service';
 import { EVENTS } from '@erp/shared';
 import type { GenerateMealChargesDto } from './dto.types';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 @Injectable()
 export class MealBillingService {
@@ -26,6 +26,7 @@ export class MealBillingService {
     private readonly events: EventBus,
     private readonly documentBuilder: DocumentBuilderService,
     private readonly posting: PostingService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   async generateMealChargesForTerm(dto: GenerateMealChargesDto) {
@@ -36,7 +37,9 @@ export class MealBillingService {
         termId: dto.termId,
         status: 'active',
         mealPlan: { billingModel: 'term_plan' },
-        ...(dto.classId ? { studentProfile: { currentClassId: dto.classId } } : {}),
+        ...(dto.classId
+          ? { studentProfile: this.placements.studentWhere({ classIds: [dto.classId] }) }
+          : {}),
       },
       include: { mealPlan: true, studentProfile: { include: { partner: true } } },
     });
@@ -80,15 +83,10 @@ export class MealBillingService {
           await tx.document.update({ where: { id: createdDoc.id }, data: { sourceId } });
 
           const full = await tx.document.findFirst({ where: { id: createdDoc.id }, include: { lines: true, partner: true } });
-          const subtotal = full.lines.reduce((s: number, l: any) => s + Number(l.subtotal), 0);
-
-          // GL post INSIDE the tx (the corrected, atomic shape).
-          const { counterAccount, itemByAccount, taxByAccount } = await this.documentBuilder.groupForPosting(tx, full, 'sales');
-          const journalLines: any[] = [
-            { accountId: counterAccount, debit: subtotal.toString(), partnerId: full.partnerId, description: `Meal invoice ${full.documentNumber}` },
-          ];
-          for (const [accountId, amount] of itemByAccount) journalLines.push({ accountId, credit: amount.toString(), partnerId: full.partnerId, description: 'Meal revenue' });
-          for (const [accountId, amount] of taxByAccount) journalLines.push({ accountId, credit: amount.toString(), description: 'Output tax' });
+          const journalLines = await this.documentBuilder.salesPostingLines(tx, full, {
+            receivable: `Meal invoice ${full.documentNumber}`,
+            revenue: 'Meal revenue',
+          });
 
           const entry = await this.posting.post(
             {
@@ -106,9 +104,7 @@ export class MealBillingService {
           return tx.document.update({
             where: { id: full.id },
             data: {
-              subtotal,
-              totalAmount: subtotal,
-              amountResidual: subtotal,
+              amountResidual: full.totalAmount,
               amountPaid: 0,
               paymentStatus: 'not_paid',
               status: 'posted',

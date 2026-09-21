@@ -273,6 +273,7 @@ export const ORG_SCOPED = new Set<string>([
   'HrLeaveType',
   'HrLeaveBalance',
   'HrLeaveRequest',
+  'HrLeaveAccrual',
   'HrHoliday',
   'HrPayrollComponent',
   'HrTaxTable',
@@ -282,6 +283,7 @@ export const ORG_SCOPED = new Set<string>([
   'HrPayrollItem',
   'HrPayrollAllowance',
   'HrPayrollDeduction',
+  'HrPayrollInput',
   'HrPayslip',
   'HrSalaryAdvance',
   'HrEmployeeLoan',
@@ -532,6 +534,8 @@ export const ORG_SCOPED = new Set<string>([
   'SchoolFeeInvoice',
   'FeeCreditAllocation',
   'MobileMoneyRequest',
+  'PaymentGatewayAccount',
+  'MobileMoneySettlement',
   'FeeAdjustment',
   'BillingRun',
   'BillingRunItem',
@@ -687,6 +691,12 @@ export const ORG_SCOPED = new Set<string>([
   'LtiLaunchSession',
   'ModLessonAttempt',
 
+  // Academic structure configuration (ADR-028).
+  'AcademicLevel',
+  // Stream -> Section convergence ledger (ADR-029). Permanent provenance; never
+  // soft-deleted, so it is ORG_SCOPED only.
+  'StreamSectionMigrationMap',
+
   // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
   'AcademicProgramme',
   'ProgrammeGradeLevel',
@@ -702,6 +712,10 @@ export const ORG_SCOPED = new Set<string>([
  * Exported for the same reason as ORG_SCOPED — see `tenancy-registration.spec.ts`.
  */
 export const SOFT_DELETE = new Set<string>([
+  // Academic structure configuration (ADR-028). A level that has carried grades
+  // is deactivated, never deleted, so historical reports keep resolving it.
+  'AcademicLevel',
+
   // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
   'AcademicProgramme',
   'ClassCohort',
@@ -827,6 +841,7 @@ export const SOFT_DELETE = new Set<string>([
   'HrPayrollPeriod',
   'HrPayrollRun',
   'HrPayrollItem',
+  'HrPayrollInput',
   'HrPayslip',
   'HrSalaryAdvance',
   'HrEmployeeLoan',

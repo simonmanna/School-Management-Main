@@ -2060,7 +2060,11 @@ export interface MomoRequest {
   providerRef: string;
   msisdn: string;
   amount: number;
-  status: 'pending' | 'succeeded' | 'failed';
+  status: 'pending' | 'succeeded' | 'failed' | 'needs_review';
+  receivedAmount?: number | string | null;
+  currency?: string | null;
+  paymentId?: string | null;
+  settlementId?: string | null;
   failureReason?: string | null;
   settledAt?: string | null;
   createdAt: string;
@@ -6055,11 +6059,18 @@ export function useStreams(classId?: string) {
 /* ═══════════════════════ Moodle-shaped LMS (ADR-014) ═══════════════════════ */
 const LMS = `${S}/lms`;
 
+/**
+ * A catalog card. The server composes the display name (subject - class (term)),
+ * because `CourseOffering` has no usable name column of its own; the browser used
+ * to render "Course a1b2c3d4" for every row.
+ */
 export interface LmsCourse {
-  id: string; subjectId: string; classId: string; termId: string;
+  id: string; name: string; subject: string | null; className: string | null;
+  term: string | null; academicYear: string | null;
   format: string; numSections: number; visible: boolean; summary?: string | null;
-  completionEnabled: boolean; groupMode: string;
-  teachers?: any[]; _count?: { modules: number; enrolments: number };
+  completionEnabled: boolean; showGradesToStudents: boolean; status?: string;
+  startDate: string | null; endDate: string | null;
+  teachers: string[]; counts: { modules: number; enrolments: number };
 }
 export interface LmsSection {
   id: string; sectionNo: number; name?: string | null; summary?: string | null;
@@ -6073,7 +6084,9 @@ export interface LmsModule {
 }
 export interface LmsActivityType { name: string; label: string; icon: string; gradable: boolean; hasSubmissions: boolean }
 
-export function useLmsCourses(params: { termId?: string; classId?: string; subjectId?: string } = {}) {
+export function useLmsCourses(
+  params: { termId?: string; classId?: string; subjectId?: string; q?: string; visible?: string } = {},
+) {
   return useQuery({ queryKey: ['lms', 'courses', params], queryFn: async () => (await api.get<LmsCourse[]>(`${LMS}/courses`, { params })).data });
 }
 /**
@@ -6276,6 +6289,271 @@ export function useLmsSetCompletion() {
 }
 export function useLmsActivityReport(id: string) {
   return useQuery({ queryKey: ['lms', 'activity-report', id], enabled: !!id, queryFn: async () => (await api.get(`${LMS}/courses/${id}/activity-report`)).data });
+}
+
+/* ─────────────────── LMS operations: enrolment, groups, badges, reports ───────────────────
+ * These routes existed on the server from P4/P7 but had no client at all, so the
+ * enrolment manager, groups screen, badge wall and report suite could not be built.
+ * Every one is capability-gated server-side; the hooks below never decide access.
+ * ------------------------------------------------------------------------------------- */
+
+export interface LmsEnrolment {
+  id: string; courseOfferingId: string; studentProfileId: string | null; userId: string | null;
+  status: 'active' | 'suspended'; startedAt: string | null; methodId: string;
+  studentName: string | null; admissionNo: string | null;
+}
+export interface LmsEnrolmentMethod {
+  id: string; method: string; enabled: boolean; sortOrder: number; enrolmentKey?: string | null;
+}
+export interface LmsGroupRow {
+  id: string; name: string; description?: string | null; enrolmentKey?: string | null;
+  _count?: { members: number };
+}
+export interface LmsBadgeRow {
+  id: string; name: string; description?: string | null; imageUrl?: string | null;
+  criteriaType: string; courseOfferingId?: string | null; _count?: { awards: number };
+}
+
+export function useLmsEnrolments(courseId: string, status?: 'active' | 'suspended') {
+  return useQuery({
+    queryKey: ['lms', 'enrolments', courseId, status ?? 'all'],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<LmsEnrolment[]>(`${LMS}/courses/${courseId}/enrolments`, { params: status ? { status } : {} })).data,
+  });
+}
+
+export function useLmsEnrolmentMethods(courseId: string) {
+  return useQuery({
+    queryKey: ['lms', 'enrolment-methods', courseId],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<LmsEnrolmentMethod[]>(`${LMS}/courses/${courseId}/enrolment-methods`)).data,
+  });
+}
+
+export function useLmsEnrol() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; studentProfileId?: string; userId?: string; roleShortname?: string }) =>
+      (await api.post(`${LMS}/courses/${courseId}/enrol`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Suspend or reactivate one enrolment. Suspension keeps the history; removal does not. */
+export function useLmsSetEnrolStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: 'active' | 'suspended' }) =>
+      (await api.patch(`${LMS}/enrolments/${id}`, { status })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'enrolments'] }),
+  });
+}
+
+export function useLmsGroups(courseId: string) {
+  return useQuery({
+    queryKey: ['lms', 'groups', courseId],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<LmsGroupRow[]>(`${LMS}/courses/${courseId}/groups`)).data,
+  });
+}
+
+export function useLmsCreateGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; name: string; description?: string; enrolmentKey?: string }) =>
+      (await api.post(`${LMS}/courses/${courseId}/groups`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'groups'] }),
+  });
+}
+
+export function useLmsGroupMembers(groupId?: string) {
+  return useQuery({
+    queryKey: ['lms', 'group-members', groupId],
+    enabled: !!groupId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/groups/${groupId}/members`)).data,
+  });
+}
+
+export function useLmsAddGroupMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ groupId, ...dto }: { groupId: string; studentProfileId?: string; userId?: string }) =>
+      (await api.post(`${LMS}/groups/${groupId}/members`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsRemoveGroupMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (memberId: string) => (await api.delete(`${LMS}/group-members/${memberId}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsGroupings(courseId: string) {
+  return useQuery({
+    queryKey: ['lms', 'groupings', courseId],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/courses/${courseId}/groupings`)).data,
+  });
+}
+
+export function useLmsCreateGrouping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; name: string; groupIds?: string[] }) =>
+      (await api.post(`${LMS}/courses/${courseId}/groupings`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'groupings'] }),
+  });
+}
+
+export function useLmsBadges(courseOfferingId?: string) {
+  return useQuery({
+    queryKey: ['lms', 'badges', courseOfferingId ?? 'all'],
+    queryFn: async () => (await api.get<LmsBadgeRow[]>(`${LMS}/badges`, { params: courseOfferingId ? { courseOfferingId } : {} })).data,
+  });
+}
+
+export function useLmsCreateBadge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; description?: string; imageUrl?: string; criteriaType?: string; courseOfferingId?: string }) =>
+      (await api.post(`${LMS}/badges`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'badges'] }),
+  });
+}
+
+export function useLmsAwardBadge() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ badgeId, ...dto }: { badgeId: string; studentProfileId?: string; userId?: string }) =>
+      (await api.post(`${LMS}/badges/${badgeId}/award`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsBadgeAwards(badgeId?: string) {
+  return useQuery({
+    queryKey: ['lms', 'badge-awards', badgeId],
+    enabled: !!badgeId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/badges/${badgeId}/awards`)).data,
+  });
+}
+
+/** The learner's own badge wall. Subject comes from the token. */
+export function useLmsMyBadges(asStudent?: string) {
+  return useQuery({
+    queryKey: ['lms', 'my', 'badges', asStudent ?? 'self'],
+    queryFn: async () => (await api.get<any[]>(`${LMS}/my/badges`, { params: asStudent ? { asStudent } : {} })).data,
+    retry: false,
+  });
+}
+
+export function useLmsLogs(courseId: string, filter: { action?: string; from?: string; to?: string } = {}) {
+  return useQuery({
+    queryKey: ['lms', 'logs', courseId, filter],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/courses/${courseId}/logs`, { params: filter })).data,
+  });
+}
+
+export function useLmsParticipation(courseId: string, action?: string) {
+  return useQuery({
+    queryKey: ['lms', 'participation', courseId, action ?? 'all'],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/courses/${courseId}/participation`, { params: action ? { action } : {} })).data,
+  });
+}
+
+export function useLmsOutline(courseId: string) {
+  return useQuery({
+    queryKey: ['lms', 'outline', courseId],
+    enabled: !!courseId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/courses/${courseId}/outline`)).data,
+  });
+}
+
+/** Pupils who have not opened a given activity — the follow-up list. */
+export function useLmsNotViewed(courseId: string, moduleId?: string) {
+  return useQuery({
+    queryKey: ['lms', 'not-viewed', courseId, moduleId],
+    enabled: !!courseId && !!moduleId,
+    queryFn: async () => (await api.get<any[]>(`${LMS}/courses/${courseId}/not-viewed/${moduleId}`)).data,
+  });
+}
+
+/** One student's grade report — the same payload the pupil and their parent read. */
+export function useLmsUserGrades(courseId: string, studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['lms', 'user-grades', courseId, studentProfileId],
+    enabled: !!courseId && !!studentProfileId,
+    queryFn: async () => (await api.get(`${LMS}/courses/${courseId}/gradebook/user/${studentProfileId}`)).data,
+  });
+}
+
+/** CSV text of the grader report. Called on demand, not on render. */
+export function useLmsExportGrades() {
+  return useMutation({
+    mutationFn: async (courseId: string) => (await api.get<string>(`${LMS}/courses/${courseId}/gradebook/export`)).data,
+  });
+}
+
+export function useLmsImportGrades() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, rows }: { courseId: string; rows: { studentAssessmentId: string; score: number }[] }) =>
+      (await api.post(`${LMS}/courses/${courseId}/gradebook/import`, { rows })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/**
+ * An override records a reason alongside the mark. Use it when replacing a mark
+ * the system computed; a plain cell edit is for correcting data entry.
+ */
+export function useLmsOverrideGrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; studentAssessmentId: string; score: number; reason?: string }) =>
+      (await api.post(`${LMS}/courses/${courseId}/gradebook/override`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Hide (withhold from pupils/parents) or lock (freeze) one gradebook column. */
+export function useLmsSetGradeColumn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ courseId, ...dto }: { courseId: string; assessmentId: string; hidden?: boolean; locked?: boolean }) =>
+      (await api.patch(`${LMS}/courses/${courseId}/gradebook/column`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsImportCourse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, bundle, includeUserData }: { id: string; bundle: unknown; includeUserData?: boolean }) =>
+      (await api.post(`${LMS}/courses/${id}/import`, { bundle, includeUserData })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+/** Course modules whose plugin instance row has vanished (ADR-014 §4 safety net). */
+export function useLmsOrphans() {
+  return useQuery({
+    queryKey: ['lms', 'orphans'],
+    queryFn: async () => (await api.get<any>(`${LMS}/maintenance/orphans`)).data,
+  });
+}
+
+export function useLmsRepairOrphans() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (courseModuleIds: string[]) => (await api.post(`${LMS}/maintenance/orphans/repair`, { courseModuleIds })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'orphans'] }),
+  });
 }
 
 /* ───────────────────── Gradebook (class × term × subject spreadsheet) ─────────────────────
@@ -6786,5 +7064,249 @@ export function useAssignSubstitute() {
       reason?: string;
     }) => (await api.post(`${S}/timetable/cover/assign`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'cover'] }),
+  });
+}
+
+/* ═══════════════ Fees ⇄ accounting hardening ═══════════════ */
+
+/** A fee-produced journal entry — the accounting trail behind a receipt or invoice. */
+export interface FeeJournal {
+  id: string;
+  entryNumber: string;
+  journal?: { code: string; name: string } | null;
+  postingDate: string;
+  status: string;
+  description?: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  reversedEntryId?: string | null;
+  lines: Array<{ accountCode?: string; accountName?: string; description?: string | null; debit: number; credit: number }>;
+}
+export function useFeeJournal(id?: string | null) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'journal', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<FeeJournal>(`${S}/finance/journal/${id}`)).data,
+  });
+}
+
+/* ── Admission / application fee ── */
+
+export type ApplicationFeeState = 'unpaid' | 'pending' | 'paid' | 'waived';
+export interface ApplicationFeeStatus {
+  applicationId: string;
+  feeStatus: ApplicationFeeState;
+  invoice: null | {
+    id: string;
+    documentNumber: string;
+    status: string;
+    totalAmount: number;
+    amountPaid: number;
+    amountResidual: number;
+    journalEntryId?: string | null;
+    payments: Array<{
+      allocationId: string;
+      amount: number;
+      paymentId?: string;
+      paymentNumber?: string;
+      paymentDate?: string;
+      paymentMethod?: string;
+    }>;
+  };
+}
+export function useApplicationFee(applicationId?: string) {
+  return useQuery({
+    queryKey: ['school', 'admissions', 'fee', applicationId],
+    enabled: !!applicationId,
+    queryFn: async () => (await api.get<ApplicationFeeStatus>(`${S}/admissions/${applicationId}/fee`)).data,
+  });
+}
+function useAdmissionFeeMutation<T>(fn: (v: T) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'admissions'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance'] });
+    },
+  });
+}
+export function useChargeApplicationFee() {
+  return useAdmissionFeeMutation(async ({ applicationId, amount }: { applicationId: string; amount: number }) =>
+    (await api.post(`${S}/admissions/${applicationId}/fee`, { amount })).data,
+  );
+}
+export function usePayApplicationFee() {
+  return useAdmissionFeeMutation(
+    async ({
+      applicationId,
+      ...body
+    }: {
+      applicationId: string;
+      amount?: number;
+      paymentMethod: 'cash' | 'bank' | 'mobile_money' | 'card';
+      reference?: string;
+      cashSessionId?: string;
+      bankAccountId?: string;
+    }) =>
+      (await api.post(`${S}/admissions/${applicationId}/fee/pay`, body, {
+        headers: { 'Idempotency-Key': `admfee-${applicationId}-${crypto.randomUUID()}` },
+      })).data,
+  );
+}
+export function useWaiveApplicationFee() {
+  return useAdmissionFeeMutation(async ({ applicationId, reason }: { applicationId: string; reason?: string }) =>
+    (await api.post(`${S}/admissions/${applicationId}/fee/waive`, { reason })).data,
+  );
+}
+
+/* ── Mobile money gateways, clearing and settlement ── */
+
+export interface MomoGateway {
+  id: string;
+  provider: 'mtn' | 'airtel';
+  label: string;
+  environment: 'sandbox' | 'production';
+  merchantCode?: string | null;
+  baseUrl?: string | null;
+  currency: string;
+  isActive: boolean;
+  credentialKeys: string[];
+  hasCallbackSecret: boolean;
+  clearingAccount?: { id: string; code: string; name: string } | null;
+  callbackPath: string;
+  updatedAt: string;
+}
+export function useMomoGateways() {
+  return useQuery({
+    queryKey: ['school', 'momo', 'gateways'],
+    queryFn: async () => (await api.get<MomoGateway[]>(`${S}/mobile-money/gateways`)).data,
+  });
+}
+export function useUpsertMomoGateway() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      ...body
+    }: {
+      provider: 'mtn' | 'airtel';
+      label?: string;
+      environment?: 'sandbox' | 'production';
+      merchantCode?: string | null;
+      baseUrl?: string | null;
+      currency?: string;
+      credentials?: Record<string, string>;
+      callbackSecret?: string;
+      clearingAccountId?: string | null;
+      isActive?: boolean;
+    }) => (await api.put<MomoGateway>(`${S}/mobile-money/gateways/${provider}`, body)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'momo'] }),
+  });
+}
+export interface MomoClearingPosition {
+  provider: 'mtn' | 'airtel';
+  clearingAccountId: string;
+  glBalance: number;
+  unsettledCollections: number;
+  variance: number;
+  unsettled: Array<{ id: string; amount: number; providerRef: string; settledAt?: string | null; msisdn: string; paymentId?: string | null }>;
+}
+export function useMomoClearing() {
+  return useQuery({
+    queryKey: ['school', 'momo', 'clearing'],
+    queryFn: async () => (await api.get<MomoClearingPosition[]>(`${S}/mobile-money/clearing`)).data,
+  });
+}
+export interface MomoSettlement {
+  id: string;
+  provider: string;
+  reference: string;
+  settlementDate: string;
+  grossAmount: string | number;
+  charges: string | number;
+  netAmount: string | number;
+  journalEntryId?: string | null;
+  notes?: string | null;
+}
+export function useMomoSettlements() {
+  return useQuery({
+    queryKey: ['school', 'momo', 'settlements'],
+    queryFn: async () => (await api.get<MomoSettlement[]>(`${S}/mobile-money/settlements`)).data,
+  });
+}
+export function useRecordMomoSettlement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      provider: 'mtn' | 'airtel';
+      reference: string;
+      settlementDate?: string;
+      grossAmount: number;
+      charges?: number;
+      bankAccountId: string;
+      requestIds?: string[];
+      notes?: string;
+    }) => (await api.post<MomoSettlement>(`${S}/mobile-money/settlements`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'momo'] }),
+  });
+}
+
+/* ── Term close preview, statement import bulk confirm, projection integrity ── */
+
+export interface TermCloseSnapshot {
+  termId: string;
+  termName?: string;
+  academicYearId?: string | null;
+  billed: number;
+  collected: number;
+  credited: number;
+  waived: number;
+  adjusted: number;
+  balance: number;
+  residual: number;
+  residualVariance: number;
+  studentCount: number;
+  invoiceCount: number;
+  bySource: Record<string, { invoices: number; billed: number; outstanding: number }>;
+  computedAt: string;
+}
+export function useTermClosePreview(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'finance', 'term-close', termId, 'preview'],
+    enabled: !!termId,
+    queryFn: async () => (await api.get<TermCloseSnapshot>(`${S}/finance/terms/${termId}/close-preview`)).data,
+  });
+}
+export function useConfirmHighImportRows() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: string) =>
+      (await api.post<{ attempted: number; posted: number; results: Array<{ rowId: string; status: string; error?: string }> }>(
+        `${S}/finance/imports/${batchId}/confirm-high`,
+        {},
+      )).data,
+    onSuccess: (_d, batchId) => {
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'imports'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance', 'imports', batchId] });
+    },
+  });
+}
+export interface CachedProjectionReconciliation {
+  checked: number;
+  drifted: Array<{
+    kind: 'amountPaid' | 'amountWaived' | 'amountResidual' | 'creditRemaining';
+    id: string;
+    reference: string;
+    cached: number;
+    subledger: number;
+    variance: number;
+  }>;
+}
+export function useCachedProjectionReconciliation() {
+  return useQuery({
+    queryKey: ['school', 'finance', 'recon', 'projections'],
+    queryFn: async () =>
+      (await api.get<CachedProjectionReconciliation>(`${S}/finance/reconciliation/cached-projections`)).data,
   });
 }

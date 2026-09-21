@@ -44,7 +44,6 @@ services:
       ENABLE_HR: "true"
       ENABLE_COMMUNICATION: "true"
       ENABLE_ADVANCED_LMS: "false"
-      ENABLE_MOMO: "false"
       ENABLE_MANUFACTURING: "false"
       ENABLE_RENTAL: "false"
       ENABLE_REPAIR: "false"

@@ -18,6 +18,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
+import { makePlacementLookupStub } from './_placement-stub';
 
 function makeService() {
   const tenant = { organizationId: 'org_test', userId: 'user_1' };
@@ -149,8 +150,12 @@ function makeService() {
     events as any,
     sequence as any,
     enrollmentSvc as any,
+    enrollmentSvc as any,
     encryption as any,
     workflowSvc,
+    makePlacementLookupStub() as any,
+    // AdmissionFeeService — settlement is read from the fee invoice; covered in admission-fee.spec.ts.
+    { isSettled: jest.fn(async (_c: any, app: any) => app?.feeStatus !== 'pending') } as any,
   );
 
   return {
@@ -415,55 +420,6 @@ describe('AdmissionsService — extended lifecycle', () => {
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'offer_issued' }) }),
     );
-  });
-});
-
-describe('AdmissionsService — application fee', () => {
-  const feeApp = {
-    id: 'app_1', status: 'under_review', organizationId: 'org_test', applicationNumber: 'APP-1',
-    applicantFirstName: 'A', applicantLastName: 'B', parentContactId: 'contact_1', feeStatus: 'unpaid',
-    feeInvoiceId: null,
-  };
-
-  it('bills the guardian Contact’s owning Partner, not the Contact itself', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue(feeApp);
-    const res: any = await service.chargeApplicationFee('app_1', { amount: 50000 });
-    expect(res.invoiceId).toBeDefined();
-    // Document.partnerId is a FK to Partner. Passing the Contact id (as the old
-    // code did) is both a NOT NULL violation when null and the wrong entity when
-    // set.
-    expect(mocks.tx.document.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ partnerId: 'partner_9' }) }),
-    );
-    expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ feeStatus: 'pending' }) }),
-    );
-  });
-
-  it('refuses to bill an application with no guardian contact linked', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, parentContactId: null });
-    await expect(service.chargeApplicationFee('app_1', { amount: 50000 })).rejects.toThrow(BadRequestException);
-  });
-
-  it.each(['rejected', 'withdrawn', 'enrolled'])('refuses to bill a %s application', async (status) => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, status });
-    await expect(service.chargeApplicationFee('app_1', { amount: 50000 })).rejects.toThrow(BadRequestException);
-  });
-
-  it('markFeePaid settles the fee and is idempotent', async () => {
-    const { service, mocks } = makeService();
-    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, feeStatus: 'pending' });
-    const res: any = await service.markFeePaid('app_1');
-    expect(res.feeStatus).toBe('paid');
-
-    mocks.applicationUpdateMany.mockClear();
-    mocks.applicationFindFirst.mockResolvedValue({ ...feeApp, feeStatus: 'paid' });
-    const again: any = await service.markFeePaid('app_1');
-    expect(again.feeStatus).toBe('paid');
-    expect(mocks.applicationUpdateMany).not.toHaveBeenCalled();
   });
 });
 

@@ -18,6 +18,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { EXTERNAL_REFERENCE_TYPES, type ExternalReferenceType } from '@erp/shared';
 
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
@@ -140,7 +141,6 @@ export class EnrollApplicationDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
-  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
@@ -178,7 +178,6 @@ export class BulkEnrollItemDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
-  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
@@ -206,7 +205,6 @@ export class TransferInDto {
   @IsOptional() @IsString() transferredFrom?: string;
   @IsString() @IsNotEmpty() classId!: string;
   @IsOptional() @IsString() sectionId?: string;
-  @IsOptional() @IsString() streamId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
   @IsOptional() @IsString() admissionNo?: string;
@@ -222,4 +220,20 @@ export class ReEnrollDto {
   @IsOptional() @IsString() sectionId?: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
+}
+
+export class PayApplicationFeeDto {
+  /** Defaults to the full outstanding fee. */
+  @IsOptional() @IsNumber() @Min(0.01) amount?: number;
+  @IsOptional() @IsIn(['cash', 'bank', 'mobile_money', 'card']) paymentMethod?: 'cash' | 'bank' | 'mobile_money' | 'card';
+  @IsOptional() @IsString() paymentDate?: string;
+  @IsOptional() @IsString() bankAccountId?: string;
+  @IsOptional() @IsString() cashSessionId?: string;
+  @IsOptional() @IsString() reference?: string;
+  @IsOptional() @IsString() externalReference?: string;
+  @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES]) externalReferenceType?: ExternalReferenceType;
+}
+
+export class WaiveApplicationFeeDto {
+  @IsOptional() @IsString() reason?: string;
 }

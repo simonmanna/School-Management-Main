@@ -39,6 +39,32 @@ paymentStatus NEVER substitutes for lifecycle filtering.
 settled by a payment. `paid` is a lifecycle terminal (residual zero) and still
 counts as billed.
 
+## Receivable classification
+
+```
+Which sourceTypes are student receivables is declared once, per source, in
+FINANCIAL_DOCUMENT_PROFILES (school/fees/fee-document.constants.ts):
+  school_fee · school_penalty · library_fine · school_meal · school_transport ·
+  school_admission_fee                              → receivable, in balance
+  meal_wallet                                       → stored value, NOT in balance
+
+Every balance / aging / clearance / portal / statement / collection query
+derives its filter from the profiles. A new billable source is one profile.
+```
+
+Enforced by `fees-accounting-integrity.spec.ts`: every school `sales_invoice`
+source must be classified.
+
+## Invoice posting
+
+```
+Dr Receivable = Document.totalAmount = Σ revenue credits + Σ output-tax credits
+```
+
+Built only by `DocumentBuilderService.salesPostingLines`, which refuses a
+document whose header and lines disagree by more than 0.01. No caller assembles
+invoice journal lines itself.
+
 ## Outstanding AR — expressed as economic events, not allocation rows
 
 ```
@@ -80,6 +106,13 @@ Direct cash/bank:   Payment = CashMovement = GL cash/bank
 Provider-settled:   Dr Clearing / Cr AR ; Dr Fees + Dr Bank / Cr Clearing
                     Payment gross ≠ bank settlement — reconcile through clearing.
 ```
+
+Settlement account by payment method (`AccountDeterminationService.settlementAccount`):
+cash → `default_cash`; bank/cheque → `default_bank`; mobile_money →
+`mobile_money_clearing` (or the gateway's own clearing account); card →
+`card_clearing`. Digital money is never booked as cash in hand. A provider
+payout is `MobileMoneySettlement`; the clearing GL balance equals succeeded,
+unsettled collections.
 
 ## Refund / Credit
 
@@ -181,11 +214,23 @@ period named in the request. A payment taken in Term 2 may not be allocated to
 a Term 1 document once Term 1 is closed.
 ```
 
+A document's term: tuition via its SchoolFeeInvoice; a penalty via its source
+invoice; meal / transport via their `MEALS-<term>` / `TRANSPORT-<term>`
+reference. Admission fees are not term-bound. The term-close snapshot sums only
+that term's documents and only valid rows (posted allocations, posted credit
+applications, per-document `amountWaived`, posted adjustments), and reports
+`residualVariance` = stored residuals − transaction-derived balance.
+
 ## Tenancy
 
 ```
 Every financial query is tenant-scoped, including raw SQL.
 ```
+
+A public callback resolves its tenant from its own row (MoMo request →
+gateway account) and verifies the signature with that tenant's secret BEFORE
+entering the tenant context and touching money. Outbox event handlers run in
+the publishing tenant's context.
 
 ## Idempotency
 

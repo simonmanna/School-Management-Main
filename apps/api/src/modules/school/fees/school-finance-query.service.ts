@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
@@ -54,6 +55,7 @@ export class SchoolFinanceQueryService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly determination: AccountDeterminationService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /**
@@ -262,7 +264,7 @@ export class SchoolFinanceQueryService {
       where: {
         status: 'active',
         deletedAt: null,
-        ...(opts.classIds ? { currentClassId: { in: opts.classIds } } : {}),
+        ...(opts.classIds ? this.placements.studentWhere({ classIds: opts.classIds }) : {}),
       },
       select: { id: true },
     });
@@ -619,7 +621,7 @@ export class SchoolFinanceQueryService {
   async reconcileCachedProjections(): Promise<{
     checked: number;
     drifted: Array<{
-      kind: 'amountPaid' | 'amountWaived' | 'creditRemaining';
+      kind: 'amountPaid' | 'amountWaived' | 'amountResidual' | 'creditRemaining';
       id: string;
       reference: string;
       cached: number;
@@ -629,7 +631,7 @@ export class SchoolFinanceQueryService {
   }> {
     const organizationId = this.tenant.organizationId;
     const drifted: Array<{
-      kind: 'amountPaid' | 'amountWaived' | 'creditRemaining';
+      kind: 'amountPaid' | 'amountWaived' | 'amountResidual' | 'creditRemaining';
       id: string;
       reference: string;
       cached: number;
@@ -639,9 +641,41 @@ export class SchoolFinanceQueryService {
 
     const docs = await this.prisma.client.document.findMany({
       where: { ...POSTED_FEE_WHERE, organizationId },
-      select: { id: true, documentNumber: true, partnerId: true, amountPaid: true, amountWaived: true },
+      select: {
+        id: true,
+        documentNumber: true,
+        partnerId: true,
+        totalAmount: true,
+        amountResidual: true,
+        amountPaid: true,
+        amountWaived: true,
+      },
     });
     const docIds = docs.map((d) => d.id);
+
+    // Residual lineage: amountResidual is a projection of
+    //   total − posted allocations − waived − posted credit applications
+    //   − credit adjustments + debit adjustments.
+    const [creditAppsByDoc, adjustmentRows] = docIds.length
+      ? await Promise.all([
+          this.prisma.client.feeCreditAllocation.groupBy({
+            by: ['documentId'],
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
+            _sum: { amount: true },
+          }),
+          this.prisma.client.feeAdjustment.findMany({
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
+            select: { documentId: true, direction: true, amount: true },
+          }),
+        ])
+      : [[], []];
+    const creditAppliedByDoc = new Map(creditAppsByDoc.map((a) => [a.documentId, Number(a._sum.amount ?? 0)]));
+    const adjustedByDoc = new Map<string, number>();
+    for (const a of adjustmentRows) {
+      if (!a.documentId) continue;
+      const signed = a.direction === 'debit' ? Number(a.amount) : -Number(a.amount);
+      adjustedByDoc.set(a.documentId, (adjustedByDoc.get(a.documentId) ?? 0) + signed);
+    }
 
     // amountPaid must equal SUM(posted PaymentAllocation) — cash only. A
     // reversed allocation no longer counts, which is precisely why `status`
@@ -678,6 +712,23 @@ export class SchoolFinanceQueryService {
           cached: cachedPaid,
           subledger: realPaid,
           variance: Number((cachedPaid - realPaid).toFixed(6)),
+        });
+      }
+      const expectedResidual =
+        Number(d.totalAmount) -
+        realPaid -
+        Number(d.amountWaived ?? 0) -
+        (creditAppliedByDoc.get(d.id) ?? 0) +
+        (adjustedByDoc.get(d.id) ?? 0);
+      const cachedResidual = Number(d.amountResidual);
+      if (Math.abs(cachedResidual - expectedResidual) > 0.01) {
+        drifted.push({
+          kind: 'amountResidual',
+          id: d.id,
+          reference: d.documentNumber,
+          cached: cachedResidual,
+          subledger: Number(expectedResidual.toFixed(6)),
+          variance: Number((cachedResidual - expectedResidual).toFixed(6)),
         });
       }
       // Only document-targeted waivers can be attributed to a document; a
@@ -974,11 +1025,12 @@ export class SchoolFinanceQueryService {
       this.studentLedger(studentProfileId),
       this.prisma.client.studentProfile.findFirst({
         where: { id: studentProfileId },
-        include: { partner: true, currentClass: true },
+        include: { partner: true },
       }),
       this.feeClearance(studentProfileId).catch(() => null),
     ]);
     if (!student) throw new NotFoundException(`Student ${studentProfileId} not found`);
+    const placedClass = (await this.placements.describe([studentProfileId])).get(studentProfileId);
 
     // Human wording per event type. A parent has never heard of a
     // "CREDIT_APPLIED" and should not have to.
@@ -1043,7 +1095,7 @@ export class SchoolFinanceQueryService {
       studentProfileId,
       studentName: student.partner?.name ?? null,
       admissionNo: student.admissionNo,
-      className: student.currentClass?.name ?? null,
+      className: placedClass?.className ?? null,
       headline,
       summary,
       lines,
@@ -1154,8 +1206,6 @@ export class SchoolFinanceQueryService {
         where: { id: studentProfileId, organizationId },
         include: {
           partner: true,
-          currentClass: { include: { gradeLevel: true } },
-          currentSection: true,
           guardians: { include: { guardianContact: true } },
         },
       }),
@@ -1172,7 +1222,7 @@ export class SchoolFinanceQueryService {
 
     return {
       school,
-      student,
+      student: await this.withPlacedClass(student, term?.id),
       term,
       ledger,
       balance,
@@ -1467,7 +1517,11 @@ export class SchoolFinanceQueryService {
     const organizationId = this.tenant.organizationId;
     const threshold = opts.thresholdPercent ?? (await this.clearanceThreshold());
     const students = await this.prisma.client.studentProfile.findMany({
-      where: { organizationId, currentClassId: classId, status: 'active' },
+      where: {
+        organizationId,
+        status: 'active',
+        ...this.placements.studentWhere({ classIds: [classId] }),
+      },
       select: { id: true, admissionNo: true, partner: { select: { name: true } } },
       orderBy: { admissionNo: 'asc' },
     });
@@ -1612,22 +1666,73 @@ export class SchoolFinanceQueryService {
   }
 
   /** One receipt, with everything a reprint needs. */
+  /**
+   * A fee-related journal entry with its lines, for the accounting trail on
+   * receipts, invoices and settlements. Restricted to entries a fee flow
+   * produced so `school.read` does not become general-ledger read access.
+   */
+  async feeJournal(journalEntryId: string) {
+    const entry = await this.prisma.client.journalEntry.findFirst({
+      where: { id: journalEntryId },
+      include: {
+        journal: { select: { code: true, name: true } },
+        lines: {
+          orderBy: { lineNumber: 'asc' },
+          include: { account: { select: { id: true, code: true, name: true } } },
+        },
+      },
+    });
+    if (!entry) throw new NotFoundException('Journal entry not found');
+    const feeSource = (t?: string | null) =>
+      !!t && (t.startsWith('school_') || ['payment', 'library_fine_invoice', 'mobile_money_settlement'].includes(t));
+    let allowed = feeSource(entry.sourceType);
+    if (!allowed && entry.sourceType === 'reversal' && entry.sourceId) {
+      const original = await this.prisma.client.journalEntry.findFirst({
+        where: { id: entry.sourceId },
+        select: { sourceType: true },
+      });
+      allowed = feeSource(original?.sourceType);
+    }
+    if (!allowed) throw new NotFoundException('Journal entry not found');
+    return {
+      id: entry.id,
+      entryNumber: entry.entryNumber,
+      journal: entry.journal,
+      postingDate: entry.postingDate,
+      status: entry.status,
+      description: entry.description,
+      sourceType: entry.sourceType,
+      sourceId: entry.sourceId,
+      reversedEntryId: (entry as any).reversedEntryId ?? null,
+      lines: entry.lines.map((l) => ({
+        accountCode: l.account?.code,
+        accountName: l.account?.name,
+        description: l.description,
+        debit: Number(l.baseDebit),
+        credit: Number(l.baseCredit),
+      })),
+    };
+  }
+
   async getReceipt(paymentId: string) {
     const organizationId = this.tenant.organizationId;
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, organizationId },
       include: {
         partner: true,
-        allocations: { include: { document: { select: { id: true, documentNumber: true, totalAmount: true } } } },
+        allocations: {
+          include: {
+            document: { select: { id: true, documentNumber: true, totalAmount: true, sourceType: true, journalEntryId: true } },
+          },
+        },
       },
     });
     if (!payment) throw new NotFoundException(`Receipt ${paymentId} not found`);
     const student = await this.prisma.client.studentProfile.findFirst({
       where: { organizationId, partnerId: payment.partnerId },
-      include: { currentClass: true },
     });
     const balance = student ? await this.studentBalance(student.id) : null;
-    return { payment, student, balance };
+    return { payment, student: student ? await this.withPlacedClass(student) : null, balance };
   }
 
   /** Canonical refundable entitlement for a partner (A2.1). Reused by refunds. */
@@ -1639,4 +1744,21 @@ export class SchoolFinanceQueryService {
   /** Constants re-exported for callers that filter documents themselves. */
   static readonly SOURCE_TYPES = SCHOOL_FEE_SOURCE_TYPES;
   static readonly ACTIVE_STATUSES = ACTIVE_FEE_STATUSES;
+  /**
+   * Attach `currentClass` / `currentSection` to a student object from placement
+   * history (ADR-027). The key names are the statement and receipt response
+   * contract the web renders (`student.currentClass.name`); only their source
+   * changed, from the StudentProfile projection to the learner's placement.
+   */
+  private async withPlacedClass<T extends { id: string }>(student: T, termId?: string) {
+    const d = (await this.placements.describe([student.id], termId ? { termId } : {})).get(student.id);
+    return {
+      ...student,
+      currentClass: d?.classId
+        ? { id: d.classId, name: d.className, gradeLevel: d.gradeLevelName ? { id: d.gradeLevelId, name: d.gradeLevelName } : null }
+        : null,
+      currentSection: d?.sectionId ? { id: d.sectionId, name: d.sectionName } : null,
+    };
+  }
+
 }
