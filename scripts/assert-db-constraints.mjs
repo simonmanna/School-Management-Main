@@ -57,6 +57,61 @@ for (const i of REQUIRED_INDEXES) {
   else console.log(`✓ index ${i.name}`);
 }
 
+// F-02 — every org-scoped table must have RLS ENABLED and FORCED with a
+// tenant_isolation policy. A table that ships without it has no database-level
+// isolation at all; a policy without ENABLE is decorative.
+{
+  const { rows } = await client.query(`
+    SELECT c.relname,
+           c.relrowsecurity      AS enabled,
+           c.relforcerowsecurity AS forced,
+           EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation') AS has_policy
+      FROM pg_class c
+      JOIN pg_namespace ns ON ns.oid = c.relnamespace
+      JOIN pg_attribute a  ON a.attrelid = c.oid
+     WHERE ns.nspname = 'public' AND c.relkind = 'r'
+       AND a.attname = 'organizationId' AND a.attnum > 0 AND NOT a.attisdropped`);
+  const bad = rows.filter((r) => !r.enabled || !r.forced || !r.has_policy);
+  if (bad.length > 0) {
+    failures.push(
+      `${bad.length} org-scoped table(s) without enabled+forced tenant_isolation RLS: ` +
+        bad.map((r) => r.relname).slice(0, 20).join(', ') + (bad.length > 20 ? ', …' : ''),
+    );
+  } else {
+    console.log(`✓ RLS enabled, forced and policed on all ${rows.length} org-scoped tables`);
+  }
+}
+
+// F-05 — every single-column FK between two org-scoped tables must carry the
+// same-tenant trigger (migration 20260923110000_tenant_fk_guard).
+{
+  const { rows } = await client.query(`
+    SELECT con.conname, child.relname AS child_tbl
+      FROM pg_constraint con
+      JOIN pg_class child  ON child.oid  = con.conrelid
+      JOIN pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_attribute ca ON ca.attrelid = con.conrelid  AND ca.attnum = con.conkey[1]
+      JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1]
+     WHERE con.contype = 'f' AND ns.nspname = 'public'
+       AND array_length(con.conkey, 1) = 1 AND pa.attname = 'id' AND ca.attname <> 'organizationId'
+       AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = child.oid  AND x.attname = 'organizationId' AND NOT x.attisdropped)
+       AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = parent.oid AND x.attname = 'organizationId' AND NOT x.attisdropped)
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_trigger tg
+          WHERE tg.tgrelid = con.conrelid AND tg.tgname = 'tenant_fk_' || left(md5(con.conname), 24)
+       )`);
+  if (rows.length > 0) {
+    failures.push(
+      `${rows.length} tenant-to-tenant FK(s) without the same-organization trigger: ` +
+        rows.map((r) => `${r.child_tbl}.${r.conname}`).slice(0, 20).join(', ') +
+        ' — re-run the catalog block from 20260923110000_tenant_fk_guard in a new migration',
+    );
+  } else {
+    console.log('✓ same-organization trigger on every tenant-to-tenant foreign key');
+  }
+}
+
 await client.end();
 
 if (failures.length) {

@@ -1,32 +1,29 @@
 /**
- * Create (or refresh) the non-superuser `app` role that Row-Level Security
- * actually needs.
+ * Create (or refresh) the two runtime database roles Row-Level Security needs.
  *
- * Why this exists: every org-scoped table carries a FORCEd `tenant_isolation`
- * policy, but Postgres lets a SUPERUSER walk straight through RLS — FORCE only
- * defeats the *table owner* exemption, not the superuser one. Connecting as
- * `postgres` therefore means the policies are decorative. This provisions a role
- * that RLS genuinely applies to.
+ *   app         NOSUPERUSER NOBYPASSRLS — DATABASE_URL. Every tenant-scoped
+ *               statement runs with `app.org_id` set (PrismaService), so the
+ *               FORCEd `tenant_isolation` policy on every org-scoped table
+ *               genuinely filters what this role can read and write.
+ *   app_system  NOSUPERUSER BYPASSRLS   — SYSTEM_DATABASE_URL. Backs
+ *               `PrismaService.raw`: pre-tenant lookups (login by organization
+ *               code, refresh-token lookup, signed downloads) and cron fan-out
+ *               across organizations. Never used for request-scoped data access.
+ *
+ * Neither role can run DDL; migrations keep their own owner (DIRECT_URL).
  *
  * Usage:
- *   pnpm rls:setup-role                       # password from RLS_APP_PASSWORD, else generated
- *   RLS_APP_ROLE=pos_app pnpm rls:setup-role  # custom role name
+ *   pnpm rls:setup-role     # passwords from RLS_APP_PASSWORD / RLS_SYSTEM_PASSWORD, else generated
+ *   RLS_APP_ROLE=pos_app RLS_SYSTEM_ROLE=pos_system pnpm rls:setup-role
  *
- * Re-run after any migration that adds tables. It is idempotent.
- *
- * IMPORTANT — read before switching DATABASE_URL:
- * `app.org_id` is only set inside interactive transactions (see PrismaService),
- * so reads issued outside a transaction match no rows once the app connects
- * through this role. Moving the whole API onto it requires making every request
- * transactional first. Until then the intended use is operator, BI, reporting
- * and read-replica access — which is where ad-hoc cross-tenant reads actually
- * happen — while the Prisma tenancy extension remains the application's primary
- * scoping mechanism.
+ * Idempotent. Re-run after migrations that add tables only if you did not rely
+ * on the default privileges it installs.
  */
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 const ROLE = process.env.RLS_APP_ROLE ?? 'app';
+const SYSTEM_ROLE = process.env.RLS_SYSTEM_ROLE ?? 'app_system';
 
 /** Reject anything that is not a plain identifier — the role name is interpolated. */
 function assertSafeIdentifier(name: string): void {
@@ -50,13 +47,7 @@ function quoteIdentifier(value: string): string {
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
   assertSafeIdentifier(ROLE);
-
-  const supplied = process.env.RLS_APP_PASSWORD;
-  if (supplied && /[\\\r\n\0]/.test(supplied)) {
-    throw new Error('RLS_APP_PASSWORD must not contain backslashes, newlines or null bytes.');
-  }
-  // base64url is quote-free, so it survives literal interpolation unchanged.
-  const password = supplied ?? randomBytes(24).toString('base64url');
+  assertSafeIdentifier(SYSTEM_ROLE);
 
   const prisma = new PrismaClient();
   await prisma.$connect();
@@ -69,44 +60,51 @@ async function main(): Promise<void> {
     `;
     if (!current[0]?.rolsuper) {
       throw new Error(
-        'This script must run as a superuser (it creates a role and grants privileges). ' +
+        'This script must run as a superuser (it creates roles and grants privileges). ' +
           'Point DATABASE_URL at the admin connection for this one command.',
       );
     }
 
-    const existing = await prisma.$queryRaw<{ rolname: string }[]>`
-      SELECT rolname FROM pg_roles WHERE rolname = ${ROLE}
-    `;
-
-    if (existing.length === 0) {
-      // NOSUPERUSER + NOBYPASSRLS are the entire point of this role.
-      await prisma.$executeRawUnsafe(
-        `CREATE ROLE ${ROLE} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD ${quoteLiteral(password)}`,
-      );
-      console.log(`created role "${ROLE}"`);
-    } else {
-      await prisma.$executeRawUnsafe(`ALTER ROLE ${ROLE} NOSUPERUSER NOBYPASSRLS LOGIN`);
-      if (supplied) {
-        await prisma.$executeRawUnsafe(`ALTER ROLE ${ROLE} PASSWORD ${quoteLiteral(password)}`);
-        console.log(`role "${ROLE}" already existed — password reset, flags reasserted`);
-      } else {
-        console.log(`role "${ROLE}" already existed — flags reasserted, password left unchanged`);
+    const generated: Array<{ role: string; password: string }> = [];
+    const ensureRole = async (role: string, bypassRls: boolean, suppliedPassword: string | undefined) => {
+      if (suppliedPassword && /[\\\r\n\0]/.test(suppliedPassword)) {
+        throw new Error(`Password for ${role} must not contain backslashes, newlines or null bytes.`);
       }
-    }
+      // base64url is quote-free, so it survives literal interpolation unchanged.
+      const password = suppliedPassword ?? randomBytes(24).toString('base64url');
+      const flags = `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE ${bypassRls ? 'BYPASSRLS' : 'NOBYPASSRLS'}`;
+      const existing = await prisma.$queryRaw<{ rolname: string }[]>`
+        SELECT rolname FROM pg_roles WHERE rolname = ${role}
+      `;
+      if (existing.length === 0) {
+        await prisma.$executeRawUnsafe(`CREATE ROLE ${role} ${flags} PASSWORD ${quoteLiteral(password)}`);
+        console.log(`created role "${role}" (${bypassRls ? 'BYPASSRLS' : 'NOBYPASSRLS'})`);
+        if (!suppliedPassword) generated.push({ role, password });
+      } else {
+        await prisma.$executeRawUnsafe(`ALTER ROLE ${role} ${flags}`);
+        if (suppliedPassword) {
+          await prisma.$executeRawUnsafe(`ALTER ROLE ${role} PASSWORD ${quoteLiteral(password)}`);
+          console.log(`role "${role}" already existed — password reset, flags reasserted`);
+        } else {
+          console.log(`role "${role}" already existed — flags reasserted, password left unchanged`);
+        }
+      }
+      // Enough privilege to run the app, never enough to alter the schema.
+      const grants = [
+        `GRANT CONNECT ON DATABASE ${quoteIdentifier(db)} TO ${role}`,
+        `GRANT USAGE ON SCHEMA public TO ${role}`,
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`,
+        `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`,
+        `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${role}`,
+        // Tables created by future migrations inherit the same grants.
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role}`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${role}`,
+      ];
+      for (const sql of grants) await prisma.$executeRawUnsafe(sql);
+    };
 
-    // Enough privilege to run the app, never enough to alter the schema. DDL
-    // stays with the migration user so a leaked app credential cannot drop a
-    // policy and read every tenant.
-    const grants = [
-      `GRANT CONNECT ON DATABASE ${quoteIdentifier(db)} TO ${ROLE}`,
-      `GRANT USAGE ON SCHEMA public TO ${ROLE}`,
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ROLE}`,
-      `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ROLE}`,
-      // Tables created by future migrations inherit the same grants.
-      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${ROLE}`,
-      `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${ROLE}`,
-    ];
-    for (const sql of grants) await prisma.$executeRawUnsafe(sql);
+    await ensureRole(ROLE, false, process.env.RLS_APP_PASSWORD);
+    await ensureRole(SYSTEM_ROLE, true, process.env.RLS_SYSTEM_PASSWORD);
 
     const [{ n: policies }] = await prisma.$queryRaw<{ n: bigint }[]>`
       SELECT count(*) AS n FROM pg_policies
@@ -136,12 +134,13 @@ async function main(): Promise<void> {
       );
     }
 
-    if (!supplied) {
-      console.log('\nGenerated password (shown once — store it in your secret manager):');
-      console.log(`  ${password}`);
+    for (const g of generated) {
+      console.log(`\nGenerated password for "${g.role}" (shown once — store it in your secret manager):`);
+      console.log(`  ${g.password}`);
     }
-    console.log('\nConnection string for this role:');
-    console.log(`  postgresql://${ROLE}:<password>@<host>:<port>/${db}?schema=public`);
+    console.log('\nConnection strings:');
+    console.log(`  DATABASE_URL        = postgresql://${ROLE}:<password>@<host>:<port>/${db}?schema=public`);
+    console.log(`  SYSTEM_DATABASE_URL = postgresql://${SYSTEM_ROLE}:<password>@<host>:<port>/${db}?schema=public`);
   } finally {
     await prisma.$disconnect();
   }

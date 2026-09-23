@@ -1,3 +1,4 @@
+import { useTerminology } from '@/features/school/api';
 /**
  * "Where am I?" — the academic context a workflow screen is scoped to.
  *
@@ -26,11 +27,12 @@ export function ContextBar({
   subject?: string | null;
   extra?: string | null;
 }) {
+  const labels = useTerminology();
   const parts = [
-    { label: 'Year', value: year },
-    { label: 'Term', value: term },
-    { label: 'Class', value: className },
-    { label: 'Stream', value: stream },
+    { label: labels.academicYear, value: year },
+    { label: labels.term, value: term },
+    { label: labels.class, value: className },
+    { label: labels.section, value: stream },
     { label: 'Subject', value: subject },
   ].filter((p) => !!p.value);
 

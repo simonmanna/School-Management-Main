@@ -77,7 +77,7 @@ describeDb('integration: A4 exam operations', () => {
   });
 
   it('A4-register: registerClass creates a candidate per active student, idempotently', async () => {
-    for (let i = 0; i < 3; i++) await asUser(() => students.create({ name: `C${i}`, admissionNo: `A4-${Date.now()}-${i}`, enrollmentDate: '2026-01-15', currentClassId: classId } as any) as any);
+    for (let i = 0; i < 3; i++) await asUser(() => students.create({ name: `C${i}`, admissionNo: `A4-${Date.now()}-${i}`, enrollmentDate: '2026-01-15', classId } as any) as any);
     const et: any = await asUser(() => examTypes.create({ name: `EOT ${Date.now()}`, weight: 100, isFinal: true } as any));
     const exam: any = await asUser(() => exams.schedule({ termId, examTypeId: et.id, name: `EOT ${Date.now()}`, startDate: '2026-03-01T00:00:00.000Z', endDate: '2026-03-10T00:00:00.000Z', classes: [] } as any));
 

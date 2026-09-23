@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, FileText, Loader2 } from 'lucide-react';
-import { useHrPayslips, useHrPayslip, useMarkHrPayslipPaid } from '@/features/hr/api';
+import { useHrPayslips, useHrPayslip, useMarkHrPayslipPaid, useReverseHrPayslipPayment } from '@/features/hr/api';
 import { downloadPayslipPdf } from '@/features/hr/reports-api';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useMoneyFormatter } from '@/lib/format';
 
+
+const PAYMENT_METHODS = ['BANK', 'MOBILE_MONEY', 'CASH', 'CHEQUE'] as const;
 
 const PAYSLIP_STATUS: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
@@ -38,6 +40,14 @@ export function HrPayslipsPage() {
   const { data } = useHrPayslips();
   const { data: detail } = useHrPayslip(detailId ?? undefined);
   const markPaid = useMarkHrPayslipPaid();
+  const reversePayment = useReverseHrPayslipPayment();
+  // Paying a slip posts a journal from this account type, so the method matters.
+  const [method, setMethod] = useState<(typeof PAYMENT_METHODS)[number]>('BANK');
+  const pay = (id: string) =>
+    markPaid.mutate(
+      { id, dto: { paymentMethod: method } },
+      { onSuccess: () => toast.success('Payment posted'), onError: (e: any) => toast.error(e?.response?.data?.message ?? 'Payment failed') },
+    );
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const it = detail?.item;
@@ -46,7 +56,14 @@ export function HrPayslipsPage() {
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Payslips</h1>
-        <p className="text-sm text-muted-foreground">Issued payslips, ready for payment or export.</p>
+        <p className="text-sm text-muted-foreground">Issued payslips, ready for payment or export. Paying one posts it to the ledger; whole runs are paid as a batch from Payroll.</p>
+      </div>
+
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Pay single slips by</span>
+        <select value={method} onChange={(e) => setMethod(e.target.value as any)} className="rounded-md border bg-card px-3 py-1.5 text-sm">
+          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
+        </select>
       </div>
 
       <Card>
@@ -75,9 +92,10 @@ export function HrPayslipsPage() {
                       ? <Loader2 className="h-4 w-4 animate-spin" />
                       : <Download className="h-4 w-4" />}
                   </Button>
-                  {p.status === 'ISSUED' && (
-                    <Button size="sm" variant="outline" onClick={() => markPaid.mutate({ id: p.id, dto: { paymentMethod: 'BANK' } })}>Mark paid</Button>
+                  {p.status === 'ISSUED' && !p.bankPaymentId && (
+                    <Button size="sm" variant="outline" disabled={markPaid.isPending} onClick={() => pay(p.id)}>Mark paid</Button>
                   )}
+                  {p.status === 'ISSUED' && p.bankPaymentId && <span className="text-xs text-muted-foreground">In payment batch</span>}
                   <Badge variant="outline" className={PAYSLIP_STATUS[p.status] ?? ''}>{p.status}</Badge>
                 </div>
               </div>
@@ -103,8 +121,19 @@ export function HrPayslipsPage() {
                   PDF
                 </Button>
               )}
-              {detail?.status === 'ISSUED' && (
-                <Button size="sm" onClick={() => markPaid.mutate({ id: detail.id, dto: { paymentMethod: 'BANK' } })}>Mark paid</Button>
+              {detail?.status === 'ISSUED' && !detail.bankPaymentId && (
+                <Button size="sm" disabled={markPaid.isPending} onClick={() => pay(detail.id)}>Mark paid ({method.replace('_', ' ')})</Button>
+              )}
+              {detail?.status === 'PAID' && !detail.bankPaymentId && (
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => {
+                    const reason = prompt('Reason for reversing this payment?');
+                    if (reason) reversePayment.mutate({ id: detail.id, reason });
+                  }}
+                >
+                  Reverse payment
+                </Button>
               )}
             </div>
           </div>
@@ -136,6 +165,7 @@ export function HrPayslipsPage() {
                 {Number(it?.loanDeduction ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Loan repayment</dt><dd>{fmt(it?.loanDeduction)}</dd></div>}
                 {Number(it?.advanceDeduction ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Advance repayment</dt><dd>{fmt(it?.advanceDeduction)}</dd></div>}
                 {Number(it?.insuranceAmount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Insurance</dt><dd>{fmt(it?.insuranceAmount)}</dd></div>}
+                {Number(it?.localTaxAmount ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Local service tax</dt><dd>{fmt(it?.localTaxAmount)}</dd></div>}
                 {Number(it?.otherDeductions ?? 0) > 0 && <div className="flex justify-between"><dt className="text-muted-foreground">Other</dt><dd>{fmt(it?.otherDeductions)}</dd></div>}
                 <div className="flex justify-between border-t pt-1 font-medium"><dt>Total</dt><dd>{fmt(it?.totalDeductions)}</dd></div>
               </dl>

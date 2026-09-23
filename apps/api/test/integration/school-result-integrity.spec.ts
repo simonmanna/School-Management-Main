@@ -58,8 +58,8 @@ describeDb('integration: A3 result spine', () => {
   async function seedClass(tag: string, opts: { approve: boolean }) {
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: `G-${tag}`, order: 8 } });
     const classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: `Class ${tag}` } })).id;
-    const s1: any = await asUser('registrar', () => students.create({ name: `S1 ${tag}`, admissionNo: `${tag}-1`, enrollmentDate: '2026-01-15', currentClassId: classId } as any));
-    const s2: any = await asUser('registrar', () => students.create({ name: `S2 ${tag}`, admissionNo: `${tag}-2`, enrollmentDate: '2026-01-15', currentClassId: classId } as any));
+    const s1: any = await asUser('registrar', () => students.create({ name: `S1 ${tag}`, admissionNo: `${tag}-1`, enrollmentDate: '2026-01-15', classId } as any));
+    const s2: any = await asUser('registrar', () => students.create({ name: `S2 ${tag}`, admissionNo: `${tag}-2`, enrollmentDate: '2026-01-15', classId } as any));
 
     const et: any = await asUser('setup', () => examTypes.create({ name: `Final ${tag}`, weight: 100, isFinal: true } as any));
     const exam: any = await asUser('setup', () => exams.schedule({ termId, examTypeId: et.id, name: `Exam ${tag}`, startDate: '2026-03-01T00:00:00.000Z', endDate: '2026-03-10T00:00:00.000Z', classes: [classId] } as any));

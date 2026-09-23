@@ -124,13 +124,18 @@ export class CreateStudentEnrollmentDto {
   @IsOptional() @IsString() gradeLevelId?: string;
   @IsOptional() @IsISO8601() admissionDate?: string;
   @IsOptional() @IsIn([...ENROLLMENT_TYPES]) enrollmentType?: EnrollmentTypeValue;
-  @IsOptional() @IsIn([...ENROLLMENT_STATUSES]) status?: EnrollmentStatusValue;
+  /** PENDING or ACTIVE only — every other status is reached through the FSM. */
+  @IsOptional() @IsIn(['PENDING', 'ACTIVE']) status?: EnrollmentStatusValue;
   @IsOptional() @IsString() notes?: string;
   /**
    * Set internally by admissions — deliberately undecorated, so the validation
    * whitelist rejects it from an HTTP body. An application enrols once.
+   *
+   * `declare`, not a plain field: a plain class field is emitted as an own
+   * property initialised to `undefined`, which the whitelist then reports as a
+   * forbidden property on EVERY request — every enrollment POST answered 400.
    */
-  admissionApplicationId?: string;
+  declare admissionApplicationId?: string;
 
   /** Opening placement. Omit only when the learner is PENDING with no seat yet. */
   @IsOptional() @ValidateNested() @Type(() => PlacementInputDto) placement?: PlacementInputDto;
@@ -140,6 +145,8 @@ export class ChangeEnrollmentStatusDto {
   @IsIn([...ENROLLMENT_STATUSES]) toStatus!: EnrollmentStatusValue;
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() @IsISO8601() effectiveAt?: string;
+  /** SUSPENDED only: the day the suspension ends. The learner is reinstated automatically. */
+  @IsOptional() @IsISO8601() suspendedUntil?: string;
   /** Required by the FSM for re-entry: where the learner comes back to. */
   @IsOptional() @ValidateNested() @Type(() => PlacementInputDto) placement?: PlacementInputDto;
 }
@@ -147,6 +154,11 @@ export class ChangeEnrollmentStatusDto {
 export class WithdrawEnrollmentDto {
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() @IsISO8601() effectiveAt?: string;
+}
+
+/** Suspension: a reason, and optionally the day it ends (the learner is then reinstated automatically). */
+export class SuspendEnrollmentDto extends WithdrawEnrollmentDto {
+  @IsOptional() @IsISO8601() suspendedUntil?: string;
 }
 
 /* ───────────────────────────── Placement ───────────────────────────── */
@@ -248,4 +260,34 @@ export class PromoteEnrollmentDto {
    */
   @IsOptional() @IsBoolean() overrideCapacity?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() overrideReason?: string;
+}
+
+/* ───────────────────────────── Promotion ───────────────────────────── */
+
+/**
+ * `promoted` → next grade in the next year; `repeated` → same grade in the next
+ * year; `graduated` → enrollment COMPLETED, no next-year enrollment.
+ */
+export const PROMOTION_OUTCOMES = ['promoted', 'repeated', 'graduated'] as const;
+export type PromotionOutcome = (typeof PROMOTION_OUTCOMES)[number];
+
+/** Promote one learner by student id (the promotion board works per learner). */
+export class PromoteStudentDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  /** A term of the academic year the learner moves INTO. */
+  @IsString() @IsNotEmpty() toTermId!: string;
+  /** Omit to let the grade ladder choose (or graduate at the top grade). */
+  @IsOptional() @IsString() toClassId?: string;
+  @IsOptional() @IsString() toSectionId?: string;
+  @IsOptional() @IsString() rollNumber?: string;
+  @IsOptional() @IsIn([...PROMOTION_OUTCOMES]) outcome?: PromotionOutcome;
+  @IsOptional() @IsString() reason?: string;
+}
+
+/** Year-end rollover from a term of year N to a term of year N+1. Dry-run by default. */
+export class PromotionRolloverDto {
+  @IsString() @IsNotEmpty() fromTermId!: string;
+  @IsString() @IsNotEmpty() toTermId!: string;
+  @IsOptional() @IsBoolean() dryRun?: boolean;
+  @IsOptional() @IsString() reason?: string;
 }

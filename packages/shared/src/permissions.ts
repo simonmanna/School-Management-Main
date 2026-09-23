@@ -386,6 +386,13 @@ export const PERMISSIONS = {
     /// Split from `manageEnrollment` so exceeding a limit is a separately
     /// delegable decision; every use is recorded with a reason on the placement.
     overrideCapacity: 'school:enrollment:capacity:override',
+    /// Bring a WITHDRAWN or TRANSFERRED learner back onto a roll (re-entry).
+    /// Split from `manageEnrollment`: reversing an exit is a decision a school
+    /// wants a senior person to own, and every use is recorded with a reason.
+    reactivateEnrollment: 'school:enrollment:reactivate',
+    /// Open medical documents and records. Separate from `school:read` so a
+    /// teacher who can see the class list cannot open a pupil's health file.
+    readMedical: 'school:medical:read',
     /// Programmes, annual class cohorts and grouping modes — configuration that
     /// changes how every downstream academic rule is resolved.
     manageProgrammes: 'school:programmes:write',
@@ -393,6 +400,9 @@ export const PERMISSIONS = {
     runAcademicMigration: 'school:academics:migrate',
     manageStaff: 'school:staff:write',
     manageAdmissions: 'school:admissions:write',
+    /// Accept / reject / waitlist an application. Separate from processing it,
+    /// so the person who gathers the documents is not the person who decides.
+    decideAdmissions: 'school:admissions:decide',
     // Admissions sub-grants (off by default; the broad write above is the legacy grant).
     scheduleAdmissionInterviews: 'school:admissions:interview',
     issueAdmissionOffers: 'school:admissions:offer',
@@ -947,6 +957,9 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:academics:migrate': { label: 'Run academic backfill', description: 'Execute enrollment/placement backfills and resolve the migration exception queue.', group: 'School', subgroup: 'Enrollment' },
   'school:staff:write': { label: 'Manage staff', description: 'CRUD staff profiles.', group: 'School', subgroup: 'Staff' },
   'school:admissions:write': { label: 'Manage admissions', description: 'CRUD admission applications.', group: 'School', subgroup: 'Admissions' },
+  'school:admissions:decide': { label: 'Decide admissions', description: 'Accept, reject or waitlist an application.', group: 'School', subgroup: 'Admissions', risk: 'high' },
+  'school:medical:read': { label: 'Read medical records', description: 'Open learners medical documents and health records.', group: 'School', subgroup: 'Students', risk: 'high' },
+  'school:enrollment:reactivate': { label: 'Reactivate enrollment', description: 'Return a withdrawn or transferred learner to a class roll.', group: 'School', subgroup: 'Enrollment', risk: 'high' },
   'school:attendance:write': { label: 'Take attendance (org-wide)', description: 'Mark registers for any class. Use the own-scoped grant for teachers.', group: 'School', subgroup: 'Attendance' },
   'school:attendance:own': { label: 'Take own-class attendance', description: 'Mark registers for classes you teach only.', group: 'School', subgroup: 'Attendance' },
   'school:grades:write': { label: 'Enter grades', description: 'Enter marks. Approving is a separate grant.', group: 'School', subgroup: 'Assessment' },
@@ -1148,6 +1161,9 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:reports:documents:publish',
       'school:promotion:decide',
       'school:promotion:apply',
+      'school:admissions:decide',
+      'school:enrollment:reactivate',
+      'school:medical:read',
       'school:statutory:read',
       'school:statutory:export',
       'school:lessonplans:review',
@@ -1330,6 +1346,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:grades:approve',
       'school:results:approve',
       'school:promotion:decide',
+      'school:admissions:decide',
       'school:analytics:read',
       'school:analytics:export',
       // Report centre (ADR-017). New grants do not reach existing tenants by
@@ -1410,6 +1427,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
     dataScope: 'school',
     permissions: [
       'school:read',
+      'school:medical:read',
       'school:students:write',
       'school:documents:read',
       'school:documents:write',

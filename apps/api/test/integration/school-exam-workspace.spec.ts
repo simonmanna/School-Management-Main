@@ -20,6 +20,7 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { MarksWorkspaceService } from '../../src/modules/school/examinations/marks-workspace.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: exam workspace — create → apply → mark → results → lock', () => {
   const rawUrl = (() => {
@@ -96,11 +97,11 @@ describeDb('integration: exam workspace — create → apply → mark → result
           organizationId,
           partnerId: partner.id,
           admissionNo: `ADM-${studentIds.length + 1}-${Date.now()}`,
-          currentClassId: classId,
           enrollmentDate: new Date('2026-01-15'),
           status: 'active',
         },
       });
+      await placeInClass(raw, { organizationId: organizationId, studentProfileId: profile.id, classId: classId });
       studentIds.push(profile.id);
     }
 

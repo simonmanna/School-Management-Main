@@ -91,11 +91,11 @@ export function SchoolPromotionPage() {
   } | null>(null);
 
   // Only fetch students once a term + class is chosen (the decision surface).
+  // The API resolves "in this class" from placement history; the profile no
+  // longer carries a class of its own.
   const { data: studentsResp, isLoading } = useStudents(
-    termId && classId ? { search: search || undefined, page: 1, pageSize: 500 } : {},
+    termId && classId ? { classId, search: search || undefined, page: 1, pageSize: 500 } : {},
   );
-  // We filter by class client-side from the term's active enrollment list, but
-  // the API returns students for the org; narrow here for a snappy grid.
   const students = useMemo(() => {
     const list = (studentsResp?.data ?? []) as Array<{
       id: string; admissionNo: string; partner?: { name: string; code?: string | null } | null;
@@ -103,7 +103,6 @@ export function SchoolPromotionPage() {
     }>;
     const q = search.trim().toLowerCase();
     return list
-      .filter((s) => (classId ? s.currentClassId === classId : true))
       .filter((s) => {
         if (!q) return true;
         const name = s.partner?.name?.toLowerCase() ?? '';

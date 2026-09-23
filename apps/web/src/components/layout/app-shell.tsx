@@ -250,9 +250,9 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/academic-years', label: 'Academic Years', icon: CalendarRange, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/terms', label: 'Terms / Semesters', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/classes', label: 'Classes / Grades', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/sections', label: 'Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/sections', label: 'Streams / Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/streams', label: 'Streams', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/settings', label: 'School Settings', icon: SettingsIcon, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/campuses', label: 'Campuses', icon: Building2, permission: PERMISSIONS.school.read },
       // Remaining academic-management tools.
       { to: '/school/subjects', label: 'Subjects & Terms', icon: BookOpen, permission: PERMISSIONS.school.read },
@@ -604,6 +604,21 @@ const NAV_SECTIONS: NavSection[] = [
 
 // Flags are build-time constants under Vite, so this resolves once.
 const VISIBLE_SECTIONS = NAV_SECTIONS.filter((s) => flagEnabled(s.flag));
+
+/**
+ * The permission a route needs, taken from the same menu entries that decide
+ * what is shown. Hiding a link is not security (the API is the authority), but
+ * typing a URL should not render a screen whose every request will 403.
+ * Longest matching menu path wins; routes with no menu entry need none.
+ */
+const ROUTE_PERMISSIONS: Array<[string, string]> = NAV_SECTIONS.flatMap((section) =>
+  section.items.filter((i) => i.permission).map((i) => [i.to, i.permission!] as [string, string]),
+).sort((a, b) => b[0].length - a[0].length);
+
+export function routePermission(pathname: string): string | undefined {
+  const hit = ROUTE_PERMISSIONS.find(([to]) => pathname === to || pathname.startsWith(`${to}/`));
+  return hit?.[1];
+}
 
 // Collapsed (icon-only) sidebar keeps sections flat; accordion is only for expanded mode.
 const SIDEBAR_EXPAND_STATE_KEY = 'poscafe.sidebar.expandedSections';

@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { createReadStream, createWriteStream, statSync } from 'node:fs';
 import { mkdir, unlink } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
@@ -131,10 +131,45 @@ export class FilesService {
   async signDownloadForCaller(fileId: string): Promise<{ url: string; expiresAt: string }> {
     const file = await this.prisma.client.file.findFirst({
       where: { id: fileId, deletedAt: null },
-      select: { id: true, organizationId: true },
+      select: {
+        id: true,
+        organizationId: true,
+        ownerType: true,
+        uploadedById: true,
+        studentDocuments: { select: { type: true } },
+        applicationDocuments: { select: { id: true } },
+      },
     });
     if (!file) throw new NotFoundException('File not found');
+    this.assertMayOpen(file);
     return this.sign(file.id, file.organizationId);
+  }
+
+  /**
+   * `school:documents:read` opens ordinary school paperwork. Sensitive files need
+   * the grant of the domain they belong to — being able to see a class list must
+   * not open a pupil's health file, an applicant's ID scan or a staff contract.
+   * The uploader can always reopen their own file.
+   */
+  private assertMayOpen(file: {
+    ownerType: string | null;
+    uploadedById: string | null;
+    studentDocuments: Array<{ type: string }>;
+    applicationDocuments: Array<{ id: string }>;
+  }) {
+    if (file.uploadedById && file.uploadedById === this.tenant.userId) return;
+    const held = new Set(this.tenant.permissions ?? []);
+    if (held.has('*')) return;
+    const required: string[] = [];
+    const medical =
+      /medical|health/i.test(file.ownerType ?? '') || file.studentDocuments.some((d) => /medical|health|immuni[sz]ation/i.test(d.type));
+    if (medical) required.push('school:medical:read');
+    if (file.applicationDocuments.length > 0) required.push('school:admissions:write');
+    if (/^Hr/.test(file.ownerType ?? '')) required.push('hr:read');
+    const missing = required.filter((p) => !held.has(p));
+    if (missing.length > 0) {
+      throw new ForbiddenException(`Opening this file requires: ${missing.join(', ')}`);
+    }
   }
 
   private sign(fileId: string, organizationId: string): { url: string; expiresAt: string } {

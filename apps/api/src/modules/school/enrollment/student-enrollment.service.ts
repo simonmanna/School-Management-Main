@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { EVENTS } from '@erp/shared';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
@@ -7,10 +7,13 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { PlacementService } from './placement.service';
 import { ClassCohortService } from './class-cohort.service';
 import { ProgrammeService } from './programme.service';
+import { assertYearWritable } from '../foundation/academic-year-guard';
 import {
   canTransition,
   closeReasonFor,
+  CREATABLE_STATUSES,
   holdsPlacement,
+  isReactivation,
   profileStatusFor,
   transitionError,
   type EnrollmentStatusValue,
@@ -22,6 +25,7 @@ import type {
   PlacementInputDto,
   PromoteEnrollmentDto,
   RepeatGradeDto,
+  SuspendEnrollmentDto,
   WithdrawEnrollmentDto,
 } from './enrollment.dto';
 
@@ -157,6 +161,19 @@ export class StudentEnrollmentService {
     {
       const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+      if (['deceased', 'archived'].includes(student.status)) {
+        throw new BadRequestException(`This learner's record is ${student.status}; they cannot be enrolled.`);
+      }
+      const status = (dto.status ?? 'ACTIVE') as EnrollmentStatusValue;
+      if (!CREATABLE_STATUSES.includes(status)) {
+        throw new BadRequestException(
+          `An enrollment is created PENDING or ACTIVE. '${status}' is reached through a status change, ` +
+            'which records the reason and ends the class seat.',
+        );
+      }
+      // Closed/archived years take no new members; locks the year row FOR SHARE
+      // so the year cannot close underneath this transaction.
+      await assertYearWritable(tx, organizationId, dto.academicYearId, 'create');
       const year = await tx.academicYear.findFirst({ where: { id: dto.academicYearId } });
       if (!year) throw new NotFoundException(`Academic year ${dto.academicYearId} not found`);
 
@@ -180,7 +197,7 @@ export class StudentEnrollmentService {
           programmeId,
           gradeLevelId,
           admissionDate: dto.admissionDate ? new Date(dto.admissionDate) : new Date(),
-          status: dto.status ?? 'ACTIVE',
+          status,
           enrollmentType: dto.enrollmentType ?? 'NEW',
           admissionApplicationId: dto.admissionApplicationId ?? null,
           notes: dto.notes ?? null,
@@ -209,10 +226,7 @@ export class StudentEnrollmentService {
         warnings = result.warnings;
       }
 
-      const profileStatus = profileStatusFor(enrollment.status as EnrollmentStatusValue);
-      if (profileStatus) {
-        await tx.studentProfile.updateMany({ where: { id: dto.studentProfileId }, data: { status: profileStatus } });
-      }
+      await this.syncProfileStatus(tx, dto.studentProfileId, 'Enrolled');
 
       await this.audit.recordInTx(tx, {
         entity: 'StudentEnrollment',
@@ -276,16 +290,46 @@ export class StudentEnrollmentService {
       if (from === to) throw new BadRequestException(`Enrollment is already '${from}'.`);
       if (!canTransition(from, to)) throw new BadRequestException(transitionError(from, to));
 
-      const at = dto.effectiveAt ? new Date(dto.effectiveAt) : new Date();
+      // A closed year's memberships may only be completed (promotion / graduation
+      // run after closure); nothing else about them changes.
+      await assertYearWritable(tx, enrollment.organizationId, enrollment.academicYearId, to === 'COMPLETED' ? 'complete' : 'modify');
 
-      await tx.studentEnrollment.updateMany({
-        where: { id },
+      if (isReactivation(from, to)) {
+        const held = this.tenant.permissions ?? [];
+        if (!held.includes(PERMISSIONS.school.reactivateEnrollment) && !held.includes('*')) {
+          throw new ForbiddenException(
+            `Returning a ${from.toLowerCase()} learner to a class roll requires the ` +
+              `${PERMISSIONS.school.reactivateEnrollment} permission.`,
+          );
+        }
+      }
+
+      const at = dto.effectiveAt ? new Date(dto.effectiveAt) : new Date();
+      let suspendedUntil: Date | null = null;
+      if (to === 'SUSPENDED' && dto.suspendedUntil) {
+        suspendedUntil = new Date(dto.suspendedUntil);
+        if (suspendedUntil <= at) {
+          throw new BadRequestException('A suspension must end after it starts.');
+        }
+      } else if (dto.suspendedUntil) {
+        throw new BadRequestException('suspendedUntil applies only to a suspension.');
+      }
+
+      // Compare-and-set on the status we validated. Two clerks acting on the same
+      // learner at once: exactly one transition wins; the other is told, rather
+      // than both "succeeding" and the second silently overwriting the first.
+      const changed = await tx.studentEnrollment.updateMany({
+        where: { id, status: from },
         data: {
           status: to,
           ...(to === 'COMPLETED' ? { completionDate: at } : {}),
+          suspendedUntil: to === 'SUSPENDED' ? suspendedUntil : null,
           updatedBy: this.tenant.userId ?? null,
         },
       });
+      if (changed.count === 0) {
+        throw new ConflictException('This enrollment was changed by someone else just now. Reload and try again.');
+      }
 
       // Losing membership ends the class seat; regaining it needs a new one.
       // The placement rows themselves are never deleted — a withdrawn learner
@@ -307,10 +351,7 @@ export class StudentEnrollmentService {
         await this.adjustAdmissionSeat(tx, enrollment, placement, +1);
       }
 
-      const profileStatus = profileStatusFor(to);
-      if (profileStatus) {
-        await tx.studentProfile.updateMany({ where: { id: enrollment.studentProfileId }, data: { status: profileStatus } });
-      }
+      await this.syncProfileStatus(tx, enrollment.studentProfileId, dto.reason);
 
       await this.recordEvent(tx, enrollment, from, to, dto.reason);
       await this.audit.recordInTx(tx, {
@@ -353,13 +394,20 @@ export class StudentEnrollmentService {
     if (!application?.admissionCycleId) return;
     const cohort = await tx.classCohort.findFirst({ where: { id: placement.classCohortId }, select: { classId: true } });
     if (!cohort) return;
-    const row = await tx.admissionCapacity.findFirst({
+    let row = await tx.admissionCapacity.findFirst({
       where: {
         admissionCycleId: application.admissionCycleId,
         classId: cohort.classId,
         sectionId: placement.sectionId ?? '__none__',
       },
     });
+    // A section seat with no section-level ledger was claimed against the
+    // class-level row (see AdmissionsService.resolveCapacity); release it there.
+    if (!row && placement.sectionId) {
+      row = await tx.admissionCapacity.findFirst({
+        where: { admissionCycleId: application.admissionCycleId, classId: cohort?.classId, sectionId: '__none__' },
+      });
+    }
     if (!row) return;
     if (delta < 0) {
       await tx.admissionCapacity.updateMany({
@@ -388,8 +436,13 @@ export class StudentEnrollmentService {
     return this.changeStatus(id, { toStatus: 'TRANSFERRED', reason: dto.reason, effectiveAt: dto.effectiveAt });
   }
 
-  suspend(id: string, dto: WithdrawEnrollmentDto) {
-    return this.changeStatus(id, { toStatus: 'SUSPENDED', reason: dto.reason, effectiveAt: dto.effectiveAt });
+  suspend(id: string, dto: SuspendEnrollmentDto) {
+    return this.changeStatus(id, {
+      toStatus: 'SUSPENDED',
+      reason: dto.reason,
+      effectiveAt: dto.effectiveAt,
+      suspendedUntil: dto.suspendedUntil,
+    });
   }
 
   complete(id: string, dto: WithdrawEnrollmentDto) {
@@ -412,6 +465,7 @@ export class StudentEnrollmentService {
     if (current.academicYearId === dto.toAcademicYearId) {
       throw new BadRequestException('A repeat places the learner in the NEXT academic year, not the current one.');
     }
+    const closeAt = await this.yearTransitionDate(tx, current.academicYearId, dto.toAcademicYearId);
 
     const openPlacement = await tx.enrollmentPlacement.findFirst({
       where: { enrollmentId: id },
@@ -425,7 +479,7 @@ export class StudentEnrollmentService {
 
     {
       if (current.status === 'ACTIVE' || current.status === 'SUSPENDED') {
-        await this.changeStatusInTx(tx, id, { toStatus: 'COMPLETED', reason: `Repeating: ${dto.reason}` });
+        await this.changeStatusInTx(tx, id, { toStatus: 'COMPLETED', reason: `Repeating: ${dto.reason}`, effectiveAt: closeAt.toISOString() });
       }
       return this.createInTx(tx, {
         studentProfileId: current.studentProfileId,
@@ -481,6 +535,7 @@ export class StudentEnrollmentService {
     if (current.academicYearId === dto.toAcademicYearId) {
       throw new BadRequestException('Promotion places the learner in the NEXT academic year, not the current one.');
     }
+    const closeAt = await this.yearTransitionDate(tx, current.academicYearId, dto.toAcademicYearId);
 
     const open = await tx.enrollmentPlacement.findFirst({
       where: { enrollmentId: id },
@@ -524,6 +579,7 @@ export class StudentEnrollmentService {
         await this.changeStatusInTx(tx, id, {
           toStatus: 'COMPLETED',
           reason: dto.reason ?? 'Promoted to the next class',
+          effectiveAt: closeAt.toISOString(),
         });
       }
       return this.createInTx(tx, {
@@ -646,6 +702,73 @@ export class StudentEnrollmentService {
     if (!programme.isActive) throw new BadRequestException(`Programme "${programme.name}" is not active.`);
 
     return { gradeLevelId: gradeLevelId as string, programmeId: programmeId as string };
+  }
+
+  /**
+   * The moment a learner leaves one year for the next: the end of the old year,
+   * or now if that is earlier (a mid-year correction). Refuses a "next" year that
+   * does not actually come after the current one.
+   */
+  private async yearTransitionDate(tx: any, fromYearId: string, toYearId: string): Promise<Date> {
+    const [from, to] = await Promise.all([
+      tx.academicYear.findFirst({ where: { id: fromYearId }, select: { name: true, startDate: true, endDate: true } }),
+      tx.academicYear.findFirst({ where: { id: toYearId }, select: { name: true, startDate: true } }),
+    ]);
+    if (!from || !to) throw new NotFoundException('Academic year not found');
+    if (to.startDate <= from.startDate) {
+      throw new BadRequestException(`"${to.name}" does not come after "${from.name}". Promotion and repeat only move forward.`);
+    }
+    const now = new Date();
+    return from.endDate < now ? from.endDate : now;
+  }
+
+  /**
+   * `StudentProfile.status` is a projection of the learner's LATEST-year
+   * membership. Withdrawing an old year's enrollment must not mark a learner who
+   * is active this year as withdrawn, so the projection is always recomputed
+   * from the most recent year rather than from whichever row changed last.
+   * Every change is written to StudentStatusHistory.
+   */
+  async syncProfileStatus(tx: any, studentProfileId: string, reason?: string) {
+    const rows = await tx.studentEnrollment.findMany({
+      where: { studentProfileId },
+      select: { status: true, academicYear: { select: { startDate: true } } },
+    });
+    if (rows.length === 0) return;
+    rows.sort((a: any, b: any) => b.academicYear.startDate.getTime() - a.academicYear.startDate.getTime());
+    const next = profileStatusFor(rows[0].status as EnrollmentStatusValue);
+    if (!next) return;
+    const profile = await tx.studentProfile.findFirst({ where: { id: studentProfileId }, select: { status: true, organizationId: true } });
+    if (!profile || profile.status === next) return;
+    await tx.studentProfile.updateMany({ where: { id: studentProfileId }, data: { status: next } });
+    await tx.studentStatusHistory.create({
+      data: {
+        organizationId: profile.organizationId,
+        studentProfileId,
+        fromStatus: profile.status,
+        toStatus: next,
+        reason: reason ?? 'Enrollment status changed',
+        changedById: this.tenant.userId ?? null,
+      },
+    });
+  }
+
+  /** Reinstate learners whose suspension end date has passed (called by the scheduler, per org). */
+  async liftExpiredSuspensions(now: Date = new Date()): Promise<number> {
+    const due = await this.prisma.client.studentEnrollment.findMany({
+      where: { status: 'SUSPENDED', suspendedUntil: { lte: now } },
+      select: { id: true },
+    });
+    let lifted = 0;
+    for (const e of due) {
+      try {
+        await this.changeStatus(e.id, { toStatus: 'ACTIVE', reason: 'Suspension period ended' });
+        lifted++;
+      } catch {
+        // A closed year or a concurrent change: leave it for a human.
+      }
+    }
+    return lifted;
   }
 
   private async recordEvent(

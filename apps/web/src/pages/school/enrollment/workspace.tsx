@@ -41,7 +41,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { notify } from '@/lib/notify';
-import { useAcademicYears, useTerms, useStudents } from '@/features/school/api';
+import { useAcademicYears, useTerms, useStudents, useTerminology } from '@/features/school/api';
 import {
   errorMessage,
   MOVEMENT_REASON_LABEL,
@@ -1139,6 +1139,7 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
 /* ══════════════════════════════ Roster tab ═════════════════════════════ */
 
 function RosterTab({ yearId }: { yearId: string }) {
+  const labels = useTerminology();
   const { data: cohorts } = useClassCohorts({ academicYearId: yearId || undefined });
   const [cohortId, setCohortId] = useState('');
   const [at, setAt] = useState(new Date().toISOString().slice(0, 10));
@@ -1183,7 +1184,7 @@ function RosterTab({ yearId }: { yearId: string }) {
                 <TableHead>Learner</TableHead>
                 <TableHead>Admission no.</TableHead>
                 <TableHead>Section</TableHead>
-                <TableHead>Stream</TableHead>
+                <TableHead>{labels.section}</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>In class since</TableHead>
               </TableRow>

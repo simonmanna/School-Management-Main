@@ -33,6 +33,7 @@ import { PortalAccountService } from '../../src/modules/school/portals/portal-ac
 import { PortalsService } from '../../src/modules/school/portals/portals.service';
 import { OneTimeTokenService } from '../../src/kernel/auth/one-time-token.service';
 import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
+import { placeInClass } from './_placement';
 
 describeDb('integration: portal onboarding — invite to working session', () => {
   const rawUrl = (() => {
@@ -93,18 +94,17 @@ describeDb('integration: portal onboarding — invite to working session', () =>
       const partner = await raw.partner.create({
         data: { organizationId, name, code: `P-PT-${name}-${Date.now()}` },
       });
-      return (
-        await raw.studentProfile.create({
-          data: {
-            organizationId,
-            partnerId: partner.id,
-            admissionNo: `ADM-${name}-${Date.now()}`,
-            currentClassId: cls.id,
-            enrollmentDate: new Date(),
-            status: 'active',
-          },
-        })
-      ).id;
+      const sp = await raw.studentProfile.create({
+        data: {
+          organizationId,
+          partnerId: partner.id,
+          admissionNo: `ADM-${name}-${Date.now()}`,
+          enrollmentDate: new Date(),
+          status: 'active',
+        },
+      });
+      await placeInClass(raw, { organizationId, studentProfileId: sp.id, classId: cls.id });
+      return sp.id;
     };
     alice = await mkPupil('Alice');
     bob = await mkPupil('Bob');

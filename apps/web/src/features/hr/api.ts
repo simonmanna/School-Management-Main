@@ -1077,12 +1077,28 @@ export function useHrPayslip(id?: string) {
   });
 }
 
+/** Paying a slip posts Dr net pay payable / Cr bank|cash, and may flip the run to PAID. */
 export function useMarkHrPayslipPaid() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, dto }: { id: string; dto: any }) =>
+    mutationFn: async ({ id, dto }: { id: string; dto: { paymentMethod: string; paidAt?: string } }) =>
       (await api.post(`/hr/payslips/${id}/paid`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'payslips'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hr', 'payslips'] });
+      qc.invalidateQueries({ queryKey: ['hr', 'payroll'] });
+    },
+  });
+}
+
+export function useReverseHrPayslipPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) =>
+      (await api.post(`/hr/payslips/${id}/reverse-payment`, { reason })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hr', 'payslips'] });
+      qc.invalidateQueries({ queryKey: ['hr', 'payroll'] });
+    },
   });
 }
 
@@ -1227,20 +1243,38 @@ export function useHrBankPayments(params: { runId?: string; status?: string } = 
   });
 }
 
+/** A batch touches the run and its payslips, so every payment mutation refreshes all three. */
+function invalidatePayments(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['hr', 'bank-payments'] });
+  qc.invalidateQueries({ queryKey: ['hr', 'payslips'] });
+  qc.invalidateQueries({ queryKey: ['hr', 'payroll'] });
+}
+
 export function useGenerateHrBankPayment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: any) => (await api.post('/hr/bank-payments/generate', dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'bank-payments'] }),
+    mutationFn: async (dto: { runId: string; method?: string; paymentDate?: string; notes?: string }) =>
+      (await api.post('/hr/bank-payments/generate', dto)).data,
+    onSuccess: () => invalidatePayments(qc),
   });
 }
 
+/** GENERATED → SENT → PAID (posts the payment journal), or CANCELLED before PAID. */
 export function useUpdateHrBankPaymentStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, dto }: { id: string; dto: any }) =>
+    mutationFn: async ({ id, dto }: { id: string; dto: { status: string; paidAt?: string; fileName?: string; fileUrl?: string } }) =>
       (await api.patch(`/hr/bank-payments/${id}/status`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'bank-payments'] }),
+    onSuccess: () => invalidatePayments(qc),
+  });
+}
+
+export function useReverseHrBankPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason?: string }) =>
+      (await api.post(`/hr/bank-payments/${id}/reverse`, { reason })).data,
+    onSuccess: () => invalidatePayments(qc),
   });
 }
 
@@ -1269,10 +1303,12 @@ export function useApproveHrAdvance() {
   });
 }
 
+/** Paying out an advance posts Dr advance receivable / Cr bank|cash; only PAID advances are recovered. */
 export function useMarkHrAdvancePaid() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => (await api.post(`/hr/advances/${id}/paid`)).data,
+    mutationFn: async ({ id, dto }: { id: string; dto: { paymentMethod: string; paidAt?: string } }) =>
+      (await api.post(`/hr/advances/${id}/paid`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'advances'] }),
   });
 }
@@ -1306,6 +1342,26 @@ export function useUpdateHrLoan() {
   return useMutation({
     mutationFn: async ({ id, dto }: { id: string; dto: any }) =>
       (await api.patch(`/hr/loans/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'loans'] }),
+  });
+}
+
+/** Disbursement posts the loan to the ledger; payroll recovers only disbursed loans. */
+export function useDisburseHrLoan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: { disbursedAt?: string; method?: string } }) =>
+      (await api.post(`/hr/loans/${id}/disburse`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'loans'] }),
+  });
+}
+
+/** Write-off (needs hr:payroll): Dr bad debt / Cr loan receivable. The only way a balance leaves outside payroll. */
+export function useWriteOffHrLoan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
+      (await api.post(`/hr/loans/${id}/write-off`, { reason })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'loans'] }),
   });
 }
@@ -1442,9 +1498,28 @@ export function useDeleteHrOnboardingTask() {
 export function useHrOffboarding(params: Record<string, any> = {}) {
   return useQuery({ queryKey: ['hr', 'offboarding', params], queryFn: async () => (await api.get('/hr/offboarding', { params })).data });
 }
+/**
+ * Read-only estimate. This used to POST `/offboarding/settle`, so pressing
+ * "Compute" on the PREVIEW dialog actually settled and deactivated the employee.
+ */
 export function useHrSettlementPreview() {
+  return useMutation({
+    mutationFn: async (dto: { employeeId: string; lastDay: string }) =>
+      (await api.get('/hr/offboarding/settlement', { params: dto })).data,
+  });
+}
+/** Confirms the settlement: offboarding record + leave-encashment input for the final payroll. */
+export function useHrSettle() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (dto: { employeeId: string; lastDay: string }) => (await api.post('/hr/offboarding/settle', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'offboarding'] }) });
+  return useMutation({
+    mutationFn: async (dto: { employeeId: string; lastDay: string; reason?: string; noticeDate?: string; notes?: string }) =>
+      (await api.post('/hr/offboarding/settle', dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['hr', 'offboarding'] });
+      qc.invalidateQueries({ queryKey: ['hr', 'employees'] });
+      qc.invalidateQueries({ queryKey: ['hr', 'payroll', 'inputs'] });
+    },
+  });
 }
 
 // ── Recruitment / ATS ────────────────────────────────────────────────────────────
@@ -1536,6 +1611,20 @@ export function useHrStatutory(params: Record<string, any> = {}) {
 export function useCreateHrStatutory() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async (dto: any) => (await api.post('/hr/payroll/statutory', dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'statutory'] }) });
+}
+export function useUpdateHrStatutory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: any }) => (await api.patch(`/hr/payroll/statutory/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'statutory'] }),
+  });
+}
+export function useDeleteHrStatutory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/hr/payroll/statutory/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hr', 'statutory'] }),
+  });
 }
 export function useHrRunPreview(runId?: string) {
   return useQuery({ enabled: !!runId, queryKey: ['hr', 'run-preview', runId], queryFn: async () => (await api.get(`/hr/payroll/runs/${runId}/preview`)).data });

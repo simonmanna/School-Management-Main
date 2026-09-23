@@ -61,6 +61,13 @@ describeDb('Row-Level Security (RLS) — D2-1', () => {
 
     orgA = randomUUID();
     orgB = randomUUID();
+    // Organization.currencyCode defaults to USD and is a FK: a freshly migrated
+    // database has no currencies until something seeds one.
+    await prismaSuper.currency.upsert({
+      where: { code: 'USD' },
+      update: {},
+      create: { code: 'USD', symbol: '$', name: 'US Dollar', decimalPlaces: 2 },
+    });
 
     // Seed orgs + partners as the table owner, scoping each write to its own
     // tenant via the app.org_id GUC (same pattern as PrismaService).

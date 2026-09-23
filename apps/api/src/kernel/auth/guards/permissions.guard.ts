@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { PermissionResolverService } from '../permission-resolver.service';
@@ -6,6 +6,7 @@ import { PERMISSIONS_KEY } from '../decorators/require-permissions.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { NO_PERMISSION_REQUIRED_KEY } from '../decorators/no-permission-required.decorator';
 import type { AuthUser } from '../jwt-token.service';
+import { TenantContextService } from '../../tenancy/tenant-context.service';
 
 /**
  * D4-2: Permissions guard with two modes:
@@ -32,7 +33,15 @@ export class PermissionsGuard implements CanActivate {
   private readonly dbMode = process.env.PERMISSIONS_DB_LOOKUP !== 'false';
 
   /** SEC-06 stage 2: refuse undecorated routes outright. See canActivate. */
-  private static readonly strictMode = process.env.PERMISSIONS_FAIL_CLOSED === 'true';
+  /**
+   * Fail-closed is the production default: the ledger of undecorated routes is
+   * empty, so an undecorated handler is a new defect and must be refused, not
+   * served to every authenticated caller (a parent portal account included).
+   * PERMISSIONS_FAIL_CLOSED=false opts out explicitly; outside production it is opt-in.
+   */
+  private static readonly strictMode =
+    process.env.PERMISSIONS_FAIL_CLOSED === 'true' ||
+    (process.env.NODE_ENV === 'production' && process.env.PERMISSIONS_FAIL_CLOSED !== 'false');
   /** One line per handler, not one per request — this is a defect report, not traffic logging. */
   private static readonly warnedRoutes = new Set<string>();
 
@@ -49,6 +58,7 @@ export class PermissionsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly resolver: PermissionResolverService,
+    private readonly tenant: TenantContextService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -57,7 +67,25 @@ export class PermissionsGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()])) {
       return true;
     }
+    const request = context.switchToHttp().getRequest<{ auth?: AuthUser }>();
+
+    // A deactivated or deleted account loses the session on its NEXT request,
+    // not when its access token expires. Portal and staff alike; one indexed
+    // read, which DB mode needs anyway for the permission set below.
+    let dbGrants: string[] | null = null;
+    if (request.auth && this.dbMode) {
+      const state = await this.resolver.sessionState(request.auth.sub);
+      if (!state) throw new UnauthorizedException('This account is no longer active');
+      dbGrants = state.permissions;
+      // Services that make their own authorization decisions (capacity override,
+      // re-opening a year, role grants, approvals) read `tenant.permissions`.
+      // Give them the database's answer, not the token's up-to-15-minute-old copy.
+      const store = this.tenant.store;
+      if (store) store.permissions = dbGrants;
+    }
+
     if (this.reflector.getAllAndOverride<string>(NO_PERMISSION_REQUIRED_KEY, [context.getHandler(), context.getClass()])) {
+      if (!request.auth) throw new ForbiddenException('Authentication required');
       return true;
     }
 
@@ -65,8 +93,6 @@ export class PermissionsGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-
-    const request = context.switchToHttp().getRequest<{ auth?: AuthUser }>();
 
     // SEC-06 — undecorated handlers no longer fall through to "allowed".
     //
@@ -109,7 +135,7 @@ export class PermissionsGuard implements CanActivate {
 
     let granted: string[];
     if (this.dbMode) {
-      granted = await this.resolver.lookupPermissions(request.auth.sub);
+      granted = dbGrants ?? [];
     } else {
       granted = request.auth.permissions ?? [];
     }

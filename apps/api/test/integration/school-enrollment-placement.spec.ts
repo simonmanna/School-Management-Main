@@ -25,7 +25,6 @@ import { ProgrammeService } from '../../src/modules/school/enrollment/programme.
 import { ClassCohortService } from '../../src/modules/school/enrollment/class-cohort.service';
 import { StudentEnrollmentService } from '../../src/modules/school/enrollment/student-enrollment.service';
 import { PlacementService } from '../../src/modules/school/enrollment/placement.service';
-import { EnrollmentBackfillService } from '../../src/modules/school/enrollment/enrollment-backfill.service';
 
 describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', () => {
   const rawUrl = (() => {
@@ -40,7 +39,6 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
   let cohorts: ClassCohortService;
   let enrollments: StudentEnrollmentService;
   let placements: PlacementService;
-  let backfill: EnrollmentBackfillService;
 
   const organizationId = `org_enr_${Date.now()}`;
   const perms = [
@@ -50,6 +48,7 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     'school:programmes:write',
     'school:academics:migrate',
     'school:foundation:write',
+    'school:enrollment:reactivate',
   ];
   const asUser = <T>(userId: string, fn: () => Promise<T>): Promise<T> =>
     tenant.run({ organizationId, userId, permissions: perms }, fn);
@@ -65,7 +64,6 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
   let classP6 = '';
   let sectionA = '';
   let sectionB = '';
-  let streamRed = '';
   let otherClassSection = '';
 
   /** Create a pupil directly — Phase 1 owns membership, not registration. */
@@ -84,6 +82,16 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     });
   };
 
+  // This suite is a dated 2026 scenario (Term 1 = Feb–Apr). Placements are
+  // dated inside their term, so "now" is pinned to mid-Term 1. Only Date is
+  // faked; timers stay real for Prisma and Nest.
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-03-15T09:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+  });
+
   beforeAll(async () => {
     await raw.$connect();
     await raw.currency.upsert({
@@ -92,7 +100,7 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
       create: { code: 'UGX', symbol: 'USh', name: 'Ugandan Shilling', decimalPlaces: 0 },
     });
     await raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, organizationId);
-    await raw.organization.create({ data: { id: organizationId, code: `ENR-${Date.now()}`, name: 'Enrollment School', currencyCode: 'UGX' } });
+    await raw.organization.create({ data: { id: organizationId, code: `ENR-${organizationId.slice(-13)}`, name: 'Enrollment School', currencyCode: 'UGX' } });
     await raw.schoolProfile.create({ data: { organizationId, name: 'Enrollment School', gradingSystem: 'UCE' } });
 
     const year = await raw.academicYear.create({
@@ -122,14 +130,15 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
 
     gradeP5 = (await raw.gradeLevel.create({ data: { organizationId, name: 'P5', order: 5 } })).id;
     gradeP6 = (await raw.gradeLevel.create({ data: { organizationId, name: 'P6', order: 6 } })).id;
+    // The ladder is configured, never inferred: P5 promotes into P6, P6 ends it.
+    await raw.gradeLevel.update({ where: { id: gradeP5 }, data: { nextGradeLevelId: gradeP6 } });
+    await raw.gradeLevel.update({ where: { id: gradeP6 }, data: { isTerminal: true } });
     classP5 = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: gradeP5, name: 'P5', capacity: 40 } })).id;
     classP6 = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: gradeP6, name: 'P6', capacity: 40 } })).id;
 
     sectionA = (await raw.section.create({ data: { organizationId, classId: classP5, name: 'A' } })).id;
     sectionB = (await raw.section.create({ data: { organizationId, classId: classP5, name: 'B' } })).id;
     otherClassSection = (await raw.section.create({ data: { organizationId, classId: classP6, name: 'A' } })).id;
-    streamRed = (await raw.stream.create({ data: { organizationId, classId: classP5, name: 'Red' } })).id;
-    await raw.stream.create({ data: { organizationId, classId: classP5, name: 'Blue' } });
 
     moduleRef = await Test.createTestingModule({
       imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
@@ -140,7 +149,6 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     cohorts = moduleRef.get(ClassCohortService);
     enrollments = moduleRef.get(StudentEnrollmentService);
     placements = moduleRef.get(PlacementService);
-    backfill = moduleRef.get(EnrollmentBackfillService);
 
     // Uganda programme templates: P5/P6 land in Upper Primary, and every later
     // rule reads the programme rather than the class name.
@@ -150,6 +158,7 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
   });
 
   afterAll(async () => {
+    jest.useRealTimers();
     await moduleRef?.close();
     await raw.$disconnect();
   });
@@ -164,7 +173,13 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     const upper = list.find((p) => p.code === 'PRIMARY_UPPER');
     expect(upper.stage).toBe('PRIMARY_UPPER');
     expect(upper.curriculumAuthority).toBe('NCDC');
-    const linkedGrades = upper.gradeLevels.map((g: any) => g.gradeLevel.name).sort();
+    // ADR-028: a grade reaches its programme through its academic level.
+    const linkedGrades = (
+      await raw.gradeLevel.findMany({
+        where: { organizationId, academicLevel: { defaultProgrammeId: upper.id } },
+        select: { name: true },
+      })
+    ).map((g) => g.name).sort();
     expect(linkedGrades).toEqual(['P5', 'P6']);
 
     // Lower primary carries "no ranking by default" as configuration, not code.
@@ -204,58 +219,8 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     ).rejects.toThrow(/different class/i);
   });
 
-  it('refuses a stream when the cohort runs sections only', async () => {
-    const student = await makeStudent('Wrong Stream');
-    await expect(
-      asUser('su', () =>
-        enrollments.create({
-          studentProfileId: student.id,
-          academicYearId: yearId,
-          placement: { termId: term1, classId: classP5, sectionId: sectionA, streamId: streamRed },
-        }),
-      ),
-    ).rejects.toThrow(/sections only/i);
-  });
 
-  it('enforces section-and-stream nesting once the cohort switches mode', async () => {
-    const p6Cohort: any = (await asUser('su', () => cohorts.list({ academicYearId: yearId, classId: classP6 })))[0];
-    const secA = await raw.section.findFirst({ where: { classId: classP6, name: 'A' } });
-    const p6StreamLoose = await raw.stream.create({ data: { organizationId, classId: classP6, name: 'Loose' } });
-    await asUser('su', () => cohorts.update(p6Cohort.id, { groupingMode: 'SECTION_AND_STREAM' }));
 
-    const student = await makeStudent('Nesting');
-    // The stream is in the right class but hangs off no section.
-    await expect(
-      asUser('su', () =>
-        enrollments.create({
-          studentProfileId: student.id,
-          academicYearId: yearId,
-          placement: { termId: term1, classCohortId: p6Cohort.id, sectionId: secA!.id, streamId: p6StreamLoose.id },
-        }),
-      ),
-    ).rejects.toThrow(/not attached to a section/i);
-
-    // Attach it and the same placement is accepted.
-    await asUser('su', () => cohorts.attachStreamToSection(p6StreamLoose.id, { sectionId: secA!.id }));
-    const created: any = await asUser('su', () =>
-      enrollments.create({
-        studentProfileId: student.id,
-        academicYearId: yearId,
-        placement: { termId: term1, classCohortId: p6Cohort.id, sectionId: secA!.id, streamId: p6StreamLoose.id },
-      }),
-    );
-    expect(created.placement.streamId).toBe(p6StreamLoose.id);
-
-    // Put P6 back to sections only for the remaining scenarios.
-    await asUser('su', () => enrollments.withdraw(created.enrollment.id, { reason: 'test cleanup' }));
-    await asUser('su', () => cohorts.update(p6Cohort.id, { groupingMode: 'SECTION_ONLY' }));
-  });
-
-  it('refuses to attach a stream to a section of another class', async () => {
-    await expect(
-      asUser('su', () => cohorts.attachStreamToSection(streamRed, { sectionId: otherClassSection })),
-    ).rejects.toThrow(/different class/i);
-  });
 
   /* ──────────────────── Mid-term movement and history ──────────────────── */
 
@@ -302,8 +267,13 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
 
     // The profile projection follows the newest open placement.
     const profile = await raw.studentProfile.findFirst({ where: { id: student.id } });
-    expect(profile!.currentSectionId).toBe(sectionB);
-    expect(profile!.currentClassId).toBe(classP5);
+    // "Where is this learner now" is the open placement — there is no class column.
+    const nowAt = await raw.enrollmentPlacement.findFirst({
+      where: { enrollment: { studentProfileId: profile!.id }, effectiveTo: null },
+      include: { classCohort: true },
+    });
+    expect(nowAt?.sectionId).toBe(sectionB);
+    expect(nowAt?.classCohort.classId).toBe(classP5);
   });
 
   it('never leaves two open placements on one enrollment', async () => {
@@ -422,7 +392,9 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
 
     // No open placement, so no current class — a departed pupil is not counted.
     const profile = await raw.studentProfile.findFirst({ where: { id: student.id } });
-    expect(profile!.currentClassId).toBeNull();
+    expect(
+      await raw.enrollmentPlacement.count({ where: { enrollment: { studentProfileId: profile!.id }, effectiveTo: null } }),
+    ).toBe(0);
     expect(profile!.status).toBe('withdrawn');
 
     // Re-entry needs a placement; reinstating without one is refused.
@@ -532,7 +504,7 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
           reason: 'Moved down a class',
         }),
       ),
-    ).rejects.toThrow(/choose a section/i);
+    ).rejects.toThrow(/choose (a section|one)/i);
   });
 
   it('completes rather than promotes a learner at the top grade', async () => {
@@ -645,87 +617,5 @@ describeDb('integration: Phase 1 enrollment & placement (ADR-018 / ADR-019)', ()
     ).rejects.toThrow(/SAME academic year/i);
   });
 
-  /* ─────────────────── Backfill, reconciliation, rollback ───────────────── */
 
-  it('backfills legacy enrollments, reconciles clean, and rolls back only its own rows', async () => {
-    const student = await makeStudent('Legacy Pupil');
-    const legacy = await raw.enrollment.create({
-      data: {
-        organizationId,
-        studentProfileId: student.id,
-        classId: classP5,
-        sectionId: sectionA,
-        termId: term1,
-        rollNumber: '77',
-        effectiveDate: new Date('2026-02-01'),
-        status: 'enrolled',
-      },
-    });
-
-    const dry: any = await asUser('su', () => backfill.run({ dryRun: true, academicYearId: yearId }));
-    expect(dry.dryRun).toBe(true);
-    expect(dry.candidates).toBeGreaterThanOrEqual(1);
-    expect(await raw.enrollmentPlacement.count({ where: { legacyEnrollmentId: legacy.id } })).toBe(0);
-
-    const runId = `test-run-${Date.now()}`;
-    const applied: any = await asUser('su', () =>
-      backfill.run({ dryRun: false, academicYearId: yearId, migrationRunId: runId }),
-    );
-    expect(applied.placementsCreated).toBeGreaterThanOrEqual(1);
-    expect(applied.exceptions).toHaveLength(0);
-
-    const placement = await raw.enrollmentPlacement.findFirst({ where: { legacyEnrollmentId: legacy.id } });
-    expect(placement).toBeTruthy();
-    expect(placement!.sectionId).toBe(sectionA);
-    expect(placement!.rollNumber).toBe('77');
-    expect(placement!.migrationRunId).toBe(runId);
-
-    const reconciliation: any = await asUser('su', () => backfill.reconcile(yearId));
-    expect(reconciliation.unmappedRows).toBe(0);
-    expect(reconciliation.differenceCount).toBe(0);
-    expect(reconciliation.duplicateOpenPlacements).toHaveLength(0);
-    expect(reconciliation.clean).toBe(true);
-
-    // Re-running is a no-op: the unique legacy key makes it idempotent.
-    const rerun: any = await asUser('su', () => backfill.run({ dryRun: false, academicYearId: yearId, migrationRunId: runId }));
-    expect(rerun.placementsCreated).toBe(0);
-    expect(await raw.enrollmentPlacement.count({ where: { legacyEnrollmentId: legacy.id } })).toBe(1);
-
-    const rolledBack: any = await asUser('su', () => backfill.rollback(runId));
-    expect(rolledBack.deletedPlacements).toBeGreaterThanOrEqual(1);
-    expect(await raw.enrollmentPlacement.count({ where: { legacyEnrollmentId: legacy.id } })).toBe(0);
-  });
-
-  it('sends an unmappable legacy row to the exception queue instead of dropping it', async () => {
-    const orphanGrade = await raw.gradeLevel.create({ data: { organizationId, name: 'X9', order: 99 } });
-    const orphanClass = await raw.schoolClass.create({ data: { organizationId, gradeLevelId: orphanGrade.id, name: 'X9 Orphan' } });
-    const student = await makeStudent('Orphan Pupil');
-    const legacy = await raw.enrollment.create({
-      data: {
-        organizationId,
-        studentProfileId: student.id,
-        classId: orphanClass.id,
-        termId: term1,
-        rollNumber: '1',
-        effectiveDate: new Date('2026-02-01'),
-        status: 'enrolled',
-      },
-    });
-
-    const runId = `test-exceptions-${Date.now()}`;
-    const applied: any = await asUser('su', () =>
-      backfill.run({ dryRun: false, academicYearId: yearId, migrationRunId: runId }),
-    );
-    expect(applied.exceptions.some((e: any) => e.sourceId === legacy.id)).toBe(true);
-
-    const queue: any[] = await asUser('su', () => backfill.listExceptions({ migrationRunId: runId, resolved: false }));
-    const row = queue.find((q) => q.sourceId === legacy.id);
-    expect(row).toBeTruthy();
-    expect(row.reason).toMatch(/no academic programme/i);
-
-    const resolved: any = await asUser('su', () => backfill.resolveException(row.id, { resolutionNote: 'Class retired; not migrated.' }));
-    expect(resolved.resolvedAt).toBeTruthy();
-
-    await asUser('su', () => backfill.rollback(runId)).catch(() => undefined);
-  });
 });

@@ -24,6 +24,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { AssessmentBoardService } from '../../src/modules/school/assessment/assessment-board.service';
 import { GradebookService } from '../../src/modules/school/assessment/gradebook.service';
 import { AssessmentWorkflowService } from '../../src/modules/school/assessment/assessment-workflow.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: assessments — one door, every kind', () => {
   const rawUrl = (() => {
@@ -85,9 +86,10 @@ describeDb('integration: assessments — one door, every kind', () => {
         data: {
           organizationId, partnerId: partner.id,
           admissionNo: `ADM-UB-${studentIds.length}-${Date.now()}`,
-          currentClassId: classId, enrollmentDate: new Date('2026-01-15'), status: 'active',
+          enrollmentDate: new Date('2026-01-15'), status: 'active',
         },
       });
+      await placeInClass(raw, { organizationId: organizationId, studentProfileId: sp.id, classId: classId });
       studentIds.push(sp.id);
     }
 

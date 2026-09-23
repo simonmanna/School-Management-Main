@@ -2,6 +2,8 @@ import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
 import { SchoolService } from './school.service';
+import { UpdateSchoolProfileDto } from './school-profile.dto';
+import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
 
 @Controller('school')
 export class SchoolController {
@@ -21,7 +23,14 @@ export class SchoolController {
 
   @Patch('profile')
   @RequirePermissions(PERMISSIONS.school.manageFoundation)
-  updateProfile(@Body() body: Record<string, unknown>) {
-    return this.school.updateProfile(body as any);
+  updateProfile(@Body() body: UpdateSchoolProfileDto) {
+    return this.school.updateProfile(body);
+  }
+
+  /** The school's own labels for its structures (e.g. Class Group, Learner). */
+  @Get('terminology')
+  @NoPermissionRequired('Display labels only; every signed-in user (staff, parent, pupil) renders them')
+  terminology() {
+    return this.school.terminology();
   }
 }

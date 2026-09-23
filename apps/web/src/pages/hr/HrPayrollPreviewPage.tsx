@@ -8,7 +8,8 @@ export function HrPayrollPreviewPage() {
   const { data: runs } = useHrPayrollRuns({});
   const { data: preview, isFetching } = useHrRunPreview(runId || undefined);
 
-  const runRows: any[] = (runs as any)?.rows ?? [];
+  // A preview never writes, so only runs that have been calculated can be previewed.
+  const runRows: any[] = ((runs as any)?.rows ?? []).filter((r: any) => ['CALCULATED', 'APPROVED', 'PAID'].includes(r.status));
 
   return (
     <div className="space-y-4 p-6">
@@ -33,6 +34,9 @@ export function HrPayrollPreviewPage() {
               <Line k="Gross payroll" v={preview.totalGross} />
               <Line k="Deductions" v={preview.totalDeductions} />
               <Line k="Net payroll" v={preview.totalNet} />
+              <Line k="PAYE" v={preview.totalPaye ?? 0} />
+              <Line k="Employer contributions" v={preview.employerCost ?? 0} />
+              <Line k="Total cost to school" v={preview.totalCostToSchool ?? preview.totalGross} />
             </CardContent>
           </Card>
 

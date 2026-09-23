@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
-import { useAcademicYears, useClasses, useSections, useStreams } from '@/features/school/api';
+import { useAcademicYears, useClasses, useSections, useStreams, useTerminology } from '@/features/school/api';
 import {
   errorMessage,
   GROUPING_MODE_LABEL,
@@ -314,6 +314,7 @@ function CohortsTab() {
 }
 
 function GroupingTab() {
+  const labels = useTerminology();
   const { data: classes } = useClasses();
   const [classId, setClassId] = useState('');
   const { data: sections } = useSections();
@@ -354,7 +355,7 @@ function GroupingTab() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Stream</TableHead>
+                <TableHead>{labels.section}</TableHead>
                 <TableHead>Belongs to section</TableHead>
               </TableRow>
             </TableHeader>

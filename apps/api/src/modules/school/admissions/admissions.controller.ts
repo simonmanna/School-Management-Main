@@ -147,13 +147,13 @@ export class AdmissionsController {
   }
 
   @Post('enroll')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.manageEnrollment)
   enroll(@Body() dto: EnrollApplicationDto) {
     return this.admissions.enroll(dto);
   }
 
   @Post('enroll/bulk')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.manageEnrollment)
   bulkEnroll(@Body() dto: BulkEnrollDto) {
     return this.admissions.bulkEnroll(dto);
   }
@@ -165,13 +165,13 @@ export class AdmissionsController {
   }
 
   @Post(':id/interview')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.scheduleAdmissionInterviews)
   scheduleInterview(@Param('id') id: string, @Body() dto: ScheduleInterviewDto) {
     return this.admissions.scheduleInterview(id, dto);
   }
 
   @Post(':id/interview/complete')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.scheduleAdmissionInterviews)
   completeInterview(@Param('id') id: string, @Body() dto: ScheduleInterviewDto) {
     return this.admissions.completeInterview(id, dto);
   }
@@ -183,19 +183,19 @@ export class AdmissionsController {
   }
 
   @Post(':id/offer')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.issueAdmissionOffers)
   issueOffer(@Param('id') id: string, @Body() dto: IssueOfferDto) {
     return this.admissions.issueOffer(id, dto);
   }
 
   @Post(':id/offer/accept')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.issueAdmissionOffers)
   acceptOffer(@Param('id') id: string) {
     return this.admissions.acceptOffer(id);
   }
 
   @Post(':id/offer/decline')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.issueAdmissionOffers)
   declineOffer(@Param('id') id: string) {
     return this.admissions.declineOffer(id);
   }
@@ -209,7 +209,7 @@ export class AdmissionsController {
 
   /** Charge (or re-charge an unpaid) application fee as a posted invoice. */
   @Post(':id/fee')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.collectAdmissionFees)
   chargeApplicationFee(@Param('id') id: string, @Body() dto: ChargeFeeDto) {
     return this.admissionFees.charge(id, dto);
   }
@@ -293,7 +293,7 @@ export class AdmissionsController {
   }
 
   @Post(':id/decision')
-  @RequirePermissions(PERMISSIONS.school.manageAdmissions)
+  @RequirePermissions(PERMISSIONS.school.manageAdmissions, PERMISSIONS.school.decideAdmissions)
   recordDecision(@Param('id') id: string, @Body('decision') decision: 'accepted' | 'rejected' | 'waitlisted', @Body('reason') reason?: string) {
     return this.admissions.recordDecision(id, decision, reason);
   }

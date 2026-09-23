@@ -22,7 +22,7 @@ export class TransportTripGeneratorWorker {
 
   @Cron(process.env.TRANSPORT_TRIP_GEN_CRON ?? CronExpression.EVERY_DAY_AT_2AM, { name: 'transport-trip-generation' })
   async run() {
-    const orgs = await this.prisma.client.organization.findMany({ select: { id: true } });
+    const orgs = await this.prisma.raw.organization.findMany({ select: { id: true } });
     const horizon = Number(process.env.TRANSPORT_TRIP_GEN_HORIZON ?? 7);
     for (const org of orgs) {
       await this.tenant.run({ organizationId: org.id }, async () => {

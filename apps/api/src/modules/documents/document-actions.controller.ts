@@ -12,6 +12,7 @@ import { BadRequestException, Body, Controller, Headers, Param, Post } from '@ne
 import type { AuthUser } from '../../kernel/auth/jwt-token.service';
 import { CurrentUser } from '../../kernel/auth/decorators/current-user.decorator';
 import { DocumentEngineService, EngineActionResult } from './document-engine.service';
+import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
 
 export interface DocumentActionBody {
   reason?: string;
@@ -21,6 +22,7 @@ export interface DocumentActionBody {
 }
 
 @Controller('documents')
+@NoPermissionRequired('Per-document authorization: every handler checks doc:<type>:<action> via DocumentPermissionsService / DocumentEngineService')
 export class DocumentActionsController {
   constructor(private readonly engine: DocumentEngineService) {}
 

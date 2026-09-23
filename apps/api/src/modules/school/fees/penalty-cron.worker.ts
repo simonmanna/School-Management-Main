@@ -78,7 +78,7 @@ export class PenaltyCronWorker implements OnApplicationBootstrap, OnModuleDestro
    */
   async tick(): Promise<{ orgs: number; schedules: number; penalties: number; durationMs: number }> {
     const started = Date.now();
-    const orgs = await this.prisma.client.organization.findMany({ select: { id: true } });
+    const orgs = await this.prisma.raw.organization.findMany({ select: { id: true } });
 
     let schedulesProcessed = 0;
     let penaltiesCreated = 0;

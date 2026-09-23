@@ -20,6 +20,7 @@ import {
   type BatchTarget,
   type CapacityViolation,
 } from './capacity';
+import { assertYearWritable } from '../foundation/academic-year-guard';
 import { holdsPlacement, type EnrollmentStatusValue, type MovementReasonValue } from './enrollment-fsm';
 import type {
   BulkPlacementDto,
@@ -36,6 +37,11 @@ export interface ResolvedTarget {
   allowsSubdivision: boolean;
   /** The school's capacity policy at the time of resolution (ADR-030). */
   capacityPolicy: CapacityPolicyValue;
+  /** The target term's dates — a placement is dated inside its term. */
+  termStartDate: Date;
+  termEndDate: Date;
+  className: string | null;
+  sectionName: string | null;
   warnings: string[];
   /** Seats this placement would take beyond configured capacity. */
   violations: CapacityViolation[];
@@ -103,7 +109,10 @@ export class PlacementService {
     const termId = input.termId ?? fallbackTermId;
     if (!termId) throw new BadRequestException('A term is required for a placement.');
 
-    const term = await tx.term.findFirst({ where: { id: termId }, select: { id: true, academicYearId: true, name: true } });
+    const term = await tx.term.findFirst({
+      where: { id: termId },
+      select: { id: true, academicYearId: true, name: true, startDate: true, endDate: true },
+    });
     if (!term) throw new NotFoundException(`Term ${termId} not found`);
     if (term.academicYearId !== enrollment.academicYearId) {
       throw new BadRequestException(
@@ -129,6 +138,16 @@ export class PlacementService {
     if (!cohort) throw new NotFoundException(`Class cohort ${cohortId} not found`);
     if (cohort.academicYearId !== enrollment.academicYearId) {
       throw new BadRequestException('That class cohort belongs to a different academic year than this enrollment.');
+    }
+    // A closed or archived cohort, or a deactivated class, takes no new members.
+    // Existing placements in them stay exactly as they are.
+    if (cohort.status === 'CLOSED' || cohort.status === 'ARCHIVED') {
+      throw new BadRequestException(
+        `${cohort.schoolClass?.name ?? 'This class'} (${cohort.status.toLowerCase()} cohort) cannot receive new placements.`,
+      );
+    }
+    if (cohort.schoolClass && cohort.schoolClass.isActive === false) {
+      throw new BadRequestException(`"${cohort.schoolClass.name}" has been deactivated and cannot receive new learners.`);
     }
 
     const allowsSubdivision = resolveAllowsSubdivision({
@@ -189,6 +208,10 @@ export class PlacementService {
       capacityPolicy,
       warnings,
       violations,
+      termStartDate: term.startDate,
+      termEndDate: term.endDate,
+      className: cohort.schoolClass?.name ?? null,
+      sectionName: result.value.sectionId ? (section?.id === result.value.sectionId ? section?.name ?? null : null) : null,
     };
   }
 
@@ -302,7 +325,8 @@ export class PlacementService {
         violations: target.violations,
       });
     }
-    if (!this.tenant.permissions?.includes(PERMISSIONS.school.overrideCapacity)) {
+    const held = this.tenant.permissions ?? [];
+    if (!held.includes(PERMISSIONS.school.overrideCapacity) && !held.includes('*')) {
       throw new ForbiddenException(
         `Seating a learner beyond capacity requires the ${PERMISSIONS.school.overrideCapacity} permission.`,
       );
@@ -335,7 +359,15 @@ export class PlacementService {
           .slice(0, 10)}. Correct the earlier placement instead of back-dating over it.`,
       );
     }
-    await tx.enrollmentPlacement.updateMany({ where: { id: open.id }, data: { effectiveTo: at, endReason } });
+    // Compare-and-set: only close the row if it is STILL open. Two concurrent
+    // moves both read the same open placement; exactly one may end it.
+    const res = await tx.enrollmentPlacement.updateMany({
+      where: { id: open.id, effectiveTo: null },
+      data: { effectiveTo: at, endReason },
+    });
+    if (res.count === 0) {
+      throw new ConflictException("This learner's placement was changed by someone else just now. Reload and try again.");
+    }
     return { ...open, effectiveTo: at, endReason };
   }
 
@@ -352,14 +384,34 @@ export class PlacementService {
     input: PlacementInput,
     opts: { closeReason?: MovementReasonValue; fallbackTermId?: string } = {},
   ) {
-    const effectiveFrom = input.effectiveFrom ? new Date(input.effectiveFrom) : new Date();
+    // New placements never land in a closed or archived year. FOR SHARE on the
+    // year row serializes this with a concurrent year closure.
+    await assertYearWritable(tx, enrollment.organizationId, enrollment.academicYearId, 'create');
     const target = await this.resolveTarget(tx, enrollment, input, opts.fallbackTermId, { lock: true });
     const override = this.applyCapacityPolicy(target, input);
+
+    // A placement is dated inside its term. A seat taken during the holiday for
+    // the coming term starts when that term starts; a date after the term has
+    // ended is refused rather than recorded against the wrong term.
+    const dateWarnings: string[] = [];
+    let effectiveFrom = input.effectiveFrom ? new Date(input.effectiveFrom) : new Date();
+    if (Number.isNaN(effectiveFrom.getTime())) throw new BadRequestException('effectiveFrom is not a valid date.');
+    const termEndOfDay = new Date(target.termEndDate.getTime() + 24 * 60 * 60 * 1000 - 1);
+    if (effectiveFrom > termEndOfDay) {
+      throw new BadRequestException(
+        `That term ended on ${target.termEndDate.toISOString().slice(0, 10)}; a placement cannot start after it. Choose the current term.`,
+      );
+    }
+    if (effectiveFrom < target.termStartDate) {
+      effectiveFrom = target.termStartDate;
+      dateWarnings.push(`Seat starts when the term starts (${target.termStartDate.toISOString().slice(0, 10)}).`);
+    }
     const movementReason = input.movementReason ?? 'INITIAL_PLACEMENT';
 
     const closed = await this.closeOpen(tx, enrollment.id, effectiveFrom, opts.closeReason ?? movementReason);
 
-    const created = await tx.enrollmentPlacement.create({
+    const created = await tx.enrollmentPlacement
+      .create({
       data: {
         organizationId: enrollment.organizationId,
         enrollmentId: enrollment.id,
@@ -367,6 +419,8 @@ export class PlacementService {
         classCohortId: target.cohortId,
         sectionId: target.sectionId,
         rollNumber: input.rollNumber ?? closed?.rollNumber ?? null,
+        classNameSnapshot: target.className,
+        sectionNameSnapshot: target.sectionName,
         effectiveFrom,
         movementReason,
         notes: input.notes ?? null,
@@ -374,7 +428,15 @@ export class PlacementService {
         capacityOverriddenById: override?.overriddenById ?? null,
         capacityOverrideReason: override?.reason ?? null,
       },
-    });
+    })
+      .catch((err: any) => {
+        // The one-open-placement index or the no-overlap constraint caught a
+        // concurrent move: report it, never as a 500.
+        if (err?.code === 'P2002' || /no_overlap|one_open_per_enrollment/.test(String(err?.message))) {
+          throw new ConflictException("This learner's placement was changed by someone else just now. Reload and try again.");
+        }
+        throw err;
+      });
 
     await this.audit.recordInTx(tx, {
       entity: 'EnrollmentPlacement',
@@ -411,9 +473,10 @@ export class PlacementService {
       requestId: this.tenant.requestId ?? null,
     });
 
-    const warnings = override
-      ? target.warnings.map((w) => `${w} Seated under a capacity override.`)
-      : target.warnings;
+    const warnings = [
+      ...(override ? target.warnings.map((w) => `${w} Seated under a capacity override.`) : target.warnings),
+      ...dateWarnings,
+    ];
     return { placement: created, closed, warnings };
   }
 
@@ -429,6 +492,19 @@ export class PlacementService {
         );
       }
       const open = await this.openPlacementOf(tx, enrollmentId);
+      // Repeating the same move (a double-click, a retried request) is a no-op,
+      // not a second placement row with nothing different in it.
+      if (open && !dto.effectiveFrom) {
+        const sameCohort = dto.classCohortId ? dto.classCohortId === open.classCohortId : true;
+        const sameClass = dto.classId
+          ? (await tx.classCohort.findFirst({ where: { id: open.classCohortId }, select: { classId: true } }))?.classId === dto.classId
+          : true;
+        const sameSection = dto.sectionId === undefined || (dto.sectionId ?? null) === (open.sectionId ?? null);
+        const sameTerm = !dto.termId || dto.termId === open.termId;
+        if (sameCohort && sameClass && sameSection && sameTerm) {
+          return { enrollmentId, placement: open, endedPlacementId: null, warnings: ['Already placed there; nothing changed.'] };
+        }
+      }
       const result = await this.appendPlacement(
         tx,
         enrollment,

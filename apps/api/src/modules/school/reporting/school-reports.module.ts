@@ -15,7 +15,7 @@ import { TimetableAdvancedService } from '../academics/timetable-advanced.servic
 import { AdvancedFinanceService } from '../fees/advanced.service';
 import { FeesModule } from '../fees/fees.module';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
-import { EnrollmentService } from '../people/enrollment.service';
+import { EnrollmentRosterService } from '../enrollment/enrollment-roster.service';
 import { PeopleModule } from '../people/people.module';
 import { ReportCardPdfService } from '../examinations/report-card-pdf.service';
 import { ExaminationsModule } from '../examinations/examinations.module';
@@ -76,7 +76,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
         analytics: AnalyticsService,
         resultRun: ResultRunService,
         attendance: StudentAttendanceService,
-        enrollment: EnrollmentService,
+        enrollment: EnrollmentRosterService,
         admissions: AdmissionsService,
         timetable: TimetableAdvancedService,
         reportCardPdf: ReportCardPdfService,
@@ -101,7 +101,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
         AnalyticsService,
         ResultRunService,
         StudentAttendanceService,
-        EnrollmentService,
+        EnrollmentRosterService,
         AdmissionsService,
         TimetableAdvancedService,
         ReportCardPdfService,

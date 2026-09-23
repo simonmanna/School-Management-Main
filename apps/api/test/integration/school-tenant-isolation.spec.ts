@@ -22,6 +22,7 @@ import { KernelModule } from '../../src/kernel/kernel.module';
 import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { PrismaService } from '../../src/kernel/prisma/prisma.service';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school cross-tenant isolation', () => {
   const rawUrl = (() => {
@@ -61,10 +62,10 @@ describeDb('integration: school cross-tenant isolation', () => {
         partnerId: partner.id,
         admissionNo: `ADM-${tag}`,
         enrollmentDate: new Date(),
-        currentClassId: schoolClass.id,
         status: 'active',
       },
     });
+    await placeInClass(raw, { organizationId: orgId, studentProfileId: student.id, classId: schoolClass.id });
     into.studentId = student.id;
     into.partnerId = partner.id;
 

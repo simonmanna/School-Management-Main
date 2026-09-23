@@ -108,6 +108,15 @@ jobs:
       - name: Schema preflight (constraints that can silently not exist)
         run: node scripts/assert-db-constraints.mjs
 
+      # F-01/F-02: provision the production runtime roles (`app` NOBYPASSRLS,
+      # `app_system` BYPASSRLS) so the RLS specs run the real PrismaService
+      # against them instead of skipping. The rest of the suite keeps the owner.
+      - name: Provision RLS runtime roles
+        run: pnpm --filter @erp/api rls:setup-role
+        env:
+          RLS_APP_PASSWORD: ci-app
+          RLS_SYSTEM_PASSWORD: ci-system
+
       # The unit project also carries the authorization ratchets —
       # route-permission coverage, role-preset segregation-of-duty invariants,
       # the permission catalogue and tenancy registration. They are cheap, and
@@ -128,6 +137,9 @@ jobs:
       # trade-off is wall-clock time, paid once here instead of in a pilot.
       - name: Test (integration)
         run: pnpm --filter @erp/api exec jest --selectProjects integration --runInBand --detectOpenHandles
+        env:
+          RLS_APP_DATABASE_URL: postgresql://app:ci-app@localhost:5432/cafe-pos?schema=public
+          RLS_SYSTEM_DATABASE_URL: postgresql://app_system:ci-system@localhost:5432/cafe-pos?schema=public
 
   # OPS-02 — build the artifact that actually ships, and prove it can start.
   # The previous Dockerfile ran `prisma generate` only in the build stage and
@@ -197,6 +209,7 @@ jobs:
       STAGING_API_URL: https://staging.school.example
       PROD_CORS_ORIGINS: https://school.example
       APP_DATABASE_URL: postgresql://app:ci@db:5432/school
+      SYSTEM_DATABASE_URL: postgresql://app_system:ci@db:5432/school
       MIGRATOR_DATABASE_URL: postgresql://migrator:ci@db:5432/school
     steps:
       - uses: actions/checkout@v4

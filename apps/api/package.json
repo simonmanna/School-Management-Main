@@ -14,7 +14,6 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "ts-node prisma/seed.ts",
     "db:seed:school": "ts-node prisma/seed-school-demo.ts",
-    "db:seed:academics-phase0": "ts-node prisma/seed-academics-phase0.ts",
     "db:seed:green-valley": "ts-node prisma/seed-green-valley.ts",
     "authz:inventory": "ts-node ../../scripts/authz-inventory.ts",
     "backfill:inventory-gl": "ts-node src/scripts/backfill-inventory-gl.ts",

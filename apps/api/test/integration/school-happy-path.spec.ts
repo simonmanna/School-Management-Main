@@ -38,6 +38,7 @@ import { FeesModule } from '../../src/modules/school/fees/fees.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { BillingService, SchoolPaymentService } from '../../src/modules/school/fees/billing.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school happy path (fee → payment → cash → ledger)', () => {
   // A single-connection raw client used only for fixture setup. connection_limit=1
@@ -89,6 +90,8 @@ describeDb('integration: school happy path (fee → payment → cash → ledger)
       ['SALES', 'Sales', 'sales'],
       ['CASH', 'Cash', 'cash'],
       ['GEN', 'General', 'general'],
+      // Mobile-money settlements post through the bank journal.
+      ['BANK', 'Bank', 'bank'],
     ] as const) {
       await raw.journal.create({ data: { organizationId, code, name, journalType: type } });
     }
@@ -152,10 +155,10 @@ describeDb('integration: school happy path (fee → payment → cash → ledger)
         partnerId: partner.id,
         admissionNo: 'ADM-0001',
         enrollmentDate: new Date('2026-01-10'),
-        currentClassId: schoolClass.id,
         status: 'active',
       },
     });
+    await placeInClass(raw, { organizationId: organizationId, studentProfileId: student.id, classId: schoolClass.id });
     studentProfileId = student.id;
 
     // Fee structure + schedule for the term (one tuition component).

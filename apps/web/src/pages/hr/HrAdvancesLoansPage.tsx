@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react';
 import { HandCoins } from 'lucide-react';
-import { useHrAdvances, useCreateHrAdvance, useApproveHrAdvance, useMarkHrAdvancePaid, useRejectHrAdvance, useHrLoans, useCreateHrLoan, useUpdateHrLoan, useDeleteHrLoan, useHrEmployees } from '@/features/hr/api';
+import {
+  useHrAdvances, useCreateHrAdvance, useApproveHrAdvance, useMarkHrAdvancePaid, useRejectHrAdvance, useHrLoans,
+  useCreateHrLoan, useDisburseHrLoan, useWriteOffHrLoan, useDeleteHrLoan, useHrEmployees,
+} from '@/features/hr/api';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +23,9 @@ const ADVANCE_STATUS: Record<string, string> = {
   REJECTED: 'bg-muted text-muted-foreground',
 };
 
+const PAYMENT_METHODS = ['BANK', 'MOBILE_MONEY', 'CASH', 'CHEQUE'] as const;
+const onError = (e: any) => toast.error(e?.response?.data?.message ?? 'Request failed');
+
 const LOAN_STATUS: Record<string, string> = {
   ACTIVE: 'bg-amber-100 text-amber-800',
   PAID: 'bg-emerald-100 text-emerald-800',
@@ -29,8 +36,9 @@ export function HrAdvancesLoansPage() {
   const fmt = useMoneyFormatter();
   const [tab, setTab] = useState('advances');
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<any>({});
+  // Money leaving the school posts to the ledger from this account type.
+  const [method, setMethod] = useState<(typeof PAYMENT_METHODS)[number]>('CASH');
   const { data: advances } = useHrAdvances();
   const { data: loans } = useHrLoans();
   const { data: empData } = useHrEmployees({ pageSize: 200 });
@@ -39,7 +47,8 @@ export function HrAdvancesLoansPage() {
   const payA = useMarkHrAdvancePaid();
   const rejectA = useRejectHrAdvance();
   const createL = useCreateHrLoan();
-  const updateL = useUpdateHrLoan();
+  const disburseL = useDisburseHrLoan();
+  const writeOffL = useWriteOffHrLoan();
   const deleteL = useDeleteHrLoan();
 
   const advanceRows = useMemo(() => advances?.rows ?? [], [advances]);
@@ -47,39 +56,34 @@ export function HrAdvancesLoansPage() {
   const employees = useMemo(() => empData?.rows ?? [], [empData]);
 
   const openCreate = () => {
-    setEditing(null);
-    setForm(tab === 'advances' ? { installmentMonths: 1 } : { interestRate: 0 });
-    setOpen(true);
-  };
-  const openEdit = (l: any) => {
-    setEditing(l);
-    setForm({ principal: l.principal, interestRate: l.interestRate, installmentsTotal: l.installmentsTotal, notes: l.notes ?? '' });
+    setForm(tab === 'advances' ? { installmentMonths: 1 } : { interestRate: 0, disburseNow: true, disbursedAt: new Date().toISOString().slice(0, 10) });
     setOpen(true);
   };
   const submit = async () => {
-    if (tab === 'advances') {
-      if (!form.employeeId || !form.amount) return;
-      await createA.mutateAsync({
-        employeeId: form.employeeId,
-        amount: Number(form.amount),
-        installmentMonths: Number(form.installmentMonths || 1),
-        notes: form.notes || undefined,
-      });
-    } else {
-      if (!form.employeeId || !form.principal || !form.installmentsTotal) return;
-      if (editing) {
-        await updateL.mutateAsync({ id: editing.id, dto: { principal: Number(form.principal), interestRate: Number(form.interestRate || 0), installmentsTotal: Number(form.installmentsTotal), notes: form.notes || null } });
+    try {
+      if (tab === 'advances') {
+        if (!form.employeeId || !form.amount) return;
+        await createA.mutateAsync({
+          employeeId: form.employeeId,
+          amount: Number(form.amount),
+          installmentMonths: Number(form.installmentMonths || 1),
+          notes: form.notes || undefined,
+        });
       } else {
+        if (!form.employeeId || !form.principal || !form.installmentsTotal) return;
         await createL.mutateAsync({
           employeeId: form.employeeId,
           principal: Number(form.principal),
           interestRate: Number(form.interestRate || 0),
           installmentsTotal: Number(form.installmentsTotal),
+          ...(form.disburseNow ? { disbursedAt: form.disbursedAt, disbursementMethod: method } : {}),
           notes: form.notes || undefined,
         });
       }
+      setOpen(false);
+    } catch (e) {
+      onError(e);
     }
-    setOpen(false);
   };
 
   return (
@@ -87,9 +91,19 @@ export function HrAdvancesLoansPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Advances & loans</h1>
-          <p className="text-sm text-muted-foreground">Salary advances and employee loans recovered through payroll.</p>
+          <p className="text-sm text-muted-foreground">
+            Salary advances and staff loans, recovered through payroll. Paying out or disbursing posts to the ledger;
+            payroll recovers only money that has actually been paid out.
+          </p>
         </div>
         <Button onClick={openCreate}>New {tab === 'advances' ? 'advance' : 'loan'}</Button>
+      </div>
+
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Pay out / disburse by</span>
+        <select value={method} onChange={(e) => setMethod(e.target.value as any)} className="rounded-md border bg-card px-3 py-1.5 text-sm">
+          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
+        </select>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -120,11 +134,16 @@ export function HrAdvancesLoansPage() {
                     <div className="flex items-center gap-2">
                       {a.status === 'PENDING' && (
                         <>
-                          <Button size="sm" variant="outline" onClick={() => approveA.mutate(a.id)}>Approve</Button>
+                          <Button size="sm" variant="outline" onClick={() => approveA.mutate(a.id, { onError })}>Approve</Button>
                           <Button size="sm" variant="ghost" onClick={() => rejectA.mutate({ id: a.id })}>Reject</Button>
                         </>
                       )}
-                      {a.status === 'APPROVED' && <Button size="sm" variant="outline" onClick={() => payA.mutate(a.id)}>Mark paid</Button>}
+                      {a.status === 'APPROVED' && (
+                        <Button size="sm" variant="outline"
+                          onClick={() => { if (confirm(`Pay out ${a.advanceCode} by ${method.replace('_', ' ')}? This posts to the ledger.`)) payA.mutate({ id: a.id, dto: { paymentMethod: method } }, { onError }); }}>
+                          Pay out
+                        </Button>
+                      )}
                       <Badge variant="outline" className={ADVANCE_STATUS[a.status] ?? ''}>{a.status}</Badge>
                     </div>
                   </div>
@@ -154,10 +173,25 @@ export function HrAdvancesLoansPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={LOAN_STATUS[l.status] ?? ''}>{l.status}</Badge>
-                      <button onClick={() => openEdit(l)} className="rounded-md border px-2 py-1 text-xs hover:bg-muted/60">Edit</button>
-                      <button onClick={() => { if (confirm(`Delete loan ${l.loanCode}?`)) deleteL.mutate(l.id); }}
-                        className="rounded-md border px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">Delete</button>
+                      {!l.disbursementJournalEntryId && l.status === 'ACTIVE' && (
+                        <>
+                          <span className="text-xs text-amber-700">Not disbursed</span>
+                          <button
+                            onClick={() => { if (confirm(`Disburse ${l.loanCode} by ${method.replace('_', ' ')}? This posts to the ledger.`)) disburseL.mutate({ id: l.id, dto: { method } }, { onError }); }}
+                            className="rounded-md border px-2 py-1 text-xs hover:bg-muted/60">Disburse</button>
+                          <button onClick={() => { if (confirm(`Delete loan ${l.loanCode}?`)) deleteL.mutate(l.id, { onError }); }}
+                            className="rounded-md border px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">Delete</button>
+                        </>
+                      )}
+                      {l.disbursementJournalEntryId && l.status === 'ACTIVE' && (
+                        <button
+                          onClick={() => {
+                            const reason = prompt(`Write off the remaining ${fmt(l.balance)} on ${l.loanCode}? Reason:`);
+                            if (reason) writeOffL.mutate({ id: l.id, reason }, { onError });
+                          }}
+                          className="rounded-md border px-2 py-1 text-xs text-rose-600 hover:bg-rose-50">Write off</button>
+                      )}
+                      <Badge variant="outline" className={LOAN_STATUS[l.status] ?? ''}>{l.status === 'DEFAULTED' ? 'WRITTEN OFF' : l.status}</Badge>
                     </div>
                   </div>
                 ))}
@@ -171,14 +205,14 @@ export function HrAdvancesLoansPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {tab === 'advances' ? 'New salary advance' : editing ? 'Edit loan' : 'New loan'}
+              {tab === 'advances' ? 'New salary advance' : 'New loan'}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
             <div>
               <Label>Employee *</Label>
               <select value={form.employeeId ?? ''} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm" disabled={!!editing}>
+                className="w-full rounded-md border bg-card px-3 py-2 text-sm">
                 <option value="">Select employee…</option>
                 {employees.map((e: any) => <option key={e.id} value={e.id}>{e.employeeCode} · {e.firstName}{e.lastName ? ' ' + e.lastName : ''}</option>)}
               </select>
@@ -216,14 +250,24 @@ export function HrAdvancesLoansPage() {
                     <Input type="number" min={1} value={form.installmentsTotal ?? ''} onChange={(e) => setForm({ ...form, installmentsTotal: e.target.value })} />
                   </div>
                 </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!!form.disburseNow} onChange={(e) => setForm({ ...form, disburseNow: e.target.checked })} />
+                  Disburse now by {method.replace('_', ' ')}
+                </label>
+                {form.disburseNow && (
+                  <div>
+                    <Label>Disbursement date</Label>
+                    <Input type="date" value={form.disbursedAt ?? ''} onChange={(e) => setForm({ ...form, disbursedAt: e.target.value })} />
+                  </div>
+                )}
                 <div>
                   <Label>Notes</Label>
                   <Input value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
                 </div>
               </>
             )}
-            <Button onClick={submit} disabled={createA.isPending || createL.isPending || updateL.isPending}>
-              {tab === 'advances' ? 'Create advance' : editing ? 'Save changes' : 'Create loan'}
+            <Button onClick={submit} disabled={createA.isPending || createL.isPending}>
+              {tab === 'advances' ? 'Create advance' : 'Create loan'}
             </Button>
           </div>
         </DialogContent>

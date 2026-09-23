@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { resolveAllowsSubdivision } from './subdivision';
+import { assertYearWritable } from '../foundation/academic-year-guard';
 import { resolveProgrammeForGrade } from './programme.service';
 import type {
   CreateClassCohortDto,
@@ -106,6 +107,7 @@ export class ClassCohortService {
     }
     const programmeId = dto.programmeId ?? (await this.programmeForClass(dto.classId));
     return this.prisma.client.$transaction(async (tx: any) => {
+      await assertYearWritable(tx, organizationId, dto.academicYearId, 'create');
       const cohort = await tx.classCohort.create({
         data: {
           organizationId,
@@ -135,6 +137,9 @@ export class ClassCohortService {
       await this.assertUndivideAllowed(id);
     }
     return this.prisma.client.$transaction(async (tx: any) => {
+      const current = await tx.classCohort.findFirst({ where: { id }, select: { academicYearId: true } });
+      if (!current) throw new NotFoundException(`Class cohort ${id} not found`);
+      await assertYearWritable(tx, this.tenant.organizationId, current.academicYearId, 'modify');
       await tx.classCohort.updateMany({
         where: { id },
         data: {
@@ -182,6 +187,7 @@ export class ClassCohortService {
     const organizationId = this.tenant.organizationId;
     const year = await this.prisma.client.academicYear.findFirst({ where: { id: dto.academicYearId } });
     if (!year) throw new NotFoundException(`Academic year ${dto.academicYearId} not found`);
+    await assertYearWritable(this.prisma.client, organizationId, dto.academicYearId, 'create');
 
     const classes = await this.prisma.client.schoolClass.findMany({
       where: { ...(dto.classIds?.length ? { id: { in: dto.classIds } } : {}) },

@@ -6,6 +6,43 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { Prisma } from '@prisma/client';
+
+/**
+ * Database-enforced rules (unique keys, same-tenant foreign keys, the placement
+ * grouping and overlap guards) are client errors, not server faults. Without this
+ * mapping every one of them reached the client as a 500, which reads as "the
+ * system is broken" rather than "that record conflicts". Messages are kept
+ * generic: constraint and table names are for the log, not the screen.
+ */
+function mapDatabaseError(exception: unknown): { status: number; message: string } | null {
+  if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (exception.code) {
+      case 'P2002':
+        return { status: 409, message: 'A record with these details already exists.' };
+      case 'P2003':
+        return {
+          status: 409,
+          message: 'This refers to a record that does not exist in your school, or is still referenced by other records.',
+        };
+      case 'P2025':
+        return { status: 404, message: 'Record not found.' };
+      case 'P2034':
+        return { status: 409, message: 'This record was changed by someone else at the same time. Please try again.' };
+    }
+  }
+  const text = exception instanceof Error ? exception.message : '';
+  if (/Cross-tenant reference rejected/.test(text)) {
+    return { status: 409, message: 'This refers to a record that does not exist in your school.' };
+  }
+  if (/EnrollmentPlacement_no_overlap|one_open_per_enrollment/.test(text)) {
+    return { status: 409, message: "This learner's placement was changed by someone else. Reload and try again." };
+  }
+  if (/EnrollmentPlacement .*: (section|class cohort) .* (is not in|does not exist)/.test(text)) {
+    return { status: 400, message: 'That section does not belong to the chosen class.' };
+  }
+  return null;
+}
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -20,6 +57,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const body = exception.getResponse();
       response.status(status).json(body);
+      return;
+    }
+
+    const mapped = mapDatabaseError(exception);
+    if (mapped) {
+      this.logger.warn(
+        `Database rule rejected ${request.method} ${request.url} [req: ${request.id ?? '-'}]: ` +
+          (exception instanceof Error ? exception.message.split('\n').slice(-3).join(' ') : String(exception)),
+      );
+      response.status(mapped.status).json({ statusCode: mapped.status, message: mapped.message, requestId: request.id });
       return;
     }
 

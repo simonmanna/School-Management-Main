@@ -30,7 +30,9 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
 import { AdmissionsPortalService } from '../../src/modules/school/admissions/admissions-portal.service';
-import { EnrollmentService } from '../../src/modules/school/people/enrollment.service';
+import { StudentEnrollmentService } from '../../src/modules/school/enrollment/student-enrollment.service';
+import { StudentAdmissionService } from '../../src/modules/school/people/student-admission.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: admissions capacity, atomicity and portal isolation', () => {
   const rawUrl = (() => {
@@ -44,7 +46,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
   let admissions: AdmissionsService;
   let workflows: AdmissionsWorkflowService;
   let portal: AdmissionsPortalService;
-  let enrollment: EnrollmentService;
+  let enrollment: StudentEnrollmentService;
 
   const organizationId = `org_cap_${Date.now()}`;
   const userId = 'registrar_1';
@@ -58,7 +60,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
 
   const asTenant = <T>(fn: () => Promise<T>): Promise<T> =>
-    tenant.run({ organizationId, userId, permissions: ['school:admissions:write'] }, fn);
+    tenant.run({ organizationId, userId, permissions: ['school:admissions:write', 'school:admissions:decide', 'school:enrollment:write'] }, fn);
 
   let seq = 0;
   async function newApp() {
@@ -79,7 +81,9 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
       admissions.enroll({
         applicationId,
         classId,
-        sectionId,
+        // S1 East is divided into streams, so every seat names one. Stream A has no
+        // ledger of its own in most cases here, so the class-level row governs it.
+        sectionId: sectionId ?? sectionAId,
         termId,
         rollNumber: applicationId.slice(0, 8),
         student: { name: `Student ${applicationId.slice(0, 6)}` },
@@ -91,12 +95,11 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     const SENT = '__none__';
     return raw.admissionCapacity.upsert({
       where: {
-        organizationId_admissionCycleId_classId_sectionId_streamId: {
+        organizationId_admissionCycleId_classId_sectionId: {
           organizationId,
           admissionCycleId: cycleId,
           classId,
           sectionId: sectionId ?? SENT,
-          streamId: SENT,
         },
       },
       update: { capacity, claimedSeats, reservedCapacity: 0 },
@@ -105,7 +108,6 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
         admissionCycleId: cycleId,
         classId,
         sectionId: sectionId ?? SENT,
-        streamId: SENT,
         capacity,
         reservedCapacity: 0,
         claimedSeats,
@@ -116,7 +118,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
   const claimedFor = async (sectionId?: string) => {
     const SENT = '__none__';
     const row = await raw.admissionCapacity.findFirst({
-      where: { organizationId, admissionCycleId: cycleId, classId, sectionId: sectionId ?? SENT, streamId: SENT },
+      where: { organizationId, admissionCycleId: cycleId, classId, sectionId: sectionId ?? SENT },
     });
     return row?.claimedSeats ?? 0;
   };
@@ -149,6 +151,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     });
     termId = term.id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     const cls = await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S1 East' } });
     classId = cls.id;
     const secA = await raw.section.create({ data: { organizationId, classId, name: 'A' } });
@@ -165,7 +168,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     admissions = moduleRef.get(AdmissionsService);
     workflows = moduleRef.get(AdmissionsWorkflowService);
     portal = moduleRef.get(AdmissionsPortalService);
-    enrollment = moduleRef.get(EnrollmentService);
+    enrollment = moduleRef.get(StudentEnrollmentService);
 
     // A direct-entry workflow keeps these tests about capacity, not about stages.
     const wf: any = await asTenant(() => workflows.create({ name: 'Direct', presetKey: 'simple', isDefault: true }));
@@ -174,6 +177,16 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     });
     cycleId = cycle.id;
   });
+
+  // Dated 2026 scenario: Term 1 runs mid-January to mid-April. Placements are
+  // dated inside their term, so "now" is pinned into it once the fixtures exist (Date only; timers real).
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-02-15T09:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+  });
+  afterAll(() => jest.useRealTimers());
 
   afterAll(async () => {
     await moduleRef?.close();
@@ -233,7 +246,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
 
     // Ending the Enrollment is the real exit path: `enrolled` is a terminal ADMISSION
     // status, so the release that used to hang off admissions `withdraw` never ran.
-    const enrolment = await raw.enrollment.findFirst({ where: { applicationId: inA.id } });
+    const enrolment = await raw.studentEnrollment.findFirst({ where: { admissionApplicationId: inA.id } });
     await asTenant(() => enrollment.withdraw(enrolment!.id, { reason: 'left the country' }));
 
     expect(await claimedFor(sectionAId)).toBe(beforeA - 1);
@@ -264,18 +277,16 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     const before = {
       partners: await raw.partner.count({ where: { organizationId } }),
       profiles: await raw.studentProfile.count({ where: { organizationId } }),
-      enrollments: await raw.enrollment.count({ where: { organizationId } }),
+      enrollments: await raw.studentEnrollment.count({ where: { organizationId } }),
       history: await raw.studentStatusHistory.count({ where: { organizationId } }),
       claimed: await claimedFor(),
     };
 
     // Fail after the student has been created but before the transaction commits.
-    const enrollment: any = moduleRef.get(
-      (await import('../../src/modules/school/people/enrollment.service')).EnrollmentService,
-    );
-    const original = enrollment.enrollNewStudent.bind(enrollment);
+    const admitter: any = moduleRef.get(StudentAdmissionService);
+    const original = admitter.admit.bind(admitter);
     const spy = jest
-      .spyOn(enrollment, 'enrollNewStudent')
+      .spyOn(admitter, 'admit')
       .mockImplementation(async (input: any, tx: any) => {
         await original(input, tx);
         throw new Error('simulated failure after student creation');
@@ -286,7 +297,7 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
 
     expect(await raw.partner.count({ where: { organizationId } })).toBe(before.partners);
     expect(await raw.studentProfile.count({ where: { organizationId } })).toBe(before.profiles);
-    expect(await raw.enrollment.count({ where: { organizationId } })).toBe(before.enrollments);
+    expect(await raw.studentEnrollment.count({ where: { organizationId } })).toBe(before.enrollments);
     expect(await raw.studentStatusHistory.count({ where: { organizationId } })).toBe(before.history);
     // The seat claim is inside the same transaction, so it rolls back too — a failed
     // enrolment must not silently consume a seat.
@@ -301,7 +312,9 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
     const app = await newApp();
     await enrollInto(app.id);
     await enrollInto(app.id).catch(() => undefined);
-    expect(await raw.enrollment.count({ where: { applicationId: app.id } })).toBe(1);
+    expect(await raw.studentEnrollment.count({ where: { admissionApplicationId: app.id } })).toBe(1);
+    // One application, one child: exactly one student record came of it.
+    expect(await raw.studentEnrollment.count({ where: { admissionApplicationId: app.id } })).toBe(1);
   });
 
   // ──────────────────────────── Portal isolation ────────────────────────────

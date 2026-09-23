@@ -124,7 +124,7 @@ import { SchoolTermsPage } from '@/pages/school/terms';
 import { SchoolDepartmentsPage } from '@/pages/school/departments';
 import { SchoolClassesPage } from '@/pages/school/classes';
 import { SchoolSectionsPage } from '@/pages/school/sections';
-import { SchoolStreamsPage } from '@/pages/school/streams';
+import { SchoolSettingsPage } from '@/pages/school/school-settings';
 import { SchoolStudentCategoriesPage } from '@/pages/school/student-categories';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
@@ -588,7 +588,9 @@ export function App() {
           <Route path="/school/management/departments" element={<SchoolDepartmentsPage />} />
           <Route path="/school/management/classes" element={<SchoolClassesPage />} />
           <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
-          <Route path="/school/management/streams" element={<SchoolStreamsPage />} />
+          {/* Streams ARE sections (ADR-029): the legacy page is gone; old links land on sections. */}
+          <Route path="/school/management/streams" element={<Navigate to="/school/management/sections" replace />} />
+          <Route path="/school/management/settings" element={<SchoolSettingsPage />} />
           <Route path="/school/management/student-categories" element={<SchoolStudentCategoriesPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />

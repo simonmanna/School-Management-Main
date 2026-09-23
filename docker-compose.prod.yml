@@ -33,12 +33,20 @@ services:
     environment:
       # Non-superuser, NOBYPASSRLS application role. See scripts/setup-rls-role.ts.
       DATABASE_URL: ${APP_DATABASE_URL:?set APP_DATABASE_URL to the non-superuser app role — see scripts/setup-rls-role.ts}
+      # BYPASSRLS system role for pre-tenant lookups (login, refresh, cron
+      # fan-out). The API refuses to boot in production without it once RLS is live.
+      SYSTEM_DATABASE_URL: ${SYSTEM_DATABASE_URL:?set SYSTEM_DATABASE_URL to the app_system role — see scripts/setup-rls-role.ts}
       # Migrations run as the owner; the application never does.
       DIRECT_URL: ${MIGRATOR_DATABASE_URL:?set MIGRATOR_DATABASE_URL to the migration role}
       NODE_ENV: production
       LOG_LEVEL: info
       CORS_ORIGINS: ${PROD_CORS_ORIGINS:?set PROD_CORS_ORIGINS}
       METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+      # SEC-06: refuse any route without an explicit authorization policy.
+      PERMISSIONS_FAIL_CLOSED: "true"
+      # Permissions and account state are re-read per request, so revoking a
+      # role or deactivating a user takes effect immediately.
+      PERMISSIONS_DB_LOOKUP: "true"
       # SCOPE-01: first-release scope. Everything absent here is off.
       ENABLE_SCHOOL: "true"
       ENABLE_HR: "true"

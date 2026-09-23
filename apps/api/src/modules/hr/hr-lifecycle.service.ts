@@ -7,10 +7,24 @@ import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../kernel/tenancy/tenant-context.service';
 import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
+import { EventBus } from '../../kernel/events/event-bus';
+import { EVENTS } from '@erp/shared';
 import { PostingService } from '../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../accounting/posting/account-determination.service';
-import { dec, sum, ZERO } from '../../kernel/common/money';
+import { dec, round, sum, ZERO, type Money } from '../../kernel/common/money';
 import { Prisma } from '@prisma/client';
+
+const MS_PER_DAY = 86_400_000;
+/** A calendar day at UTC midnight — payroll date arithmetic is calendar arithmetic. */
+function utcDay(d: Date | string): Date {
+  const dt = d instanceof Date ? d : new Date(d);
+  return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+}
+/** Days from `from` to `to`, both inclusive. */
+function daysBetween(from: Date, to: Date): number {
+  const n = Math.round((utcDay(to).getTime() - utcDay(from).getTime()) / MS_PER_DAY) + 1;
+  return n > 0 ? n : 0;
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -33,8 +47,8 @@ const ONBOARD_STATUSES = ['pending', 'done'];
  *  - Employment actions (promotion/transfer/grade/salary/manager changes).
  *  - Contracts (draft→active→expiring/expired/terminated) with expiring alerts.
  *  - Onboarding checklist.
- *  - Offboarding + final settlement (prorated salary, leave payout, outstanding
- *    loan/advance, optional GL posting via PostingService).
+ *  - Offboarding + final settlement (routed through the final payroll run:
+ *    pro-rated salary, taxed leave encashment, full loan/advance recovery).
  */
 @Injectable()
 export class HrLifecycleService {
@@ -45,6 +59,7 @@ export class HrLifecycleService {
     private readonly audit: AuditService,
     private readonly posting: PostingService,
     private readonly accounts: AccountDeterminationService,
+    private readonly events: EventBus,
   ) {}
 
   private num(v: any): number {
@@ -403,71 +418,125 @@ export class HrLifecycleService {
   // ── Offboarding + final settlement ────────────────────────────────────────
 
   /**
-   * Computes the final settlement for an employee and (optionally) confirms it:
-   * sets the employee inactive/archived, writes the offboarding record and posts
-   * a GL journal (salary due + leave payout → net settlement payable).
+   * Final settlement. The settlement does NOT pay anyone itself — that used to
+   * double-pay the final month (the settlement journal paid it, then the
+   * payroll run paid the same leaver pro-rata again), and paid it untaxed.
+   *
+   * Instead:
+   *  - the final month's salary is paid by the payroll run for the period that
+   *    contains the last working day, pro-rated to that day, taxed as normal;
+   *  - that final payslip recovers every outstanding loan and advance in full
+   *    (as far as net pay allows — `calculateRun` treats it as the final pay);
+   *  - unused ENCASHABLE leave for the current leave year becomes a taxable
+   *    payroll input on that period, PENDING approval by someone with
+   *    `hr:payroll` like any other one-off money.
+   *
+   * `post = false` returns the estimate without writing anything.
    */
-  async computeFinalSettlement(employeeId: string, lastDay: string, post = false) {
+  async computeFinalSettlement(employeeId: string, lastDay: string, post = false, dto: any = {}) {
     const orgId = this.tenant.organizationId;
     const userId = this.tenant.userId;
+    const ld = utcDay(lastDay);
+    if (Number.isNaN(ld.getTime())) throw new BadRequestException('lastDay is not a valid date');
+    if (dto.reason && !OFFBOARD_REASONS.includes(dto.reason))
+      throw new BadRequestException(`Invalid reason: ${dto.reason}`);
+    const year = ld.getUTCFullYear();
     const emp = await this.prisma.client.hrEmployee.findFirst({
       where: { id: employeeId, organizationId: orgId },
       include: {
-        leaveBalances: true,
+        leaveBalances: { where: { year, deletedAt: null }, include: { leaveType: true } },
         loans: { where: { deletedAt: null, status: 'ACTIVE' } },
-        salaryAdvances: { where: { deletedAt: null, status: { in: ['APPROVED', 'PAID'] } } },
+        salaryAdvances: { where: { deletedAt: null, status: 'PAID' } },
       },
     });
     if (!emp) throw new NotFoundException('Employee not found');
+    if (emp.hireDate && ld.getTime() < utcDay(emp.hireDate).getTime())
+      throw new BadRequestException('lastDay is before the hire date');
 
-    // Decimal end to end — this is a money calculation that posts to the GL
-    // (FINANCIAL_INVARIANTS.md §"Money precision").
+    const period = await this.prisma.client.hrPayrollPeriod.findFirst({
+      where: { organizationId: orgId, startDate: { lte: ld }, endDate: { gte: ld } },
+      orderBy: { startDate: 'desc' },
+    });
+
+    // Decimal end to end, rounded to the currency's minor unit.
+    const dp = await this.currencyDecimals(orgId);
     const base = dec(emp.baseSalary ?? 0);
-    const dailyRate = base.dividedBy(30);
-    // Prorated salary for days worked in the final month (assume 30-day month).
-    const ld = new Date(lastDay);
-    const salaryDue = dailyRate.times(ld.getDate());
+    const monthDays = new Date(Date.UTC(ld.getUTCFullYear(), ld.getUTCMonth() + 1, 0)).getUTCDate();
+    const dailyRate = base.dividedBy(monthDays);
 
-    // Leave payout: remaining leave days × daily pay (gross daily).
-    let leaveDays = ZERO;
-    for (const b of emp.leaveBalances) {
-      const remaining = dec(b.accruedDays).plus(dec(b.adjustedDays)).minus(dec(b.usedDays));
-      if (remaining.greaterThan(ZERO)) leaveDays = leaveDays.plus(remaining);
+    // Estimate of the final period's pro-rated salary — informational; the
+    // payroll run computes the real figure (unpaid leave, allowances, tax).
+    let salaryDue: Money;
+    if (period) {
+      const pStart = utcDay(period.startDate);
+      const pEnd = utcDay(period.endDate);
+      const hire = emp.hireDate ? utcDay(emp.hireDate) : null;
+      const from = hire && hire > pStart ? hire : pStart;
+      const periodDays = daysBetween(pStart, pEnd);
+      salaryDue = round(base.times(daysBetween(from, ld)).dividedBy(periodDays), dp);
+    } else {
+      salaryDue = round(dailyRate.times(ld.getUTCDate()), dp);
     }
-    const leavePayout = dailyRate.times(leaveDays);
 
-    // Outstanding loan + advance balances.
+    // Leave encashment: only leave types flagged encashable (annual leave), and
+    // only this leave year — sick leave and last year's lapsed days are not money.
+    let leaveDays = ZERO;
+    const encashed: Array<{ balanceId: string; days: Money }> = [];
+    for (const b of emp.leaveBalances as any[]) {
+      if (!b.leaveType?.isEncashable) continue;
+      const remaining = dec(b.accruedDays).plus(dec(b.adjustedDays)).minus(dec(b.usedDays));
+      if (!remaining.greaterThan(ZERO)) continue;
+      leaveDays = leaveDays.plus(remaining);
+      encashed.push({ balanceId: b.id, days: remaining });
+    }
+    const leavePayout = round(dailyRate.times(leaveDays), dp);
+
     const loanOutstanding = sum(emp.loans.map((l: any) => dec(l.balance)));
     const advanceOutstanding = sum(emp.salaryAdvances.map((a: any) => dec(a.balance)));
+    const netSettlement = salaryDue.plus(leavePayout).minus(loanOutstanding).minus(advanceOutstanding);
 
-    const grossDue = salaryDue.plus(leavePayout);
-    const recovered = loanOutstanding.plus(advanceOutstanding);
-    const netSettlement = grossDue.minus(recovered);
+    const summary = {
+      employeeId,
+      lastWorkingDay: ld,
+      finalPayrollPeriod: period ? { id: period.id, periodCode: period.periodCode } : null,
+      salaryDue,
+      leavePayout,
+      leaveDays: leaveDays.toNumber(),
+      loanOutstanding,
+      advanceOutstanding,
+      netSettlement,
+      note:
+        'Estimate before tax. The final salary and leave payout are paid, taxed and netted against ' +
+        'outstanding loans/advances by the payroll run for the period containing the last working day.',
+    };
+    if (!post) return { ...summary, postable: !!period };
 
-    if (!post) {
-      return {
-        employeeId,
-        salaryDue,
-        leavePayout,
-        leaveDays: leaveDays.toNumber(),
-        loanOutstanding,
-        advanceOutstanding,
-        netSettlement,
-        postable: netSettlement.greaterThan(ZERO),
-      };
-    }
+    if (!period)
+      throw new BadRequestException(
+        `Create the payroll period covering ${ld.toISOString().slice(0, 10)} first — the final pay is made through that period's payroll run.`,
+      );
+    const approvedRun = await this.prisma.client.hrPayrollRun.findFirst({
+      where: { organizationId: orgId, periodId: period.id, deletedAt: null, status: { in: ['APPROVED', 'PAID'] } },
+      select: { runNumber: true },
+    });
+    if (approvedRun)
+      throw new BadRequestException(
+        `Payroll ${approvedRun.runNumber} for ${period.periodCode} is already approved. Reverse it, settle, then ` +
+          'recalculate — otherwise the leaver stays paid for the whole period.',
+      );
+    const alreadySettled = await this.prisma.client.hrOffboarding.findFirst({
+      where: { organizationId: orgId, employeeId, status: 'settled' },
+      select: { id: true },
+    });
+    if (alreadySettled) throw new BadRequestException('This employee already has a settled offboarding record');
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      // Deactivate employee + archive.
-      await tx.hrEmployee.update({
-        where: { id: employeeId },
-        data: { isActive: false, deletedAt: new Date(), updatedBy: userId },
-      });
       const off = await tx.hrOffboarding.create({
         data: {
           organizationId: orgId,
           employeeId,
-          reason: 'resignation',
+          reason: dto.reason ?? 'resignation',
+          noticeDate: dto.noticeDate ? utcDay(dto.noticeDate) : null,
           lastWorkingDay: ld,
           status: 'settled',
           salaryDue,
@@ -475,54 +544,49 @@ export class HrLifecycleService {
           loanOutstanding,
           advanceOutstanding,
           netSettlement,
+          notes: dto.notes ?? null,
           settledAt: new Date(),
           settledById: userId,
           createdBy: userId,
         },
       });
-      if (grossDue.greaterThan(ZERO)) {
-        const [salaryExpense, netPayPayable, loanReceivable, advanceReceivable] = await Promise.all([
-          this.accounts.mapped('salary_expense', tx),
-          this.accounts.mapped('net_pay_payable', tx),
-          this.accounts.mapped('employee_loan_receivable', tx),
-          this.accounts.mapped('employee_advance_receivable', tx),
-        ]);
-        // The entry MUST balance: debit the full gross, then credit the net
-        // payable AND the receivables the settlement clears. Crediting only
-        // the net left the entry short by (loans + advances), so any employee
-        // leaving with an outstanding loan failed to post at all.
-        const lines: any[] = [
-          { accountId: salaryExpense, debit: grossDue, description: 'Salary + leave payout' },
-        ];
-        if (netSettlement.greaterThan(ZERO))
-          lines.push({ accountId: netPayPayable, credit: netSettlement, description: 'Net final settlement payable' });
-        if (loanOutstanding.greaterThan(ZERO))
-          lines.push({ accountId: loanReceivable, credit: loanOutstanding, description: 'Loan balance recovered' });
-        if (advanceOutstanding.greaterThan(ZERO))
-          lines.push({ accountId: advanceReceivable, credit: advanceOutstanding, description: 'Advance balance recovered' });
-        // A settlement that nets negative (recovery exceeds the payout) leaves
-        // the employee owing the school — booked back to the expense account
-        // so the entry balances rather than silently failing.
-        if (netSettlement.lessThan(ZERO))
-          lines.push({ accountId: salaryExpense, debit: netSettlement.abs(), description: 'Net recoverable from employee' });
 
-        const journal = await this.posting.post(
-          {
-            journalCode: 'GEN',
-            // Dated to the last working day — the period the settlement belongs
-            // to — not the day the button was clicked.
-            date: ld,
-            description: `Final settlement — ${emp.firstName} ${emp.lastName ?? ''} (${emp.employeeCode})`,
-            sourceType: 'hr_settlement',
-            sourceId: off.id,
-            postingType: 'primary',
-            postingKey: `hr_settlement:${off.id}`,
-            lines,
+      let payrollInputId: string | null = null;
+      if (leavePayout.greaterThan(ZERO)) {
+        const input = await tx.hrPayrollInput.create({
+          data: {
+            organizationId: orgId,
+            employeeId,
+            periodId: period.id,
+            inputType: 'ALLOWANCE',
+            name: `Leave encashment (${leaveDays.toString()} days)`,
+            amount: leavePayout,
+            isTaxable: true,
+            // Captured here, authorised by payroll — the same separation of
+            // duties as any other one-off money.
+            status: 'PENDING',
+            reference: `offboarding:${off.id}`,
+            createdBy: userId,
           },
-          tx,
-        );
-        await tx.hrOffboarding.update({ where: { id: off.id }, data: { journalEntryId: journal.id } });
+        });
+        payrollInputId = input.id;
+        // The encashed days are consumed so they cannot be taken or paid again.
+        for (const e of encashed) {
+          const bal = await tx.hrLeaveBalance.findUnique({ where: { id: e.balanceId } });
+          await tx.hrLeaveBalance.update({
+            where: { id: e.balanceId },
+            data: { adjustedDays: dec(bal.adjustedDays).minus(e.days) },
+          });
+        }
       }
+
+      // Inactive, NOT deleted: the leaver must stay visible to the payroll run
+      // that pays their final salary, and to every report after it.
+      await tx.hrEmployee.update({
+        where: { id: employeeId },
+        data: { isActive: false, updatedBy: userId },
+      });
+      await tx.hrOffboarding.update({ where: { id: off.id }, data: { payrollInputId } });
       await this.audit.recordInTx(tx, {
         entity: 'HrOffboarding',
         entityId: off.id,
@@ -530,15 +594,44 @@ export class HrLifecycleService {
         newValues: {
           employeeId,
           lastWorkingDay: ld,
+          finalPayrollPeriod: period.periodCode,
           salaryDue: salaryDue.toString(),
           leavePayout: leavePayout.toString(),
+          leaveDays: leaveDays.toString(),
           loanOutstanding: loanOutstanding.toString(),
           advanceOutstanding: advanceOutstanding.toString(),
-          netSettlement: netSettlement.toString(),
+          payrollInputId,
         },
       });
-      return tx.hrOffboarding.findUnique({ where: { id: off.id } });
+      // A leaver loses system access with the posting, not whenever someone
+      // remembers: the login is disabled and every session revoked in the same
+      // transaction. The school vertical ends their teaching access on the event
+      // (HR may not import the school module — ADR-011).
+      if (emp.userId) {
+        await tx.user.updateMany({ where: { id: emp.userId }, data: { isActive: false } });
+        await tx.refreshToken.updateMany({
+          where: { userId: emp.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+      await this.events.publishInTx(tx, EVENTS.HrEmployeeOffboarded, {
+        organizationId: orgId,
+        employeeId,
+        partnerId: emp.partnerId ?? null,
+        userId: emp.userId ?? null,
+        lastWorkingDay: ld.toISOString(),
+      });
+
+      const saved = await tx.hrOffboarding.findUnique({ where: { id: off.id } });
+      return { ...saved, finalPayrollPeriod: summary.finalPayrollPeriod };
     });
+  }
+
+  private async currencyDecimals(orgId: string): Promise<number> {
+    const org = await this.prisma.client.organization.findUnique({ where: { id: orgId }, select: { currencyCode: true } });
+    if (!org?.currencyCode) return 2;
+    const cur = await this.prisma.client.currency.findUnique({ where: { code: org.currencyCode }, select: { decimalPlaces: true } });
+    return cur?.decimalPlaces ?? 2;
   }
 
   async listOffboarding(query: any = {}) {

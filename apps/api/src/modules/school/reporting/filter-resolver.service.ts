@@ -274,26 +274,10 @@ export class FilterResolverService implements ReportContextBuilder {
           `This report uses the "${classBasis}" class basis and needs a term. Select a term, or none is current.`,
         );
       }
-      const placed = await this.placements.studentIdsIn(
+      return this.placements.studentIdsIn(
         classIds ? { classIds } : {},
         { termId, includeInactive: opts.includeInactive },
       );
-      // Compat: learners not yet backfilled are still counted from their legacy
-      // term Enrollment. Removed with the legacy table (Phase 8).
-      const legacy = await this.db.enrollment.findMany({
-        where: {
-          termId,
-          ...(classIds ? { classId: { in: classIds } } : {}),
-          ...(opts.includeInactive ? {} : { status: 'enrolled' }),
-        },
-        select: { studentProfileId: true },
-      });
-      return [
-        ...new Set<string>([
-          ...placed,
-          ...legacy.map((r: { studentProfileId: string }) => r.studentProfileId),
-        ]),
-      ];
     }
 
     const rows = await this.db.studentProfile.findMany({

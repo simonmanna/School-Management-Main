@@ -14,8 +14,7 @@ import {
   useCreateGuardian,
   useStudentStatement,
   type Student,
-  type StudentStatus,
-} from '@/features/school/api';
+  type StudentStatus, useTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -89,7 +88,7 @@ export function SchoolStudentsPage() {
           email: form.email || undefined,
           phone: form.phone || undefined,
           gender: (form.gender || undefined) as 'male' | 'female' | 'other' | undefined,
-          currentClassId: form.currentClassId || undefined,
+          classId: form.currentClassId || undefined,
           residenceType: (form.residenceType || undefined) as 'day' | 'boarder' | undefined,
         });
         notify.success('Student admitted');
@@ -405,6 +404,7 @@ function QuickRegisterDialog({
   terms: any[]; classes: any[]; sections: any[]; streams: any[];
   onSubmit: () => void; busy: boolean;
 }) {
+  const labels = useTerminology();
   const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -460,7 +460,7 @@ function QuickRegisterDialog({
               </select>
             </div>
             <div>
-              <Label>Stream</Label>
+              <Label>{labels.section}</Label>
               <select className={sel} value={form.streamId ?? ''} onChange={(e) => setForm({ ...form, streamId: e.target.value })}>
                 <option value="">—</option>
                 {(streams ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}

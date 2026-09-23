@@ -19,12 +19,12 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       title: 'Student Register',
       domain: 'student',
       description:
-        'Every enrolled pupil for a term, with class, section, stream and admission number.',
+        'Every enrolled pupil for a term, with class, stream/section and admission number.',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
       filters: [
         'academicYearId', 'termId', 'campusId', 'gradeLevelId', 'classId',
-        'sectionId', 'streamId', 'status', 'gender', 'residenceType', 'house',
+        'sectionId', 'status', 'gender', 'residenceType', 'house',
         'studentCategoryId', 'search', 'classBasis',
       ],
       classBasisDefault: 'enrollment',
@@ -39,7 +39,6 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         { key: 'gender', label: 'Gender', type: 'string', width: 8 },
         { key: 'className', label: 'Class', type: 'string', width: 12 },
         { key: 'sectionName', label: 'Section', type: 'string', width: 10 },
-        { key: 'streamName', label: 'Stream', type: 'string', width: 10 },
         { key: 'rollNumber', label: 'Roll No', type: 'string', width: 8 },
         { key: 'residenceType', label: 'Residence', type: 'string', width: 10 },
         { key: 'house', label: 'House', type: 'string', width: 10 },
@@ -66,7 +65,6 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const mapped = rows
           .filter((e: any) => (classIds ? classIds.includes(e.classId) : true))
           .filter((e: any) => (params.sectionId ? e.sectionId === params.sectionId : true))
-          .filter((e: any) => (params.streamId ? e.streamId === params.streamId : true))
           // Multi-value status is filtered here; the service takes only one.
           .filter((e: any) => (params.status?.length ? params.status.includes(e.status) : true))
           .filter((e: any) => (params.gender ? e.student?.gender === params.gender : true))
@@ -80,7 +78,6 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
             gender: e.student?.gender ?? '',
             className: e.schoolClass?.name ?? '',
             sectionName: e.section?.name ?? '',
-            streamName: e.stream?.name ?? '',
             rollNumber: e.rollNumber ?? '',
             residenceType: e.student?.residenceType ?? '',
             house: e.student?.house ?? '',
@@ -149,7 +146,6 @@ export function studentReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
           const e = profile.currentEnrolment;
           rows.push({ section: 'Enrolment', field: 'Class', value: e.className ?? null });
           rows.push({ section: 'Enrolment', field: 'Section', value: e.sectionName ?? null });
-          rows.push({ section: 'Enrolment', field: 'Stream', value: e.streamName ?? null });
           rows.push({ section: 'Enrolment', field: 'Roll No', value: e.rollNumber ?? null });
           rows.push({ section: 'Enrolment', field: 'Status', value: e.status ?? null });
           rows.push({ section: 'Enrolment', field: 'Enrolled On', value: e.enrolledAt ?? null });

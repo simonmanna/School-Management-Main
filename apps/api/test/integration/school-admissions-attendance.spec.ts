@@ -22,6 +22,7 @@ import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 import { StudentAttendanceService } from '../../src/modules/school/attendance/student-attendance.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: school admissions → enrollment → attendance (H4)', () => {
   const rawUrl = (() => {
@@ -62,6 +63,7 @@ describeDb('integration: school admissions → enrollment → attendance (H4)', 
     });
     termId = term.id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     const cls = await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S1 East' } });
     classId = cls.id;
 
@@ -76,13 +78,23 @@ describeDb('integration: school admissions → enrollment → attendance (H4)', 
     attendance = moduleRef.get(StudentAttendanceService);
   });
 
+  // Dated 2026 scenario: Term 1 runs mid-January to mid-April. Placements are
+  // dated inside their term, so "now" is pinned into it once the fixtures exist (Date only; timers real).
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-02-15T09:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+  });
+  afterAll(() => jest.useRealTimers());
+
   afterAll(async () => {
     await moduleRef?.close();
     await raw.$disconnect();
   });
 
   const asTenant = <T>(fn: () => Promise<T>): Promise<T> =>
-    tenant.run({ organizationId, userId, permissions: ['school:admissions:write', 'school:attendance:write'] }, fn);
+    tenant.run({ organizationId, userId, permissions: ['school:admissions:write', 'school:admissions:decide', 'school:enrollment:write', 'school:attendance:write'] }, fn);
 
   it('drives the full journey: application → review → decision → offer → acceptance → enrollment', async () => {
     const app: any = await asTenant(() =>
@@ -151,7 +163,12 @@ describeDb('integration: school admissions → enrollment → attendance (H4)', 
 
     const student = await raw.studentProfile.findFirst({ where: { id: studentProfileId } });
     expect(student).toBeTruthy();
-    expect(student!.currentClassId).toBe(classId);
+    // Class membership is the enrollment's open placement, not a profile column.
+    const placement = await raw.enrollmentPlacement.findFirst({
+      where: { enrollment: { studentProfileId }, effectiveTo: null },
+      include: { classCohort: true },
+    });
+    expect(placement?.classCohort.classId).toBe(classId);
 
     // The enrolled student has a Partner (the AR account) carrying the name.
     const partner = await raw.partner.findFirst({ where: { id: student!.partnerId } });

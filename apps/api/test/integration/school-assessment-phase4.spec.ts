@@ -10,6 +10,7 @@ import { ASSESSMENT_KINDS } from '../../src/modules/school/assessment/assessment
 import { AssignmentService } from '../../src/modules/school/assessment/assignment.service';
 import { PortalIdentityService } from '../../src/kernel/auth/portal-identity.service';
 import { TeachingWorkspaceService } from '../../src/modules/school/teaching/teaching-workspace.service';
+import { placeInClass } from './_placement';
 
 /** Real Postgres transactions and triggers; no web server, Redis, or mocked grade store. */
 describeDb('Phase 4 canonical assessment workflow', () => {
@@ -49,7 +50,8 @@ describeDb('Phase 4 canonical assessment workflow', () => {
     await db.courseOfferingTeacher.create({ data: { organizationId, courseOfferingId: course.id, teacherPartnerId: staff.id, isResponsible: true, effectiveFrom: year.startDate } });
     for (let i = 0; i < 3; i++) {
       const p = await db.partner.create({ data: { organizationId, name: `Learner ${i}`, code: `S${i}` } });
-      const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `S${i}`, enrollmentDate: year.startDate, currentClassId: cls.id } });
+      const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `S${i}`, enrollmentDate: year.startDate } });
+      await placeInClass(db, { organizationId: organizationId, studentProfileId: s.id, classId: cls.id });
       learners.push(s.id);
       const e = await db.studentEnrollment.create({ data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
       await db.courseEnrollment.create({ data: { organizationId, courseOfferingId: course.id, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
@@ -63,7 +65,11 @@ describeDb('Phase 4 canonical assessment workflow', () => {
   it('captures official enrollment and freezes membership at the database boundary', async () => {
     expect(roster.memberCount).toBe(3);
     await expect(db.academicRosterMember.deleteMany({ where: { rosterId: roster.id } })).rejects.toThrow('Frozen academic roster');
-    await db.studentProfile.update({ where: { id: learners[0] }, data: { currentClassId: null } });
+    // Leaving the class = the placement ends (history kept), not a profile edit.
+    await db.enrollmentPlacement.updateMany({
+      where: { enrollment: { studentProfileId: learners[0] }, effectiveTo: null },
+      data: { effectiveTo: new Date(), endReason: 'WITHDRAWAL' },
+    });
     expect(await db.academicRosterMember.count({ where: { rosterId: roster.id } })).toBe(3);
   });
   it.each(ASSESSMENT_KINDS)('creates %s through the same draft workflow', async (kind) => {

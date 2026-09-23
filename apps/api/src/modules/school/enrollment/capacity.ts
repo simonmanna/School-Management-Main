@@ -1,3 +1,4 @@
+import { TERMINOLOGY_DEFAULTS } from '@erp/shared';
 /**
  * Capacity rules (ADR-030, brief §11) — pure arithmetic.
  *
@@ -42,7 +43,7 @@ export function seatViolation(target: SeatTarget): CapacityViolation | null {
   };
 }
 
-export function describeViolation(v: CapacityViolation, label = 'Stream'): string {
+export function describeViolation(v: CapacityViolation, label = TERMINOLOGY_DEFAULTS.section): string {
   const what = v.kind === 'class' ? `Class "${v.name}"` : `${label} "${v.name}"`;
   return `${what} is full (${v.occupied}/${v.capacity}).`;
 }

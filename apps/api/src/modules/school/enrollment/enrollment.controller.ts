@@ -1,10 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
+import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
+import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { ProgrammeService } from './programme.service';
 import { ClassCohortService } from './class-cohort.service';
 import { StudentEnrollmentService } from './student-enrollment.service';
 import { PlacementService } from './placement.service';
+import { PromotionRunService } from './promotion-run.service';
 import type { EnrollmentStatusValue } from './enrollment-fsm';
 import {
   BulkPlacementDto,
@@ -15,8 +18,11 @@ import {
   GenerateClassCohortsDto,
   MovePlacementDto,
   PromoteEnrollmentDto,
+  PromoteStudentDto,
+  PromotionRolloverDto,
   RepeatGradeDto,
   SeedUgandaProgrammesDto,
+  SuspendEnrollmentDto,
   TermRolloverDto,
   UpdateClassCohortDto,
   UpdateProgrammeDto,
@@ -111,6 +117,9 @@ export class ClassCohortController {
 
 /* ────────────────────── Enrollment (membership) ─────────────────── */
 
+// A client that sends Idempotency-Key gets exactly-once writes on retry.
+@UseInterceptors(IdempotencyInterceptor)
+@Idempotent()
 @Controller('school/student-enrollments')
 export class StudentEnrollmentController {
   constructor(
@@ -202,7 +211,7 @@ export class StudentEnrollmentController {
 
   @Post(':id/suspend')
   @RequirePermissions(PERMISSIONS.school.manageEnrollment)
-  suspend(@Param('id') id: string, @Body() dto: WithdrawEnrollmentDto) {
+  suspend(@Param('id') id: string, @Body() dto: SuspendEnrollmentDto) {
     return this.service.suspend(id, dto);
   }
 
@@ -227,6 +236,9 @@ export class StudentEnrollmentController {
 
 /* ───────────────────────────── Placement ────────────────────────── */
 
+// A client that sends Idempotency-Key gets exactly-once writes on retry.
+@UseInterceptors(IdempotencyInterceptor)
+@Idempotent()
 @Controller('school/placements')
 export class PlacementController {
   constructor(private readonly service: PlacementService) {}
@@ -266,5 +278,29 @@ export class PlacementController {
   @RequirePermissions(PERMISSIONS.school.manageEnrollment)
   termRollover(@Body() dto: TermRolloverDto) {
     return this.service.termRollover(dto);
+  }
+}
+
+/* ───────────────────────────── Promotion ────────────────────────── */
+
+/** The promotion board and year-end rollover (student-keyed, next academic year). */
+// A client that sends Idempotency-Key gets exactly-once writes on retry.
+@UseInterceptors(IdempotencyInterceptor)
+@Idempotent()
+@Controller('school/promotion')
+export class PromotionRunController {
+  constructor(private readonly service: PromotionRunService) {}
+
+  @Post('promote')
+  @RequirePermissions(PERMISSIONS.school.manageEnrollment)
+  promote(@Body() dto: PromoteStudentDto) {
+    return this.service.promote(dto);
+  }
+
+  /** Dry-run by default; pass `{ "dryRun": false }` to execute. */
+  @Post('rollover')
+  @RequirePermissions(PERMISSIONS.school.manageEnrollment)
+  rollover(@Body() dto: PromotionRolloverDto) {
+    return this.service.rollover(dto);
   }
 }

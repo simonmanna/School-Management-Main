@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
+import { assertYearWritable } from '../foundation/academic-year-guard';
 import type {
   BulkGenerateOfferingsDto,
   CreateCourseOfferingDto,
@@ -111,6 +112,8 @@ export class CourseOfferingService {
   }
 
   private async validateContext(dto: CreateCourseOfferingDto, tx: any = this.prisma.client) {
+    // Teaching is planned in open years only; a closed year's offerings are history.
+    await assertYearWritable(tx, this.org, dto.academicYearId, 'create');
     const [year, term, programme] = await Promise.all([
       tx.academicYear.findFirst({ where: { id: dto.academicYearId, organizationId: this.org } }),
       tx.term.findFirst({ where: { id: dto.termId, organizationId: this.org } }),
@@ -145,6 +148,9 @@ export class CourseOfferingService {
     const curriculumTypes = ['SUBJECT', 'LEARNING_AREA', 'REMEDIAL'];
     if (curriculumTypes.includes(dto.offeringType)) {
       if (!dto.subjectId || !dto.curriculumId) throw new BadRequestException(`${dto.offeringType} requires subjectId and a published curriculum version.`);
+      const subject = await tx.subject.findFirst({ where: { id: dto.subjectId, organizationId: this.org }, select: { isActive: true, name: true } });
+      if (!subject) throw new BadRequestException('Subject does not belong to this school.');
+      if (!subject.isActive) throw new BadRequestException(`"${subject.name}" has been retired and cannot be offered.`);
       const curriculum = await tx.curriculum.findFirst({
         where: { id: dto.curriculumId, organizationId: this.org, academicYearId: year.id, status: 'published', subjects: { some: { subjectId: dto.subjectId } } },
       });
@@ -208,6 +214,12 @@ export class CourseOfferingService {
   private async allocateTeacherInTx(tx: any, offeringId: string, dto: TeacherAllocationDto) {
     const teacher = await tx.staffProfile.findFirst({ where: { id: dto.teacherPartnerId, organizationId: this.org, deletedAt: null } });
     if (!teacher) throw new BadRequestException('Teacher does not belong to this school.');
+    // Only someone currently employed can be given teaching. A leaver keeps every
+    // historical allocation; they just cannot receive new ones.
+    const status: string = teacher.status ?? 'active';
+    if (status !== 'active' && status !== 'on_leave') {
+      throw new BadRequestException(`This staff member is ${status.replace('_', ' ')} and cannot be allocated teaching.`);
+    }
     const role = dto.role ?? 'LEAD';
     const from = dto.effectiveFrom ? new Date(dto.effectiveFrom) : new Date();
     const to = dto.effectiveTo ? new Date(dto.effectiveTo) : null;

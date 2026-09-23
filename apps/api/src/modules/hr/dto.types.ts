@@ -47,7 +47,9 @@ const CALC_METHODS = ['FIXED', 'PERCENTAGE'] as const;
 const TAX_TYPES = ['PAYE', 'PENSION', 'SOCIAL_SECURITY', 'LOCAL'] as const;
 const PERIOD_TYPES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'CUSTOM'] as const;
 const PAYMENT_METHODS = ['BANK', 'MOBILE_MONEY', 'CASH', 'CHEQUE'] as const;
-const BANK_PAYMENT_STATUSES = ['DRAFT', 'GENERATED', 'SENT', 'PAID'] as const;
+const BANK_PAYMENT_STATUSES = ['DRAFT', 'GENERATED', 'SENT', 'PAID', 'CANCELLED'] as const;
+const DEDUCTION_CATEGORIES = ['PENSION', 'SOCIAL_SECURITY', 'INSURANCE', 'OTHER_PAYABLE', 'RECOVERY'] as const;
+const CONTRIBUTION_BASES = ['GROSS', 'BASIC'] as const;
 const REVIEW_STATUSES = ['DRAFT', 'SUBMITTED', 'APPROVED'] as const;
 const CONTRACT_TYPES = ['permanent', 'contract', 'temporary', 'probation', 'internship'] as const;
 const CONTRACT_STATUSES = ['draft', 'active', 'expiring', 'expired', 'terminated'] as const;
@@ -57,7 +59,7 @@ const ONBOARDING_STATUSES = ['pending', 'in_progress', 'done', 'skipped'] as con
 const QUALIFICATION_TYPES = ['degree', 'diploma', 'certificate', 'teaching_qual', 'license', 'professional', 'other'] as const;
 const CERTIFICATION_STATUSES = ['active', 'expiring', 'expired', 'revoked'] as const;
 const ENROLLMENT_STATUSES = ['enrolled', 'in_progress', 'completed', 'failed', 'cancelled'] as const;
-const STATUTORY_CONFIG_TYPES = ['PENSION', 'SOCIAL_SECURITY', 'LOCAL_TAX', 'INSURANCE', 'OTHER'] as const;
+const STATUTORY_CONFIG_TYPES = ['PENSION', 'SOCIAL_SECURITY', 'LOCAL_TAX', 'INSURANCE', 'OVERTIME', 'OTHER'] as const;
 const LEAVE_ACCRUAL_METHODS = ['ANNUAL_UPFRONT', 'MONTHLY', 'NONE'] as const;
 const PAYROLL_INPUT_TYPES = ['BONUS', 'COMMISSION', 'ALLOWANCE', 'DEDUCTION', 'REIMBURSEMENT'] as const;
 const PAYROLL_INPUT_STATUSES = ['PENDING', 'APPROVED', 'APPLIED', 'CANCELLED'] as const;
@@ -293,6 +295,8 @@ export class CreateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) accrualStartsAfterMonths?: number;
   @IsOptional() @IsInt() @Min(0) carryForwardExpiryMonths?: number;
   @IsOptional() @IsInt() @Min(0) maxBalanceDays?: number;
+  /** Unused days are paid out on exit (annual leave). */
+  @IsOptional() @IsBoolean() isEncashable?: boolean;
 }
 
 export class UpdateLeaveTypeDto {
@@ -306,6 +310,7 @@ export class UpdateLeaveTypeDto {
   @IsOptional() @IsInt() @Min(0) accrualStartsAfterMonths?: number;
   @IsOptional() @IsInt() @Min(0) carryForwardExpiryMonths?: number;
   @IsOptional() @IsInt() @Min(0) maxBalanceDays?: number;
+  @IsOptional() @IsBoolean() isEncashable?: boolean;
 }
 
 // ── Leave accrual engine ─────────────────────────────────────────────
@@ -389,6 +394,8 @@ export class CreatePayrollComponentDto {
   @IsOptional() @IsBoolean() isRecurring?: boolean;
   /** Scope filter, `key:value` — departmentId / positionId / employmentType. */
   @IsOptional() @IsString() appliesTo?: string;
+  /** DEDUCTION components: where the credit posts. Null = legacy code-based classification. */
+  @IsOptional() @IsIn([...DEDUCTION_CATEGORIES]) deductionCategory?: (typeof DEDUCTION_CATEGORIES)[number];
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
@@ -401,6 +408,8 @@ export class UpdatePayrollComponentDto {
   @IsOptional() @IsBoolean() isTaxable?: boolean;
   @IsOptional() @IsBoolean() isRecurring?: boolean;
   @IsOptional() @IsString() appliesTo?: string;
+  /** DEDUCTION components: where the credit posts. Null = legacy code-based classification. */
+  @IsOptional() @IsIn([...DEDUCTION_CATEGORIES]) deductionCategory?: (typeof DEDUCTION_CATEGORIES)[number];
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
@@ -414,7 +423,9 @@ export class UpdatePayrollComponentDto {
 export class TaxBracketDto {
   @IsNumber() @Min(0) fromAmount!: number;
   @IsOptional() @IsNumber() @Min(0) toAmount?: number;
-  @IsNumber() @Min(0) rate!: number;
+  @IsOptional() @IsNumber() @Min(0) rate?: number;
+  /** LOCAL tables: fixed ANNUAL charge for the band. */
+  @IsOptional() @IsNumber() @Min(0) fixedAmount?: number;
 }
 
 export class CreateTaxTableDto {
@@ -424,6 +435,10 @@ export class CreateTaxTableDto {
   @IsIn([...TAX_TYPES]) taxType!: (typeof TAX_TYPES)[number];
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** PAYE: do employee pension/social-security contributions reduce the PAYE base? (Uganda: no.) */
+  @IsOptional() @IsBoolean() contributionsDeductible?: boolean;
+  /** LOCAL: collection months, e.g. "7,8,9,10". */
+  @IsOptional() @IsString() collectionMonths?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => TaxBracketDto)
   brackets?: TaxBracketDto[];
 }
@@ -434,6 +449,10 @@ export class UpdateTaxTableDto {
   @IsOptional() @IsIn([...TAX_TYPES]) taxType?: (typeof TAX_TYPES)[number];
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** PAYE: do employee pension/social-security contributions reduce the PAYE base? (Uganda: no.) */
+  @IsOptional() @IsBoolean() contributionsDeductible?: boolean;
+  /** LOCAL: collection months, e.g. "7,8,9,10". */
+  @IsOptional() @IsString() collectionMonths?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => TaxBracketDto)
   brackets?: TaxBracketDto[];
 }
@@ -444,6 +463,9 @@ export class CreateStatutoryConfigDto {
   @IsOptional() @IsIn([...STATUTORY_CONFIG_TYPES]) configType?: (typeof STATUTORY_CONFIG_TYPES)[number];
   @IsOptional() @IsNumber() @Min(0) rate?: number;
   @IsOptional() @IsNumber() @Min(0) employerRate?: number;
+  @IsOptional() @IsIn([...CONTRIBUTION_BASES]) contributionBase?: (typeof CONTRIBUTION_BASES)[number];
+  /** Monthly cap on the contribution base. */
+  @IsOptional() @IsNumber() @Min(0) ceiling?: number;
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -453,6 +475,9 @@ export class UpdateStatutoryConfigDto {
   @IsOptional() @IsIn([...STATUTORY_CONFIG_TYPES]) configType?: (typeof STATUTORY_CONFIG_TYPES)[number];
   @IsOptional() @IsNumber() @Min(0) rate?: number;
   @IsOptional() @IsNumber() @Min(0) employerRate?: number;
+  @IsOptional() @IsIn([...CONTRIBUTION_BASES]) contributionBase?: (typeof CONTRIBUTION_BASES)[number];
+  /** Monthly cap on the contribution base. */
+  @IsOptional() @IsNumber() @Min(0) ceiling?: number;
   @IsOptional() @IsString() effectiveFrom?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -486,6 +511,11 @@ export class ReverseRunDto {
 
 export class MarkPayslipPaidDto {
   @IsOptional() @IsIn([...PAYMENT_METHODS]) paymentMethod?: (typeof PAYMENT_METHODS)[number];
+  @IsOptional() @IsString() paidAt?: string;
+}
+
+export class ReasonDto {
+  @IsOptional() @IsString() reason?: string;
 }
 
 export class GenerateBankPaymentDto {
@@ -497,6 +527,8 @@ export class GenerateBankPaymentDto {
 
 export class UpdateBankPaymentStatusDto {
   @IsIn([...BANK_PAYMENT_STATUSES]) status!: (typeof BANK_PAYMENT_STATUSES)[number];
+  /** PAID only: the value date of the transfer. Defaults to the batch payment date. */
+  @IsOptional() @IsString() paidAt?: string;
   @IsOptional() @IsString() fileName?: string;
   @IsOptional() @IsString() fileUrl?: string;
 }
@@ -562,15 +594,34 @@ export class CreateLoanDto {
   @IsNumber() @IsPositive() principal!: number;
   @IsOptional() @IsNumber() @Min(0) interestRate?: number;
   @IsOptional() @IsInt() @IsPositive() installmentsTotal?: number;
+  /** Disburse through the ledger now, dated this day. Omit to disburse later. */
   @IsOptional() @IsString() disbursedAt?: string;
+  @IsOptional() @IsIn([...PAYMENT_METHODS]) disbursementMethod?: (typeof PAYMENT_METHODS)[number];
   @IsOptional() @IsString() notes?: string;
 }
 
+/**
+ * A loan's balance moves only through payroll, reversal or write-off — never
+ * by edit. The only status change allowed here is a write-off (DEFAULTED).
+ */
 export class UpdateLoanDto {
-  @IsOptional() @IsNumber() @Min(0) balance?: number;
-  @IsOptional() @IsInt() @Min(0) installmentsPaid?: number;
-  @IsOptional() @IsIn(['ACTIVE', 'PAID', 'DEFAULTED']) status?: 'ACTIVE' | 'PAID' | 'DEFAULTED';
+  @IsOptional() @IsIn(['DEFAULTED']) status?: 'DEFAULTED';
+  @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsString() notes?: string;
+}
+
+export class DisburseLoanDto {
+  @IsOptional() @IsString() disbursedAt?: string;
+  @IsOptional() @IsIn([...PAYMENT_METHODS]) method?: (typeof PAYMENT_METHODS)[number];
+}
+
+export class WriteOffLoanDto {
+  @IsString() @IsNotEmpty() reason!: string;
+}
+
+export class PayAdvanceDto {
+  @IsOptional() @IsIn([...PAYMENT_METHODS]) paymentMethod?: (typeof PAYMENT_METHODS)[number];
+  @IsOptional() @IsString() paidAt?: string;
 }
 
 // ── Performance reviews ─────────────────────────────────────────────────────
@@ -664,6 +715,10 @@ export class AddOnboardingTaskDto {
 export class SettleOffboardingDto {
   @IsString() @IsNotEmpty() employeeId!: string;
   @IsString() @IsNotEmpty() lastDay!: string;
+  @IsOptional() @IsIn(['resignation', 'termination', 'retirement', 'contract_expiry', 'redundancy', 'death', 'dismissal'])
+  reason?: string;
+  @IsOptional() @IsString() noticeDate?: string;
+  @IsOptional() @IsString() notes?: string;
 }
 
 // ── Recruitment ─────────────────────────────────────────────────────────────

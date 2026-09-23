@@ -11,7 +11,7 @@ export class MedicalRecordController {
   constructor(private readonly service: MedicalRecordService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.read, PERMISSIONS.school.readMedical)
   @ScopedToStudent('studentProfileId')
   get(@Param('studentProfileId') id: string) {
     return this.service.get(id);
@@ -21,7 +21,7 @@ export class MedicalRecordController {
   // caller could therefore write a health record for a learner they have no
   // relationship with. Both directions are scoped now.
   @Post()
-  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  @RequirePermissions(PERMISSIONS.school.manageStudents, PERMISSIONS.school.readMedical)
   @ScopedToStudent('studentProfileId')
   upsert(@Param('studentProfileId') id: string, @Body() body: Omit<UpsertMedicalRecordDto, 'studentProfileId'>) {
     return this.service.upsert({ ...body, studentProfileId: id });

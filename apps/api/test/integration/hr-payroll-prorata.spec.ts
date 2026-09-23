@@ -92,6 +92,8 @@ describeDb('integration: payroll pro-rata, unpaid leave and inputs', () => {
       ['insurance_payable', 'PR-2500', 'Insurance Payable', 'current_liability'],
       ['employee_advance_receivable', 'PR-1300', 'Advances', 'current_asset'],
       ['employee_loan_receivable', 'PR-1400', 'Loans', 'current_asset'],
+      // Loans are disbursed through the ledger now, from the bank.
+      ['default_bank', 'PR-1200', 'Bank', 'bank'],
     ];
     for (const [key, code, name, category] of mappings) {
       const acct = await mk(organizationId, code, name, category);
@@ -106,6 +108,15 @@ describeDb('integration: payroll pro-rata, unpaid leave and inputs', () => {
     payroll = moduleRef.get(HrPayrollService);
     org = moduleRef.get(HrOrgService);
     leave = moduleRef.get(HrLeaveService);
+
+    // PAYE is mandatory; this spec is about pay, not tax, so a 0% table.
+    await asAdmin(() =>
+      payroll.createTaxTable({
+        code: 'PAYE-NIL', name: 'Nil PAYE', taxType: 'PAYE',
+        effectiveFrom: new Date(Date.UTC(2020, 0, 1)).toISOString(),
+        brackets: [{ fromAmount: 0, rate: 0 }],
+      }),
+    );
 
     // FULL   — employed all month, the control.
     // JOINER — hired on the 16th, so 15 of 30 days.
@@ -208,6 +219,8 @@ describeDb('integration: payroll pro-rata, unpaid leave and inputs', () => {
     await raw.hrLeaveType.deleteMany({ where: { organizationId } });
     await raw.hrOffboarding.deleteMany({ where: { organizationId } });
     await raw.hrPayrollComponent.deleteMany({ where: { organizationId } });
+    await raw.hrTaxBracket.deleteMany({ where: { organizationId } });
+    await raw.hrTaxTable.deleteMany({ where: { organizationId } });
     await raw.hrEmploymentAction.deleteMany({ where: { organizationId } });
     await raw.hrSalaryChange.deleteMany({ where: { organizationId } });
     await raw.hrEmployee.deleteMany({ where: { organizationId } });
@@ -363,9 +376,10 @@ describeDb('integration: payroll pro-rata, unpaid leave and inputs', () => {
       const allowances = await raw.hrPayrollAllowance.findMany({ where: { itemId: item.id } });
       const refund = allowances.find((a) => a.name === 'Travel refund')!;
       expect(refund.isTaxable).toBe(false);
-      // With no tax table configured in this org there is no PAYE line at all,
-      // which is itself the assertion that nothing was charged on the refund.
+      // Under a 0% table there is no PAYE line at all; what matters is the
+      // PAYE base, which must exclude the refund.
       expect(paye).toBeUndefined();
+      expect(Number(item.taxableIncome)).toBeCloseTo(SALARY + 500_000, 0);
     });
 
     it('marks inputs APPLIED on approval so a second run cannot pay them twice', async () => {

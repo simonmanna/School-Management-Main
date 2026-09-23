@@ -98,22 +98,13 @@ describeDb('integration: PlacementLookupService (ADR-027)', () => {
     placedInP4 = await learner('A', 'Brian Okello');
     await linkLearner(raw, { spine: p4, studentProfileId: placedInP4, effectiveFrom: new Date('2026-01-15') });
 
-    // B: never placed; only the projection says P4. The compat path must keep
-    // finding them, or un-backfilled schools stop billing.
+    // B: never placed. There is no class column on the profile any more, so an
+    // unplaced learner is in no class at all.
     unplacedOnProjection = await learner('B', 'Sarah Namusoke');
-    await raw.studentProfile.update({
-      where: { id: unplacedOnProjection },
-      data: { currentClassId: p4.classId },
-    });
 
-    // C: placed in P5, but the projection still (wrongly) says P4. Matching them
-    // under P4 would bill them twice — once correctly, once through staleness.
+    // C: placed in P5 only.
     movedWithStaleProjection = await learner('C', 'Daniel Kato');
     await linkLearner(raw, { spine: p5, studentProfileId: movedWithStaleProjection, effectiveFrom: new Date('2026-01-15') });
-    await raw.studentProfile.update({
-      where: { id: movedWithStaleProjection },
-      data: { currentClassId: p4.classId },
-    });
 
     // D: P4 until 1 March, then P5. The effective-dating case.
     movedMidTerm = await learner('D', 'Martha Nakato');
@@ -144,13 +135,12 @@ describeDb('integration: PlacementLookupService (ADR-027)', () => {
     expect(ids).toEqual([movedMidTerm, placedInP4].sort());
   });
 
-  it('includes un-backfilled learners on the compat path, but never a moved learner twice', async () => {
+  it('placement history is the only source: an unplaced learner is in no class', async () => {
     const ids = await idsWhere(
       lookup.studentWhere({ classIds: [p4.classId] }, { asOf: new Date('2026-02-01') }),
     );
     expect(ids).toContain(placedInP4);
-    expect(ids).toContain(unplacedOnProjection);
-    // C has a placement in P5; the stale P4 projection must not drag them in.
+    expect(ids).not.toContain(unplacedOnProjection);
     expect(ids).not.toContain(movedWithStaleProjection);
   });
 
@@ -173,7 +163,7 @@ describeDb('integration: PlacementLookupService (ADR-027)', () => {
     expect(after.get(movedMidTerm)?.classId).toBe(p5.classId);
   });
 
-  it('reports which source each attached placement came from', async () => {
+  it('attaches the resolved placement, or null for a learner with none', async () => {
     const rows = await as(async () =>
       lookup.attach(
         await prisma.client.studentProfile.findMany({
@@ -181,15 +171,15 @@ describeDb('integration: PlacementLookupService (ADR-027)', () => {
         }),
       ),
     );
-    const bySource = Object.fromEntries(rows.map((r) => [r.id, r.placementSource]));
-    expect(bySource[placedInP4]).toBe('placement');
-    expect(bySource[unplacedOnProjection]).toBe('projection');
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r.placement]));
+    expect(byId[placedInP4]?.classId).toBe(p4.classId);
+    expect(byId[unplacedOnProjection]).toBeNull();
   });
 
-  it('counts class sizes from placements and the projection without double counting', async () => {
+  it('counts class sizes from placements, each learner once', async () => {
     const sizes = await as(() => lookup.classSizes([p4.classId, p5.classId]));
-    // P4 today: A (placed) + B (projection only). C and D have moved to P5.
-    expect(sizes.get(p4.classId)).toBe(2);
+    // P4 today: A. C and D are in P5; B is placed nowhere.
+    expect(sizes.get(p4.classId)).toBe(1);
     expect(sizes.get(p5.classId)).toBe(2);
   });
 
@@ -197,7 +187,7 @@ describeDb('integration: PlacementLookupService (ADR-027)', () => {
     const roster = await as(() => lookup.roster({ classIds: [p4.classId] }));
     const a = roster.find((r) => r.student.id === placedInP4);
     expect(a?.sectionId).toBe(p4.sectionId);
-    expect(a?.subdivisionName).toBe('North');
+    expect(a?.sectionName).toBe('North');
   });
 
   it('sees nothing belonging to another school', async () => {

@@ -13,8 +13,7 @@ import {
   useClasses,
   useTerms,
   type AdmissionApplication,
-  type AdmissionAction,
-} from '@/features/school/api';
+  type AdmissionAction, useTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,6 +34,7 @@ import { DecisionDialog } from './_components/DecisionDialog';
 import { ApplicationFeeDialog, applicationFeeBadge } from './fees-integrity';
 
 export function SchoolAdmissionsPage() {
+  const labels = useTerminology();
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
   const [enrollForm, setEnrollForm] = useState<Record<string, string>>({});
   const [offerFor, setOfferFor] = useState<AdmissionApplication | null>(null);
@@ -462,7 +462,7 @@ export function SchoolAdmissionsPage() {
                 {(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </Field>
-            <Field label="Stream">
+            <Field label={labels.section}>
               <select
                 className="w-full rounded-md border bg-card px-3 py-2 text-sm"
                 value={enrollForm.sectionId ?? ''}

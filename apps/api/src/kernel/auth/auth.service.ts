@@ -75,10 +75,13 @@ export class AuthService {
   async login(dto: LoginDto, request?: Request): Promise<LoginResult> {
     const ipAddress = request?.ip;
     const userAgent = (request?.headers?.['user-agent'] as string | undefined) ?? null;
-    const org = await this.prisma.client.organization.findUnique({
+    // Pre-tenant: resolve the organization through the system client. Under the
+    // RLS app role the tenant-scoped client cannot see any Organization row until
+    // app.org_id is known — which is exactly what this lookup establishes.
+    const org = await this.prisma.raw.organization.findUnique({
       where: { code: dto.organizationCode },
     });
-    if (!org || org.status !== 'active') {
+    if (!org || org.status !== 'active' || org.deletedAt) {
       await this.recordAttempt(null, dto.email, false, false, ipAddress, userAgent, 'org_inactive_or_missing');
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -294,9 +297,24 @@ export class AuthService {
     // context" and refresh returned 500. Mirrors mfaLogin.
     const preload = await this.prisma.raw.refreshToken.findFirst({
       where: { tokenHash: presentedHash },
-      select: { organizationId: true },
+      select: { organizationId: true, userId: true, revokedAt: true, replacedById: true },
     });
     if (!preload) throw new UnauthorizedException('Invalid or expired refresh token');
+    // Reuse detection. A token that was already ROTATED (revoked and replaced)
+    // being presented again means two parties hold the same refresh token — the
+    // classic sign it was stolen. Revoke the whole family so both are logged out.
+    // Done before, and outside, the rotation transaction so the revocation is not
+    // rolled back by the rejection that follows.
+    // A few seconds' grace covers two tabs refreshing at the same moment.
+    if (preload.revokedAt && preload.replacedById && Date.now() - preload.revokedAt.getTime() > 10_000) {
+      await this.prisma.raw.refreshToken.updateMany({
+        where: { userId: preload.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      this.logger.warn(`Refresh token reuse detected for user ${preload.userId}; all sessions revoked.`);
+      await this.recordAttempt(preload.organizationId, `user:${preload.userId}`, false, false, request?.ip, null, 'refresh_token_reuse');
+      throw new UnauthorizedException('Session expired. Please sign in again.');
+    }
     return this.tenant.run({ organizationId: preload.organizationId }, () =>
       this.prisma.client.$transaction(async (tx) => {
         const existing = await tx.refreshToken.findFirst({

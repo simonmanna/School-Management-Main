@@ -29,6 +29,7 @@ import { BillingService, SchoolPaymentService } from '../../src/modules/school/f
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
 import { PaymentAllocationReversalService } from '../../src/modules/school/fees/allocation-reversal.service';
 import { AdvancedFinanceService } from '../../src/modules/school/fees/advanced.service';
+import { placeInClass } from './_placement';
 
 const UGX = (v: number) => new (require('@prisma/client').Prisma).Decimal(v);
 
@@ -123,8 +124,9 @@ describeDb('integration: elementary school — full year e2e (register → bill 
         n++;
         const adm = `ELEM/2026/${String(n).padStart(3, '0')}`;
         const partner = await raw.partner.create({ data: { organizationId: O, code: `STU-${String(n).padStart(3, '0')}`, name: `${firstNames[n - 1]} Guardian`, isCustomer: true, receivableAccountId: accounts.ar } });
-        const stu = await raw.studentProfile.create({ data: { organizationId: O, partnerId: partner.id, admissionNo: adm, enrollmentDate: new Date('2026-01-20'), currentClassId: cls.id, status: 'active' } });
-        await raw.enrollment.create({ data: { organizationId: O, studentProfileId: stu.id, termId: termIds[0], classId: cls.id, rollNumber: String(n), enrolledAt: new Date('2026-01-20') } });
+        const stu = await raw.studentProfile.create({ data: { organizationId: O, partnerId: partner.id, admissionNo: adm, enrollmentDate: new Date('2026-01-20'), status: 'active' } });
+        await placeInClass(raw, { organizationId: O, studentProfileId: stu.id, classId: cls.id });
+
         students.push({ id: stu.id, partnerId: partner.id, adm, grade: gName });
       }
     }

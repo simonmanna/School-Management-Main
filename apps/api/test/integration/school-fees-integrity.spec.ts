@@ -29,6 +29,7 @@ import { AdvancedFinanceService } from '../../src/modules/school/fees/advanced.s
 import { FinanceControlsService } from '../../src/modules/school/fees/finance-controls.service';
 import { SchoolFinanceQueryService } from '../../src/modules/school/fees/school-finance-query.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school fees integrity (invariants)', () => {
   const rawUrl = (() => {
@@ -110,8 +111,9 @@ describeDb('integration: school fees integrity (invariants)', () => {
     });
     partnerId = partner.id;
     const student = await raw.studentProfile.create({
-      data: { organizationId, partnerId: partner.id, admissionNo: 'ADM-0001', enrollmentDate: new Date('2026-01-10'), currentClassId: schoolClass.id, status: 'active' },
+      data: { organizationId, partnerId: partner.id, admissionNo: 'ADM-0001', enrollmentDate: new Date('2026-01-10'), status: 'active' },
     });
+    await placeInClass(raw, { organizationId, studentProfileId: student.id, classId: schoolClass.id });
     studentProfileId = student.id;
     const feeStructure = await raw.feeStructure.create({
       data: {

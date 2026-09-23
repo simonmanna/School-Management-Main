@@ -27,7 +27,9 @@ async function main() {
   await prisma.phoneCall.deleteMany({});
   console.log('Deleted phone calls');
   
-  await prisma.enrollment.deleteMany({});
+  await prisma.enrollmentPlacement.deleteMany({});
+  await prisma.studentEnrollmentEvent.deleteMany({});
+  await prisma.studentEnrollment.deleteMany({});
   console.log('Deleted enrollments');
   
   await prisma.studentProfile.updateMany({

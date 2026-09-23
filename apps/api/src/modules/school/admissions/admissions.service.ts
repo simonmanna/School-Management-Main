@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { normalizePhone } from '../people/guardian.service';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AdmissionApplication } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -7,7 +8,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { EncryptionService } from '../../../kernel/encryption/encryption.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
-import { EVENTS } from '@erp/shared';
+import { EVENTS, PERMISSIONS } from '@erp/shared';
 import type {
   AddExamScoreDto,
   BulkEnrollDto,
@@ -665,7 +666,31 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     const guardians = await tx.admissionGuardian.findMany({ where: { applicationId } });
     for (const g of guardians) {
       if (g.contactId) continue;
-      const contact = await tx.contact.create({
+      // A parent who already has a child here is the SAME guardian record, not a
+      // second one: match on phone or email among existing guardians.
+      const phone = normalizePhone(g.phone);
+      const email = g.email?.trim().toLowerCase() || null;
+      let contact: any = null;
+      if (phone || email) {
+        const links = await tx.studentGuardian.findMany({
+          where: {
+            guardianContact: {
+              OR: [
+                ...(email ? [{ email: { equals: email, mode: 'insensitive' } }] : []),
+                ...(phone ? [{ phone: { contains: phone.slice(-9) } }] : []),
+              ],
+            },
+          },
+          include: { guardianContact: true },
+          take: 20,
+        });
+        contact =
+          links
+            .map((l: any) => l.guardianContact)
+            .find((c: any) => (email && c.email?.trim().toLowerCase() === email) || (phone && normalizePhone(c.phone) === phone)) ??
+          null;
+      }
+      contact ??= await tx.contact.create({
         data: {
           organizationId,
           partnerId,
@@ -676,6 +701,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           isPrimary: g.isPrimary,
         },
       });
+      const linked = await tx.studentGuardian.findFirst({ where: { studentProfileId, guardianContactId: contact.id } });
+      if (linked) {
+        await tx.admissionGuardian.updateMany({ where: { id: g.id }, data: { contactId: contact.id } });
+        continue;
+      }
       await tx.studentGuardian.create({
         data: {
           organizationId,
@@ -779,6 +809,27 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         );
       }
 
+      // 3b. Identity. An applicant flagged as possibly an existing pupil must be
+      //     resolved before admission: either confirmed as the same child (then
+      //     the existing record is re-used — one child, one student record) or
+      //     dismissed. Admitting with an open match is how duplicates are born.
+      const matches = await tx.applicantIdentityMatch.findMany({
+        where: { applicationId: app.id, candidateType: 'student' },
+        select: { status: true, candidateId: true, candidateName: true },
+      });
+      const open = matches.filter((m: any) => m.status === 'open');
+      if (open.length > 0) {
+        throw new BadRequestException(
+          `Application ${app.applicationNumber ?? app.id} may be an existing pupil (${open.map((m: any) => m.candidateName).join(', ')}). ` +
+            'Confirm or dismiss the identity match before enrolling.',
+        );
+      }
+      const confirmed = [...new Set(matches.filter((m: any) => m.status === 'confirmed_same').map((m: any) => m.candidateId))];
+      if (confirmed.length > 1) {
+        throw new BadRequestException('The applicant is confirmed as more than one existing pupil. Dismiss the wrong match.');
+      }
+      const existingStudentProfileId = (confirmed[0] as string | undefined) ?? null;
+
       // Concurrency-safe seat claim. `claimedSeats` is the SINGLE seat ledger (see the
       // capacity state contract on `resolveCapacity`): it counts every seat consumed by a
       // committed or in-flight enrollment, and is released on withdrawal. The claim is a
@@ -824,6 +875,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         // unless explicitly supplied; do NOT reuse applicationNumber.
         admissionNo: undefined,
         guardians: dto.student.guardians,
+        existingStudentProfileId,
         placement: {
           termId: dto.termId,
           classId: dto.classId,
@@ -1394,6 +1446,9 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * event logic (with `decline_offer` still mapped to the wrong target).
    */
   async review(applicationId: string, action: string, notes?: string) {
+    // Accept / reject / waitlist are DECISIONS, separately delegable from the
+    // processing actions that share this endpoint (screen, interview, score...).
+    if (['accept', 'reject', 'waitlist'].includes(action)) this.assertMayDecide();
     return this.prisma.client.$transaction(async (tx: any) => {
       await this.applyReview(tx, applicationId, action, notes);
       return tx.admissionApplication.findFirst({ where: { id: applicationId } });
@@ -1703,7 +1758,17 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * class they applied to, so the waitlist is populated by the decision rather
    * than by a separate manual step nobody remembers to take.
    */
+  private assertMayDecide() {
+    const held = this.tenant.permissions ?? [];
+    if (!held.includes(PERMISSIONS.school.decideAdmissions) && !held.includes('*')) {
+      throw new ForbiddenException(
+        `Accepting, rejecting or waitlisting an application requires the ${PERMISSIONS.school.decideAdmissions} permission.`,
+      );
+    }
+  }
+
   async recordDecision(applicationId: string, decision: 'accepted' | 'rejected' | 'waitlisted', reason?: string) {
+    this.assertMayDecide();
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
       const app = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
@@ -1913,14 +1978,17 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
   > {
     if (!key.admissionCycleId) return null;
     const SENT = '__none__';
-    const row = await client.admissionCapacity.findFirst({
-      where: {
-        organizationId: this.tenant.organizationId,
-        admissionCycleId: key.admissionCycleId,
-        classId: key.classId,
-        sectionId: key.sectionId ?? SENT,
-      },
-    });
+    const where = {
+      organizationId: this.tenant.organizationId,
+      admissionCycleId: key.admissionCycleId,
+      classId: key.classId,
+    };
+    // A section-level ledger wins; otherwise the class-level one governs every
+    // section of the class. Without the fallback, naming a section silently
+    // escaped a class capacity that was configured without per-section rows.
+    const row =
+      (await client.admissionCapacity.findFirst({ where: { ...where, sectionId: key.sectionId ?? SENT } })) ??
+      (key.sectionId ? await client.admissionCapacity.findFirst({ where: { ...where, sectionId: SENT } }) : null);
     if (!row) return null;
     const occupied = await this.countOccupied(client, row, key.academicYearId);
     // `claimedSeats` is an atomic, transaction-level seat claim (see enroll()).
@@ -2110,15 +2178,8 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     let classOf: Map<string, string>;
     if (termId) {
       const placedIds = await this.placements.studentIdsIn({ classIds }, { termId });
-      const legacy = await this.prisma.client.enrollment.findMany({
-        where: { organizationId: orgId, termId, status: 'enrolled', endedAt: null },
-        select: { studentProfileId: true, classId: true },
-      });
-      const ids = [...new Set([...placedIds, ...legacy.map((e) => e.studentProfileId)])];
-      const resolved = await this.placements.resolve(ids, { termId });
+      const resolved = await this.placements.resolve(placedIds, { termId });
       classOf = new Map<string, string>();
-      for (const e of legacy) classOf.set(e.studentProfileId, e.classId);
-      // Placement wins over the legacy row wherever both exist.
       for (const [id, p] of resolved) classOf.set(id, p.classId);
     } else {
       const found = await this.prisma.client.studentProfile.findMany({

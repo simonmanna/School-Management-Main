@@ -15,6 +15,7 @@ import { PositionController } from './position.controller';
 import { StaffAttendanceService } from './staff-attendance.service';
 import { StaffAttendanceController } from './staff-attendance.controller';
 import { StudentAdmissionService } from './student-admission.service';
+import { StaffOffboardingSubscriber } from './staff-offboarding.subscriber';
 import { FeesModule } from '../fees/fees.module';
 import { SchoolEnrollmentModule } from '../enrollment/enrollment.module';
 import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
@@ -44,6 +45,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
     PositionService,
     StaffAttendanceService,
     StudentAdmissionService,
+    StaffOffboardingSubscriber,
   ],
   exports: [
     StudentService,

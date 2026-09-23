@@ -4,6 +4,7 @@ import { ClassCohortService } from './class-cohort.service';
 import { PlacementService } from './placement.service';
 import { StudentEnrollmentService } from './student-enrollment.service';
 import { PromotionRunService } from './promotion-run.service';
+import { SuspensionExpiryWorker } from './suspension-expiry.worker';
 import { PlacementLookupModule } from './placement-lookup.module';
 import {
   ClassCohortController,
@@ -33,6 +34,7 @@ import {
     PlacementService,
     StudentEnrollmentService,
     PromotionRunService,
+    SuspensionExpiryWorker,
   ],
   exports: [ProgrammeService, ClassCohortService, PlacementService, StudentEnrollmentService],
 })

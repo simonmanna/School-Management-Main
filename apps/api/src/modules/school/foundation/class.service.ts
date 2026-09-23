@@ -94,10 +94,6 @@ export class SchoolClassService extends AuditedCrudService<
         count: () => tx.enrollmentPlacement.count({ where: { classCohort: { classId: id } } }),
       },
       {
-        label: 'legacy enrollment(s)',
-        count: () => tx.enrollment.count({ where: { classId: id } }),
-      },
-      {
         label: 'stream(s)',
         count: () => tx.section.count({ where: { classId: id, deletedAt: null } }),
       },
@@ -164,10 +160,6 @@ export class SectionService extends AuditedCrudService<Section, CreateSectionDto
         // history that must survive, and it is reachable only through this row.
         label: 'placement(s) in its history',
         count: () => tx.enrollmentPlacement.count({ where: { sectionId: id } }),
-      },
-      {
-        label: 'legacy enrollment(s)',
-        count: () => tx.enrollment.count({ where: { sectionId: id } }),
       },
       {
         label: 'teacher assignment(s)',

@@ -23,6 +23,7 @@ import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { PortalIdentityService } from '../../src/kernel/auth/portal-identity.service';
 import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
+import { placeInClass } from './_placement';
 
 describeDb('integration: portal identity + LMS authorization', () => {
   const rawUrl = (() => {
@@ -69,12 +70,14 @@ describeDb('integration: portal identity + LMS authorization', () => {
       const partner = await raw.partner.create({
         data: { organizationId, name, code: `P-AZ-${name}-${Date.now()}` },
       });
-      return (await raw.studentProfile.create({
+      const sp = await raw.studentProfile.create({
         data: {
           organizationId, partnerId: partner.id, admissionNo: `ADM-${name}-${Date.now()}`,
-          currentClassId: cls.id, enrollmentDate: new Date(), status: 'active',
+          enrollmentDate: new Date(), status: 'active',
         },
-      })).id;
+      });
+      await placeInClass(raw, { organizationId, studentProfileId: sp.id, classId: cls.id });
+      return sp.id;
     };
     alice = await mk('Alice');
     bob = await mk('Bob');

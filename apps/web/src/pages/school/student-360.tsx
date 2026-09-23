@@ -9,8 +9,7 @@ import {
   useEnrollStudent, useSections, useSectionsForClass, useStudentEnrollments,
   useAcademicYears, useClasses, useAdmissionCycles, useNationalities, useStudentCategories,
   useTerms, useStudentResultSet,
-  type FeeStatement, type Guardian,
-} from '@/features/school/api';
+  type FeeStatement, type Guardian, useTerminology } from '@/features/school/api';
 import { useUpdatePartner } from '@/features/partners/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,6 +39,7 @@ const RELIGIONS = ['Christian', 'Muslim', 'Hindu', 'Traditional', 'Other'];
 const ENTRY_STATUSES = ['New entrant', 'Transfer', 'Re-admission', 'Returning'];
 
 export function SchoolStudent360Page() {
+  const labels = useTerminology();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -413,7 +413,7 @@ export function SchoolStudent360Page() {
             <SectionCard title="System Information">
               <Field label="Registration no." value={student.partner?.code ?? '—'} />
               <Field label="Admission no." value={student.admissionNo} />
-              <Field label="Stream" value={sectionName(student.currentSectionId) ?? '—'} />
+              <Field label={labels.section} value={student.currentSection?.name ?? '—'} />
               <Field label="House" value={cf.house ?? '—'} />
               <Field label="Entry status (current)" value={student.status} />
             </SectionCard>
@@ -1088,6 +1088,7 @@ function PlacementDialog({
   enrollments: any[];
   onDone: () => void;
 }) {
+  const labels = useTerminology();
   const enroll = useEnrollStudent();
   const [classId, setClassId] = useState('');
   const [sectionId, setSectionId] = useState('');
@@ -1162,7 +1163,7 @@ function PlacementDialog({
             </Select>
           </div>
           <div>
-            <Label>Stream</Label>
+            <Label>{labels.section}</Label>
             <Select value={sectionId} onValueChange={setSectionId} disabled={!classId || sections.data.length === 0}>
               <SelectTrigger>
                 <SelectValue placeholder={!classId ? 'Choose a class first' : sections.data.length ? 'Choose a stream' : 'This class has no streams'} />

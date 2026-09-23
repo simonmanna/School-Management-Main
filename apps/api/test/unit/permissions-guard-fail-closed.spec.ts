@@ -144,3 +144,76 @@ describe('PermissionsGuard — SEC-06 fail-closed', () => {
     });
   });
 });
+
+/**
+ * F-06 / F-07 — production defaults and account state.
+ *
+ *  - In production an undecorated route is refused unless PERMISSIONS_FAIL_CLOSED=false.
+ *  - In DB mode a deactivated account loses its session on the NEXT request
+ *    (401), not when its access token expires, and the request's tenant store
+ *    is refreshed with the database's grants so in-service checks
+ *    (`tenant.permissions`) never act on a stale token copy.
+ */
+function loadGuardWith(env: Record<string, string | undefined>): any {
+  jest.resetModules();
+  const saved: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    saved[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('../../src/kernel/auth/guards/permissions.guard');
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  const Guard = mod.PermissionsGuard;
+  // The guard reads PERMISSIONS_DB_LOOKUP when an INSTANCE is built, so the
+  // environment must also hold during construction.
+  return class extends Guard {
+    constructor(...args: any[]) {
+      const saved2: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(env)) {
+        saved2[k] = process.env[k];
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      super(...args);
+      for (const [k, v] of Object.entries(saved2)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+}
+
+describe('PermissionsGuard — production defaults and live account state', () => {
+  it('is fail-closed by default in production', async () => {
+    const Guard = loadGuardWith({ NODE_ENV: 'production', PERMISSIONS_FAIL_CLOSED: undefined, PERMISSIONS_DB_LOOKUP: 'false' });
+    const guard = new Guard(reflectorWith({}), resolver, { store: undefined });
+    await expectForbidden(guard.canActivate(ctxFor({ sub: 'u1' })));
+  });
+
+  it('ends the session of a deactivated account on its next request', async () => {
+    const Guard = loadGuardWith({ NODE_ENV: 'test', PERMISSIONS_FAIL_CLOSED: 'false', PERMISSIONS_DB_LOOKUP: 'true' });
+    const dbResolver = { sessionState: async () => null, lookupPermissions: async () => [] };
+    const guard = new Guard(reflectorWith({ [PERMISSIONS_KEY]: ['school:read'] }), dbResolver, { store: {} });
+    let thrown: any;
+    try {
+      await guard.canActivate(ctxFor({ sub: 'u1', permissions: ['school:read'] }));
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown?.getStatus?.()).toBe(401);
+  });
+
+  it('decides on — and publishes — the database grants, not the token copy', async () => {
+    const Guard = loadGuardWith({ NODE_ENV: 'test', PERMISSIONS_FAIL_CLOSED: 'false', PERMISSIONS_DB_LOOKUP: 'true' });
+    const store: { permissions?: string[] } = { permissions: ['school:read', 'user:update'] };
+    const dbResolver = { sessionState: async () => ({ permissions: ['school:read'] }), lookupPermissions: async () => [] };
+    const guard = new Guard(reflectorWith({ [PERMISSIONS_KEY]: ['user:update'] }), dbResolver, { store });
+    await expectForbidden(guard.canActivate(ctxFor({ sub: 'u1', permissions: ['school:read', 'user:update'] })));
+    expect(store.permissions).toEqual(['school:read']);
+  });
+});

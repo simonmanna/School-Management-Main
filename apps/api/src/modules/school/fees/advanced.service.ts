@@ -953,16 +953,13 @@ export class AdvancedFinanceService {
            JOIN "StudentEnrollment" se ON se."id" = ep."enrollmentId"
            JOIN "ClassCohort" cc ON cc."id" = ep."classCohortId"
           WHERE se."studentProfileId" = sp."id"
-            AND se."status" IN ('ACTIVE','PENDING')
+            AND se."status" IN ('ACTIVE','PENDING','SUSPENDED')
             AND ep."effectiveFrom" <= $1::timestamp
             AND (ep."effectiveTo" IS NULL OR ep."effectiveTo" > $1::timestamp)
           ORDER BY ep."effectiveFrom" DESC, ep."createdAt" DESC
           LIMIT 1
        ) plc ON TRUE
-       -- COALESCE is the ADR-027 compatibility window: a learner who has been
-       -- backfilled resolves from placement, one who has not still resolves from
-       -- the projection exactly as before. Drop the fallback with the column.
-       LEFT JOIN "SchoolClass" c ON c."id" = COALESCE(plc."classId", sp."currentClassId")
+       LEFT JOIN "SchoolClass" c ON c."id" = plc."classId"
        LEFT JOIN (
          SELECT "studentProfileId", SUM("amount") AS "waived"
          FROM "Waiver" WHERE "organizationId" = $2 AND "applied" = true GROUP BY "studentProfileId"
@@ -979,7 +976,7 @@ export class AdvancedFinanceService {
          AND d."amountResidual" > 0
          AND d."sourceType" = ANY($4::text[])
          AND ($1::timestamp >= d."issueDate")
-         AND ($5::text IS NULL OR COALESCE(plc."classId", sp."currentClassId") = $5)
+         AND ($5::text IS NULL OR plc."classId" = $5)
          AND ($6::text IS NULL OR sp."id" = $6)
        GROUP BY sp."id", sp."partnerId", p."name", sp."admissionNo", c."name", w."waived"
        HAVING SUM(d."amountResidual") > 0`,

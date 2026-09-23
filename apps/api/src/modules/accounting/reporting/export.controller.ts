@@ -5,6 +5,8 @@ import { stringify } from 'csv-stringify/sync';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { PERMISSIONS } from '@erp/shared';
 
 /**
  * F.5 — Report export.
@@ -23,6 +25,7 @@ export class ExportController {
 
   @Get('trial-balance.csv')
   @ApiQuery({ name: 'asOf', required: false, example: '2025-01-31' })
+  @RequirePermissions(PERMISSIONS.report.accounting)
   async trialBalanceCsv(@Query('asOf') asOf: string, @Res() res: Response) {
     const orgId = this.tenant.organizationId;
     const date = asOf ? new Date(asOf) : new Date();
@@ -65,6 +68,7 @@ export class ExportController {
   }
 
   @Get('ar-aging.csv')
+  @RequirePermissions(PERMISSIONS.report.ar)
   async arAgingCsv(@Res() res: Response) {
     const orgId = this.tenant.organizationId;
     const now = new Date();
@@ -107,6 +111,7 @@ export class ExportController {
   }
 
   @Get('invoice/:id.pdf')
+  @RequirePermissions(PERMISSIONS.invoice.read)
   async invoicePdf(@Query('id') id: string, @Res() res: Response) {
     const doc = await this.prisma.raw.document.findFirst({
       where: { id, organizationId: this.tenant.organizationId },

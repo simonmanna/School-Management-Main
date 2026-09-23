@@ -26,7 +26,7 @@ export class RepairCronWorker {
 
   @Cron(CronExpression.EVERY_10_MINUTES, { name: 'repair-housekeeping' })
   async housekeeping(): Promise<void> {
-    const orgs = await this.prisma.client.organization.findMany({
+    const orgs = await this.prisma.raw.organization.findMany({
       select: { id: true },
       where: { deletedAt: null },
     });

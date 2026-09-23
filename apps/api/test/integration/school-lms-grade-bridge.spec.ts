@@ -28,6 +28,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { MarkingService } from '../../src/modules/school/assessment/marking.service';
 import { LmsGradeBridgeService } from '../../src/modules/school/lms/moodle/grade/grade-bridge.service';
 import { QuestionBankService, QuestionService, PaperService, CbtAttemptService } from '../../src/modules/school/cbt/cbt.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: LMS grade bridge — marks survive recompute, quizzes count once', () => {
   const rawUrl = (() => {
@@ -94,9 +95,10 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
     studentProfileId = (await raw.studentProfile.create({
       data: {
         organizationId, partnerId: partner.id, admissionNo: `ADM-BR-${Date.now()}`,
-        currentClassId: classId, enrollmentDate: new Date('2026-01-15'), status: 'active',
+        enrollmentDate: new Date('2026-01-15'), status: 'active',
       },
     })).id;
+    await placeInClass(raw, { organizationId, studentProfileId, classId });
 
     // Phase 4 made the teaching context and the frozen audience part of what an
     // assessment IS, and the grade bridge now refuses to write into an activity

@@ -118,7 +118,7 @@ describeDb('integration: A0 grade hardening + SoD', () => {
   };
 
   const makeStudent = (admissionNo: string) =>
-    asUser('registrar', () => students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', currentClassId: classId } as any)) as Promise<any>;
+    asUser('registrar', () => students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', classId } as any)) as Promise<any>;
 
   it('A0-marks: rejects marks above maxMarks', async () => {
     const s = await makeStudent(`M-${Date.now()}`);

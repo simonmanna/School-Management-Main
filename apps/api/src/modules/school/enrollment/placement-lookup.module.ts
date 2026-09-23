@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PlacementLookupService } from './placement-lookup.service';
+import { EnrollmentRosterService } from './enrollment-roster.service';
 
 /**
  * `PlacementLookupService`, on its own.
@@ -26,7 +27,7 @@ import { PlacementLookupService } from './placement-lookup.service';
  * place instead.
  */
 @Module({
-  providers: [PlacementLookupService],
-  exports: [PlacementLookupService],
+  providers: [PlacementLookupService, EnrollmentRosterService],
+  exports: [PlacementLookupService, EnrollmentRosterService],
 })
 export class PlacementLookupModule {}

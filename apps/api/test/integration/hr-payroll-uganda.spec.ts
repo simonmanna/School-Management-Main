@@ -12,8 +12,12 @@
  *   410,001 – 10,000,000  30% of the excess over 410,000  (+25,000)
  *      over   10,000,000  additional 10% (40% top marginal)
  *
- * NSSF: 5% employee (reduces net pay), 10% employer (a school cost).
- * Chargeable income is gross MINUS the NSSF employee contribution.
+ * NSSF: 5% employee (reduces net pay), 10% employer (a school cost), both on
+ * gross, driven by a versioned statutory config.
+ *
+ * Chargeable income is the FULL gross: Uganda does not allow the employee's
+ * NSSF contribution as a deduction for PAYE. (An earlier version of this spec
+ * asserted gross − NSSF, which under-deducted PAYE on every payslip.)
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
@@ -30,6 +34,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 const MONTHS = 12;
 const m = (monthly: number) => monthly * MONTHS;
 const NSSF_EMPLOYEE_RATE = 0.05;
+const NSSF_EMPLOYER_RATE = 0.1;
 
 /** The hand-computed monthly PAYE for a given monthly chargeable income. */
 function expectedMonthlyPaye(chargeable: number): number {
@@ -114,14 +119,14 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
 
     // Statutory setup, mirroring prisma/seed-hr-uganda.ts.
     await asAdmin(() =>
-      payroll.createComponent({
-        code: 'NSSF-SSF',
-        name: 'NSSF employee (5%)',
-        componentType: 'DEDUCTION',
-        calcMethod: 'PERCENTAGE',
-        rate: 5, // PERCENT
-        isTaxable: false,
-        isRecurring: true,
+      payroll.createStatutoryConfig({
+        code: 'UG-NSSF',
+        name: 'NSSF 5% / 10%',
+        configType: 'SOCIAL_SECURITY',
+        rate: NSSF_EMPLOYEE_RATE, // FRACTION
+        employerRate: NSSF_EMPLOYER_RATE,
+        contributionBase: 'GROSS',
+        effectiveFrom: new Date('2024-07-01').toISOString(),
       }),
     );
     await asAdmin(() =>
@@ -130,6 +135,7 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
         name: 'Uganda PAYE',
         countryCode: 'UG',
         taxType: 'PAYE',
+        contributionsDeductible: false,
         effectiveFrom: new Date('2024-07-01').toISOString(),
         // Annualised marginal bands; `rate` is a FRACTION.
         brackets: [
@@ -195,8 +201,8 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
       expect(item).toBeTruthy();
 
       const nssf = s.gross * NSSF_EMPLOYEE_RATE;
-      const chargeable = s.gross - nssf;
-      const paye = expectedMonthlyPaye(chargeable);
+      const chargeable = s.gross; // NSSF is not PAYE-deductible in Uganda
+      const paye = Math.round(expectedMonthlyPaye(chargeable));
 
       // Rounded to the shilling: UGX has no minor unit, and Decimal(20,6)
       // carries the exact value, so a 1-unit tolerance is generous.
@@ -204,6 +210,10 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
       expect(Number(item.socialSecurityAmount)).toBeCloseTo(nssf, 0);
       expect(Number(item.taxAmount)).toBeCloseTo(paye, 0);
       expect(Number(item.netPay)).toBeCloseTo(s.gross - nssf - paye, 0);
+      // The PAYE base is stored, so the return reports exactly what was taxed.
+      expect(Number(item.taxableIncome)).toBeCloseTo(chargeable, 0);
+      // Employer share: a cost, not a deduction.
+      expect(Number(item.employerSocialSecurityAmount)).toBeCloseTo(s.gross * NSSF_EMPLOYER_RATE, 0);
     }
   });
 
@@ -213,7 +223,7 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
       include: { employee: { select: { employeeCode: true } } },
     });
     const nilBand = items.find((i) => i.employee.employeeCode === 'UG-A')!;
-    // 200,000 gross − 10,000 NSSF = 190,000 chargeable, under the threshold.
+    // 200,000 gross is chargeable in full, still under the 235,000 threshold.
     expect(Number(nilBand.taxAmount)).toBe(0);
     expect(Number(nilBand.socialSecurityAmount)).toBeCloseTo(10_000, 0);
   });
@@ -224,7 +234,7 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
       include: { employee: { select: { employeeCode: true } } },
     });
     const top = items.find((i) => i.employee.employeeCode === 'UG-E')!;
-    const chargeable = 12_000_000 - 12_000_000 * NSSF_EMPLOYEE_RATE; // 11,400,000
+    const chargeable = 12_000_000; // no NSSF relief
     expect(Number(top.taxAmount)).toBeCloseTo(expectedMonthlyPaye(chargeable), 0);
     // Sanity: the top slice really is taxed at 40%, not 30%.
     const at30Only = 25_000 + (chargeable - 410_000) * 0.3;
@@ -242,9 +252,9 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
     const cr = je.lines.reduce((s, l) => s + Number(l.baseCredit), 0);
     expect(dr).toBe(cr);
 
-    // Gross expense equals the sum of every employee's gross.
+    // Debits: gross salary expense + the employer's 10% NSSF on top.
     const totalGross = SALARIES.reduce((s, x) => s + x.gross, 0);
-    expect(dr).toBeCloseTo(totalGross, 0);
+    expect(dr).toBeCloseTo(totalGross * (1 + NSSF_EMPLOYER_RATE), 0);
 
     // PAYE and NSSF are separate liabilities, not netted into pay.
     const payeAcct = await raw.accountMapping.findFirstOrThrow({ where: { organizationId, key: 'paye_payable' } });
@@ -252,6 +262,58 @@ describeDb('integration: Uganda PAYE + NSSF', () => {
     const payeLine = je.lines.find((l) => l.accountId === payeAcct.accountId);
     const nssfLine = je.lines.find((l) => l.accountId === nssfAcct.accountId);
     expect(Number(payeLine?.baseCredit ?? 0)).toBeGreaterThan(0);
-    expect(Number(nssfLine?.baseCredit ?? 0)).toBeCloseTo(totalGross * NSSF_EMPLOYEE_RATE, 0);
+    // The fund is owed BOTH shares: 5% withheld + 10% employer = 15%.
+    expect(Number(nssfLine?.baseCredit ?? 0)).toBeCloseTo(totalGross * (NSSF_EMPLOYEE_RATE + NSSF_EMPLOYER_RATE), 0);
+    const employerAcct = await raw.accountMapping.findFirstOrThrow({ where: { organizationId, key: 'employer_contribution_expense' } });
+    const employerLine = je.lines.find((l) => l.accountId === employerAcct.accountId);
+    expect(Number(employerLine?.baseDebit ?? 0)).toBeCloseTo(totalGross * NSSF_EMPLOYER_RATE, 0);
+  });
+
+  it('refuses an NSSF component that would duplicate the statutory config', async () => {
+    const period = await asAdmin(() =>
+      payroll.createPeriod({
+        periodType: 'MONTHLY',
+        startDate: new Date(Date.UTC(2026, 6, 1)).toISOString(),
+        endDate: new Date(Date.UTC(2026, 6, 31)).toISOString(),
+      }),
+    );
+    const comp = await asAdmin(() =>
+      payroll.createComponent({
+        code: 'NSSF-SSF', name: 'NSSF (dup)', componentType: 'DEDUCTION',
+        calcMethod: 'PERCENTAGE', rate: 5, isRecurring: true,
+      }),
+    );
+    const run = await asAdmin(() => payroll.createRun({ periodId: period.id }));
+    await expect(asAdmin(() => payroll.calculateRun(run.id))).rejects.toThrow(/deducted twice/);
+    await asAdmin(() => payroll.updateComponent(comp.id, { isActive: false }));
+    await asAdmin(() => payroll.deleteRun(run.id));
+  });
+
+  it('collects Local Service Tax only in its collection months, in instalments', async () => {
+    await asAdmin(() =>
+      payroll.createTaxTable({
+        code: 'UG-LST', name: 'LST', taxType: 'LOCAL', collectionMonths: '7,8,9,10',
+        effectiveFrom: new Date('2024-07-01').toISOString(),
+        brackets: [
+          { fromAmount: 100_000, toAmount: 1_000_000, fixedAmount: 40_000 },
+          { fromAmount: 1_000_000, fixedAmount: 100_000 },
+        ],
+      }),
+    );
+    // July 2026 — a collection month. The run from the previous test was deleted.
+    const july = await raw.hrPayrollPeriod.findFirstOrThrow({ where: { organizationId, startDate: new Date(Date.UTC(2026, 6, 1)) } });
+    const run = await asAdmin(() => payroll.createRun({ periodId: july.id }));
+    await asAdmin(() => payroll.calculateRun(run.id));
+    const items = await raw.hrPayrollItem.findMany({ where: { runId: run.id }, include: { employee: { select: { employeeCode: true } } } });
+    const d = items.find((i) => i.employee.employeeCode === 'UG-D')!; // 1.2m/month → 100,000/yr ÷ 4
+    const b = items.find((i) => i.employee.employeeCode === 'UG-B')!; // 300k/month → 40,000/yr ÷ 4
+    expect(Number(d.localTaxAmount)).toBe(25_000);
+    expect(Number(b.localTaxAmount)).toBe(10_000);
+    expect(Number(d.netPay)).toBeCloseTo(
+      Number(d.grossPay) - Number(d.socialSecurityAmount) - Number(d.taxAmount) - 25_000, 0,
+    );
+    // 200,000 sits in the lower band (boundaries belong to the lower band).
+    const a = items.find((i) => i.employee.employeeCode === 'UG-A')!; // 200k → 40,000/yr band
+    expect(Number(a.localTaxAmount)).toBe(10_000);
   });
 });

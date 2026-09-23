@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import type { StudentProfile, Partner } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -18,6 +18,9 @@ import type { CreateStudentDto, StudentListQueryDto, UpdateStudentDto } from './
  * `transferred` and `alumni` (graduated) are terminal. `withdrawn`/`suspended`
  * can return to `active` (re-admission / reinstatement).
  */
+/** Statuses an operator may set on the profile directly; the rest follow the enrollment. */
+const MANUAL_STUDENT_STATUSES = ['deceased', 'archived'];
+
 const STUDENT_STATUS_TRANSITIONS: Record<string, string[]> = {
   applicant: ['active', 'withdrawn', 'archived'],
   active: ['suspended', 'transferred', 'withdrawn', 'graduated', 'deceased', 'archived'],
@@ -137,6 +140,17 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       }
       termId = term.id;
     }
+    if (!dto.allowDuplicate) {
+      const dupes = await this.admission.findLikelyDuplicates(this.prisma.client, dto.name, dto.dateOfBirth ?? null);
+      if (dupes.length > 0) {
+        throw new ConflictException({
+          message:
+            `A learner named "${dto.name}" with the same date of birth already exists ` +
+            `(${dupes.map((d) => d.admissionNo).join(', ')}). Open that record instead, or confirm this is a different child.`,
+          duplicates: dupes,
+        });
+      }
+    }
     const { profile } = await this.admission.admit({
       organizationId: this.tenant.organizationId,
       name: dto.name,
@@ -197,6 +211,26 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       // reviving a transferred/alumni record) are rejected. Every legal change
       // still records StudentStatusHistory + emits the event.
       if (dto.status && dto.status !== before.status) {
+        // Membership statuses are projections of the enrollment (ADR-018): a
+        // learner becomes withdrawn, suspended, transferred or graduated through
+        // the enrollment endpoints, which also end the class seat. Editing the
+        // profile directly would leave the two disagreeing.
+        if (!MANUAL_STUDENT_STATUSES.includes(dto.status)) {
+          throw new BadRequestException(
+            `'${dto.status}' is set through the learner's enrollment (withdraw, suspend, transfer, complete), ` +
+              'not by editing the profile.',
+          );
+        }
+        if (dto.status === 'deceased' || dto.status === 'archived') {
+          const seated = await tx.studentEnrollment.count({
+            where: { studentProfileId: id, status: { in: ['PENDING', 'ACTIVE', 'SUSPENDED'] } },
+          });
+          if (seated > 0) {
+            throw new BadRequestException(
+              'This learner still holds a class seat. End the enrollment first (withdraw), then update the record.',
+            );
+          }
+        }
         const allowed = STUDENT_STATUS_TRANSITIONS[before.status] ?? [];
         if (!allowed.includes(dto.status)) {
           throw new BadRequestException(
@@ -265,10 +299,33 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     });
   }
 
+  /**
+   * Delete is for a record created by mistake and never used. A learner with any
+   * enrollment, fee or attendance history is part of the school's record; they
+   * leave through their enrollment (withdraw/transfer/complete) and are archived.
+   */
   async remove(id: string): Promise<void> {
     await this.prisma.client.$transaction(async (tx: any) => {
       const profile = await tx.studentProfile.findFirst({ where: { id } });
       if (!profile) throw new NotFoundException(`Student ${id} not found`);
+      const [enrollments, feeAssignments, attendance, invoices] = await Promise.all([
+        tx.studentEnrollment.count({ where: { studentProfileId: id } }),
+        tx.studentFeeAssignment.count({ where: { studentProfileId: id } }),
+        tx.studentAttendance.count({ where: { studentProfileId: id } }),
+        tx.document.count({ where: { partnerId: profile.partnerId } }),
+      ]);
+      const blockers = [
+        enrollments ? `${enrollments} enrollment(s)` : null,
+        feeAssignments ? `${feeAssignments} fee assignment(s)` : null,
+        attendance ? `${attendance} attendance record(s)` : null,
+        invoices ? `${invoices} financial document(s)` : null,
+      ].filter(Boolean);
+      if (blockers.length > 0) {
+        throw new ConflictException(
+          `This learner has ${blockers.join(', ')} and cannot be deleted. ` +
+            'Withdraw or complete their enrollment and archive the record instead.',
+        );
+      }
       await tx.studentProfile.updateMany({ where: { id }, data: { deletedAt: new Date() } });
       await tx.partner.updateMany({ where: { id: profile.partnerId }, data: { deletedAt: new Date() } });
       await this.audit.recordInTx(tx, { entity: 'StudentProfile', entityId: id, action: 'delete' });
@@ -336,6 +393,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
           classId,
           sectionId,
           termId: val(row, 'termId') || undefined,
+          allowDuplicate: val(row, 'allowDuplicate').toLowerCase() === 'true',
         });
         created.push(student);
       } catch (e: any) {

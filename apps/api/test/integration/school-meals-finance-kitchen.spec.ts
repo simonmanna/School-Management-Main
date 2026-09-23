@@ -30,6 +30,7 @@ import { MealAssignmentService } from '../../src/modules/school/meals/meal-confi
 import { MealBillingService } from '../../src/modules/school/meals/meal-billing.service';
 import { MealWalletService } from '../../src/modules/school/meals/meal-wallet.service';
 import { MealKitchenService } from '../../src/modules/school/meals/meal-kitchen.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school meals finance (V2) + kitchen (V3)', () => {
   const rawUrl = (() => {
@@ -100,7 +101,8 @@ describeDb('integration: school meals finance (V2) + kitchen (V3)', () => {
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S1 East' } })).id;
     const partner = await raw.partner.create({ data: { organizationId, code: 'STU-M1', name: 'Boarder One', isCustomer: true, receivableAccountId: arAccountId } });
-    studentProfileId = (await raw.studentProfile.create({ data: { organizationId, partnerId: partner.id, admissionNo: 'ADM-M1', enrollmentDate: new Date('2026-01-10'), currentClassId: classId, status: 'active' } })).id;
+    studentProfileId = (await raw.studentProfile.create({ data: { organizationId, partnerId: partner.id, admissionNo: 'ADM-M1', enrollmentDate: new Date('2026-01-10'), status: 'active' } })).id;
+    await placeInClass(raw, { organizationId, studentProfileId, classId });
 
     // Meal plan (term-plan billing, tied to the fee product).
     boardingPlanId = (await raw.mealPlan.create({ data: { organizationId, name: 'Boarding Full', pricePerTerm: PRICE, billingModel: 'term_plan', feeProductId: feeProduct.id } })).id;

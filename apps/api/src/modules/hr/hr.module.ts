@@ -18,6 +18,7 @@ import { HrPeopleService } from './hr-people.service';
 import { HrPayslipPdfService } from './hr-payslip-pdf.service';
 import { HrLeaveAccrualService } from './hr-leave-accrual.service';
 import { HrReconciliationService } from './hr-reconciliation.service';
+import { HrSchedulerService } from './hr-scheduler.service';
 import { HrReportsModule } from './reporting/hr-reports.module';
 
 /**
@@ -46,6 +47,7 @@ import { HrReportsModule } from './reporting/hr-reports.module';
     HrPayslipPdfService,
     HrLeaveAccrualService,
     HrReconciliationService,
+    HrSchedulerService,
   ],
   exports: [HrPayrollService, HrAttendanceService],
 })

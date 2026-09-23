@@ -6,7 +6,7 @@ import type { TimetableAdvancedService } from '../academics/timetable-advanced.s
 import type { ReportCardPdfService } from '../examinations/report-card-pdf.service';
 import type { AdvancedFinanceService } from '../fees/advanced.service';
 import type { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
-import type { EnrollmentService } from '../people/enrollment.service';
+import type { EnrollmentRosterService } from '../enrollment/enrollment-roster.service';
 import type { FilterResolverService } from './filter-resolver.service';
 import type { AccountingReportingService } from '../../accounting/reporting/accounting-reporting.service';
 import type { PnLReportService } from '../../accounting/reporting/pnl-report.service';
@@ -42,7 +42,7 @@ export interface SchoolReportDeps {
   /** Registers, class summaries, threshold breaches. */
   attendance: StudentAttendanceService;
   /** Per-term enrollment truth. */
-  enrollment: EnrollmentService;
+  enrollment: EnrollmentRosterService;
   /** Admissions pipeline, applications, funnel analytics. */
   admissions: AdmissionsService;
   /** Timetable slots, room grids, teacher schedules. */

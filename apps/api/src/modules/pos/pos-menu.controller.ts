@@ -25,6 +25,7 @@ import { PosMenuService } from './pos-menu.service';
 import { PosVariantService } from './pos-variant.service';
 import { PosAccompanimentService } from './pos-accompaniment.service';
 import { PaginationDto } from '../../kernel/common/pagination.dto';
+import { PERMISSIONS } from '@erp/shared';
 
 /* ====================== DTOs ====================== */
 
@@ -145,6 +146,7 @@ export class PosMenuController {
 
   // ─── Categories ───
   @Get('categories')
+  @RequirePermissions(PERMISSIONS.pos.read)
   listCategories() { return this.svc.listCategories(); }
 
   @Post('categories')
@@ -171,12 +173,15 @@ export class PosMenuController {
 
   // ─── Items ───
   @Get('items/available')
+  @RequirePermissions(PERMISSIONS.pos.read)
   available() { return this.svc.listAvailable(); }
 
   @Get('items')
+  @RequirePermissions(PERMISSIONS.pos.read)
   list(@Query() query: PaginationDto) { return this.svc.listAll(query); }
 
   @Get('items/:id')
+  @RequirePermissions(PERMISSIONS.pos.read)
   getOne(@Param('id') id: string) { return this.svc.getOne(id); }
 
   @Post('items')

@@ -30,6 +30,7 @@ import { MarkingService } from '../../src/modules/school/assessment/marking.serv
 import { ResultRunService } from '../../src/modules/school/assessment/result-run.service';
 import { ResultIntegrityService } from '../../src/modules/school/assessment/result-integrity.service';
 import { PromotionDecisionService } from '../../src/modules/school/assessment/promotion-decision.service';
+import { placeInClass } from './_placement';
 
 describeDb('Phase 5 examination and result integrity', () => {
   let moduleRef: TestingModule;
@@ -114,7 +115,8 @@ describeDb('Phase 5 examination and result integrity', () => {
 
     for (let i = 0; i < 4; i += 1) {
       const p = await db.partner.create({ data: { organizationId, name: `Candidate ${i}`, code: `C${i}` } });
-      const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `P5-${i}`, enrollmentDate: year.startDate, currentClassId: classId } });
+      const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `P5-${i}`, enrollmentDate: year.startDate } });
+      await placeInClass(db, { organizationId: organizationId, studentProfileId: s.id, classId: classId });
       learners.push(s.id);
       const e = await db.studentEnrollment.create({ data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
       await db.courseEnrollment.create({ data: { organizationId, courseOfferingId: course.id, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
@@ -190,7 +192,8 @@ describeDb('Phase 5 examination and result integrity', () => {
     // Registering a fifth candidate after the freeze must not silently join the
     // sitting: the gate sees the drift and says so.
     const extraPartner = await db.partner.create({ data: { organizationId, name: 'Late candidate', code: 'CLATE' } });
-    const extra = await db.studentProfile.create({ data: { organizationId, partnerId: extraPartner.id, admissionNo: 'P5-LATE', enrollmentDate: new Date('2026-01-10'), currentClassId: classId } });
+    const extra = await db.studentProfile.create({ data: { organizationId, partnerId: extraPartner.id, admissionNo: 'P5-LATE', enrollmentDate: new Date('2026-01-10') } });
+    await placeInClass(db, { organizationId: organizationId, studentProfileId: extra.id, classId: classId });
     await db.examRegistration.create({ data: { organizationId, examId, studentProfileId: extra.id, classId, status: 'registered' } });
     const stale = await run(() => ops.gate(examId, 'candidates_locked'));
     expect(stale.conflicts.map((c) => c.code)).toContain('SNAPSHOT_STALE');

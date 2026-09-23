@@ -102,6 +102,16 @@ describeDb('integration: HR payroll → GL posting', () => {
     payroll = moduleRef.get(HrPayrollService);
     org = moduleRef.get(HrOrgService);
 
+    // PAYE is mandatory. A 0% table from 2020 keeps January's journal to the
+    // two lines asserted below; PAYE-2026 (created later) supersedes it.
+    await asAdmin(() =>
+      payroll.createTaxTable({
+        code: 'PAYE-NIL', name: 'Nil PAYE', taxType: 'PAYE',
+        effectiveFrom: new Date(Date.UTC(2020, 0, 1)).toISOString(),
+        brackets: [{ fromAmount: 0, rate: 0 }],
+      }),
+    );
+
     // One active employee on a flat monthly salary. UGX has 0 decimal places
     // but payroll math is Decimal(20,6) regardless.
     const emp = await asAdmin(() =>

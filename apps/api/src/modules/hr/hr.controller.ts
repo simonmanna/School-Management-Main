@@ -68,6 +68,10 @@ import {
   LeaveDecisionDto,
   LinkEmployeeUserDto,
   MarkPayslipPaidDto,
+  ReasonDto,
+  DisburseLoanDto,
+  WriteOffLoanDto,
+  PayAdvanceDto,
   RejectDto,
   ReverseRunDto,
   SetApplicantStatusDto,
@@ -696,6 +700,12 @@ export class HrController {
     return this.payroll.markPaid(id, dto);
   }
 
+  @Post('payslips/:id/reverse-payment')
+  @RequirePermissions('hr:payroll')
+  reversePayslipPayment(@Param('id') id: string, @Body() dto: ReasonDto) {
+    return this.payroll.reversePayslipPayment(id, dto);
+  }
+
   // ── Bank payments ────────────────────────────────────────────────────────
 
   @Get('bank-payments')
@@ -714,6 +724,12 @@ export class HrController {
   @RequirePermissions('hr:payroll')
   updateBankPaymentStatus(@Param('id') id: string, @Body() dto: UpdateBankPaymentStatusDto) {
     return this.payroll.updateBankPaymentStatus(id, dto);
+  }
+
+  @Post('bank-payments/:id/reverse')
+  @RequirePermissions('hr:payroll')
+  reverseBankPayment(@Param('id') id: string, @Body() dto: ReasonDto) {
+    return this.payroll.reverseBankPayment(id, dto);
   }
 
   // ── Ad-hoc payroll inputs ──────────────────────────────────────────
@@ -786,8 +802,8 @@ export class HrController {
 
   @Post('advances/:id/paid')
   @RequirePermissions('hr:advance')
-  markAdvancePaid(@Param('id') id: string) {
-    return this.payroll.markAdvancePaid(id);
+  markAdvancePaid(@Param('id') id: string, @Body() dto: PayAdvanceDto) {
+    return this.payroll.markAdvancePaid(id, dto);
   }
 
   @Post('advances/:id/reject')
@@ -812,6 +828,18 @@ export class HrController {
   @RequirePermissions('hr:loan')
   updateLoan(@Param('id') id: string, @Body() dto: UpdateLoanDto) {
     return this.payroll.updateLoan(id, dto);
+  }
+
+  @Post('loans/:id/disburse')
+  @RequirePermissions('hr:loan')
+  disburseLoan(@Param('id') id: string, @Body() dto: DisburseLoanDto) {
+    return this.payroll.disburseLoan(id, dto);
+  }
+
+  @Post('loans/:id/write-off')
+  @RequirePermissions('hr:payroll')
+  writeOffLoan(@Param('id') id: string, @Body() dto: WriteOffLoanDto) {
+    return this.payroll.writeOffLoan(id, dto.reason);
   }
 
   @Delete('loans/:id')
@@ -993,7 +1021,7 @@ export class HrController {
   @RequirePermissions('hr:offboarding')
   settle(@Body() dto: SettleOffboardingDto) {
     if (!dto.employeeId || !dto.lastDay) throw new BadRequestException('employeeId and lastDay are required');
-    return this.lifecycle.computeFinalSettlement(dto.employeeId, dto.lastDay, true);
+    return this.lifecycle.computeFinalSettlement(dto.employeeId, dto.lastDay, true, dto);
   }
 
   // ── Recruitment / ATS ───────────────────────────────────────────────────────

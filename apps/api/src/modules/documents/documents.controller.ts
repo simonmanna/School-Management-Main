@@ -55,6 +55,7 @@ import { DocumentRenderService } from './document-render.service';
 import { DocumentRelationsService } from './document-relations.service';
 import { DocumentSourcesService } from './document-sources.service';
 import { DocumentAttachmentsService } from './document-attachments.service';
+import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
 
 /** Fields a consumer may patch through the generic endpoint. */
 const PATCHABLE_FIELDS = [
@@ -76,6 +77,7 @@ export interface DocumentListQuery {
 }
 
 @Controller('documents')
+@NoPermissionRequired('Per-document authorization: every handler checks doc:<type>:<action> via DocumentPermissionsService / DocumentEngineService')
 export class DocumentsController {
   constructor(
     private readonly prisma: PrismaService,

@@ -6,6 +6,7 @@ import {
 } from './academics.service';
 import { TimetableAdvancedService } from './timetable-advanced.service';
 import { TeacherCoverService } from './teacher-cover.service';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
 import {
   CompetencyService,
   TopicService,
@@ -26,6 +27,7 @@ import {
 } from './curriculum-content.controller';
 
 @Module({
+  imports: [PlacementLookupModule],
   controllers: [
     CurriculumController,
     TeacherAssignmentController,

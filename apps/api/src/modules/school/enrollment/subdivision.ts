@@ -1,8 +1,9 @@
+import { TERMINOLOGY_DEFAULTS } from '@erp/shared';
 /**
  * Subdivision rules (ADR-029).
  *
  * A class is either subdivided or it is not. `Section` is the one subdivision
- * (shown to users as a "Stream", "Section", "House" — whatever the school's
+ * (shown to users under the school's own word — "Section", "House", a stream — whatever the school's
  * terminology says), so the choice is a boolean.
  *
  * Everything here is pure: the caller fetches the rows, this decides whether the
@@ -59,7 +60,7 @@ const lower = (s: string): string => (s.length ? s.charAt(0).toLowerCase() + s.s
  */
 export function validateSubdivision(input: SubdivisionInput): SubdivisionResult {
   const errors: string[] = [];
-  const label = input.label ?? 'Stream';
+  const label = input.label ?? TERMINOLOGY_DEFAULTS.section;
   const sectionId = input.sectionId ?? null;
 
   if (sectionId && !input.section) {

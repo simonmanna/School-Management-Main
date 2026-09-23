@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { useHrLeaveRequests, useHrLeaveTypes, useHrLeaveBalances, useCreateHrLeaveRequest, useApproveHrLeaveRequest, useRejectHrLeaveRequest, useCancelHrLeaveRequest, useHrEmployees } from '@/features/hr/api';
+import { useHrLeaveRequests, useHrLeaveTypes, useHrLeaveBalances, useCreateHrLeaveRequest, useApproveHrLeaveRequest, useRejectHrLeaveRequest, useCancelHrLeaveRequest, useHrEmployees, useUpdateHrLeaveType } from '@/features/hr/api';
+import { toast } from 'sonner';
+
+/** Self-approval and double-approval are refused by the API; say why instead of failing silently. */
+const onError = (e: any) => toast.error(e?.response?.data?.message ?? 'Request failed');
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,6 +33,7 @@ export function HrLeavePage() {
   const approve = useApproveHrLeaveRequest();
   const reject = useRejectHrLeaveRequest();
   const cancel = useCancelHrLeaveRequest();
+  const updateType = useUpdateHrLeaveType();
 
   const rows = useMemo(() => requests?.rows ?? [], [requests]);
   const typeRows = useMemo(() => types?.rows ?? [], [types]);
@@ -91,11 +96,11 @@ export function HrLeavePage() {
                     <div className="flex items-center gap-2">
                       {r.status === 'PENDING' && (
                         <>
-                          <Button size="sm" variant="outline" onClick={() => approve.mutate({ id: r.id })}>Approve</Button>
-                          <Button size="sm" variant="outline" onClick={() => reject.mutate({ id: r.id })}>Reject</Button>
+                          <Button size="sm" variant="outline" onClick={() => approve.mutate({ id: r.id }, { onError })}>Approve</Button>
+                          <Button size="sm" variant="outline" onClick={() => reject.mutate({ id: r.id }, { onError })}>Reject</Button>
                         </>
                       )}
-                      {r.status === 'PENDING' && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(r.id)}>Cancel</Button>}
+                      {r.status === 'PENDING' && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(r.id, { onError })}>Cancel</Button>}
                       <Badge variant="outline" className={STATUS_STYLE[r.status] ?? ''}>{r.status}</Badge>
                     </div>
                   </div>
@@ -147,7 +152,18 @@ export function HrLeavePage() {
                         {t.maxConsecutiveDays ? ` · max ${t.maxConsecutiveDays} consecutive` : ''}
                       </p>
                     </div>
-                    {!t.isActive && <Badge variant="outline" className="bg-muted text-muted-foreground">Inactive</Badge>}
+                    <div className="flex items-center gap-3">
+                      {/* Only encashable types (annual leave) are paid out in a final settlement. */}
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground" title="Unused days are paid out, taxed, in the final payroll">
+                        <input
+                          type="checkbox"
+                          checked={!!t.isEncashable}
+                          onChange={(e) => updateType.mutate({ id: t.id, dto: { isEncashable: e.target.checked } }, { onError })}
+                        />
+                        Paid out on exit
+                      </label>
+                      {!t.isActive && <Badge variant="outline" className="bg-muted text-muted-foreground">Inactive</Badge>}
+                    </div>
                   </div>
                 ))}
               </div>

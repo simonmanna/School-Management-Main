@@ -198,7 +198,53 @@ Both need folding into the migration chain before another environment is built.
 - The five existing HR integration suites (30 tests) were green before the work
   started and are the regression baseline.
 
-## 6. Still open
+## 6. Second pass — 2026-09-21
+
+Migration `20260921150000_hr_payroll_production_hardening`. Regression suite:
+`test/integration/hr-payroll-hardening.spec.ts` (20 cases); the Uganda,
+pro-rata and posting suites were updated for the corrected behaviour.
+
+### 6.1 Money defects fixed
+
+| # | Defect | Fix |
+|---|--------|-----|
+| 1 | Approval reduced **each** of an employee's loans/advances by the employee's **total** installment; reversal added the total back to each. | Every payroll line records `sourceType`/`sourceId`. Approval and reversal settle each loan, advance and input by its own lines. |
+| 2 | Approval stamped **every** approved input in the period APPLIED, including ones approved after calculation — never paid. | Only inputs on this run's lines are stamped; approval is refused if an input was approved, cancelled or changed after calculation. |
+| 3 | The tenancy soft-delete filter does not reach nested `include`s, so after a tax-table edit the old **and** new brackets priced PAYE (doubled). | Brackets are always included with an explicit `deletedAt: null`. Brackets are validated (ordered, non-overlapping, PAYE rate is a fraction). |
+| 4 | Final settlement paid the last month in its own journal **and** payroll paid it again; untaxed; leave payout summed every balance ever held; employee soft-deleted. | Settlement no longer pays. The final payroll run pays the pro-rated salary, a taxed leave-encashment input (encashable types, current year only, PENDING payroll approval) and recovers loans/advances in full. The leaver is deactivated, not deleted. |
+| 5 | PAYE base was gross − NSSF. Uganda does not allow NSSF against PAYE. | `HrTaxTable.contributionsDeductible` (country law). Uganda seed: `false`. |
+| 6 | PAYE annualised ×12 for every period type. | ×52 weekly, ×26 bi-weekly, 365/days for custom. |
+| 7 | A monthly salary in a weekly period was paid in full every week; DAILY pay was a pro-rated monthly figure. | Salaried staff are paid only in periods of their own frequency; DAILY = day rate × days attended. |
+| 8 | No PAYE table → zero tax for the whole school, silently. | Calculation is refused. |
+| 9 | Advances were recovered once APPROVED, before any money was paid out. | Only PAID advances and ledger-disbursed loans are recovered. |
+
+### 6.2 Ledger completeness
+
+- **Employer contributions** — `HrStatutoryConfig` (versioned, employee + employer rate, base GROSS/BASIC, monthly ceiling) now drives NSSF/pension. Employer share: Dr `employer_contribution_expense` / Cr the fund's payable, stored per item and shown on the statutory schedule (5% + 10% = 15% remitted). A component duplicating a statutory contribution is refused.
+- **Local service tax** — LOCAL tax tables with fixed annual band amounts collected over `collectionMonths`; Cr `local_tax_payable`.
+- **Other deductions** — `deductionCategory` on components: `OTHER_PAYABLE` credits `other_deductions_payable`; `RECOVERY` stays a contra to salary expense.
+- **Salary payments** — single payslip (`markPaid`) or bank batch (PAID) posts Dr net pay payable (per employee partner) / Cr bank|cash|mobile-money clearing. Run → PAID when every slip is paid. Payment reversal endpoints for both. One live batch per run.
+- **Advances / loans** — payout and disbursement post Dr receivable / Cr bank|cash; flat loan interest credits `staff_loan_interest_income`; write-off Dr `bad_debt`.
+- New mapping keys auto-provision (COA codes 2250, 2260, 4290, 5720) for orgs created before them.
+
+### 6.3 Controls
+
+- State transitions are claimed with a conditional `updateMany` inside the transaction (runs, payslips, batches, advances, leave) — concurrent double-approve/double-pay cannot both succeed. Run creation and batch generation take an advisory lock.
+- Separation of duties: nobody approves an advance they requested or one made out to themselves, or their own leave. Loan write-off needs `hr:payroll`.
+- Loan balances cannot be edited; they move only through payroll, reversal or an audited write-off. Disbursed loans cannot be deleted.
+- A run with paid payslips cannot be reversed until the payment is reversed. Period dates cannot change under an approved run; overlapping periods are refused; runs need an OPEN period.
+- Money is rounded to the currency's minor unit as it is produced, so each item is an exact sum of its lines and every journal balances without a rounding line.
+- `previewRun` never writes (a DRAFT run must be calculated first).
+- Payroll Readiness report flags organisation blockers (no PAYE table, missing GL mappings, no bank/cash account).
+- `HrSchedulerService`: daily leave accrual, 1 Jan year-end rollover, carry-forward expiry, daily HR alerts — advisory-locked, off under `NODE_ENV=test` or `HR_SCHEDULER_ENABLED=false`.
+
+### 6.4 Web
+
+- Offboarding "preview" called `POST /settle` — pressing Compute settled the employee for real. Now a GET estimate plus an explicit Confirm.
+- Payroll settings: component rate was labelled "0.05 = 5%" while the engine reads a percent (5% became 0.05%); "Full-time only" was stored without `employmentType:` and applied to everyone. Fixed; added a bracket editor, LST, and a statutory-contributions tab.
+- Payroll run: payment batches (generate / sent / paid / cancel / reverse), employer cost. Payslips: payment method, payment reversal, LST line. Advances/loans: payout method, disburse, write-off (no balance edits). Leave types: "paid out on exit".
+
+## 7. Still open
 
 Ordered by what a school feels first.
 
@@ -219,11 +265,14 @@ Ordered by what a school feels first.
 6. **Year-to-date figures on the payslip.** Deliberately omitted rather than
    computed in the renderer; they belong on the payroll item when the engine
    writes them.
-7. **`other_deductions_payable` account mapping.** Other deductions are currently
-   credited back against salary expense, which balances the entry but creates no
-   liability — correct for a reimbursement, wrong for union dues owed onward.
-   Flagged in a comment in `approveRun` since before this review.
-8. **Web UI for everything added here** — payroll inputs, the accrual engine, the
-   report centre and the payslip download all have API surface and no screens yet.
-9. **Scheduled execution.** The accrual and alert jobs are endpoints; nothing
-   calls them on a schedule.
+7. **Annual employee tax certificates / year-end returns** built from the stored
+   payroll items (the per-period PAYE return exists).
+8. **Payslip distribution** — email/portal notification when payslips are issued.
+9. **Statutory rates to confirm with URA/NSSF before go-live**: PAYE bands, NSSF
+   5%/10% on gross, LST bands, and whether LST paid is PAYE-deductible
+   (`UG-LST.contributionsDeductible`, seeded `false`).
+
+Closed on 2026-09-21: `other_deductions_payable` mapping (§6.2), web screens for
+payments/statutory/brackets (§6.4), scheduled execution (§6.3). The two SQL
+scripts in §4 are already folded into the migration chain
+(`20260920120000_reconcile_local_drift`).

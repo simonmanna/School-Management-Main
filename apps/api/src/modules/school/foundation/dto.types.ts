@@ -182,6 +182,10 @@ export class CreateSubjectDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsString() departmentId?: string;
   @IsOptional() @IsBoolean() isCore?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsString() academicLevelId?: string;
+  @IsOptional() @IsString() subjectCategoryId?: string;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 export class UpdateSubjectDto {
@@ -189,6 +193,10 @@ export class UpdateSubjectDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsString() departmentId?: string;
   @IsOptional() @IsBoolean() isCore?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() @Min(0) displayOrder?: number;
+  @IsOptional() @IsString() academicLevelId?: string;
+  @IsOptional() @IsString() subjectCategoryId?: string;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 

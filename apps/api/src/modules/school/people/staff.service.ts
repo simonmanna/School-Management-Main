@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { StaffProfile } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -8,6 +8,7 @@ import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS } from '@erp/shared';
 import type { CreateStaffDto, UpdateStaffDto } from './dto.types';
+import { assertStaffTransition, endTeachingAccess, LEAVING_STATUSES, type StaffStatusValue } from './staff-lifecycle';
 
 /**
  * Staff = Partner (employee) + StaffProfile (school metadata).
@@ -99,6 +100,9 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
   }
 
   async update(id: string, dto: UpdateStaffDto): Promise<StaffProfile> {
+    if (dto.status && LEAVING_STATUSES.includes(dto.status as StaffStatusValue) && !dto.reason?.trim()) {
+      throw new BadRequestException(`Ending employment (${dto.status}) needs a reason.`);
+    }
     return this.prisma.client.$transaction(async (tx: any) => {
       const before = await tx.staffProfile.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`Staff ${id} not found`);
@@ -112,6 +116,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
       }
 
       if (dto.status && dto.status !== before.status) {
+        assertStaffTransition(before.status, dto.status);
         await tx.staffStatusHistory.create({
           data: {
             organizationId: before.organizationId,
@@ -148,22 +153,55 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
       if (dto.status !== undefined) profileUpdates.status = dto.status;
 
       await tx.staffProfile.updateMany({ where: { id }, data: profileUpdates });
+
+      // Leaving ends CURRENT access — login, allocations, live lessons, class
+      // teacher roles — and rewrites none of the history.
+      let ended: Awaited<ReturnType<typeof endTeachingAccess>> | null = null;
+      if (
+        dto.status &&
+        dto.status !== before.status &&
+        LEAVING_STATUSES.includes(dto.status as StaffStatusValue)
+      ) {
+        ended = await endTeachingAccess(tx, before, new Date(), this.tenant.userId ?? null);
+      }
+
       const after = await tx.staffProfile.findFirst({ where: { id } });
       await this.audit.recordInTx(tx, {
         entity: 'StaffProfile',
         entityId: id,
         action: 'update',
         oldValues: before,
-        newValues: after,
+        newValues: { ...after, ...(ended ? { employmentEnded: ended } : {}) },
       });
       return after as StaffProfile;
     });
   }
 
+  /**
+   * Delete is for a record created by mistake. A staff member with ANY history —
+   * teaching allocations, timetable, marks, attendance, lesson plans — leaves
+   * through a status change (terminated / resigned / retired), which keeps every
+   * historical record attributable to them.
+   */
   async remove(id: string): Promise<void> {
     await this.prisma.client.$transaction(async (tx: any) => {
       const profile = await tx.staffProfile.findFirst({ where: { id } });
       if (!profile) throw new NotFoundException(`Staff ${id} not found`);
+      const [allocations, slots, assignments, plans, attendance, assessments] = await Promise.all([
+        tx.courseOfferingTeacher.count({ where: { teacherPartnerId: id } }),
+        tx.timetableSlot.count({ where: { OR: [{ teacherPartnerId: id }, { substituteTeacherId: id }] } }),
+        tx.teacherAssignment.count({ where: { teacherPartnerId: id } }),
+        tx.lessonPlan.count({ where: { teacherPartnerId: id } }),
+        tx.staffAttendance.count({ where: { staffProfileId: id } }),
+        tx.assessment.count({ where: { teacherPartnerId: id } }),
+      ]);
+      const history = allocations + slots + assignments + plans + attendance + assessments;
+      if (history > 0) {
+        throw new ConflictException(
+          'This staff member has teaching or attendance history and cannot be deleted. ' +
+            'End their employment instead (status terminated, resigned or retired).',
+        );
+      }
       await tx.staffProfile.updateMany({ where: { id }, data: { deletedAt: new Date() } });
       await tx.partner.updateMany({ where: { id: profile.partnerId }, data: { deletedAt: new Date() } });
       await this.audit.recordInTx(tx, { entity: 'StaffProfile', entityId: id, action: 'delete' });

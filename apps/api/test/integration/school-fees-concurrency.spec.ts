@@ -27,6 +27,7 @@ import { FeesModule } from '../../src/modules/school/fees/fees.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { BillingService, SchoolPaymentService } from '../../src/modules/school/fees/billing.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
   const rawUrl = (() => {
@@ -148,10 +149,10 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
         partnerId: partner.id,
         admissionNo: 'ADM-G-0001',
         enrollmentDate: new Date('2026-01-10'),
-        currentClassId: schoolClass.id,
         status: 'active',
       },
     });
+    await placeInClass(raw, { organizationId: organizationId, studentProfileId: student.id, classId: schoolClass.id });
     studentProfileId = student.id;
 
     // Published, versioned fee structure (P1-G requires this to bill at all).

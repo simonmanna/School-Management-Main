@@ -46,6 +46,7 @@ import { ReportingService } from '../../src/modules/school/reporting/reporting.s
 import { ReportRegistryService } from '../../src/modules/core/reporting/report-registry.service';
 import { ReportRunnerService } from '../../src/modules/core/reporting/report-runner.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: school reporting', () => {
   const rawUrl = (() => {
@@ -155,17 +156,12 @@ describeDb('integration: school reporting', () => {
       const student = await raw.studentProfile.create({
         data: {
           organizationId, partnerId: partner.id, admissionNo: s.adm,
-          enrollmentDate: new Date('2026-01-10'), currentClassId: s.classId,
+          enrollmentDate: new Date('2026-01-10'),
           status: 'active', gender: s.gender, residenceType: 'day',
         },
       });
       students.push({ id: student.id, admissionNo: s.adm });
-      await raw.enrollment.create({
-        data: {
-          organizationId, studentProfileId: student.id, classId: s.classId,
-          termId, rollNumber: s.adm, status: 'enrolled',
-        },
-      });
+      await placeInClass(raw, { organizationId, studentProfileId: student.id, classId: s.classId });
     }
 
     const feeStructure = await raw.feeStructure.create({

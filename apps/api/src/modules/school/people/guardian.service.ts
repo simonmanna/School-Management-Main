@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
@@ -9,6 +9,14 @@ import type { CreateGuardianDto, UpdateGuardianDto } from './dto.types';
  * If the Contact doesn't exist for the partner, we create one. The Contact
  * is reused across siblings — same parent may have multiple children.
  */
+/** Digits only, Uganda local form (07XX…) folded to international (2567XX…). */
+export function normalizePhone(raw?: string | null): string | null {
+  if (!raw) return null;
+  let d = raw.replace(/\D/g, '');
+  if (d.startsWith('0') && d.length === 10) d = '256' + d.slice(1);
+  return d.length >= 7 ? d : null;
+}
+
 @Injectable()
 export class GuardianService {
   constructor(
@@ -25,19 +33,60 @@ export class GuardianService {
       });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
 
-      // Create the Contact row (parent contact belongs to the student's partner).
-      const contact = await tx.contact.create({
-        data: {
-          organizationId,
-          partnerId: student.partnerId,
-          firstName: dto.guardian.firstName,
-          lastName: dto.guardian.lastName ?? null,
-          email: dto.guardian.email ?? null,
-          phone: dto.guardian.phone ?? null,
-          position: dto.guardian.position ?? null,
-          isPrimary: dto.isPrimary ?? false,
-        },
+      // One parent is one contact, however many children they have. Link an
+      // explicitly chosen guardian, else reuse an existing guardian contact with
+      // the same phone or email; only a genuinely new parent creates a contact.
+      let contact: any = null;
+      if (dto.guardianContactId) {
+        contact = await tx.contact.findFirst({ where: { id: dto.guardianContactId } });
+        if (!contact) throw new NotFoundException(`Guardian contact ${dto.guardianContactId} not found`);
+      } else {
+        if (!dto.guardian) {
+          throw new BadRequestException('Give the guardian\'s details, or guardianContactId to link an existing guardian.');
+        }
+        const phone = normalizePhone(dto.guardian.phone);
+        const email = dto.guardian.email?.trim().toLowerCase() || null;
+        if (phone || email) {
+          const links = await tx.studentGuardian.findMany({
+            where: {
+              guardianContact: {
+                OR: [
+                  ...(email ? [{ email: { equals: email, mode: 'insensitive' } }] : []),
+                  ...(phone ? [{ phone: { contains: phone.slice(-9) } }] : []),
+                ],
+              },
+            },
+            include: { guardianContact: true },
+            take: 20,
+          });
+          const same = links
+            .map((l: any) => l.guardianContact)
+            .find(
+              (c: any) =>
+                (email && c.email?.trim().toLowerCase() === email) ||
+                (phone && normalizePhone(c.phone) === phone),
+            );
+          if (same) contact = same;
+        }
+        if (!contact) {
+          contact = await tx.contact.create({
+            data: {
+              organizationId,
+              partnerId: student.partnerId,
+              firstName: dto.guardian.firstName,
+              lastName: dto.guardian.lastName ?? null,
+              email: dto.guardian.email ?? null,
+              phone: dto.guardian.phone ?? null,
+              position: dto.guardian.position ?? null,
+              isPrimary: dto.isPrimary ?? false,
+            },
+          });
+        }
+      }
+      const already = await tx.studentGuardian.findFirst({
+        where: { studentProfileId: dto.studentProfileId, guardianContactId: contact.id },
       });
+      if (already) throw new ConflictException('That guardian is already linked to this learner.');
 
       const link = await tx.studentGuardian.create({
         data: {

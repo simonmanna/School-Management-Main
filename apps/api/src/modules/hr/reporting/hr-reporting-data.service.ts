@@ -164,10 +164,11 @@ export class HrReportingDataService {
     return {
       run,
       rows: items.map((i: any) => {
-        // The PAYE base is gross less the statutory contributions that are
-        // deductible before tax — recomputing it here from stored figures keeps
-        // the return tied to the payslip rather than to a second calculation.
-        const chargeable = N(i.grossPay) - N(i.pensionAmount) - N(i.socialSecurityAmount);
+        // The PAYE base is STORED by the engine (`taxableIncome`), so the return
+        // shows exactly what was taxed — including non-taxable allowances and
+        // whether the country allows contributions as a deduction — rather than
+        // re-deriving it here and risking a second, different answer.
+        const chargeable = N(i.taxableIncome);
         return {
           employeeCode: i.employee?.employeeCode ?? '',
           employeeName: HrReportingDataService.fullName(i.employee),
@@ -193,7 +194,11 @@ export class HrReportingDataService {
     return {
       run,
       rows: items
-        .filter((i: any) => N(i.pensionAmount) > 0 || N(i.socialSecurityAmount) > 0)
+        .filter(
+          (i: any) =>
+            N(i.pensionAmount) > 0 || N(i.socialSecurityAmount) > 0 ||
+            N(i.employerPensionAmount) > 0 || N(i.employerSocialSecurityAmount) > 0,
+        )
         .map((i: any) => ({
           employeeCode: i.employee?.employeeCode ?? '',
           employeeName: HrReportingDataService.fullName(i.employee),
@@ -201,8 +206,13 @@ export class HrReportingDataService {
           pensionNumber: i.employee?.pensionNumber ?? '',
           grossPay: N(i.grossPay),
           pension: N(i.pensionAmount),
+          employerPension: N(i.employerPensionAmount),
           socialSecurity: N(i.socialSecurityAmount),
-          total: N(i.pensionAmount) + N(i.socialSecurityAmount),
+          employerSocialSecurity: N(i.employerSocialSecurityAmount),
+          // What the fund is actually owed: both shares (NSSF: 5% + 10% = 15%).
+          total:
+            N(i.pensionAmount) + N(i.employerPensionAmount) +
+            N(i.socialSecurityAmount) + N(i.employerSocialSecurityAmount),
         })),
     };
   }
@@ -250,14 +260,19 @@ export class HrReportingDataService {
       const key = i.employee?.department?.name ?? '(unassigned)';
       const acc = byDept.get(key) ?? {
         department: key, headcount: 0, grossPay: 0, paye: 0,
-        statutory: 0, otherDeductions: 0, netPay: 0,
+        statutory: 0, otherDeductions: 0, netPay: 0, employerCost: 0, totalCost: 0,
       };
       acc.headcount += 1;
       acc.grossPay += N(i.grossPay);
       acc.paye += N(i.taxAmount);
       acc.statutory += N(i.pensionAmount) + N(i.socialSecurityAmount);
-      acc.otherDeductions += N(i.otherDeductions) + N(i.insuranceAmount);
+      acc.otherDeductions += N(i.otherDeductions) + N(i.insuranceAmount) + N(i.localTaxAmount);
       acc.netPay += N(i.netPay);
+      // What the department actually costs the school: gross plus the employer
+      // contributions paid on top of it.
+      const employer = N(i.employerPensionAmount) + N(i.employerSocialSecurityAmount);
+      acc.employerCost += employer;
+      acc.totalCost += N(i.grossPay) + employer;
       byDept.set(key, acc);
     }
     return { run, rows: [...byDept.values()].sort((a, b) => b.grossPay - a.grossPay) };
@@ -695,6 +710,37 @@ export class HrReportingDataService {
       orderBy: { employeeCode: 'asc' },
     });
     const rows: any[] = [];
+
+    // Organisation-level blockers first: without these no run can be
+    // calculated, approved or paid, whatever the staff records say.
+    const orgIssues: string[] = [];
+    const now = new Date();
+    const paye = await this.db.hrTaxTable.findFirst({
+      where: { organizationId: this.orgId, taxType: 'PAYE', isActive: true, deletedAt: null, effectiveFrom: { lte: now } },
+      select: { id: true },
+    });
+    if (!paye) orgIssues.push('no active PAYE tax table (calculation is refused)');
+    const mapped = new Set(
+      (
+        await this.db.accountMapping.findMany({
+          where: { organizationId: this.orgId, key: { in: ['salary_expense', 'net_pay_payable', 'paye_payable', 'default_bank', 'default_cash'] } },
+          select: { key: true },
+        })
+      ).map((m: any) => m.key),
+    );
+    for (const key of ['salary_expense', 'net_pay_payable', 'paye_payable'])
+      if (!mapped.has(key)) orgIssues.push(`GL account mapping "${key}" missing (approval is refused)`);
+    if (!mapped.has('default_bank') && !mapped.has('default_cash'))
+      orgIssues.push('no default bank/cash account mapped (salary payments cannot post)');
+    if (orgIssues.length > 0)
+      rows.push({
+        employeeCode: '(organisation)',
+        employeeName: 'Payroll setup',
+        department: '',
+        issueCount: orgIssues.length,
+        issues: orgIssues.join('; '),
+      });
+
     for (const e of employees) {
       const issues: string[] = [];
       const hourly = e.payFrequency === 'HOURLY';

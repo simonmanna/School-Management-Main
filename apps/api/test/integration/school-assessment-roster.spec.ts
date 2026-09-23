@@ -56,7 +56,7 @@ describeDb('integration: A2 rosters + assignments', () => {
     tenant.run({ organizationId, userId: 'student', permissions: ['school:assignments:submit'], portal: { kind: 'student', studentProfileId } }, fn);
 
   const makeStudent = (n: string) =>
-    asUser('registrar', () => students.create({ name: `Student ${n}`, admissionNo: n, enrollmentDate: '2026-01-15', currentClassId: classId } as any)) as Promise<any>;
+    asUser('registrar', () => students.create({ name: `Student ${n}`, admissionNo: n, enrollmentDate: '2026-01-15', classId } as any)) as Promise<any>;
 
   beforeAll(async () => {
     await raw.$connect();

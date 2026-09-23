@@ -11,6 +11,8 @@ import { TenantContextService } from '../../../tenancy/tenant-context.service';
 import { AuditService } from '../../../audit/audit.service';
 import { EventBus } from '../../../events/event-bus';
 import { PasswordService } from '../../password.service';
+import { PermissionResolverService } from '../../permission-resolver.service';
+import { DataScopeService } from '../../data-scope.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { EVENTS } from '@erp/shared';
@@ -57,6 +59,8 @@ export class UsersService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly password: PasswordService,
+    private readonly resolver: PermissionResolverService,
+    private readonly dataScope: DataScopeService,
   ) {}
 
   async list(query: { search?: string; page?: number; pageSize?: number }) {
@@ -105,6 +109,7 @@ export class UsersService {
     if (existing) throw new ConflictException(`A user with email "${dto.email}" already exists`);
 
     const roles = await this.resolveRoles(orgId, dto.roleIds);
+    await this.assertCanAssign(roles);
     const passwordHash = await this.password.hash(dto.password);
 
     const user = await this.prisma.client.$transaction(async (tx) => {
@@ -138,6 +143,7 @@ export class UsersService {
       include: { roles: { select: { id: true } } },
     });
     if (!current) throw new NotFoundException(`User ${id} not found`);
+    await this.assertCanManage(id);
 
     if (dto.email && dto.email !== current.email) {
       const collision = await this.prisma.client.user.findFirst({
@@ -150,6 +156,7 @@ export class UsersService {
     if (dto.roleIds) {
       // Prevent the last active administrator from losing the user:read perm.
       const roles = await this.resolveRoles(current.organizationId, dto.roleIds);
+      await this.assertCanAssign(roles);
       await this.guardLastAdmin(id, roles.map((r) => r.id));
       resolvedRoles = roles.map((r) => ({ id: r.id, name: r.name }));
     }
@@ -210,6 +217,7 @@ export class UsersService {
   async resetPassword(id: string, newPassword: string): Promise<void> {
     const user = await this.prisma.client.user.findFirst({ where: { id } });
     if (!user) throw new NotFoundException(`User ${id} not found`);
+    await this.assertCanManage(id);
     const passwordHash = await this.password.hash(newPassword);
     await this.prisma.client.$transaction(async (tx) => {
       await tx.user.updateMany({ where: { id }, data: { passwordHash, failedLoginCount: 0, lockedUntil: null } });
@@ -231,6 +239,7 @@ export class UsersService {
       include: { roles: { select: { id: true, name: true } } },
     });
     if (!user) throw new NotFoundException(`User ${id} not found`);
+    await this.assertCanManage(id);
     const updated = await this.prisma.client.$transaction(async (tx) => {
       await tx.user.updateMany({
         where: { id },
@@ -258,6 +267,7 @@ export class UsersService {
       include: { roles: { select: { id: true, name: true } } },
     });
     if (!current) throw new NotFoundException(`User ${id} not found`);
+    await this.assertCanManage(id);
     if (id === this.tenant.userId) {
       throw new ForbiddenException('You cannot delete your own account');
     }
@@ -278,6 +288,51 @@ export class UsersService {
   }
 
   // ---- helpers ----
+
+  /**
+   * Privilege-escalation guard for role ASSIGNMENT — the counterpart of the
+   * grant check in RolesService. Holding `user:update` must not let an actor
+   * hand anyone (themselves included) a role carrying authority the actor does
+   * not already have, or a data scope wider than their own. Without this, an
+   * "IT Admin" with no finance authority could assign themselves Administrator.
+   *
+   * The actor's grants are read from the database, never from the token.
+   */
+  private async assertCanAssign(roles: Array<{ name: string; permissions: string[]; dataScope?: string | null }>) {
+    const granted = new Set(await this.resolver.grantedForCaller());
+    if (granted.has('*')) return;
+    const missing = new Set<string>();
+    for (const role of roles) {
+      for (const p of role.permissions ?? []) if (!granted.has(p)) missing.add(p);
+      if (role.dataScope && !(await this.dataScope.canGrantScope(role.dataScope))) {
+        throw new ForbiddenException(`You cannot assign role "${role.name}": its data scope is wider than your own.`);
+      }
+    }
+    if (missing.size > 0) {
+      throw new ForbiddenException(
+        `You cannot assign a role carrying permissions you do not hold: ${[...missing].sort().join(', ')}`,
+      );
+    }
+  }
+
+  /**
+   * An actor may only administer (edit, reset, unlock, delete) a user whose
+   * authority is a subset of their own. Otherwise a password reset on an
+   * administrator is an account takeover. Acting on yourself is always allowed.
+   */
+  private async assertCanManage(targetUserId: string) {
+    if (targetUserId === this.tenant.userId) return;
+    const granted = new Set(await this.resolver.grantedForCaller());
+    if (granted.has('*')) return;
+    const targetPerms = await this.resolver.lookupPermissions(targetUserId, { includeInactive: true });
+    const beyond = targetPerms.filter((p) => !granted.has(p));
+    if (beyond.length > 0) {
+      throw new ForbiddenException(
+        'You cannot administer a user who holds permissions you do not have ' +
+          `(${beyond.slice(0, 5).join(', ')}${beyond.length > 5 ? ', …' : ''}).`,
+      );
+    }
+  }
 
   private async resolveRoles(orgId: string, roleIds: string[]) {
     if (roleIds.length === 0) {

@@ -31,9 +31,15 @@ export class PermissionResolverService {
   ) {}
 
   /** Re-read a user's role permissions from Postgres. */
-  async lookupPermissions(userId: string): Promise<string[]> {
+  /**
+   * A deactivated, deleted or locked-out account holds NOTHING, even while its
+   * access token is still inside its TTL — deactivation must take effect on the
+   * next request, not up to JWT_ACCESS_TTL later. `includeInactive` exists only
+   * for administrative comparisons (what authority would this account carry?).
+   */
+  async lookupPermissions(userId: string, opts: { includeInactive?: boolean } = {}): Promise<string[]> {
     const user = await this.prisma.client.user.findFirst({
-      where: { id: userId },
+      where: { id: userId, ...(opts.includeInactive ? {} : { isActive: true }) },
       include: { roles: true },
     });
     if (!user) return [];
@@ -42,6 +48,23 @@ export class PermissionResolverService {
       for (const p of role.permissions ?? []) all.add(p);
     }
     return [...all];
+  }
+
+  /**
+   * The caller's account state in one read: `null` when the account no longer
+   * exists or is deactivated (the session must end), otherwise its permissions.
+   */
+  async sessionState(userId: string): Promise<{ permissions: string[] } | null> {
+    const user = await this.prisma.client.user.findFirst({
+      where: { id: userId, isActive: true },
+      include: { roles: true },
+    });
+    if (!user) return null;
+    const all = new Set<string>();
+    for (const role of user.roles as any[]) {
+      for (const p of role.permissions ?? []) all.add(p);
+    }
+    return { permissions: [...all] };
   }
 
   /** Everything the current caller holds, resolved under the active mode. */

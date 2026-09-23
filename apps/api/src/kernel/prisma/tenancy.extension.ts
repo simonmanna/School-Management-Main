@@ -389,21 +389,19 @@ export const ORG_SCOPED = new Set<string>([
   'AdmissionPortalToken',
   'AdmissionOfferTemplate',
   'AdmissionEnquiry',
-  'Enrollment',
   'Curriculum',
   'CurriculumSubject',
   'SubjectCategory',
-  'Stream',
   'StudentCategory',
   'Competency',
   'Topic',
   'Unit',
   'LearningObjective',
   'LessonPlanObjective',
-  'EnrollmentHistory',
   'LessonPlan',
   'TeacherAssignment',
   'TimetableSlot',
+  'TimetableVersion',
   'StudentAttendance',
   'AttendanceStatusConfig',
   'AttendanceThreshold',
@@ -695,11 +693,9 @@ export const ORG_SCOPED = new Set<string>([
   'AcademicLevel',
   // Stream -> Section convergence ledger (ADR-029). Permanent provenance; never
   // soft-deleted, so it is ORG_SCOPED only.
-  'StreamSectionMigrationMap',
 
   // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
   'AcademicProgramme',
-  'ProgrammeGradeLevel',
   'ClassCohort',
   'StudentEnrollment',
   'EnrollmentPlacement',
@@ -970,7 +966,6 @@ export const SOFT_DELETE = new Set<string>([
   'MealProductionPlan',
   // Academic Management foundation (2026-08-15) — new soft-deletable masters
   'SubjectCategory',
-  'Stream',
   'Competency',
   'Topic',
   'LearningObjective',

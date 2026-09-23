@@ -113,6 +113,14 @@ export function transitionError(from: EnrollmentStatusValue, to: EnrollmentStatu
  */
 export const PLACEMENT_HOLDING_STATUSES: readonly EnrollmentStatusValue[] = ['PENDING', 'ACTIVE', 'SUSPENDED'];
 
+/** Statuses an enrollment may be CREATED in. Every other status is reached through the FSM. */
+export const CREATABLE_STATUSES: readonly EnrollmentStatusValue[] = ['PENDING', 'ACTIVE'];
+
+/** Leaving a school and coming back: needs the re-entry grant, not just enrollment write. */
+export function isReactivation(from: EnrollmentStatusValue, to: EnrollmentStatusValue): boolean {
+  return (from === 'WITHDRAWN' || from === 'TRANSFERRED') && to === 'ACTIVE';
+}
+
 export function holdsPlacement(status: EnrollmentStatusValue): boolean {
   return PLACEMENT_HOLDING_STATUSES.includes(status);
 }
@@ -148,7 +156,8 @@ export function profileStatusFor(status: EnrollmentStatusValue): string | null {
     case 'TRANSFERRED':
       return 'transferred';
     case 'COMPLETED':
-      return 'alumni';
+      // `alumni` is a legacy value the enum keeps only for old rows.
+      return 'graduated';
     default:
       return null;
   }

@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -90,6 +92,7 @@ export class HrLeaveService {
         accrualStartsAfterMonths: dto.accrualStartsAfterMonths ?? 0,
         carryForwardExpiryMonths: dto.carryForwardExpiryMonths ?? null,
         maxBalanceDays: dto.maxBalanceDays ?? null,
+        isEncashable: dto.isEncashable ?? false,
         createdBy: userId,
       },
     });
@@ -105,7 +108,7 @@ export class HrLeaveService {
       throw new BadRequestException(`accrualMethod must be one of ${ACCRUAL_METHODS.join(', ')}`);
     for (const f of [
       'name', 'daysPerYear', 'isPaid', 'carryForwardDays', 'maxConsecutiveDays', 'isActive',
-      'accrualMethod', 'accrualStartsAfterMonths', 'carryForwardExpiryMonths', 'maxBalanceDays',
+      'accrualMethod', 'accrualStartsAfterMonths', 'carryForwardExpiryMonths', 'maxBalanceDays', 'isEncashable',
     ]) {
       if (dto[f] !== undefined) data[f] = dto[f];
     }
@@ -301,6 +304,19 @@ export class HrLeaveService {
     if (row.status !== 'PENDING')
       throw new BadRequestException('Only PENDING requests can be approved');
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Separation of duties: nobody approves their own leave.
+      const approverEmployee = userId
+        ? await tx.hrEmployee.findFirst({ where: { organizationId: orgId, userId }, select: { id: true } })
+        : null;
+      if (approverEmployee && approverEmployee.id === row.employeeId)
+        throw new ForbiddenException('You cannot approve your own leave request');
+      // Claim the transition in one statement. Two approvers clicking at once
+      // used to both read PENDING and both deduct the balance.
+      const claimed = await tx.hrLeaveRequest.updateMany({
+        where: { id, organizationId: orgId, status: 'PENDING' },
+        data: { status: 'APPROVED', approverId: userId, approvedAt: new Date(), updatedBy: userId },
+      });
+      if (claimed.count !== 1) throw new ConflictException('Leave request was decided concurrently');
       const balance = await this.ensureBalance(tx, row.employeeId, row.leaveTypeId, row.startDate.getFullYear());
       const available = availableDays(balance);
       if (available.lessThan(dec(row.days))) {
@@ -370,6 +386,11 @@ export class HrLeaveService {
     if (row.status !== 'PENDING')
       throw new BadRequestException('Only PENDING requests can be rejected');
     return this.prisma.client.$transaction(async (tx: any) => {
+      const claimed = await tx.hrLeaveRequest.updateMany({
+        where: { id, organizationId: orgId, status: 'PENDING' },
+        data: { updatedBy: userId },
+      });
+      if (claimed.count !== 1) throw new ConflictException('Leave request was decided concurrently');
       const updated = await tx.hrLeaveRequest.update({
         where: { id },
         data: {
@@ -399,10 +420,14 @@ export class HrLeaveService {
     if (row.status !== 'PENDING' && row.status !== 'APPROVED')
       throw new BadRequestException('Only PENDING/APPROVED requests can be cancelled');
     return this.prisma.client.$transaction(async (tx: any) => {
-      const updated = await tx.hrLeaveRequest.update({
-        where: { id },
+      // Conditional on the status we read: a double cancel must not credit the
+      // balance back twice.
+      const claimed = await tx.hrLeaveRequest.updateMany({
+        where: { id, organizationId: orgId, status: row.status },
         data: { status: 'CANCELLED', updatedBy: userId },
       });
+      if (claimed.count !== 1) throw new ConflictException('Leave request changed concurrently');
+      const updated = await tx.hrLeaveRequest.findUnique({ where: { id } });
       if (row.status === 'APPROVED') {
         const balance = await this.ensureBalance(tx, row.employeeId, row.leaveTypeId, row.startDate.getFullYear());
         await tx.hrLeaveBalance.update({

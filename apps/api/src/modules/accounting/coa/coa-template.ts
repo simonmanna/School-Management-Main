@@ -137,7 +137,11 @@ export const COA_TEMPLATE: readonly CoaAccountDef[] = [
   { code: '2220', name: 'Pension Payable', categoryKey: 'current_liability', parentCode: '2000', sortOrder: 2220 },
   { code: '2230', name: 'Social Security Payable', categoryKey: 'current_liability', parentCode: '2000', sortOrder: 2230 },
   { code: '2240', name: 'Insurance Payable', categoryKey: 'current_liability', parentCode: '2000', sortOrder: 2240 },
+  { code: '2250', name: 'Local Service Tax Payable', categoryKey: 'current_liability', parentCode: '2000', sortOrder: 2250 },
+  { code: '2260', name: 'Payroll Deductions Payable', categoryKey: 'current_liability', parentCode: '2000', sortOrder: 2260 },
   { code: '5710', name: 'Salaries & Wages Expense', categoryKey: 'operating_expense', parentCode: '5000', sortOrder: 5710 },
+  { code: '5720', name: 'Employer Statutory Contributions', categoryKey: 'operating_expense', parentCode: '5000', sortOrder: 5720 },
+  { code: '4290', name: 'Staff Loan Interest Income', categoryKey: 'other_income', parentCode: '4000', sortOrder: 4290 },
 ];
 
 /**
@@ -206,6 +210,10 @@ export const COA_MAPPINGS: Record<string, string> = {
   insurance_payable: '2240',
   employee_advance_receivable: '1350',
   employee_loan_receivable: '1355',
+  employer_contribution_expense: '5720',
+  local_tax_payable: '2250',
+  other_deductions_payable: '2260',
+  staff_loan_interest_income: '4290',
 };
 
 export interface CoaJournalDef {

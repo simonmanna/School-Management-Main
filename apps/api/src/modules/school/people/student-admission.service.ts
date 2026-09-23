@@ -57,6 +57,12 @@ export class AdmitStudentInput {
   customFields?: Record<string, unknown>;
   partnerCustomFields?: Record<string, unknown>;
   placement?: AdmissionPlacement | null;
+  /**
+   * Admit an EXISTING learner (a returning pupil, or an applicant confirmed as
+   * the same child) — no second Partner/StudentProfile is created; only the new
+   * enrollment and placement.
+   */
+  existingStudentProfileId?: string | null;
 }
 
 /** Quick "register & place" payload — everything a secretary types on one screen. */
@@ -121,6 +127,10 @@ export class StudentAdmissionService {
           const profile = await tx.studentProfile.findFirst({ where: { id: prior.studentProfileId } });
           return { partner: null, profile, enrollment: prior, placement: null, warnings: [] as string[] };
         }
+      }
+
+      if (input.existingStudentProfileId) {
+        return this.enrolExisting(tx, input);
       }
 
       const code = await this.sequence.next(
@@ -236,6 +246,85 @@ export class StudentAdmissionService {
       return { partner, profile, enrollment, placement, warnings };
     };
     return outerTx ? run(outerTx) : this.prisma.client.$transaction(run);
+  }
+
+  /**
+   * Learners that are probably the same child: same name (case/space-insensitive)
+   * AND same date of birth. Name alone is never enough — two pupils may share it.
+   */
+  async findLikelyDuplicates(client: any, name: string, dateOfBirth: string | null) {
+    if (!dateOfBirth) return [];
+    const dob = new Date(dateOfBirth);
+    if (Number.isNaN(dob.getTime())) return [];
+    const rows = await client.studentProfile.findMany({
+      where: {
+        dateOfBirth: dob,
+        partner: { name: { equals: name.trim().replace(/\s+/g, ' '), mode: 'insensitive' } },
+      },
+      select: { id: true, admissionNo: true, status: true },
+      take: 5,
+    });
+    return rows as Array<{ id: string; admissionNo: string; status: string }>;
+  }
+
+  /** Enrol a learner who already has a StudentProfile (no new master record). */
+  private async enrolExisting(tx: any, input: AdmitStudentInput) {
+    const profile = await tx.studentProfile.findFirst({ where: { id: input.existingStudentProfileId } });
+    if (!profile) throw new BadRequestException(`Student ${input.existingStudentProfileId} not found.`);
+    if (['deceased', 'archived'].includes(profile.status)) {
+      throw new BadRequestException(`That learner's record is ${profile.status}; they cannot be re-admitted.`);
+    }
+    let enrollment: any = null;
+    let placement: any = null;
+    let warnings: string[] = [];
+    if (input.placement) {
+      const term = await tx.term.findFirst({ where: { id: input.placement.termId }, select: { id: true, academicYearId: true } });
+      if (!term) throw new BadRequestException(`Term ${input.placement.termId} not found.`);
+      const admissionDate = input.placement.effectiveFrom ?? input.enrollmentDate ?? new Date().toISOString();
+      const created = await this.enrollments.createInTx(tx, {
+        studentProfileId: profile.id,
+        academicYearId: term.academicYearId,
+        admissionDate,
+        enrollmentType: input.placement.enrollmentType ?? 'RE_ENTRY',
+        admissionApplicationId: input.applicationId ?? undefined,
+        placement: {
+          termId: term.id,
+          classId: input.placement.classId,
+          sectionId: input.placement.sectionId ?? null,
+          rollNumber: input.placement.rollNumber ?? undefined,
+          effectiveFrom: admissionDate,
+          overrideCapacity: input.placement.overrideCapacity,
+          overrideReason: input.placement.overrideReason,
+        },
+      } as any);
+      enrollment = created.enrollment;
+      placement = created.placement;
+      warnings = created.warnings;
+    }
+    for (const g of input.guardians ?? []) {
+      const exists = await tx.studentGuardian.findFirst({
+        where: { studentProfileId: profile.id, guardianContactId: g.guardianContactId },
+      });
+      if (exists) continue;
+      await tx.studentGuardian.create({
+        data: {
+          organizationId: profile.organizationId,
+          studentProfileId: profile.id,
+          guardianContactId: g.guardianContactId,
+          relationship: g.relationship,
+          isPrimary: g.isPrimary ?? false,
+          canPickup: g.canPickup ?? true,
+          receivesStatements: g.receivesStatements ?? true,
+        },
+      });
+    }
+    await this.audit.recordInTx(tx, {
+      entity: 'StudentProfile',
+      entityId: profile.id,
+      action: 'update',
+      newValues: { readmitted: true, applicationId: input.applicationId ?? null, enrollmentId: enrollment?.id ?? null },
+    });
+    return { partner: null, profile, enrollment, placement, warnings };
   }
 
   /**

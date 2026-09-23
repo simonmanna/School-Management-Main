@@ -4,6 +4,8 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
+import { PERMISSIONS } from '@erp/shared';
 
 class ActivityQuery {
   @ApiProperty({ required: false, default: 10, minimum: 1, maximum: 50 })
@@ -21,6 +23,7 @@ export class ReportsDashboardController {
 
   /** Single endpoint for the home dashboard KPIs. */
   @Get('dashboard-kpi')
+  @RequirePermissions(PERMISSIONS.report.accounting)
   async kpi() {
     const orgId = this.tenant.organizationId;
     const now = new Date();
@@ -95,6 +98,7 @@ export class ReportsDashboardController {
   }
 
   @Get('dashboard-activity')
+  @RequirePermissions(PERMISSIONS.report.accounting)
   async activity(@Query() q: ActivityQuery) {
     const orgId = this.tenant.organizationId;
     const limit = Math.min(50, Math.max(1, Number(q.limit ?? 10)));

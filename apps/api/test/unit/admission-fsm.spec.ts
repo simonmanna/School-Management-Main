@@ -21,7 +21,13 @@ import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/a
 import { makePlacementLookupStub } from './_placement-stub';
 
 function makeService() {
-  const tenant = { organizationId: 'org_test', userId: 'user_1' };
+  // The admissions office in these tests may decide and enrol (both are separately
+  // delegable grants; the service checks them itself).
+  const tenant = {
+    organizationId: 'org_test',
+    userId: 'user_1',
+    permissions: ['school:admissions:write', 'school:admissions:decide', 'school:enrollment:write'],
+  };
   const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const sequence = { next: jest.fn().mockResolvedValue('APP-2026-000001') };
   const auditRecordInTx = jest.fn().mockResolvedValue(undefined);
@@ -45,6 +51,7 @@ function makeService() {
     status: 'issued',
     expiresAt: null,
   });
+  const occupiedCount = jest.fn().mockResolvedValue(0);
   const enrollmentFindFirst = jest.fn().mockResolvedValue(null);
   const capacityUpdateMany = jest.fn().mockReturnValue({ count: 1 });
 
@@ -84,10 +91,14 @@ function makeService() {
     // built-in Standard workflow, i.e. pre-workflow behaviour.
     admissionWorkflow: { findFirst: jest.fn().mockResolvedValue(null) },
     waitingList: { findFirst: jest.fn().mockResolvedValue(null), count: jest.fn().mockResolvedValue(0), create: jest.fn().mockImplementation((a: any) => ({ id: 'wl_1', ...a.data })) },
-    applicantIdentityMatch: { create: jest.fn().mockResolvedValue(undefined) },
+    applicantIdentityMatch: { create: jest.fn().mockResolvedValue(undefined), findMany: jest.fn().mockResolvedValue([]) },
     contact: { findFirst: jest.fn().mockResolvedValue({ partnerId: 'partner_9' }), create: jest.fn().mockImplementation((a: any) => ({ id: 'contact_new', ...a.data })) },
     file: { findFirst: jest.fn().mockResolvedValue({ id: 'file_1' }) },
-    enrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
+    // Occupancy is counted from open placements; `enrollment` is kept as an alias
+    // of the same mock so older assertions keep reading naturally.
+    enrollment: { findFirst: enrollmentFindFirst, count: occupiedCount },
+    enrollmentPlacement: { count: occupiedCount },
+    studentEnrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
     studentProfile: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
     studentGuardian: { create: jest.fn().mockImplementation((a: any) => ({ id: 'sg_1', ...a.data })) },
     admissionGuardian: { create: jest.fn().mockImplementation((a: any) => ({ id: 'ag_1', ...a.data })), findMany: jest.fn().mockResolvedValue([]), updateMany: jest.fn().mockReturnValue({ count: 1 }) },
@@ -108,21 +119,27 @@ function makeService() {
       admissionCapacity: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), updateMany: capacityUpdateMany },
       admissionWorkflow: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
       offerLetter: { updateMany: jest.fn().mockReturnValue({ count: 2 }) },
-      enrollment: { findFirst: enrollmentFindFirst, count: jest.fn().mockResolvedValue(0) },
+      enrollment: { findFirst: enrollmentFindFirst, count: occupiedCount },
+      enrollmentPlacement: { count: occupiedCount },
+      studentEnrollment: { findFirst: enrollmentFindFirst },
+      term: { findFirst: jest.fn().mockResolvedValue({ id: 'term_1', academicYearId: 'ay_1' }) },
       waitingList: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
     },
   };
 
   // The sixth constructor argument. Omitting it is what stopped this file from
   // compiling, which in turn stopped every test below from ever running.
+  // StudentAdmissionService.admit (6th) creates the learner and seats them;
+  // StudentEnrollmentService (7th) owns every later membership change.
   const enrollmentSvc = {
-    enrollNewStudent: jest.fn().mockImplementation(async (input: any) => ({
+    admit: jest.fn().mockImplementation(async (input: any) => ({
       partner: { id: 'partner_1', name: input.name },
-      profile: { id: 'sp_1', currentClassId: input.classId, admissionNo: 'STU-000001' },
-      enrollment: { id: 'enr_1', classId: input.classId, termId: input.termId },
+      profile: { id: 'sp_1', partnerId: 'partner_1', admissionNo: 'STU-000001' },
+      enrollment: { id: 'enr_1', classId: input.placement?.classId, termId: input.placement?.termId },
     })),
-    withdraw: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'withdrawn' }),
-    reEnroll: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'enrolled' }),
+    withdraw: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'WITHDRAWN' }),
+    changeStatus: jest.fn().mockResolvedValue({ id: 'enr_1', status: 'ACTIVE' }),
+    create: jest.fn().mockResolvedValue({ enrollment: { id: 'enr_2' } }),
   };
 
   // EncryptionService — the seventh constructor argument. Round-trips through a
@@ -527,7 +544,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     expect(res.studentProfile.id).toBe('sp_1');
     // enrollNewStudent must receive the caller's tx so the student creation and
     // the status change commit together.
-    expect(mocks.enrollmentSvc.enrollNewStudent).toHaveBeenCalledWith(expect.any(Object), mocks.tx);
+    expect(mocks.enrollmentSvc.admit).toHaveBeenCalledWith(expect.any(Object), mocks.tx);
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'enrolled' }) }),
     );
@@ -552,7 +569,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     // application whose status lags its evidence.
     mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'accepted', offerLetter: null }));
     await expect(service.enroll(enrollDto as any)).rejects.toThrow();
-    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+    expect(mocks.enrollmentSvc.admit).not.toHaveBeenCalled();
   });
 
   /**
@@ -566,7 +583,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
     const { service, mocks } = makeService();
     mocks.applicationFindFirst.mockResolvedValue(eligibleApp({ status: 'submitted', offerLetter: null }));
     await expect(service.enroll(enrollDto as any)).rejects.toThrow();
-    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+    expect(mocks.enrollmentSvc.admit).not.toHaveBeenCalled();
   });
 
   it('refuses to enroll on a withdrawn offer', async () => {
@@ -575,7 +592,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
       eligibleApp({ offerLetter: { id: 'offer_1', status: 'withdrawn', expiresAt: null } }),
     );
     await expect(service.enroll(enrollDto as any)).rejects.toThrow();
-    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+    expect(mocks.enrollmentSvc.admit).not.toHaveBeenCalled();
   });
 
   it('refuses to enroll on an expired offer', async () => {
@@ -584,7 +601,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
       eligibleApp({ offerLetter: { id: 'offer_1', status: 'accepted', expiresAt: new Date(Date.now() - 86_400_000) } }),
     );
     await expect(service.enroll(enrollDto as any)).rejects.toThrow(/offer expired/);
-    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+    expect(mocks.enrollmentSvc.admit).not.toHaveBeenCalled();
   });
 
   it('refuses to enroll while a required document is unverified', async () => {
@@ -593,7 +610,7 @@ describe('AdmissionsService.enroll — the eligibility gate', () => {
       eligibleApp({ documents: [{ type: 'birth_cert', required: true, verified: false }] }),
     );
     await expect(service.enroll(enrollDto as any)).rejects.toThrow(/required documents not verified/);
-    expect(mocks.enrollmentSvc.enrollNewStudent).not.toHaveBeenCalled();
+    expect(mocks.enrollmentSvc.admit).not.toHaveBeenCalled();
   });
 
   it('ignores optional documents that are unverified', async () => {
@@ -690,7 +707,7 @@ describe('AdmissionsService — student lifecycle delegation', () => {
       transferredFrom: 'Other School',
     });
     expect(res.studentProfile.id).toBe('sp_1');
-    expect(mocks.enrollmentSvc.enrollNewStudent).toHaveBeenCalledWith(
+    expect(mocks.enrollmentSvc.admit).toHaveBeenCalledWith(
       expect.objectContaining({ customFields: { transferredFrom: 'Other School' } }),
     );
   });
@@ -705,7 +722,7 @@ describe('AdmissionsService — student lifecycle delegation', () => {
     const { service, mocks } = makeService();
     mocks.enrollmentFindFirst.mockResolvedValue({ id: 'enr_1', studentProfileId: 'sp_1', status: 'enrolled' });
     await service.withdrawStudent('sp_1', { reason: 'moved away' });
-    expect(mocks.enrollmentSvc.withdraw).toHaveBeenCalledWith('enr_1', { reason: 'moved away' });
+    expect(mocks.enrollmentSvc.withdraw).toHaveBeenCalledWith('enr_1', expect.objectContaining({ reason: 'moved away' }));
   });
 
   it('reEnroll refuses when the student has no enrollment history', async () => {

@@ -2,12 +2,16 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TimetableService } from './academics.service';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 @Injectable()
 export class TimetableAdvancedService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    private readonly timetable: TimetableService,
+    private readonly placements: PlacementLookupService,
   ) {}
 
   /* ── Teaching rooms ──────────────────────────────────────────────────── */
@@ -38,12 +42,12 @@ export class TimetableAdvancedService {
 
   /* ── Student timetable (resolve current enrollment -> class grid) ──────── */
   async gridForStudent(studentProfileId: string, date?: string) {
-    const enrollment = await (this.prisma.client as any).enrollment.findFirst({
-      where: { studentProfileId, status: 'enrolled' },
-      orderBy: { effectiveDate: 'desc' },
-    });
-    if (!enrollment) return { slots: [], grid: {}, note: 'No active enrollment' };
-    return this.classGridWithOverrides(enrollment.classId, enrollment.sectionId, date);
+    // Where the learner sits on that date, from placement history (the legacy
+    // per-term Enrollment table is gone).
+    const at = date ? new Date(date) : new Date();
+    const placement = (await this.placements.resolve([studentProfileId], { asOf: at })).get(studentProfileId);
+    if (!placement) return { slots: [], grid: {}, note: 'No active enrollment' };
+    return this.classGridWithOverrides(placement.classId, placement.sectionId, date);
   }
 
   /** Build a class grid, then overlay any active overrides for the given date. */
@@ -214,8 +218,6 @@ export class TimetableAdvancedService {
     );
     const maxPerDay = dto.maxPerDay ?? 2;
 
-    await (this.prisma.client as any).timetableSlot.deleteMany({ where: { classId: dto.classId, sectionId: dto.sectionId ?? null } });
-
     const placed: any[] = [];
     const dayCount: Record<number, number> = {};
     for (const load of loads) {
@@ -230,6 +232,9 @@ export class TimetableAdvancedService {
           dayOfWeek: day, periodId: period.id, teacherPartnerId: teacherOf[load.subjectId],
         });
         if (clash) continue;
+        // Never twice in the same cell of this draft.
+        if (placed.some((p) => p.dayOfWeek === day && p.periodId === period.id)) continue;
+        if (teacherOf[load.subjectId] && placed.some((p) => p.dayOfWeek === day && p.periodId === period.id && p.teacherPartnerId === teacherOf[load.subjectId])) continue;
         placed.push({
           classId: dto.classId, sectionId: dto.sectionId ?? null, dayOfWeek: day, periodId: period.id,
           subjectId: load.subjectId, teacherPartnerId: teacherOf[load.subjectId] ?? null, type: 'lesson',
@@ -238,7 +243,17 @@ export class TimetableAdvancedService {
         remaining--;
       }
     }
-    const res = await (this.prisma.client as any).timetableSlot.createMany({ data: placed });
+    // The draft is committed through the one validated write path: whole-batch
+    // conflict detection, teacher allocation, course offerings, the timetable
+    // lock and a TimetableVersion snapshot. Nothing is deleted if it fails.
+    const res = await this.timetable.bulkUpsert({
+      classId: dto.classId,
+      sectionId: dto.sectionId,
+      slots: placed.map(({ classId: _c, sectionId: _s, ...slot }) => ({
+        ...slot,
+        teacherPartnerId: slot.teacherPartnerId ?? undefined,
+      })),
+    });
     return { created: res.count };
   }
 

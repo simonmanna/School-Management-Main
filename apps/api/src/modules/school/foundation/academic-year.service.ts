@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { AcademicYear, Term } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -6,6 +6,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
+import { assertYearWritable } from './academic-year-guard';
 import type {
   CreateAcademicYearDto,
   CreateTermDto,
@@ -37,6 +38,26 @@ const YEAR_TRANSITIONS: Readonly<Record<YearStatus, readonly YearStatus[]>> = Ob
   ARCHIVED: [],
 });
 
+/** Parse a date-only or ISO string, refusing garbage instead of storing Invalid Date. */
+function parseDate(value: string | undefined, label: string): Date | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new BadRequestException(`${label} "${value}" is not a valid date.`);
+  return d;
+}
+
+function assertOrdered(start: Date | undefined, end: Date | undefined, what: string) {
+  if (start && end && end <= start) {
+    throw new BadRequestException(`${what} must end after it starts.`);
+  }
+}
+
+/** Lock a year row for a lifecycle change; serializes with assertYearWritable's FOR SHARE. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function lockYear(tx: any, organizationId: string, id: string) {
+  await tx.$queryRaw`SELECT 1 FROM "AcademicYear" WHERE "id" = ${id} AND "organizationId" = ${organizationId} FOR UPDATE`;
+}
+
 @Injectable()
 export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAcademicYearDto, UpdateAcademicYearDto> {
   protected readonly entityName = 'AcademicYear';
@@ -56,8 +77,9 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
     return this.prisma.client.$transaction(async (tx: any) => {
       // JSON bodies arrive as date-only strings; Prisma's DateTime filter rejects
       // them, so coerce to Date before any query or write.
-      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
-      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
+      const startDate = parseDate(dto.startDate, 'Start date');
+      const endDate = parseDate(dto.endDate, 'End date');
+      assertOrdered(startDate, endDate, 'An academic year');
       // Guard: no two academic years may overlap in time (same org).
       const clash = await tx.academicYear.findFirst({
         where: {
@@ -75,7 +97,10 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
       if (dto.isCurrent) {
         await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
-      const row = await tx.academicYear.create({ data: { ...dto, startDate, endDate } as any });
+      // A year created as the current one is being worked in, so it is ACTIVE.
+      const row = await tx.academicYear.create({
+        data: { ...dto, startDate, endDate, ...(dto.isCurrent ? { status: 'ACTIVE' } : {}) } as any,
+      });
       await this.audit.recordInTx(tx, { entity: 'AcademicYear', entityId: row.id, action: 'create', newValues: row });
       return row;
     });
@@ -83,6 +108,20 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
 
   async setCurrent({ academicYearId }: SetCurrentYearDto): Promise<AcademicYear> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      await lockYear(tx, this.tenant.organizationId, academicYearId);
+      const target = await tx.academicYear.findFirst({ where: { id: academicYearId } });
+      if (!target) throw new NotFoundException(`AcademicYear ${academicYearId} not found`);
+      // Making a year current must not become a back door around the lifecycle:
+      // a CLOSED year re-opens only through setStatus (permission + reason), and
+      // an ARCHIVED one never does.
+      if (target.status === 'CLOSED' || target.status === 'ARCHIVED') {
+        throw new BadRequestException(
+          `"${target.name}" is ${target.status}. ` +
+            (target.status === 'CLOSED'
+              ? 'Re-open it (PATCH /status to ACTIVE, with a reason) before making it current.'
+              : 'An archived year cannot become current again.'),
+        );
+      }
       await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       // Making a year current also makes it ACTIVE: a year the school is
       // working in is not still being planned, and it is certainly not closed.
@@ -96,6 +135,13 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
       // Also unset any "current" terms; the operator must re-pick one for the new year.
       await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       const row = await tx.academicYear.findFirst({ where: { id: academicYearId }, include: { terms: true } });
+      await this.audit.recordInTx(tx, {
+        entity: 'AcademicYear',
+        entityId: academicYearId,
+        action: 'update',
+        oldValues: { status: target.status, isCurrent: target.isCurrent },
+        newValues: { status: 'ACTIVE', isCurrent: true },
+      });
       this.events.publish(EVENTS.SchoolAcademicYearSetCurrent, {
         organizationId: this.tenant.organizationId,
         academicYearId,
@@ -105,19 +151,51 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
   }
 
   async update(id: string, dto: UpdateAcademicYearDto): Promise<AcademicYear> {
+    if (dto.isCurrent) {
+      // `isCurrent` has one entry point, the one with the lifecycle rules.
+      await this.setCurrent({ academicYearId: id });
+      const { isCurrent: _current, ...rest } = dto;
+      if (Object.keys(rest).length === 0) return this.findOne(id);
+      dto = rest;
+    }
     return this.prisma.client.$transaction(async (tx: any) => {
-      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
-      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
-      if (dto.isCurrent) {
-        await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      await lockYear(tx, this.tenant.organizationId, id);
+      const before = await tx.academicYear.findFirst({ where: { id } });
+      if (!before) throw new NotFoundException(`AcademicYear ${id} not found`);
+      const startDate = parseDate(dto.startDate, 'Start date');
+      const endDate = parseDate(dto.endDate, 'End date');
+      if ((startDate || endDate) && (before.status === 'CLOSED' || before.status === 'ARCHIVED')) {
+        throw new BadRequestException(`"${before.name}" is ${before.status}; its dates are part of the historical record.`);
+      }
+      const nextStart = startDate ?? before.startDate;
+      const nextEnd = endDate ?? before.endDate;
+      assertOrdered(nextStart, nextEnd, 'An academic year');
+      if (startDate || endDate) {
+        const clash = await tx.academicYear.findFirst({
+          where: { id: { not: id }, startDate: { lte: nextEnd }, endDate: { gte: nextStart } },
+        });
+        if (clash) throw new BadRequestException(`Academic year dates overlap with "${clash.name}".`);
+        const outside = await tx.term.findFirst({
+          where: { academicYearId: id, OR: [{ startDate: { lt: nextStart } }, { endDate: { gt: nextEnd } }] },
+          select: { name: true },
+        });
+        if (outside) {
+          throw new BadRequestException(`Term "${outside.name}" would fall outside the new year dates. Adjust the term first.`);
+        }
       }
       const res = await tx.academicYear.updateMany({
         where: { id },
-        data: { ...dto, startDate, endDate } as any,
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(startDate ? { startDate } : {}),
+          ...(endDate ? { endDate } : {}),
+          ...(dto.isCurrent === false ? { isCurrent: false } : {}),
+          updatedBy: this.tenant.userId ?? null,
+        },
       });
       if (res.count === 0) throw new NotFoundException(`AcademicYear ${id} not found`);
       const row = await tx.academicYear.findFirst({ where: { id }, include: { terms: true } });
-      await this.audit.recordInTx(tx, { entity: 'AcademicYear', entityId: id, action: 'update', newValues: row });
+      await this.audit.recordInTx(tx, { entity: 'AcademicYear', entityId: id, action: 'update', oldValues: before, newValues: row });
       return row;
     });
   }
@@ -131,6 +209,9 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
   async setStatus(id: string, dto: SetAcademicYearStatusDto): Promise<AcademicYear> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Serializes with every in-flight write holding the year FOR SHARE, so a
+      // year cannot close underneath an enrollment that is being created.
+      await lockYear(tx, this.tenant.organizationId, id);
       const before = await tx.academicYear.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`AcademicYear ${id} not found`);
 
@@ -149,8 +230,9 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
       }
 
       if (from === 'CLOSED' && to === 'ACTIVE') {
-        if (!this.tenant.permissions?.includes(PERMISSIONS.school.runAcademicMigration)) {
-          throw new BadRequestException(
+        const held = this.tenant.permissions ?? [];
+        if (!held.includes(PERMISSIONS.school.runAcademicMigration) && !held.includes('*')) {
+          throw new ForbiddenException(
             'Re-opening a closed academic year makes historical records writable again. ' +
               `It requires the ${PERMISSIONS.school.runAcademicMigration} permission.`,
           );
@@ -241,26 +323,47 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
     super(prisma.client.term as unknown as CrudDelegate);
   }
 
+  /**
+   * Validate a term's dates against its year and its siblings: inside the year,
+   * start before end, and no overlap with another term of the same year.
+   */
+  private async validateTermDates(
+    tx: any,
+    academicYearId: string,
+    startDate: Date,
+    endDate: Date,
+    excludeId?: string,
+  ) {
+    assertOrdered(startDate, endDate, 'A term');
+    const year = await tx.academicYear.findFirst({ where: { id: academicYearId } });
+    if (!year) throw new NotFoundException(`Academic year ${academicYearId} not found`);
+    if (startDate < year.startDate || endDate > year.endDate) {
+      throw new BadRequestException(
+        `A term must fall inside its academic year "${year.name}" ` +
+          `(${year.startDate.toISOString().slice(0, 10)} – ${year.endDate.toISOString().slice(0, 10)}).`,
+      );
+    }
+    const clash = await tx.term.findFirst({
+      where: {
+        academicYearId,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+      },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `Term dates overlap with "${clash.name}" (${clash.startDate.toISOString().slice(0, 10)} – ${clash.endDate.toISOString().slice(0, 10)}).`,
+      );
+    }
+  }
+
   async create(dto: CreateTermDto): Promise<Term> {
     return this.prisma.client.$transaction(async (tx: any) => {
-      // JSON bodies arrive as date-only strings; Prisma's DateTime filter rejects
-      // them, so coerce to Date before any query or write.
-      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
-      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
-      // Guard: terms within the same academic year must not overlap in time.
-      const clash = await tx.term.findFirst({
-        where: {
-          organizationId: this.tenant.organizationId,
-          academicYearId: dto.academicYearId,
-          startDate: { lte: endDate },
-          endDate: { gte: startDate },
-        },
-      });
-      if (clash) {
-        throw new BadRequestException(
-          `Term dates overlap with "${clash.name}" (${clash.startDate.toISOString().slice(0, 10)} – ${clash.endDate.toISOString().slice(0, 10)}).`,
-        );
-      }
+      await assertYearWritable(tx, this.tenant.organizationId, dto.academicYearId, 'create');
+      const startDate = parseDate(dto.startDate, 'Start date')!;
+      const endDate = parseDate(dto.endDate, 'End date')!;
+      await this.validateTermDates(tx, dto.academicYearId, startDate, endDate);
       if (dto.isCurrent) {
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
@@ -270,11 +373,17 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
 
   async setCurrent({ termId }: SetCurrentTermDto): Promise<Term> {
     return this.prisma.client.$transaction(async (tx: any) => {
-      await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
-      // Mark the parent year as current too, so dashboards agree.
       const term = await tx.term.findFirst({ where: { id: termId } });
       if (!term) throw new NotFoundException(`Term ${termId} not found`);
-      await tx.academicYear.updateMany({ where: { id: term.academicYearId }, data: { isCurrent: true } });
+      // The parent year becomes current too, so it must be a year that may be
+      // worked in: never a CLOSED or ARCHIVED one (that is a re-open, which has
+      // its own permission and reason).
+      const year = await assertYearWritable(tx, this.tenant.organizationId, term.academicYearId, 'modify');
+      await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      await tx.academicYear.updateMany({
+        where: { id: term.academicYearId },
+        data: { isCurrent: true, ...(year.status === 'PLANNING' ? { status: 'ACTIVE' } : {}) },
+      });
       await tx.academicYear.updateMany({
         where: { id: { not: term.academicYearId }, isCurrent: true },
         data: { isCurrent: false },
@@ -304,8 +413,28 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
 
   async update(id: string, dto: UpdateTermDto): Promise<Term> {
     return this.prisma.client.$transaction(async (tx: any) => {
-      const startDate = dto.startDate ? new Date(dto.startDate) : undefined;
-      const endDate = dto.endDate ? new Date(dto.endDate) : undefined;
+      const before = await tx.term.findFirst({ where: { id } });
+      if (!before) throw new NotFoundException(`Term ${id} not found`);
+      await assertYearWritable(tx, this.tenant.organizationId, before.academicYearId, 'modify');
+
+      const targetYearId = dto.academicYearId ?? before.academicYearId;
+      if (targetYearId !== before.academicYearId) {
+        // Placements, fees and results hang off a term through its year. Moving
+        // the term would silently re-date every one of them.
+        const used = await tx.enrollmentPlacement.count({ where: { termId: id } });
+        if (used > 0) {
+          throw new BadRequestException(
+            `Term "${before.name}" already has ${used} placement(s); it cannot be moved to another academic year.`,
+          );
+        }
+        await assertYearWritable(tx, this.tenant.organizationId, targetYearId, 'create');
+      }
+
+      const startDate = parseDate(dto.startDate, 'Start date') ?? before.startDate;
+      const endDate = parseDate(dto.endDate, 'End date') ?? before.endDate;
+      if (dto.startDate || dto.endDate || targetYearId !== before.academicYearId) {
+        await this.validateTermDates(tx, targetYearId, startDate, endDate, id);
+      }
       if (dto.isCurrent) {
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
@@ -314,8 +443,30 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
         data: { ...dto, startDate, endDate } as any,
       });
       if (res.count === 0) throw new NotFoundException(`Term ${id} not found`);
-      const row = await tx.term.findFirst({ where: { id }, include: { academicYear: true } });
-      return row;
+      return tx.term.findFirst({ where: { id }, include: { academicYear: true } });
+    });
+  }
+
+  /** A term that carries history (placements, assignments, fees) is not deletable. */
+  async remove(id: string): Promise<void> {
+    await this.prisma.client.$transaction(async (tx: any) => {
+      const before = await tx.term.findFirst({ where: { id } });
+      if (!before) throw new NotFoundException(`Term ${id} not found`);
+      await assertYearWritable(tx, this.tenant.organizationId, before.academicYearId, 'modify');
+      const [placements, fees, assignments] = await Promise.all([
+        tx.enrollmentPlacement.count({ where: { termId: id } }),
+        tx.studentFeeAssignment.count({ where: { termId: id } }),
+        tx.teacherAssignment.count({ where: { termId: id } }),
+      ]);
+      const blockers = [
+        placements ? `${placements} placement(s)` : null,
+        fees ? `${fees} fee assignment(s)` : null,
+        assignments ? `${assignments} teacher assignment(s)` : null,
+      ].filter(Boolean);
+      if (blockers.length > 0) {
+        throw new ConflictException(`Term "${before.name}" cannot be deleted because it has ${blockers.join(', ')}.`);
+      }
+      await tx.term.updateMany({ where: { id }, data: { deletedAt: new Date() } });
     });
   }
 }

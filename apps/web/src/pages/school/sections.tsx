@@ -1,11 +1,13 @@
+import { useTerminology } from '@/features/school/api';
 import { SimpleCrud } from './_components/simple-crud';
 import { api } from '@/lib/api';
 
 export function SchoolSectionsPage() {
+  const labels = useTerminology();
   return (
     <SimpleCrud
-      title="Streams"
-      subtitle="The streams within a class — P4 West, P4 East. Attendance, class teachers and mark sheets all hang off these."
+      title={labels.sectionPlural}
+      subtitle={`The ${labels.sectionPlural.toLowerCase()} within a ${labels.class.toLowerCase()} — e.g. North, South. Attendance, class teachers and mark sheets all hang off these.`}
       endpoint="sections"
       queryKey="sections"
       nameField="name"

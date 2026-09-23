@@ -199,6 +199,9 @@ export const EVENTS = {
   // (ADR-011), and this keeps that boundary intact.
   HrLeaveApproved: 'hr.leave.approved',
   HrLeaveCancelled: 'hr.leave.cancelled',
+  // A leaver's offboarding was posted. The school vertical ends the staff
+  // member's teaching access; HR has already disabled their login.
+  HrEmployeeOffboarded: 'hr.employee.offboarded',
   // Admissions
   SchoolAdmissionSubmitted: 'school.admission.submitted',
   SchoolAdmissionUnderReview: 'school.admission.under_review',
@@ -610,6 +613,13 @@ export interface DomainEventMap {
     staffProfileId: string;
     fromStatus: string;
     toStatus: string;
+  };
+  'hr.employee.offboarded': {
+    organizationId: string;
+    employeeId: string;
+    partnerId: string | null;
+    userId: string | null;
+    lastWorkingDay: string;
   };
   'hr.leave.approved': {
     organizationId: string;

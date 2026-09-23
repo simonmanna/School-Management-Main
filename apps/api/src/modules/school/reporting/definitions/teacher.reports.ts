@@ -127,7 +127,7 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
       description: 'All pupils in my assigned class(es) with key details.',
       permission: PERMISSIONS.school.readReports,
       shape: 'table',
-      filters: ['termId', 'status', 'gender', 'residenceType', 'house', 'classId', 'sectionId', 'streamId', 'search'],
+      filters: ['termId', 'status', 'gender', 'residenceType', 'house', 'classId', 'sectionId', 'search'],
       classBasisDefault: 'enrollment',
       asOfMode: 'live',
       paging: 'memory',
@@ -139,7 +139,6 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         { key: 'gender', label: 'Gender', type: 'string', width: 8 },
         { key: 'className', label: 'Class', type: 'string', width: 12 },
         { key: 'sectionName', label: 'Section', type: 'string', width: 10 },
-        { key: 'streamName', label: 'Stream', type: 'string', width: 10 },
         { key: 'rollNumber', label: 'Roll No', type: 'string', width: 8 },
         { key: 'residenceType', label: 'Residence', type: 'string', width: 10 },
         { key: 'house', label: 'House', type: 'string', width: 10 },
@@ -167,7 +166,6 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         const mapped = rows
           .filter((e: any) => classIds.includes(e.classId))
           .filter((e: any) => (params.sectionId ? e.sectionId === params.sectionId : true))
-          .filter((e: any) => (params.streamId ? e.streamId === params.streamId : true))
           .filter((e: any) => (params.status?.length ? params.status.includes(e.status) : true))
           .filter((e: any) => (params.gender ? e.student?.gender === params.gender : true))
           .filter((e: any) => (params.residenceType ? e.student?.residenceType === params.residenceType : true))
@@ -179,7 +177,6 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
             gender: e.student?.gender ?? '',
             className: e.schoolClass?.name ?? '',
             sectionName: e.section?.name ?? '',
-            streamName: e.stream?.name ?? '',
             rollNumber: e.rollNumber ?? '',
             residenceType: e.student?.residenceType ?? '',
             house: e.student?.house ?? '',

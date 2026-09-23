@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
@@ -145,6 +145,22 @@ export class TimetableController {
   @RequirePermissions(PERMISSIONS.school.read)
   gridForClass(@Param('classId') classId: string, @Query('sectionId') sectionId?: string, @Query('cycle') cycle?: string) {
     return this.service.gridForClass(classId, sectionId, cycle);
+  }
+
+  /** Every recorded version of a class/section grid, newest first (optionally for one term). */
+  @Get('class/:classId/history')
+  @RequirePermissions(PERMISSIONS.school.read)
+  history(@Param('classId') classId: string, @Query('sectionId') sectionId?: string, @Query('termId') termId?: string) {
+    return this.service.history(classId, sectionId, termId);
+  }
+
+  /** The grid as it stood at a moment (`at`, ISO date). */
+  @Get('class/:classId/as-of')
+  @RequirePermissions(PERMISSIONS.school.read)
+  asOf(@Param('classId') classId: string, @Query('at') at: string, @Query('sectionId') sectionId?: string) {
+    const when = new Date(at);
+    if (!at || Number.isNaN(when.getTime())) throw new BadRequestException('`at` must be an ISO date.');
+    return this.service.asOf(classId, sectionId, when);
   }
 
   @Post('slots')

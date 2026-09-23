@@ -31,6 +31,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
 import { PRESETS } from '../../src/modules/school/admissions/admission-workflow.schema';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: configurable admission workflow', () => {
   const rawUrl = (() => {
@@ -57,7 +58,7 @@ describeDb('integration: configurable admission workflow', () => {
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
 
   const asTenant = <T>(fn: () => Promise<T>): Promise<T> =>
-    tenant.run({ organizationId, userId, permissions: ['school:admissions:write'] }, fn);
+    tenant.run({ organizationId, userId, permissions: ['school:admissions:write', 'school:admissions:decide', 'school:enrollment:write'] }, fn);
 
   let seq = 0;
   const newApplicant = () => {
@@ -134,6 +135,7 @@ describeDb('integration: configurable admission workflow', () => {
     });
     termId = term.id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     const cls = await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S1 East' } });
     classId = cls.id;
 
@@ -164,6 +166,16 @@ describeDb('integration: configurable admission workflow', () => {
     });
     selectiveCycleId = c2.id;
   });
+
+  // Dated 2026 scenario: Term 1 runs mid-January to mid-April. Placements are
+  // dated inside their term, so "now" is pinned into it once the fixtures exist (Date only; timers real).
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-02-15T09:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+  });
+  afterAll(() => jest.useRealTimers());
 
   afterAll(async () => {
     await moduleRef?.close();
@@ -214,7 +226,7 @@ describeDb('integration: configurable admission workflow', () => {
     const app = await createApp(simpleCycleId, true);
     expect(app.status).toBe('draft');
     await expect(enroll(app.id)).rejects.toThrow();
-    expect(await raw.enrollment.count({ where: { applicationId: app.id } })).toBe(0);
+    expect(await raw.studentEnrollment.count({ where: { admissionApplicationId: app.id } })).toBe(0);
   });
 
   it('simple: an unverified required document still blocks enrollment', async () => {
@@ -222,14 +234,17 @@ describeDb('integration: configurable admission workflow', () => {
     const app = await createApp(simpleCycleId);
     await addUnverifiedDoc(app.id, 'birth_certificate');
     await expect(enroll(app.id)).rejects.toThrow(/required documents not verified/);
-    expect(await raw.enrollment.count({ where: { applicationId: app.id } })).toBe(0);
+    expect(await raw.studentEnrollment.count({ where: { admissionApplicationId: app.id } })).toBe(0);
   });
 
   it('simple: an outstanding application fee still blocks enrollment', async () => {
     const app = await createApp(simpleCycleId);
+    // Settlement is read from the fee invoice (AdmissionFeeService.isSettled), never
+    // from the legacy `paid` flag. A charged-but-unpaid fee is `pending`.
     await raw.admissionFee.create({
       data: { organizationId, applicationId: app.id, amount: 50000, paid: false },
     });
+    await raw.admissionApplication.update({ where: { id: app.id }, data: { feeStatus: 'pending' } });
     await expect(enroll(app.id)).rejects.toThrow(/fee outstanding/);
   });
 
@@ -241,7 +256,6 @@ describeDb('integration: configurable admission workflow', () => {
         admissionCycleId: simpleCycleId,
         classId,
         sectionId: '__none__',
-        streamId: '__none__',
         capacity: 1,
         reservedCapacity: 0,
         claimedSeats: 1,
@@ -257,9 +271,9 @@ describeDb('integration: configurable admission workflow', () => {
     await enroll(app.id, 'Only Once');
     await enroll(app.id, 'Only Once').catch(() => undefined);
 
-    expect(await raw.enrollment.count({ where: { applicationId: app.id } })).toBe(1);
+    expect(await raw.studentEnrollment.count({ where: { admissionApplicationId: app.id } })).toBe(1);
     const profiles = await raw.studentProfile.findMany({
-      where: { enrollments: { some: { applicationId: app.id } } },
+      where: { academicEnrollments: { some: { admissionApplicationId: app.id } } },
     });
     expect(profiles).toHaveLength(1);
   });
@@ -364,10 +378,12 @@ describeDb('integration: configurable admission workflow', () => {
   });
 
   it('does not expose another organization’s workflow', async () => {
-    const otherOrgId = `org_wf_other_${Date.now()}`;
+    // Random, not Date.now(): the clock is pinned for this suite.
+    const suffix = Math.random().toString(36).slice(2, 10);
+    const otherOrgId = `org_wf_other_${suffix}`;
     await setOrg(otherOrgId);
     await raw.organization.create({
-      data: { id: otherOrgId, code: `WFO-${Date.now()}`, name: 'Other School', currencyCode: 'UGX' },
+      data: { id: otherOrgId, code: `WFO-${suffix}`, name: 'Other School', currencyCode: 'UGX' },
     });
     const foreign = await raw.admissionWorkflow.create({
       data: { organizationId: otherOrgId, name: 'Foreign', presetKey: 'simple', stages: PRESETS.simple.stages as any },

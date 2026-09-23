@@ -33,6 +33,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { StudentAttendanceService } from '../../src/modules/school/attendance/student-attendance.service';
 import { MarkingService } from '../../src/modules/school/assessment/marking.service';
 import { LessonPlanningService } from '../../src/modules/school/lms/lesson-planning.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: teacher owner-scoped writes', () => {
   const rawUrl = (() => {
@@ -201,11 +202,11 @@ describeDb('integration: teacher owner-scoped writes', () => {
           organizationId,
           partnerId: partner.id,
           admissionNo: `ADM-${label}-${Date.now()}`,
-          currentClassId: classId,
           enrollmentDate: new Date(),
           status: 'active',
         },
       });
+      await placeInClass(raw, { organizationId: organizationId, studentProfileId: pupil.id, classId: classId });
       const assessment = await raw.assessment.create({
         data: {
           organizationId,

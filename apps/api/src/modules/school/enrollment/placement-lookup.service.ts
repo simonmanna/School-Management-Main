@@ -117,9 +117,35 @@ export class PlacementLookupService {
   }
 
   /** Enrollment statuses that hold a class seat. */
-  private enrollmentWhere(at: PlacementAt): Record<string, unknown> {
+  /**
+   * Which memberships count.
+   *
+   *  - A HISTORICAL question (an explicit date or a term) is answered by the
+   *    placement's own effective dates: a learner who later withdrew, transferred
+   *    or completed WAS in P4 North last March, and must be found. Only a
+   *    CANCELLED enrollment (created in error) never counts.
+   *  - A question about NOW counts every membership that holds a seat, including
+   *    SUSPENDED — a suspended pupil stays on the class roll (enrollment-fsm).
+   */
+  private statusClause(at: PlacementAt): Record<string, unknown> {
     if (at.includeInactive) return {};
-    return { enrollment: { status: { in: ['ACTIVE', 'PENDING'] } } };
+    if (at.asOf || at.termId) return { status: { not: 'CANCELLED' } };
+    return { status: { in: ['ACTIVE', 'PENDING', 'SUSPENDED'] } };
+  }
+
+  private enrollmentWhere(at: PlacementAt): Record<string, unknown> {
+    const clause = this.statusClause(at);
+    return Object.keys(clause).length ? { enrollment: clause } : {};
+  }
+
+  /** The enrollment filter for a placement query: status plus the year, merged (not overwritten). */
+  private enrollmentFilter(at: PlacementAt, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const merged = {
+      ...this.statusClause(at),
+      ...(at.academicYearId ? { academicYearId: at.academicYearId } : {}),
+      ...extra,
+    };
+    return Object.keys(merged).length ? { enrollment: merged } : {};
   }
 
   /**
@@ -160,11 +186,7 @@ export class PlacementLookupService {
       where: {
         ...this.org(at),
         ...this.effectiveAt(at),
-        enrollment: {
-          studentProfileId: { in: studentProfileIds },
-          ...(at.includeInactive ? {} : { status: { in: ['ACTIVE', 'PENDING'] } }),
-          ...(at.academicYearId ? { academicYearId: at.academicYearId } : {}),
-        },
+        ...this.enrollmentFilter(at, { studentProfileId: { in: studentProfileIds } }),
       },
       // Newest first, so the first row seen per learner wins when a correction
       // left two rows covering the same instant.
@@ -206,9 +228,7 @@ export class PlacementLookupService {
         ...this.org(at),
         ...this.effectiveAt(at),
         ...this.targetWhere(target),
-        ...(at.includeInactive
-          ? {}
-          : { enrollment: { status: { in: ['ACTIVE', 'PENDING'] } } }),
+        ...this.enrollmentFilter(at),
       },
       select: { enrollment: { select: { studentProfileId: true } } },
       distinct: ['enrollmentId'],
@@ -340,7 +360,8 @@ export class PlacementLookupService {
         ...this.org(at),
         ...this.effectiveAt(at),
         classCohort: { classId: { in: classIds } },
-        enrollment: { status: { in: ['ACTIVE', 'PENDING'] }, student: { status: 'active' } },
+        // A seat is a seat: suspended learners still occupy one.
+        ...this.enrollmentFilter(at, { student: { status: { in: ['active', 'suspended'] } } }),
       },
       select: {
         classCohort: { select: { classId: true } },

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
 
 /* ───────────────────────── Types (mirror the backend contract) ───────────────────────── */
 
@@ -33,7 +34,18 @@ export interface Student {
   house?: string | null;
   enrollmentDate?: string | null;
   partner?: { id: string; name: string; code: string | null; email: string | null; phone: string | null } | null;
+  /** Derived by the API from placement history on every read. */
   currentClass?: { id: string; name: string } | null;
+  currentSection?: { id: string; name: string } | null;
+}
+
+/**
+ * The API no longer stores a class on the student (placement history is the
+ * source, ADR-027); it returns `currentClass` / `currentSection` objects. The
+ * id fields many screens read are filled in from those, so they keep working.
+ */
+export function normalizeStudent<T extends Partial<Student>>(s: T): T {
+  return { ...s, currentClassId: s.currentClass?.id ?? null, currentSectionId: s.currentSection?.id ?? null };
 }
 
 export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean }
@@ -79,16 +91,56 @@ const S = '/school';
 export interface SchoolProfile {
   id?: string;
   name?: string;
+  motto?: string | null;
+  logoUrl?: string | null;
   phone?: string | null;
+  email?: string | null;
+  website?: string | null;
   address?: string | null;
+  /** From the Organization — the single source for money and dates. */
   currencyCode?: string;
+  timezone?: string;
   country?: string;
+  educationLevel?: string;
+  gradingSystem?: string;
+  capacityPolicy?: 'ENFORCE' | 'WARN' | 'OFF';
+  /** Stored overrides only. */
+  terminology?: Partial<Terminology>;
+  /** Resolved labels: overrides with defaults filled in. */
+  labels?: Terminology;
 }
 export function useSchoolProfile() {
   return useQuery({
     queryKey: ['school', 'profile'],
     queryFn: async () => (await api.get<SchoolProfile>(`${S}/profile`)).data,
   });
+}
+
+export type UpdateSchoolProfileInput = Omit<Partial<SchoolProfile>, 'id' | 'labels'>;
+
+export function useUpdateSchoolProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: UpdateSchoolProfileInput) => (await api.patch<SchoolProfile>(`${S}/profile`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'profile'] });
+      qc.invalidateQueries({ queryKey: ['school', 'terminology'] });
+    },
+  });
+}
+
+/**
+ * The school's own words for its structures ("Stream" vs "Class Group",
+ * "Pupil" vs "Learner"). Defaults are returned until the school overrides them,
+ * so a label is never blank.
+ */
+export function useTerminology(): Terminology {
+  const { data } = useQuery({
+    queryKey: ['school', 'terminology'],
+    queryFn: async () => (await api.get<Terminology>(`${S}/terminology`)).data,
+    staleTime: 5 * 60 * 1000,
+  });
+  return data ?? TERMINOLOGY_DEFAULTS;
 }
 
 export function useSchoolOverview() {
@@ -1182,12 +1234,18 @@ export interface StudentListParams {
   search?: string;
   page?: number;
   pageSize?: number;
+  /** Learners placed in this class now (resolved from placement history by the API). */
+  classId?: string;
+  sectionId?: string;
 }
 
 export function useStudents(params: StudentListParams = {}) {
   return useQuery({
     queryKey: ['school', 'students', params],
-    queryFn: async () => (await api.get<Paginated<Student>>(`${S}/students`, { params })).data,
+    queryFn: async () => {
+      const res = (await api.get<Paginated<Student>>(`${S}/students`, { params })).data;
+      return { ...res, data: (res.data ?? []).map(normalizeStudent) };
+    },
   });
 }
 
@@ -1195,7 +1253,7 @@ export function useStudent(id: string | undefined) {
   return useQuery({
     queryKey: ['school', 'student', id],
     enabled: !!id,
-    queryFn: async () => (await api.get<Student>(`${S}/students/${id}`)).data,
+    queryFn: async () => normalizeStudent((await api.get<Student>(`${S}/students/${id}`)).data),
   });
 }
 
@@ -1207,8 +1265,12 @@ export interface CreateStudentInput {
   phone?: string;
   gender?: 'male' | 'female' | 'other';
   dateOfBirth?: string;
-  currentClassId?: string;
-  currentSectionId?: string;
+  /** Admit straight into a class (creates the enrollment and opening placement). */
+  classId?: string;
+  sectionId?: string;
+  termId?: string;
+  /** Confirm this is a different child when the API reports a likely duplicate. */
+  allowDuplicate?: boolean;
   residenceType?: 'day' | 'boarder';
   house?: string;
   nationality?: string;
@@ -6048,11 +6110,18 @@ export function useClassSubdivisions(classId?: string) {
   };
 }
 
+/**
+ * A stream IS a section (ADR-029): the separate Stream table is gone, so this
+ * reads sections and keeps the old shape for the screens still calling it.
+ */
 export function useStreams(classId?: string) {
   return useQuery({
     queryKey: ['school', 'streams', classId ?? 'all'],
-    queryFn: async () =>
-      (await api.get<Paginated<Stream>>(`${S}/streams`, { params: { pageSize: 300, ...(classId ? { classId } : {}) } })).data,
+    queryFn: async () => {
+      const res = (await api.get<Paginated<Section & { capacity?: number | null }>>(`${S}/sections`, { params: { pageSize: 300 } })).data;
+      const rows = (res.data ?? []).filter((x) => !classId || x.classId === classId);
+      return { ...res, data: rows.map((x) => ({ id: x.id, classId: x.classId, name: x.name, capacity: x.capacity ?? 0 })) as Stream[] };
+    },
   });
 }
 

@@ -277,8 +277,8 @@ export class AudienceResolverService {
       case 'section':
         return { ...base, ...this.placements.studentWhere({ sectionIds: selector.ids }) };
       case 'stream':
-        // A saved 'stream' audience may hold legacy Stream ids (ADR-029).
-        return { ...base, ...this.placements.studentWhere({ subdivisionIds: selector.ids }) };
+        // A stream IS a section (ADR-029); saved 'stream' audiences hold section ids.
+        return { ...base, ...this.placements.studentWhere({ sectionIds: selector.ids }) };
       case 'house':
         return { ...base, house: { in: selector.ids } };
       case 'residence':
@@ -450,16 +450,9 @@ export class AudienceResolverService {
         );
         break;
       case 'section':
-        await load(
-          await this.prisma.raw.section.findMany({
-            where: { organizationId, id: { in: selector.ids } },
-            select: { id: true, name: true },
-          }),
-        );
-        break;
       case 'stream':
         await load(
-          await this.prisma.raw.stream.findMany({
+          await this.prisma.raw.section.findMany({
             where: { organizationId, id: { in: selector.ids } },
             select: { id: true, name: true },
           }),

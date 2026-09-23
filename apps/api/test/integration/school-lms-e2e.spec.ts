@@ -35,6 +35,7 @@ import { CompletionService } from '../../src/modules/school/lms/moodle/completio
 import { CourseBackupService } from '../../src/modules/school/lms/moodle/backup/course-backup.service';
 import { LmsOrphanCheckService } from '../../src/modules/school/lms/moodle/maintenance/orphan-check.service';
 import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
+import { placeInClass } from './_placement';
 
 describeDb('integration: LMS → assessment → result, end to end', () => {
   const rawUrl = (() => {
@@ -116,9 +117,10 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     studentProfileId = (await raw.studentProfile.create({
       data: {
         organizationId, partnerId: partner.id, admissionNo: `ADM-E2E-${Date.now()}`,
-        currentClassId: classId, enrollmentDate: new Date('2026-01-15'), status: 'active',
+        enrollmentDate: new Date('2026-01-15'), status: 'active',
       },
     })).id;
+    await placeInClass(raw, { organizationId, studentProfileId, classId });
     studentUserId = (await raw.user.create({
       data: { organizationId, email: `pupil-${Date.now()}@example.test`, passwordHash: 'x', firstName: 'Grace', lastName: 'N', isActive: true },
     })).id;
@@ -360,9 +362,10 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     const other = await raw.studentProfile.create({
       data: {
         organizationId, partnerId: otherPartner.id, admissionNo: `ADM-OTH-${Date.now()}`,
-        currentClassId: classId, enrollmentDate: new Date(), status: 'active',
+        enrollmentDate: new Date(), status: 'active',
       },
     });
+    await placeInClass(raw, { organizationId: organizationId, studentProfileId: other.id, classId: classId });
     await expect(
       asStudent(() => modules.view(assignModuleId, { asStudent: other.id })),
     ).rejects.toThrow(/only act as yourself/i);

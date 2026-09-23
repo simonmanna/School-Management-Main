@@ -24,8 +24,15 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EnrollmentController } from '../../src/modules/school/people/enrollment.controller';
-import { EnrollmentService } from '../../src/modules/school/people/enrollment.service';
+import {
+  PlacementController,
+  PromotionRunController,
+  StudentEnrollmentController,
+} from '../../src/modules/school/enrollment/enrollment.controller';
+import { StudentEnrollmentService } from '../../src/modules/school/enrollment/student-enrollment.service';
+import { PlacementService } from '../../src/modules/school/enrollment/placement.service';
+import { PromotionRunService } from '../../src/modules/school/enrollment/promotion-run.service';
+import { IdempotencyService } from '../../src/kernel/idempotency/idempotency.service';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 
 /** Mirrors `main.ts` exactly — if that changes, this must change with it. */
@@ -49,23 +56,35 @@ class AllowAll {
   }
 }
 
-describe('http contract: placement routes survive the global ValidationPipe', () => {
+describe('http contract: enrollment & placement routes survive the global ValidationPipe', () => {
   let app: INestApplication;
-  const service = {
-    register: jest.fn(async (dto: unknown) => ({ ok: true, dto })),
-    enroll: jest.fn(async (dto: unknown) => ({ ok: true, dto })),
-    transferOut: jest.fn(async (_id: string, dto: unknown) => ({ ok: true, dto })),
-    withdraw: jest.fn(async (_id: string, dto: unknown) => ({ ok: true, dto })),
-    reEnroll: jest.fn(async (_id: string, dto: unknown) => ({ ok: true, dto })),
-    list: jest.fn(async () => []),
-    history: jest.fn(async () => []),
+  const ok = (name: string) => jest.fn(async (...args: unknown[]) => ({ ok: true, name, args }));
+  const enrollments = {
+    create: ok('create'),
+    lateAdmission: ok('lateAdmission'),
+    changeStatus: ok('changeStatus'),
+    withdraw: ok('withdraw'),
+    transferOut: ok('transferOut'),
+    suspend: ok('suspend'),
+    complete: ok('complete'),
+    repeat: ok('repeat'),
+    promote: ok('promote'),
+    list: ok('list'),
+    get: ok('get'),
+    forStudent: ok('forStudent'),
   };
+  const placements = { move: ok('move'), preview: ok('preview'), bulkPlace: ok('bulkPlace'), termRollover: ok('termRollover'), roster: ok('roster'), history: ok('history'), placementAt: ok('placementAt') };
+  const promotion = { promote: ok('promote'), rollover: ok('rollover') };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
-      controllers: [EnrollmentController],
+      controllers: [StudentEnrollmentController, PlacementController, PromotionRunController],
       providers: [
-        { provide: EnrollmentService, useValue: service },
+        { provide: StudentEnrollmentService, useValue: enrollments },
+        { provide: PlacementService, useValue: placements },
+        { provide: PromotionRunService, useValue: promotion },
+        // No Idempotency-Key header in these requests: the interceptor just runs the handler.
+        { provide: IdempotencyService, useValue: { execute: async (p: any) => ({ replayed: false, ...(await p.runHandler()) }) } },
         { provide: TenantContextService, useValue: { organizationId: 'org-test', userId: 'user-test' } },
         { provide: APP_GUARD, useClass: AllowAll },
       ],
@@ -82,88 +101,82 @@ describe('http contract: placement routes survive the global ValidationPipe', ()
 
   beforeEach(() => jest.clearAllMocks());
 
-  // ── the regression that started this ──────────────────────────────────────
-
-  it('POST /school/enrollments accepts a well-formed placement and reaches the service', async () => {
-    const body = {
+  it('POST /school/student-enrollments accepts a well-formed enrollment with placement', async () => {
+    const res = await request(app.getHttpServer()).post('/school/student-enrollments').send({
       studentProfileId: 'sp-1',
-      classId: 'class-1',
-      sectionId: 'sec-1',
-      termId: 'term-1',
-      rollNumber: '12',
-    };
-    const res = await request(app.getHttpServer()).post('/school/enrollments').send(body);
-
+      academicYearId: 'y-1',
+      placement: { termId: 'term-1', classId: 'class-1', sectionId: 'sec-1' },
+    });
     expect(res.status).toBe(201);
-    expect(service.enroll).toHaveBeenCalledTimes(1);
-    expect(service.enroll.mock.calls[0][0]).toMatchObject(body);
+    expect(enrollments.create).toHaveBeenCalledTimes(1);
   });
 
-  it('POST /school/enrollments/register accepts the quick register-and-place payload', async () => {
-    const body = {
-      name: 'Sarah Namukasa',
-      classId: 'class-1',
-      termId: 'term-1',
-      rollNumber: '7',
-      streamId: 'stream-1',
-      gender: 'female',
-      residenceType: 'day',
-      guardianName: 'Grace Namukasa',
-      guardianPhone: '+256700000000',
-    };
-    const res = await request(app.getHttpServer()).post('/school/enrollments/register').send(body);
-
-    expect(res.status).toBe(201);
-    expect(service.register).toHaveBeenCalledTimes(1);
-    expect(service.register.mock.calls[0][0]).toMatchObject({ name: 'Sarah Namukasa', classId: 'class-1' });
-  });
-
-  it.each(['transfer-out', 'withdraw', 're-enroll'])(
-    'POST /school/enrollments/:id/%s accepts a reason',
-    async (action) => {
-      const res = await request(app.getHttpServer())
-        .post('/school/enrollments/enr-1/' + action)
-        .send({ reason: 'Family relocated' });
-      expect(res.status).toBe(201);
-    },
-  );
-
-  // ── and the validation it was supposed to be doing all along ──────────────
-
-  it('rejects a placement missing its required fields', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/school/enrollments')
-      .send({ studentProfileId: 'sp-1' });
-
+  it('refuses an enrollment created straight into a terminal status', async () => {
+    const res = await request(app.getHttpServer()).post('/school/student-enrollments').send({
+      studentProfileId: 'sp-1',
+      academicYearId: 'y-1',
+      status: 'WITHDRAWN',
+    });
     expect(res.status).toBe(400);
-    expect(service.enroll).not.toHaveBeenCalled();
+    expect(enrollments.create).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown property rather than silently dropping it', async () => {
-    const res = await request(app.getHttpServer()).post('/school/enrollments').send({
+    const res = await request(app.getHttpServer()).post('/school/student-enrollments').send({
       studentProfileId: 'sp-1',
-      classId: 'class-1',
-      termId: 'term-1',
-      rollNumber: '12',
+      academicYearId: 'y-1',
       currentClassId: 'class-9',
     });
-
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body.message)).toMatch(/currentClassId/);
-    expect(service.enroll).not.toHaveBeenCalled();
+    expect(enrollments.create).not.toHaveBeenCalled();
   });
 
-  it('rejects a gender outside the allowed set', async () => {
-    const res = await request(app.getHttpServer()).post('/school/enrollments/register').send({
-      name: 'Test Pupil',
-      classId: 'class-1',
-      termId: 'term-1',
-      rollNumber: '1',
-      gender: 'not-a-gender',
+  it('rejects admissionApplicationId from an HTTP body (set internally by admissions only)', async () => {
+    const res = await request(app.getHttpServer()).post('/school/student-enrollments').send({
+      studentProfileId: 'sp-1',
+      academicYearId: 'y-1',
+      admissionApplicationId: 'app-1',
     });
-
     expect(res.status).toBe(400);
-    expect(service.register).not.toHaveBeenCalled();
+  });
+
+  it.each(['withdraw', 'transfer-out', 'complete'])('POST /school/student-enrollments/:id/%s needs a reason', async (action) => {
+    const bad = await request(app.getHttpServer()).post(`/school/student-enrollments/e-1/${action}`).send({});
+    expect(bad.status).toBe(400);
+    const good = await request(app.getHttpServer()).post(`/school/student-enrollments/e-1/${action}`).send({ reason: 'Family moved' });
+    expect(good.status).toBe(201);
+  });
+
+  it('POST /:id/suspend accepts an end date', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/school/student-enrollments/e-1/suspend')
+      .send({ reason: 'Conduct', suspendedUntil: '2026-03-01' });
+    expect(res.status).toBe(201);
+    expect(enrollments.suspend).toHaveBeenCalledWith('e-1', expect.objectContaining({ suspendedUntil: '2026-03-01' }));
+  });
+
+  it('POST /school/placements/:id/move reaches the service', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/school/placements/e-1/move')
+      .send({ sectionId: 'sec-2', movementReason: 'SECTION_CHANGE', reason: 'Balancing streams' });
+    expect(res.status).toBe(201);
+    expect(placements.move).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /school/promotion/rollover and /promote reach the promotion service', async () => {
+    const r1 = await request(app.getHttpServer())
+      .post('/school/promotion/rollover')
+      .send({ fromTermId: 't-1', toTermId: 't-2', dryRun: true });
+    expect(r1.status).toBe(201);
+    const r2 = await request(app.getHttpServer())
+      .post('/school/promotion/promote')
+      .send({ studentProfileId: 'sp-1', toTermId: 't-2', outcome: 'repeated' });
+    expect(r2.status).toBe(201);
+    const bad = await request(app.getHttpServer())
+      .post('/school/promotion/promote')
+      .send({ studentProfileId: 'sp-1', toTermId: 't-2', outcome: 'skipped' });
+    expect(bad.status).toBe(400);
   });
 });
 

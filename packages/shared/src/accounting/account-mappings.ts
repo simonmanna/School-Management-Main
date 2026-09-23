@@ -455,6 +455,38 @@ export const ACCOUNT_MAPPING_REGISTRY: readonly AccountMappingDef[] = [
       required: true,
       description: 'Loans extended to employees, recoverable from future pay.',
     },
+    {
+      key: 'employer_contribution_expense',
+      label: 'Employer Statutory Contributions',
+      group: 'hr',
+      expectedCategories: ['operating_expense'],
+      required: true,
+      description: 'Employer share of pension / social security (e.g. NSSF 10%) — a cost on top of gross pay.',
+    },
+    {
+      key: 'local_tax_payable',
+      label: 'Local Service Tax Payable',
+      group: 'hr',
+      expectedCategories: ['current_liability'],
+      required: true,
+      description: 'Local service tax withheld from staff and owed to the local government.',
+    },
+    {
+      key: 'other_deductions_payable',
+      label: 'Payroll Deductions Payable',
+      group: 'hr',
+      expectedCategories: ['current_liability'],
+      required: true,
+      description: 'Deductions owed onward to third parties — union dues, SACCO, welfare.',
+    },
+    {
+      key: 'staff_loan_interest_income',
+      label: 'Staff Loan Interest Income',
+      group: 'hr',
+      expectedCategories: ['other_income', 'revenue'],
+      required: true,
+      description: 'Interest charged on staff loans.',
+    },
   ];
 
 export const ACCOUNT_MAPPING_KEYS: string[] = ACCOUNT_MAPPING_REGISTRY.map((m) => m.key);

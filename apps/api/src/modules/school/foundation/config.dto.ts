@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsArray, Min } from 'class-validator';
+import { Allow, IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsArray, Min } from 'class-validator';
 
 /* ── SchoolCalendarEvent ─────────────────────────────────────────────────── */
 export class CreateCalendarEventDto {
@@ -25,15 +25,16 @@ export class CreateSchoolPolicyDto {
   @IsString() @IsNotEmpty() key!: string;
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsString() category?: string;
-  // value accepted as any JSON-serialisable payload
-  value!: unknown;
+  /** Any JSON-serialisable payload. `@Allow` whitelists it; without a decorator the
+   *  global ValidationPipe rejected every request as carrying a forbidden property. */
+  @Allow() value!: unknown;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 export class UpdateSchoolPolicyDto {
   @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsString() category?: string;
-  value?: unknown;
+  @Allow() value?: unknown;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }

@@ -126,19 +126,12 @@ export async function ensureAcademicSpine(raw: any, opts: SpineOptions): Promise
         code: programmeCode,
         name: 'Integration fixture programme',
         stage: 'OTHER',
-        groupingMode: opts.sectionName ? 'SECTION_ONLY' : 'NONE',
         effectiveFrom: new Date(yearName + '-01-01'),
       },
     }));
 
-  // A grade level belongs to exactly one programme per organization
-  // (@@unique([organizationId, gradeLevelId])), so this is an upsert rather than
-  // a create: a spec that builds two classes in the same grade must not collide.
-  await raw.programmeGradeLevel.upsert({
-    where: { organizationId_gradeLevelId: { organizationId, gradeLevelId: grade.id } },
-    update: {},
-    create: { organizationId, programmeId: programme.id, gradeLevelId: grade.id },
-  });
+  // ADR-028: grade -> academic level -> default programme.
+  await ensureProgrammeRoute(raw, organizationId, grade.id, programme.id);
 
   const cohort =
     (await raw.classCohort.findFirst({
@@ -237,16 +230,112 @@ export async function linkLearner(raw: any, opts: LinkOptions): Promise<LearnerP
     },
   });
 
-  // ---- Projection sync. Delete this block when the columns are dropped. ----
-  await raw.studentProfile.updateMany({
-    where: { id: studentProfileId },
-    data: { currentClassId: spine.classId, currentSectionId: sectionId },
-  });
-
   return {
     enrollmentId: enrollment.id,
     placementId: placement.id,
     classId: spine.classId,
     sectionId,
   };
+}
+
+/**
+ * Place a learner in an EXISTING class (the fixtures that build their own
+ * GradeLevel/SchoolClass). Finds or creates the rest of the spine around that
+ * class — current year, first term, programme, annual cohort — then links the
+ * learner exactly like `linkLearner`. Replaces the dropped
+ * `StudentProfile.currentClassId` fixture write.
+ */
+export async function placeInClass(
+  raw: any,
+  opts: { organizationId: string; studentProfileId: string; classId: string; sectionId?: string | null; effectiveFrom?: Date },
+): Promise<LearnerPlacement> {
+  const { organizationId, classId } = opts;
+  const cls = await raw.schoolClass.findFirst({ where: { id: classId, organizationId } });
+  if (!cls) throw new Error(`placeInClass: class ${classId} not found in ${organizationId}`);
+  const yearName = String(new Date().getFullYear());
+  const year =
+    (await raw.academicYear.findFirst({ where: { organizationId, isCurrent: true, deletedAt: null } })) ??
+    (await raw.academicYear.findFirst({ where: { organizationId, name: yearName } })) ??
+    (await raw.academicYear.create({
+      data: {
+        organizationId,
+        name: yearName,
+        startDate: new Date(yearName + '-01-01'),
+        endDate: new Date(yearName + '-12-31'),
+        isCurrent: true,
+        status: 'ACTIVE',
+      },
+    }));
+  const term =
+    (await raw.term.findFirst({ where: { organizationId, academicYearId: year.id, isCurrent: true } })) ??
+    (await raw.term.findFirst({ where: { organizationId, academicYearId: year.id }, orderBy: { startDate: 'asc' } })) ??
+    (await raw.term.create({
+      data: {
+        organizationId,
+        academicYearId: year.id,
+        name: 'Term 1',
+        startDate: year.startDate,
+        endDate: year.endDate,
+        isCurrent: true,
+      },
+    }));
+  const programme =
+    (await raw.academicProgramme.findFirst({ where: { organizationId, code: 'FIXTURE' } })) ??
+    (await raw.academicProgramme.create({
+      data: { organizationId, code: 'FIXTURE', name: 'Fixture programme', isActive: true, effectiveFrom: new Date('2000-01-01') },
+    }));
+  const cohort =
+    (await raw.classCohort.findFirst({ where: { organizationId, academicYearId: year.id, classId } })) ??
+    (await raw.classCohort.create({
+      data: { organizationId, academicYearId: year.id, classId, programmeId: programme.id, status: 'ACTIVE' },
+    }));
+  return linkLearner(raw, {
+    spine: {
+      organizationId,
+      academicYearId: year.id,
+      termId: term.id,
+      gradeLevelId: cls.gradeLevelId,
+      classId,
+      sectionId: opts.sectionId ?? null,
+      programmeId: programme.id,
+      classCohortId: cohort.id,
+    },
+    studentProfileId: opts.studentProfileId,
+    sectionId: opts.sectionId ?? null,
+    effectiveFrom: opts.effectiveFrom ?? (term.startDate < new Date() ? term.startDate : new Date()),
+  });
+}
+
+/**
+ * Give a grade level a route to a programme (ADR-028: grade -> academic level
+ * -> default programme), which enrollment needs to resolve the programme. For
+ * fixtures that create bare GradeLevels. Idempotent.
+ */
+export async function ensureProgrammeRoute(
+  raw: any,
+  organizationId: string,
+  gradeLevelId: string,
+  programmeId?: string,
+): Promise<string> {
+  const grade = await raw.gradeLevel.findFirst({ where: { id: gradeLevelId }, select: { academicLevelId: true } });
+  const programme =
+    (programmeId && (await raw.academicProgramme.findFirst({ where: { id: programmeId } }))) ||
+    (await raw.academicProgramme.findFirst({ where: { organizationId, code: 'FIXTURE' } })) ||
+    (await raw.academicProgramme.create({
+      data: { organizationId, code: 'FIXTURE', name: 'Fixture programme', isActive: true, effectiveFrom: new Date('2000-01-01') },
+    }));
+  if (grade?.academicLevelId) {
+    await raw.academicLevel.updateMany({
+      where: { id: grade.academicLevelId, defaultProgrammeId: null },
+      data: { defaultProgrammeId: programme.id },
+    });
+    return programme.id;
+  }
+  const level =
+    (await raw.academicLevel.findFirst({ where: { organizationId, code: 'FIXTURE' } })) ??
+    (await raw.academicLevel.create({
+      data: { organizationId, code: 'FIXTURE', name: 'Fixture level', defaultProgrammeId: programme.id },
+    }));
+  await raw.gradeLevel.update({ where: { id: gradeLevelId }, data: { academicLevelId: level.id } });
+  return programme.id;
 }

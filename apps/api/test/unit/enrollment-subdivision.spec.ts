@@ -1,5 +1,4 @@
 import {
-  legacyModeFor,
   resolveAllowsSubdivision,
   validateSubdivision,
 } from '../../src/modules/school/enrollment/subdivision';
@@ -79,11 +78,6 @@ describe('validateSubdivision', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('refuses a legacy stream id outright', () => {
-    const r = validateSubdivision({ ...base, sectionId: north.id, section: north, streamId: 'stream_x' });
-    expect(r.ok).toBe(false);
-    expect(r.errors.join(' ')).toMatch(/ADR-029/);
-  });
 
   it('speaks the school\'s own word for a subdivision', () => {
     const r = validateSubdivision({ ...base, sectionId: null, label: 'House' });
@@ -95,9 +89,8 @@ describe('validateSubdivision', () => {
       ...base,
       sectionId: retired.id,
       section: { ...retired, classId: 'class_p5' },
-      streamId: 'stream_x',
     });
-    expect(r.errors.length).toBeGreaterThanOrEqual(3);
+    expect(r.errors.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -112,19 +105,8 @@ describe('resolveAllowsSubdivision', () => {
     expect(resolveAllowsSubdivision({ classAllowsStreams: true })).toBe(true);
   });
 
-  it('honours a legacy NONE mode while that column still exists', () => {
-    expect(resolveAllowsSubdivision({ classAllowsStreams: true, legacyMode: 'NONE' })).toBe(false);
-    expect(resolveAllowsSubdivision({ classAllowsStreams: true, legacyMode: 'SECTION_AND_STREAM' })).toBe(true);
-  });
 
   it('defaults to subdivided', () => {
     expect(resolveAllowsSubdivision({})).toBe(true);
-  });
-});
-
-describe('legacyModeFor', () => {
-  it('maps the boolean back to the value the current web client reads', () => {
-    expect(legacyModeFor(true)).toBe('SECTION_ONLY');
-    expect(legacyModeFor(false)).toBe('NONE');
   });
 });

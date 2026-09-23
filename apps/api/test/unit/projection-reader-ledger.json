@@ -1,13 +1,4 @@
 [
   "modules/communication/audience/audience-resolver.service.spec.ts",
-  "modules/school/enrollment/enrollment-backfill.service.ts",
-  "modules/school/enrollment/placement-lookup.module.ts",
-  "modules/school/enrollment/placement-lookup.service.ts",
-  "modules/school/enrollment/placement.service.ts",
-  "modules/school/enrollment/projection-parity.service.ts",
-  "modules/school/fees/advanced.service.ts",
-  "modules/school/people/dto.types.ts",
-  "modules/school/people/enrollment.service.ts",
-  "modules/school/people/promotion.service.ts",
-  "modules/school/people/student.service.ts"
+  "modules/school/enrollment/placement-lookup.module.ts"
 ]

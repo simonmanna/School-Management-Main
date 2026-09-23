@@ -1,6 +1,14 @@
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { CurriculumService } from '../../src/modules/school/academics/academics.service';
-import { EnrollmentService } from '../../src/modules/school/people/enrollment.service';
+import {
+  canTransition,
+  CREATABLE_STATUSES,
+  ENROLLMENT_STATUSES,
+  holdsPlacement,
+  isReactivation,
+  profileStatusFor,
+} from '../../src/modules/school/enrollment/enrollment-fsm';
+import { assertStaffTransition, LEAVING_STATUSES } from '../../src/modules/school/people/staff-lifecycle';
 import { AuditService } from '../../src/kernel/audit/audit.service';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../src/kernel/events/event-bus';
@@ -37,19 +45,6 @@ function makeCurriculumService(curRow: any | null, handlers: Record<string, any>
   const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any;
   const service = new CurriculumService({ client } as any, tenant, audit, events);
   void handlers;
-  return { service, audit, events };
-}
-
-function makeEnrollmentService(enrRow: any | null) {
-  const { client } = mockPrisma({ enrollment: { findFirst: async () => enrRow } });
-  const tenant = { organizationId: 'org_test', userId: 'user_1' } as any;
-  const audit = { recordInTx: jest.fn(async () => undefined) } as any;
-  const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) } as any;
-  // SequenceService is the fifth constructor argument. It was added and this call
-  // was not updated, so the whole file stopped compiling (TS2554) and every test
-  // in it silently stopped running — the same rot that had killed admission-fsm.spec.
-  const sequence = { next: jest.fn(async () => 'STU-000001') } as any;
-  const service = new EnrollmentService({ client } as any, tenant, audit, events, sequence);
   return { service, audit, events };
 }
 
@@ -98,59 +93,49 @@ describe('CurriculumService — version lifecycle (immutable published versions)
   });
 });
 
-// ── Enrollment history (first-class historical entity) ────────────────────
-describe('EnrollmentService — enrollment history FSM', () => {
-  it('enrolls and records an initial history row', async () => {
-    const { service, events } = makeEnrollmentService(null);
-    const res = await service.enroll({
-      studentProfileId: 's1', classId: 'c1', sectionId: 'sec1', streamId: 'st1',
-      termId: 't1', rollNumber: 'R1',
-    });
-    expect(res.status).toBe('enrolled');
-    expect(events.publishInTx).toHaveBeenCalled();
+// ── Enrollment & staff lifecycles (pure state machines) ────────────────────
+describe('Enrollment FSM', () => {
+  it('only PENDING and ACTIVE may be created directly', () => {
+    expect([...CREATABLE_STATUSES].sort()).toEqual(['ACTIVE', 'PENDING']);
   });
 
-  it('rejects a second active enrollment for the same student+term (concurrency)', async () => {
-    const { service } = makeEnrollmentService(null, );
-    // Simulate existing active enrollment by stubbing the findFirst inside the tx.
-    (service as any).prisma = {
-      client: {
-        $transaction: jest.fn(async (cb: any) => cb({
-          enrollment: { findFirst: jest.fn(async () => ({ id: 'existing', status: 'enrolled' })), create: jest.fn(), createMany: jest.fn(), updateMany: jest.fn() },
-          enrollmentHistory: { create: jest.fn() },
-          studentProfile: { updateMany: jest.fn() },
-        })),
-      },
-    } as any;
-    await expect(service.enroll({ studentProfileId: 's1', classId: 'c1', termId: 't1', rollNumber: 'R1' }))
-      .rejects.toThrow(BadRequestException);
+  it('WITHDRAWN -> ACTIVE is a reactivation (needs its own grant); SUSPENDED -> ACTIVE is not', () => {
+    expect(canTransition('WITHDRAWN', 'ACTIVE')).toBe(true);
+    expect(isReactivation('WITHDRAWN', 'ACTIVE')).toBe(true);
+    expect(isReactivation('TRANSFERRED', 'ACTIVE')).toBe(true);
+    expect(isReactivation('SUSPENDED', 'ACTIVE')).toBe(false);
   });
 
-  it('transfers out an active enrollment and appends history', async () => {
-    const { service } = makeEnrollmentService({ id: 'e1', status: 'enrolled' });
-    const res = await service.transferOut('e1', { reason: 'moved schools' });
-    expect(res.status).toBe('transferred_out');
+  it('COMPLETED and CANCELLED are terminal', () => {
+    for (const to of ENROLLMENT_STATUSES) {
+      expect(canTransition('COMPLETED', to)).toBe(false);
+      expect(canTransition('CANCELLED', to)).toBe(false);
+    }
   });
 
-  it('rejects transferring an already-withdrawn enrollment', async () => {
-    const { service } = makeEnrollmentService({ id: 'e1', status: 'withdrawn' });
-    await expect(service.transferOut('e1', { reason: 'x' })).rejects.toThrow(BadRequestException);
+  it('only seat-holding statuses keep an open placement', () => {
+    expect(holdsPlacement('ACTIVE')).toBe(true);
+    expect(holdsPlacement('SUSPENDED')).toBe(true);
+    expect(holdsPlacement('WITHDRAWN')).toBe(false);
   });
 
-  it('withdraws an active enrollment', async () => {
-    const { service } = makeEnrollmentService({ id: 'e1', status: 'enrolled' });
-    const res = await service.withdraw('e1', { reason: 'left' });
-    expect(res.status).toBe('withdrawn');
+  it('a completed membership projects to graduated, not the legacy alumni value', () => {
+    expect(profileStatusFor('COMPLETED')).toBe('graduated');
+  });
+});
+
+describe('Staff lifecycle FSM', () => {
+  it('allows leaving from active and re-hire from a leaving status', () => {
+    expect(() => assertStaffTransition('active', 'resigned')).not.toThrow();
+    expect(() => assertStaffTransition('terminated', 'active')).not.toThrow();
   });
 
-  it('re-enrolls a withdrawn enrollment', async () => {
-    const { service } = makeEnrollmentService({ id: 'e1', status: 'withdrawn' });
-    const res = await service.reEnroll('e1', { reason: 'returned' });
-    expect(res.status).toBe('enrolled');
+  it('refuses nonsense jumps', () => {
+    expect(() => assertStaffTransition('suspended', 'retired')).toThrow(BadRequestException);
+    expect(() => assertStaffTransition('resigned', 'on_leave')).toThrow(BadRequestException);
   });
 
-  it('rejects re-enrolling an already-active enrollment', async () => {
-    const { service } = makeEnrollmentService({ id: 'e1', status: 'enrolled' });
-    await expect(service.reEnroll('e1', { reason: 'x' })).rejects.toThrow(BadRequestException);
+  it('marks terminated / resigned / retired as leaving', () => {
+    expect([...LEAVING_STATUSES].sort()).toEqual(['resigned', 'retired', 'terminated']);
   });
 });

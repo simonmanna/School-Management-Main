@@ -123,10 +123,6 @@ export class GradeLevelService extends AuditedCrudService<
         label: 'grade level(s) that promote into it',
         count: () => tx.gradeLevel.count({ where: { nextGradeLevelId: id, deletedAt: null } }),
       },
-      {
-        label: 'programme link(s)',
-        count: () => tx.programmeGradeLevel.count({ where: { gradeLevelId: id } }),
-      },
     ]);
     if (blockers.length > 0) throw this.blockedByHistory(blockers);
   }

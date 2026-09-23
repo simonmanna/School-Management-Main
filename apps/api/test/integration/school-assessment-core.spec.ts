@@ -108,7 +108,7 @@ describeDb('integration: A1 assessment core', () => {
   });
 
   const makeStudent = (admissionNo: string) =>
-    asUser('registrar', () => students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', currentClassId: classId } as any)) as Promise<any>;
+    asUser('registrar', () => students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', classId } as any)) as Promise<any>;
 
   it('A1-policy: resolves the most-specific matching policy', async () => {
     // Org-wide default + a subject+class specific one.

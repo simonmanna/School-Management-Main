@@ -22,7 +22,7 @@ import { PaginationDto } from '../../../kernel/common/pagination.dto';
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
 const STUDENT_STATUS = ['applicant', 'active', 'suspended', 'transferred', 'withdrawn', 'graduated', 'deceased', 'archived', 'alumni'] as const;
-const STAFF_STATUS = ['active', 'on_leave', 'suspended', 'terminated', 'retired'] as const;
+const STAFF_STATUS = ['active', 'on_leave', 'suspended', 'inactive', 'terminated', 'resigned', 'retired'] as const;
 const RELATIONSHIP = ['father', 'mother', 'uncle', 'aunt', 'sibling', 'grandparent', 'guardian', 'other'] as const;
 const CONTRACT = ['permanent', 'contract', 'temporary', 'probation'] as const;
 const STAFF_CATEGORY = ['teaching', 'non_teaching', 'admin', 'support'] as const;
@@ -43,6 +43,12 @@ export class CreateStudentDto {
 
   @IsString() @IsNotEmpty() admissionNo!: string;
   @IsString() @IsNotEmpty() enrollmentDate!: string;
+  /**
+   * Create the record even though a learner with the same name and date of
+   * birth already exists (twins with the same name are rare but real). Without
+   * it, a likely duplicate is refused with the candidates listed.
+   */
+  @IsOptional() @IsBoolean() allowDuplicate?: boolean;
   /** Admit straight into a class. Creates the enrollment and opening placement. */
   @IsOptional() @IsString() classId?: string;
   /** The class's stream (section), when the class is divided. */
@@ -105,9 +111,16 @@ export class GuardianContactInput {
 export class CreateGuardianDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
 
+  /**
+   * Link an EXISTING guardian (e.g. a sibling's parent) instead of creating a
+   * new contact. One parent, one record — however many children they have.
+   */
+  @IsOptional() @IsString() guardianContactId?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => GuardianContactInput)
-  guardian!: GuardianContactInput;
+  guardian?: GuardianContactInput;
 
   @IsIn([...RELATIONSHIP]) relationship!: (typeof RELATIONSHIP)[number];
   @IsOptional() @IsBoolean() isPrimary?: boolean;

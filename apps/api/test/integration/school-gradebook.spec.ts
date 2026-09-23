@@ -19,6 +19,7 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { GradebookService } from '../../src/modules/school/assessment/gradebook.service';
+import { placeInClass } from './_placement';
 
 describeDb('integration: gradebook — one weighted total, editable columns', () => {
   const rawUrl = (() => {
@@ -67,8 +68,9 @@ describeDb('integration: gradebook — one weighted total, editable columns', ()
     for (const name of ['Abbo Faith', 'Bosco John']) {
       const partner = await raw.partner.create({ data: { organizationId, name, code: `P-GB-${name.replace(/\s+/g, '')}-${Date.now()}` } });
       const sp = await raw.studentProfile.create({
-        data: { organizationId, partnerId: partner.id, admissionNo: `ADM-GB-${studentIds.length}-${Date.now()}`, currentClassId: classId, enrollmentDate: new Date('2026-01-15'), status: 'active' },
+        data: { organizationId, partnerId: partner.id, admissionNo: `ADM-GB-${studentIds.length}-${Date.now()}`, enrollmentDate: new Date('2026-01-15'), status: 'active' },
       });
+      await placeInClass(raw, { organizationId, studentProfileId: sp.id, classId });
       studentIds.push(sp.id);
     }
 

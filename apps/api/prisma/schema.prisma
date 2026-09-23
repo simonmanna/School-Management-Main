@@ -8812,6 +8812,7 @@ enum HrBankPaymentStatus {
   GENERATED
   SENT
   PAID
+  CANCELLED
 }
 
 enum HrReviewStatus {
@@ -9123,6 +9124,8 @@ model HrLeaveType {
   /// Hard ceiling on accrued days, so an employee who never takes leave does not
   /// accumulate an unbounded liability on the school's books. Null = no cap.
   maxBalanceDays           Int?
+  /// Unused days of this type are paid out on exit (annual leave, typically).
+  isEncashable             Boolean              @default(false)
   createdAt                DateTime             @default(now())
   updatedAt                DateTime             @updatedAt
   createdBy                String?
@@ -9238,23 +9241,29 @@ model HrHoliday {
 }
 
 model HrPayrollComponent {
-  id             String                 @id @default(uuid())
-  organizationId String
-  code           String
-  name           String
-  componentType  HrPayrollComponentType
-  calcMethod     HrPayrollCalcMethod    @default(FIXED)
-  amount         Decimal?               @db.Decimal(20, 6)
-  rate           Decimal?               @db.Decimal(10, 6)
-  isTaxable      Boolean                @default(true)
-  isRecurring    Boolean                @default(true)
-  appliesTo      String?
-  isActive       Boolean                @default(true)
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id                String                 @id @default(uuid())
+  organizationId    String
+  code              String
+  name              String
+  componentType     HrPayrollComponentType
+  calcMethod        HrPayrollCalcMethod    @default(FIXED)
+  amount            Decimal?               @db.Decimal(20, 6)
+  rate              Decimal?               @db.Decimal(10, 6)
+  isTaxable         Boolean                @default(true)
+  isRecurring       Boolean                @default(true)
+  appliesTo         String?
+  /// What a DEDUCTION is, and so where its credit posts:
+  ///   PENSION | SOCIAL_SECURITY | INSURANCE — the matching payable;
+  ///   OTHER_PAYABLE — owed onward (union dues, SACCO) → other_deductions_payable;
+  ///   RECOVERY — money the school takes back (staff shop, damage) → contra salary expense.
+  /// Null falls back to the legacy code-substring classification.
+  deductionCategory String?
+  isActive          Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  createdBy         String?
+  updatedBy         String?
+  deletedAt         DateTime?
 
   salaryStructures HrSalaryStructure[]
 
@@ -9263,19 +9272,26 @@ model HrPayrollComponent {
 }
 
 model HrTaxTable {
-  id             String    @id @default(uuid())
-  organizationId String
-  code           String
-  name           String
-  countryCode    String?
-  taxType        HrTaxType @default(PAYE)
-  effectiveFrom  DateTime
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id                      String    @id @default(uuid())
+  organizationId          String
+  code                    String
+  name                    String
+  countryCode             String?
+  taxType                 HrTaxType @default(PAYE)
+  effectiveFrom           DateTime
+  /// PAYE: do employee pension / social-security contributions reduce the PAYE
+  /// base? Country law, not a preference — Uganda: NO (NSSF is not deductible);
+  /// Kenya: yes (pension relief). LOCAL: does this charge reduce the PAYE base?
+  contributionsDeductible Boolean   @default(false)
+  /// LOCAL tables only: calendar months (1–12) the annual charge is collected
+  /// in, comma separated — Uganda LST is "7,8,9,10". Null = every month.
+  collectionMonths        String?
+  isActive                Boolean   @default(true)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  createdBy               String?
+  updatedBy               String?
+  deletedAt               DateTime?
 
   brackets HrTaxBracket[]
 
@@ -9290,6 +9306,8 @@ model HrTaxBracket {
   fromAmount     Decimal   @db.Decimal(20, 6)
   toAmount       Decimal?  @db.Decimal(20, 6)
   rate           Decimal   @db.Decimal(10, 6)
+  /// LOCAL tables: a fixed ANNUAL charge for the band instead of a rate.
+  fixedAmount    Decimal?  @db.Decimal(20, 6)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -9351,44 +9369,55 @@ model HrPayrollRun {
 }
 
 model HrPayrollItem {
-  id                   String    @id @default(uuid())
-  organizationId       String
-  runId                String
-  employeeId           String
-  baseSalary           Decimal   @default(0) @db.Decimal(20, 6)
-  hourlyRate           Decimal   @default(0) @db.Decimal(20, 6)
-  regularHours         Int       @default(0)
-  overtimeHours        Int       @default(0)
-  overtimePay          Decimal   @default(0) @db.Decimal(20, 6)
-  allowancesTotal      Decimal   @default(0) @db.Decimal(20, 6)
-  commissionAmount     Decimal   @default(0) @db.Decimal(20, 6)
-  bonusAmount          Decimal   @default(0) @db.Decimal(20, 6)
-  grossPay             Decimal   @default(0) @db.Decimal(20, 6)
-  taxAmount            Decimal   @default(0) @db.Decimal(20, 6)
-  pensionAmount        Decimal   @default(0) @db.Decimal(20, 6)
-  socialSecurityAmount Decimal   @default(0) @db.Decimal(20, 6)
-  loanDeduction        Decimal   @default(0) @db.Decimal(20, 6)
-  advanceDeduction     Decimal   @default(0) @db.Decimal(20, 6)
-  insuranceAmount      Decimal   @default(0) @db.Decimal(20, 6)
-  otherDeductions      Decimal   @default(0) @db.Decimal(20, 6)
-  totalDeductions      Decimal   @default(0) @db.Decimal(20, 6)
-  netPay               Decimal   @default(0) @db.Decimal(20, 6)
-  absenceDays          Decimal   @default(0) @db.Decimal(10, 2)
+  id                           String    @id @default(uuid())
+  organizationId               String
+  runId                        String
+  employeeId                   String
+  baseSalary                   Decimal   @default(0) @db.Decimal(20, 6)
+  hourlyRate                   Decimal   @default(0) @db.Decimal(20, 6)
+  regularHours                 Int       @default(0)
+  overtimeHours                Int       @default(0)
+  overtimePay                  Decimal   @default(0) @db.Decimal(20, 6)
+  allowancesTotal              Decimal   @default(0) @db.Decimal(20, 6)
+  commissionAmount             Decimal   @default(0) @db.Decimal(20, 6)
+  bonusAmount                  Decimal   @default(0) @db.Decimal(20, 6)
+  grossPay                     Decimal   @default(0) @db.Decimal(20, 6)
+  taxAmount                    Decimal   @default(0) @db.Decimal(20, 6)
+  pensionAmount                Decimal   @default(0) @db.Decimal(20, 6)
+  socialSecurityAmount         Decimal   @default(0) @db.Decimal(20, 6)
+  loanDeduction                Decimal   @default(0) @db.Decimal(20, 6)
+  advanceDeduction             Decimal   @default(0) @db.Decimal(20, 6)
+  insuranceAmount              Decimal   @default(0) @db.Decimal(20, 6)
+  otherDeductions              Decimal   @default(0) @db.Decimal(20, 6)
+  /// The part of `otherDeductions` owed onward to a third party (union, SACCO),
+  /// posted to other_deductions_payable. The rest is a recovery by the school.
+  otherPayableAmount           Decimal   @default(0) @db.Decimal(20, 6)
+  /// Local service tax withheld this period.
+  localTaxAmount               Decimal   @default(0) @db.Decimal(20, 6)
+  totalDeductions              Decimal   @default(0) @db.Decimal(20, 6)
+  netPay                       Decimal   @default(0) @db.Decimal(20, 6)
+  /// The PAYE base actually taxed this period — what the PAYE return reports.
+  taxableIncome                Decimal   @default(0) @db.Decimal(20, 6)
+  /// Employer statutory contributions. A cost to the school, NOT part of the
+  /// employee's deductions: posted Dr employer_contribution_expense.
+  employerPensionAmount        Decimal   @default(0) @db.Decimal(20, 6)
+  employerSocialSecurityAmount Decimal   @default(0) @db.Decimal(20, 6)
+  absenceDays                  Decimal   @default(0) @db.Decimal(10, 2)
   /// Calendar days in the payroll period. Denominator of the pro-rata factor,
   /// stored so an old payslip can still be explained after the period is gone.
-  periodDays           Int       @default(0)
+  periodDays                   Int       @default(0)
   /// Days the employee was actually on the payroll and paid: period days minus
   /// days before hire, after last working day, and on unpaid leave.
-  paidDays             Decimal   @default(0) @db.Decimal(10, 2)
+  paidDays                     Decimal   @default(0) @db.Decimal(10, 2)
   /// paidDays / periodDays. 1 for a full-month employee. Applied to base salary
   /// and to FIXED allowances, never to hourly pay (hours are already actual).
-  proRataFactor        Decimal   @default(1) @db.Decimal(10, 6)
-  unpaidLeaveDays      Decimal   @default(0) @db.Decimal(10, 2)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  createdBy            String?
-  updatedBy            String?
-  deletedAt            DateTime?
+  proRataFactor                Decimal   @default(1) @db.Decimal(10, 6)
+  unpaidLeaveDays              Decimal   @default(0) @db.Decimal(10, 2)
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  createdBy                    String?
+  updatedBy                    String?
+  deletedAt                    DateTime?
 
   run        HrPayrollRun         @relation(fields: [runId], references: [id])
   employee   HrEmployee           @relation(fields: [employeeId], references: [id])
@@ -9407,6 +9436,12 @@ model HrPayrollAllowance {
   name           String
   amount         Decimal   @db.Decimal(20, 6)
   isTaxable      Boolean   @default(true)
+  /// What produced this line: COMPONENT | INPUT | LOAN | ADVANCE | STATUTORY |
+  /// PAYE | LOCAL_TAX. With `sourceId` it is how approval and reversal settle
+  /// exactly the loan, advance or input this line took — never "the employee's
+  /// total", which double-counted anyone with two loans.
+  sourceType     String?
+  sourceId       String?
   createdAt      DateTime  @default(now())
   createdBy      String?
   deletedAt      DateTime?
@@ -9414,6 +9449,7 @@ model HrPayrollAllowance {
   item HrPayrollItem @relation(fields: [itemId], references: [id])
 
   @@index([organizationId, itemId])
+  @@index([organizationId, sourceType, sourceId])
 }
 
 model HrPayrollDeduction {
@@ -9423,6 +9459,12 @@ model HrPayrollDeduction {
   name           String
   amount         Decimal   @db.Decimal(20, 6)
   isTaxable      Boolean   @default(true)
+  /// What produced this line: COMPONENT | INPUT | LOAN | ADVANCE | STATUTORY |
+  /// PAYE | LOCAL_TAX. With `sourceId` it is how approval and reversal settle
+  /// exactly the loan, advance or input this line took — never "the employee's
+  /// total", which double-counted anyone with two loans.
+  sourceType     String?
+  sourceId       String?
   createdAt      DateTime  @default(now())
   createdBy      String?
   deletedAt      DateTime?
@@ -9430,6 +9472,7 @@ model HrPayrollDeduction {
   item HrPayrollItem @relation(fields: [itemId], references: [id])
 
   @@index([organizationId, itemId])
+  @@index([organizationId, sourceType, sourceId])
 }
 
 /// One-off payroll money for a single employee in a single period.
@@ -9470,19 +9513,23 @@ model HrPayrollInput {
 }
 
 model HrPayslip {
-  id             String           @id @default(uuid())
-  organizationId String
-  payslipNumber  String
-  itemId         String           @unique
-  status         HrPayslipStatus  @default(DRAFT)
-  issuedAt       DateTime?
-  paymentMethod  HrPaymentMethod?
-  paidAt         DateTime?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id                    String           @id @default(uuid())
+  organizationId        String
+  payslipNumber         String
+  itemId                String           @unique
+  status                HrPayslipStatus  @default(DRAFT)
+  issuedAt              DateTime?
+  paymentMethod         HrPaymentMethod?
+  paidAt                DateTime?
+  /// Journal that cleared this slip's net pay (Dr net pay payable, Cr bank/cash).
+  paymentJournalEntryId String?
+  /// Set when the slip was paid through a bank payment batch.
+  bankPaymentId         String?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  createdBy             String?
+  updatedBy             String?
+  deletedAt             DateTime?
 
   item HrPayrollItem @relation(fields: [itemId], references: [id])
 
@@ -9491,25 +9538,28 @@ model HrPayslip {
 }
 
 model HrSalaryAdvance {
-  id                String          @id @default(uuid())
-  organizationId    String
-  advanceCode       String
-  employeeId        String
-  amount            Decimal         @db.Decimal(20, 6)
-  installmentMonths Int             @default(3)
-  monthlyDeduction  Decimal         @default(0) @db.Decimal(20, 6)
-  balance           Decimal         @default(0) @db.Decimal(20, 6)
-  status            HrAdvanceStatus @default(PENDING)
-  requestedById     String?
-  approvedById      String?
-  approvedAt        DateTime?
-  paidAt            DateTime?
-  notes             String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  createdBy         String?
-  updatedBy         String?
-  deletedAt         DateTime?
+  id                         String           @id @default(uuid())
+  organizationId             String
+  advanceCode                String
+  employeeId                 String
+  amount                     Decimal          @db.Decimal(20, 6)
+  installmentMonths          Int              @default(3)
+  monthlyDeduction           Decimal          @default(0) @db.Decimal(20, 6)
+  balance                    Decimal          @default(0) @db.Decimal(20, 6)
+  status                     HrAdvanceStatus  @default(PENDING)
+  requestedById              String?
+  approvedById               String?
+  approvedAt                 DateTime?
+  paidAt                     DateTime?
+  paymentMethod              HrPaymentMethod?
+  /// Dr employee_advance_receivable, Cr bank/cash — posted when paid out.
+  disbursementJournalEntryId String?
+  notes                      String?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  createdBy                  String?
+  updatedBy                  String?
+  deletedAt                  DateTime?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
 
@@ -9519,25 +9569,30 @@ model HrSalaryAdvance {
 }
 
 model HrEmployeeLoan {
-  id                String       @id @default(uuid())
-  organizationId    String
-  loanCode          String
-  employeeId        String
-  principal         Decimal      @db.Decimal(20, 6)
-  interestRate      Decimal      @default(0) @db.Decimal(10, 6)
-  totalPayable      Decimal      @default(0) @db.Decimal(20, 6)
-  installmentAmount Decimal      @default(0) @db.Decimal(20, 6)
-  installmentsTotal Int          @default(1)
-  installmentsPaid  Int          @default(0)
-  balance           Decimal      @default(0) @db.Decimal(20, 6)
-  status            HrLoanStatus @default(ACTIVE)
-  disbursedAt       DateTime?
-  notes             String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  createdBy         String?
-  updatedBy         String?
-  deletedAt         DateTime?
+  id                         String           @id @default(uuid())
+  organizationId             String
+  loanCode                   String
+  employeeId                 String
+  principal                  Decimal          @db.Decimal(20, 6)
+  interestRate               Decimal          @default(0) @db.Decimal(10, 6)
+  totalPayable               Decimal          @default(0) @db.Decimal(20, 6)
+  installmentAmount          Decimal          @default(0) @db.Decimal(20, 6)
+  installmentsTotal          Int              @default(1)
+  installmentsPaid           Int              @default(0)
+  balance                    Decimal          @default(0) @db.Decimal(20, 6)
+  status                     HrLoanStatus     @default(ACTIVE)
+  disbursedAt                DateTime?
+  disbursementMethod         HrPaymentMethod?
+  /// Dr employee_loan_receivable (total payable), Cr bank/cash (principal),
+  /// Cr staff_loan_interest_income (interest). Payroll only recovers a loan
+  /// that has been disbursed through the ledger.
+  disbursementJournalEntryId String?
+  notes                      String?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  createdBy                  String?
+  updatedBy                  String?
+  deletedAt                  DateTime?
 
   employee HrEmployee @relation(fields: [employeeId], references: [id])
 
@@ -9558,6 +9613,9 @@ model HrBankPayment {
   fileName       String?
   fileUrl        String?
   processedById  String?
+  /// Payment journal posted when the batch is confirmed PAID.
+  journalEntryId String?
+  paidAt         DateTime?
   notes          String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
@@ -9765,6 +9823,8 @@ model HrOffboarding {
   advanceOutstanding Decimal?  @db.Decimal(20, 6)
   otherDeductions    Decimal?  @db.Decimal(20, 6)
   netSettlement      Decimal?  @db.Decimal(20, 6)
+  /// Leave encashment is paid through the final payroll as this input.
+  payrollInputId     String?
   journalEntryId     String?
   notes              String?
   settledAt          DateTime?
@@ -9937,20 +9997,24 @@ model HrTrainingEnrollment {
 }
 
 model HrStatutoryConfig {
-  id             String    @id @default(uuid())
-  organizationId String
-  code           String
-  name           String
-  configType     String    @default("PENSION") // PENSION|NSSF|SOCIAL_SECURITY|EMPLOYER_PENSION
-  rate           Decimal?  @db.Decimal(10, 6)
-  employerRate   Decimal?  @db.Decimal(10, 6)
-  effectiveFrom  DateTime
-  isActive       Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  createdBy      String?
-  updatedBy      String?
-  deletedAt      DateTime?
+  id               String    @id @default(uuid())
+  organizationId   String
+  code             String
+  name             String
+  configType       String    @default("PENSION") // PENSION|SOCIAL_SECURITY applied by calculateRun; LOCAL_TAX|INSURANCE|OTHER informational
+  rate             Decimal?  @db.Decimal(10, 6)
+  employerRate     Decimal?  @db.Decimal(10, 6)
+  /// What the rates apply to: GROSS (all earnings) or BASIC (base pay + overtime).
+  contributionBase String    @default("GROSS")
+  /// Monthly cap on the contribution base (Kenya NSSF tiers). Null = uncapped.
+  ceiling          Decimal?  @db.Decimal(20, 6)
+  effectiveFrom    DateTime
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
 
   @@unique([organizationId, code, effectiveFrom])
   @@index([organizationId, deletedAt])
@@ -11006,6 +11070,11 @@ model Subject {
   departmentId      String?
   subjectCategoryId String?
   isCore            Boolean   @default(true)
+  /// Retired subjects stay on every historical record but take no new teaching.
+  isActive          Boolean   @default(true)
+  displayOrder      Int       @default(0)
+  /// The band this subject belongs to (Nursery, Primary...); null = any level.
+  academicLevelId   String?
   customFields      Json      @default("{}")
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -11015,6 +11084,7 @@ model Subject {
 
   department         Department?          @relation(fields: [departmentId], references: [id])
   subjectCategory    SubjectCategory?     @relation(fields: [subjectCategoryId], references: [id])
+  academicLevel      AcademicLevel?       @relation(fields: [academicLevelId], references: [id], onDelete: SetNull)
   curriculumSubjects CurriculumSubject[]
   competencies       Competency[]
   teacherAssignments TeacherAssignment[]
@@ -11031,6 +11101,8 @@ model Subject {
   @@index([organizationId])
   @@index([departmentId])
   @@index([subjectCategoryId])
+  @@index([academicLevelId])
+  @@index([organizationId, isActive, displayOrder])
 }
 
 model Period {
@@ -11100,6 +11172,8 @@ enum StaffStatus {
   suspended
   terminated
   retired
+  resigned
+  inactive
 }
 
 model StudentProfile {
@@ -12254,6 +12328,7 @@ model AcademicLevel {
 
   defaultProgramme AcademicProgramme? @relation("LevelDefaultProgramme", fields: [defaultProgrammeId], references: [id], onDelete: SetNull)
   gradeLevels      GradeLevel[]
+  subjects         Subject[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, name])
@@ -12343,6 +12418,8 @@ model StudentEnrollment {
   admissionDate          DateTime
   completionDate         DateTime?
   status                 StudentEnrollmentStatus @default(ACTIVE)
+  /// SUSPENDED only: when the suspension lapses and the learner is reinstated.
+  suspendedUntil         DateTime?
   enrollmentType         EnrollmentType          @default(NEW)
   /// Tags rows written by a backfill so a failed gate can remove only those.
   migrationRunId         String?
@@ -12370,6 +12447,7 @@ model StudentEnrollment {
   @@unique([organizationId, studentProfileId, academicYearId])
   @@index([organizationId])
   @@index([organizationId, status])
+  @@index([status, suspendedUntil])
   @@index([studentProfileId])
   @@index([academicYearId])
   @@index([programmeId])
@@ -12389,6 +12467,10 @@ model EnrollmentPlacement {
   classCohortId          String
   sectionId              String?
   rollNumber             String?
+  /// The class and section names AS THEY WERE when the learner was placed, so
+  /// renaming "P4 North" later does not rewrite what last year's records say.
+  classNameSnapshot      String?
+  sectionNameSnapshot    String?
   effectiveFrom          DateTime
   effectiveTo            DateTime?
   movementReason         PlacementMovementReason  @default(INITIAL_PLACEMENT)
@@ -13300,6 +13382,28 @@ model StudentCourseProgress {
   @@index([courseOfferingId])
 }
 
+/// Append-only history of a class (or section) timetable (audit F-14).
+/// TimetableSlot is the LIVE grid every screen reads; each change to it writes
+/// the resulting grid here, stamped with the term that was current, so
+/// "what was P4 North's timetable in Term 1 2025, and who taught it?" stays
+/// answerable after the grid is rebuilt for the next term.
+model TimetableVersion {
+  id             String   @id @default(uuid())
+  organizationId String
+  classId        String
+  sectionId      String?
+  termId         String?
+  version        Int
+  reason         String
+  slots          Json
+  createdAt      DateTime @default(now())
+  createdById    String?
+
+  @@unique([organizationId, classId, sectionId, version])
+  @@index([organizationId])
+  @@index([classId, sectionId, termId])
+}
+
 model TeacherAssignment {
   id               String   @id @default(uuid())
   organizationId   String
@@ -13312,7 +13416,7 @@ model TeacherAssignment {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  teacher     StaffProfile @relation(fields: [teacherPartnerId], references: [id], onDelete: Cascade)
+  teacher     StaffProfile @relation(fields: [teacherPartnerId], references: [id], onDelete: Restrict)
   subject     Subject      @relation(fields: [subjectId], references: [id])
   schoolClass SchoolClass  @relation(fields: [classId], references: [id])
   section     Section?     @relation(fields: [sectionId], references: [id])
@@ -16128,31 +16232,31 @@ model MobileMoneyRequest {
 /// rest (EncryptionService); the public callback resolves its tenant from here
 /// before reading any tenant-scoped data.
 model PaymentGatewayAccount {
-  id                  String    @id @default(uuid())
-  organizationId      String
+  id                   String   @id @default(uuid())
+  organizationId       String
   /// mtn | airtel
-  provider            String
-  label               String
+  provider             String
+  label                String
   /// sandbox | production
-  environment         String    @default("sandbox")
-  merchantCode        String?
-  baseUrl             String?
-  currency            String    @default("UGX")
+  environment          String   @default("sandbox")
+  merchantCode         String?
+  baseUrl              String?
+  currency             String   @default("UGX")
   /// Encrypted JSON of provider credentials (subscription key, access token, ...).
-  credentialsCipher   String?
-  credentialsIv       String?
-  credentialsTag      String?
+  credentialsCipher    String?
+  credentialsIv        String?
+  credentialsTag       String?
   /// Encrypted HMAC secret used to verify provider callbacks.
   callbackSecretCipher String?
-  callbackSecretIv    String?
-  callbackSecretTag   String?
+  callbackSecretIv     String?
+  callbackSecretTag    String?
   /// GL clearing account collections are debited to until the provider settles.
-  clearingAccountId   String?
-  isActive            Boolean   @default(true)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  createdBy           String?
-  updatedBy           String?
+  clearingAccountId    String?
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  createdBy            String?
+  updatedBy            String?
 
   @@unique([organizationId, provider])
   @@index([organizationId])

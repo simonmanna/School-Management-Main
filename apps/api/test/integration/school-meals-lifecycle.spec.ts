@@ -132,7 +132,7 @@ describeDb('integration: school meals V1 lifecycle', () => {
 
   const makeStudent = (admissionNo: string) =>
     asTenant(() =>
-      students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', currentClassId: classId }),
+      students.create({ name: `Student ${admissionNo}`, admissionNo, enrollmentDate: '2026-01-15', classId }),
     ) as Promise<any>;
 
   it('derives eligibility: boarder expected for all meals, day student only for lunch', async () => {

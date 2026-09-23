@@ -182,7 +182,6 @@ async function main() {
       const sp = await prisma.studentProfile.create({
         data: {
           organizationId: O, partnerId: partner.id, admissionNo: `HTS/S3/${String(counter).padStart(3, '0')}`,
-          currentClassId: c.id, currentSectionId: c.id === classEast.id ? secA.id : null,
           enrollmentDate: new Date('2025-02-03'), status: 'active', gender: counter % 2 ? 'M' : 'F',
           nationality: 'UG', residenceType: counter % 5 ? 'day' : 'boarder', house: counter % 2 ? 'Red' : 'Blue',
         },
@@ -192,10 +191,6 @@ async function main() {
   }
   ok(`students: ${students.length} across S3 East (24) + S3 West (20)`);
 
-  // Enrollment rows (so promotion/rollover has history).
-  await Promise.all(students.map((s) => prisma.enrollment.create({
-    data: { organizationId: O, studentProfileId: s.id, termId: term.id, classId: s.classId, rollNumber: s.no.split('/').pop()!, enrolledAt: new Date('2026-05-04') },
-  })));
 
   // ── SIS-10: the canonical enrollment spine ─────────────────────────────────
   //
@@ -217,11 +212,12 @@ async function main() {
       effectiveFrom: year.startDate,
     },
   });
-  await prisma.programmeGradeLevel.create({
-    // Unique on (organizationId, gradeLevelId): a grade level belongs to exactly
-    // one programme, which is what makes programme resolution deterministic.
-    data: { organizationId: O, programmeId: programme.id, gradeLevelId: gl.id },
+  // Grade -> academic level -> default programme (ADR-028): how the enrollment
+  // service resolves a programme for a class.
+  const level = await prisma.academicLevel.create({
+    data: { organizationId: O, code: 'LSEC', name: 'Lower Secondary', stage: 'LOWER_SECONDARY', defaultProgrammeId: programme.id },
   });
+  await prisma.gradeLevel.update({ where: { id: gl.id }, data: { academicLevelId: level.id } });
 
   const cohortByClassId = new Map<string, string>();
   for (const c of [classEast, classWest]) {

@@ -145,8 +145,10 @@ export function payrollReports(deps: HrReportDeps): ReportDefinition<any>[] {
         { key: 'socialSecurityNumber', label: 'Social sec. no.', type: 'string', width: 16 },
         { key: 'pensionNumber', label: 'Pension no.', type: 'string', width: 16 },
         { key: 'grossPay', label: 'Wage', type: 'money', width: 15, total: 'sum' },
-        { key: 'pension', label: 'Pension', type: 'money', width: 14, total: 'sum' },
-        { key: 'socialSecurity', label: 'Social sec.', type: 'money', width: 14, total: 'sum' },
+        { key: 'pension', label: 'Pension (employee)', type: 'money', width: 14, total: 'sum' },
+        { key: 'employerPension', label: 'Pension (employer)', type: 'money', width: 14, total: 'sum' },
+        { key: 'socialSecurity', label: 'Social sec. (employee)', type: 'money', width: 14, total: 'sum' },
+        { key: 'employerSocialSecurity', label: 'Social sec. (employer)', type: 'money', width: 14, total: 'sum' },
         { key: 'total', label: 'Total remitted', type: 'money', width: 15, total: 'sum' },
       ],
       async run(_ctx, params) {
@@ -231,6 +233,8 @@ export function payrollReports(deps: HrReportDeps): ReportDefinition<any>[] {
         { key: 'statutory', label: 'Pension + SS', type: 'money', width: 14, total: 'sum' },
         { key: 'otherDeductions', label: 'Other', type: 'money', width: 14, total: 'sum' },
         { key: 'netPay', label: 'Net pay', type: 'money', width: 16, total: 'sum' },
+        { key: 'employerCost', label: 'Employer contrib.', type: 'money', width: 15, total: 'sum' },
+        { key: 'totalCost', label: 'Total cost', type: 'money', width: 16, total: 'sum' },
       ],
       async run(_ctx, params) {
         const { run, rows } = await deps.data.payrollCostByDepartment(params);
