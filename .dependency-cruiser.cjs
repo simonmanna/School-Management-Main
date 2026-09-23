@@ -52,6 +52,11 @@ const CROSS_VERTICAL_EXCEPTIONS = {
     '^apps/api/src/modules/pos/billing/pos-invoice\\.service',
     '^apps/api/src/modules/pos/pos\\.module',
   ],
+  // Class/section audiences resolve membership through the placement ledger
+  // (ADR-027); the read-only lookup is the only sanctioned entry point.
+  'communication->school': [
+    '^apps/api/src/modules/school/enrollment/placement-lookup\\.(module|service)',
+  ],
 };
 const NON_VERTICAL = 'core|accounting|invoicing|inventory|procurement|kernel|auth|settings|audit|tenancy|prisma|events|sequence|workflow|module-loader|common';
 

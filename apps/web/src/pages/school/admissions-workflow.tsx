@@ -108,7 +108,7 @@ export function SchoolAdmissionsWorkflowPage() {
     }
   };
 
-  const usePreset = async (presetKey: string) => {
+  const startFromPreset = async (presetKey: string) => {
     if (!selected) return;
     try {
       const updated = await applyPreset.mutateAsync({ id: selected.id, presetKey });
@@ -226,7 +226,7 @@ export function SchoolAdmissionsWorkflowPage() {
                       variant="outline"
                       size="sm"
                       title={p.description}
-                      onClick={() => usePreset(p.key)}
+                      onClick={() => startFromPreset(p.key)}
                     >
                       <RotateCcw className="mr-1 h-3.5 w-3.5" /> {p.label}
                     </Button>

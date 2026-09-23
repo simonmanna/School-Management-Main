@@ -124,7 +124,8 @@ export function PermissionMatrix({
                 onClick={() =>
                   setCollapsedGroups((s) => {
                     const n = new Set(s);
-                    n.has(g.group) ? n.delete(g.group) : n.add(g.group);
+                    if (n.has(g.group)) n.delete(g.group);
+                    else n.add(g.group);
                     return n;
                   })
                 }
@@ -173,7 +174,8 @@ export function PermissionMatrix({
                           setCollapsedSubs((s) => {
                             const n = new Set(s);
                             const k = subKey(g.group, sg.subgroup);
-                            n.has(k) ? n.delete(k) : n.add(k);
+                            if (n.has(k)) n.delete(k);
+                            else n.add(k);
                             return n;
                           })
                         }
@@ -320,7 +322,8 @@ export function RoleDialog({
     if (disabledKeys.has(key)) return;
     setSelected((prev) => {
       const n = new Set(prev);
-      n.has(key) ? n.delete(key) : n.add(key);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
       return n;
     });
   };
