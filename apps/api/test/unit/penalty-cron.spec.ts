@@ -26,10 +26,10 @@ interface Mocks {
   penaltyRunFindFirst: jest.Mock;
   penaltyRunCreate: jest.Mock;
   penaltyAssessmentCreate: jest.Mock;
-  penaltyAssessmentFindFirst: jest.Mock;
+  penaltyAssessmentFindMany: jest.Mock;
   documentCreate: jest.Mock;
   documentLineCreate: jest.Mock;
-  documentBuilderGroup: jest.Mock;
+  salesPostingLines: jest.Mock;
   postingPost: jest.Mock;
   documentUpdate: jest.Mock;
   sequenceNext: jest.Mock;
@@ -69,7 +69,7 @@ function makeService() {
     ...args.data,
   }));
   // No existing assessment for any (sourceDocumentId, penaltyRunId) pair.
-  const penaltyAssessmentFindFirst = jest.fn().mockResolvedValue(null);
+  const penaltyAssessmentFindMany = jest.fn().mockResolvedValue([]);
   const documentCreate = jest.fn().mockImplementation((args: any) => ({
     id: 'pen_doc_1',
     ...args.data,
@@ -79,19 +79,25 @@ function makeService() {
     { id: 'doc_1', documentNumber: 'FEE-001', partnerId: 'p_1', amountResidual: 100_000, dueDate: new Date('2026-01-15') },
   ]);
   const documentUpdate = jest.fn().mockResolvedValue({ id: 'pen_doc_1' });
-  const documentBuilderGroup = jest.fn().mockResolvedValue({
-    counterAccount: 'acc_ar',
-    itemByAccount: new Map([['acc_revenue', 5_000]]),
-    taxByAccount: new Map(),
-  });
+  // The penalty is re-read with its lines and handed to the shared sales
+  // posting builder (Dr receivable / Cr revenue).
+  const documentFindFirst = jest.fn().mockImplementation((args: any) => ({
+    id: args?.where?.id ?? 'pen_doc_1',
+    totalAmount: 5_000,
+    lines: [{ id: 'line_1', total: 5_000 }],
+  }));
+  const salesPostingLines = jest.fn().mockResolvedValue([
+    { accountId: 'acc_ar', debit: '5000' },
+    { accountId: 'acc_revenue', credit: '5000' },
+  ]);
   const postingPost = jest.fn().mockResolvedValue({ id: 'je_1' });
 
   const tx = {
     penaltyRule: { findFirst: penaltyRuleFindFirst },
     feeSchedule: { findFirst: feeScheduleFindFirst },
     penaltyRun: { findFirst: penaltyRunFindFirst, create: penaltyRunCreate, update: penaltyRunUpdate },
-    penaltyAssessment: { findFirst: penaltyAssessmentFindFirst, create: penaltyAssessmentCreate },
-    document: { findMany: documentFindMany, create: documentCreate, update: documentUpdate },
+    penaltyAssessment: { findMany: penaltyAssessmentFindMany, create: penaltyAssessmentCreate },
+    document: { findMany: documentFindMany, findFirst: documentFindFirst, create: documentCreate, update: documentUpdate },
     documentLine: { create: documentLineCreate },
   };
 
@@ -106,7 +112,7 @@ function makeService() {
     tenant as any,
     events as any,
     sequence as any,
-    { groupForPosting: documentBuilderGroup } as any,
+    { salesPostingLines } as any,
     { post: postingPost } as any,
     { mapped: jest.fn(), receivableAccount: jest.fn() } as any,
     { resolveIdByCode: jest.fn().mockResolvedValue('doctype_sales_invoice') } as any,
@@ -121,10 +127,10 @@ function makeService() {
     penaltyRunFindFirst,
     penaltyRunCreate,
     penaltyAssessmentCreate,
-    penaltyAssessmentFindFirst,
+    penaltyAssessmentFindMany,
     documentCreate,
     documentLineCreate,
-    documentBuilderGroup,
+    salesPostingLines,
     postingPost,
     documentUpdate,
     sequenceNext: sequence.next,
@@ -193,15 +199,10 @@ describe('BillingService.generatePenaltyRun — idempotency (P0-2, C2 + H6)', ()
     expect(Number(call.data.amount)).toBe(5_000);
   });
 
-  it('skips assessment when an existing one is found for (sourceDocumentId, penaltyRunId)', async () => {
+  it('skips an invoice already assessed under the same rule (once per invoice per rule)', async () => {
     const { service, mocks } = makeService();
-    // For doc_1, an assessment already exists in this run.
-    mocks.penaltyAssessmentFindFirst.mockImplementation((args: any) => {
-      if (args.where?.sourceDocumentId === 'doc_1') {
-        return Promise.resolve({ id: 'pa_existing', sourceDocumentId: 'doc_1' });
-      }
-      return Promise.resolve(null);
-    });
+    // doc_1 was already assessed under this rule on an earlier cron day.
+    mocks.penaltyAssessmentFindMany.mockResolvedValue([{ sourceDocumentId: 'doc_1' }]);
     mocks.documentFindMany.mockResolvedValue([
       { id: 'doc_1', documentNumber: 'FEE-001', partnerId: 'p_1', amountResidual: 100_000 },
       { id: 'doc_2', documentNumber: 'FEE-002', partnerId: 'p_2', amountResidual: 200_000 },
