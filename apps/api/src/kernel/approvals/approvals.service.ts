@@ -35,6 +35,11 @@ type WorkflowRow = {
  * `pending` until the last applicable step clears, then flips to `approved` and
  * the caller re-runs its post.
  */
+/** entityType -> where it is decided instead of the generic approvals page. */
+const DECIDED_ELSEWHERE: Record<string, string> = {
+  school_fee_refund: 'Fees → Refund',
+};
+
 @Injectable()
 export class ApprovalsService {
   constructor(
@@ -136,6 +141,12 @@ export class ApprovalsService {
       });
       if (!req) throw new NotFoundException('Approval request not found');
       if (req.status !== 'pending') throw new BadRequestException('Already resolved');
+      // Some requests are decided where the approved action is carried out, so
+      // approving cannot flip a status without the effect (a fee refund must pay
+      // out when approved — see RefundRequestService).
+      if (req.entityType in DECIDED_ELSEWHERE) {
+        throw new BadRequestException(`Decide this request from ${DECIDED_ELSEWHERE[req.entityType]}.`);
+      }
 
       const wf = (req.workflow as unknown as WorkflowRow | null) ?? null;
       const amount = this.amountOf(req.snapshot as any);

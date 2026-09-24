@@ -1073,6 +1073,9 @@ export const PORTAL_ROLE_PRESETS: readonly RolePreset[] = [
       PERMISSIONS.school.portalSelf,
       PERMISSIONS.school.lmsRead,
       PERMISSIONS.school.submitAssignments,
+      // Wave 2.3: sitting a CBT quiz. Held by no role, so no pupil could start
+      // one. The route pins a student principal to their own attempt.
+      PERMISSIONS.school.takeCbt,
     ],
   },
   {
@@ -1179,6 +1182,13 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:fees:waiver:approve',
       'school:fees:credit:approve',
       'school:fees:refund:approve',
+      // Wave 2.3: these were held by NO preset, so only an Administrator could
+      // approve an adjustment, write off a bad debt or close a fee period. They
+      // are approvals, never collection, so they sit with the Head Teacher.
+      'school:fees:adjustment:approve',
+      'school:fees:writeoff',
+      'school:fees:period:close',
+      'school:certificates:revoke',
       'school:communicate',
       'school:staff:write',
       'school:documents:read',
@@ -1222,6 +1232,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'cash_session:open',
       'cash_session:close',
       'cash_session:reconcile',
+      // Wave 2.3: meal billing and pupil meal wallets are fee-office money and
+      // were held by no preset.
+      'school:meals:billing',
+      'school:meals:wallet',
       'hr:self',
       // Report centre (ADR-017). New grants do not reach existing tenants by
       // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
@@ -1316,6 +1330,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:attendance:own',
       'school:attendance:status:write',
       'school:grades:own',
+      // Wave 2.3: marking an allocated exam script (held by no preset before).
+      'school:exams:mark',
       'school:assignments:write',
       'school:assignments:grade',
       'school:lessonplans:own',
@@ -1346,6 +1362,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:courses:enrol',
       'school:lessonplans:review',
       'school:lessonplans:approve',
+      // Wave 2.3: school-wide lesson-plan management (teachers hold :own).
+      'school:lessonplans:write',
       'school:assessments:write',
       // Approval authority the Exams Officer deliberately does not hold. A
       // school with no deputy still has the Head Teacher; a school with one

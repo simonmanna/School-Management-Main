@@ -1,9 +1,10 @@
-import { Body, Controller, Param, Post, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { BillingService, SchoolPaymentService } from './billing.service';
+import { RefundRequestService } from './refund-request.service';
 // Value import (not `import type`): the global ValidationPipe needs the runtime
 // class to read class-validator metadata; `import type` would erase it.
 import { CollectFeePaymentDto, GenerateBillingDto, RefundFeeDto } from './dto.types';
@@ -37,7 +38,10 @@ export class BillingController {
 @Controller('school/payments')
 @UseInterceptors(IdempotencyInterceptor)
 export class SchoolPaymentController {
-  constructor(private readonly payments: SchoolPaymentService) {}
+  constructor(
+    private readonly payments: SchoolPaymentService,
+    private readonly refunds: RefundRequestService,
+  ) {}
 
   @Post('collect')
   @Idempotent()
@@ -46,16 +50,37 @@ export class SchoolPaymentController {
     return this.payments.collect(dto);
   }
 
-  // Phase 0: paying money OUT now requires an approval permission in addition
-  // to the operational refund permission. P0-6 showed the payment engine's
-  // overpayment guard never fires on a customer refund, so until A2.1 moves the
-  // canonical entitlement check into the engine itself, the authorisation
-  // boundary is doing the work.
+  /**
+   * Paying money OUT is maker-checker. With only the refund permission this
+   * files a request (`status: 'pending_approval'`); a holder of the approve
+   * permission — a different person — releases it below. Requiring BOTH here
+   * (the guard ANDs its list) meant no preset could ever refund (E2E audit P1).
+   * A caller holding both, e.g. an Administrator, still refunds in one step.
+   */
   @Post('refund')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.refundFees, PERMISSIONS.school.approveRefunds)
+  @RequirePermissions(PERMISSIONS.school.refundFees)
   refund(@Body() dto: RefundFeeDto) {
-    return this.payments.refundFee(dto);
+    return this.refunds.submit(dto);
+  }
+
+  @Get('refund-requests')
+  @RequirePermissions(PERMISSIONS.school.readFees)
+  refundRequests(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
+    return this.refunds.list(status ?? 'pending');
+  }
+
+  @Post('refund-requests/:id/approve')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.approveRefunds)
+  approveRefund(@Param('id') id: string, @Body('comment') comment?: string) {
+    return this.refunds.approve(id, comment);
+  }
+
+  @Post('refund-requests/:id/reject')
+  @RequirePermissions(PERMISSIONS.school.approveRefunds)
+  rejectRefund(@Param('id') id: string, @Body('reason') reason: string) {
+    return this.refunds.reject(id, reason);
   }
 
   /**

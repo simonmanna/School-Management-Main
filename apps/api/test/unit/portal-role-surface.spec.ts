@@ -37,6 +37,9 @@ describe('portal role presets', () => {
         PERMISSIONS.school.studentPortal,
         PERMISSIONS.school.lmsRead,
         PERMISSIONS.school.submitAssignments,
+        // Every CBT route pins a student principal to their own attempt
+        // (cbt.controller.ts start/assertOwns), so this is self-scoped too.
+        PERMISSIONS.school.takeCbt,
       ];
       for (const grant of byName(name).permissions) {
         expect(allowed).toContain(grant);

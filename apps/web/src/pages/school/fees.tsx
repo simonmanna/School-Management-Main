@@ -16,6 +16,8 @@ import {
   useCreatePenaltyRule,
   usePenaltyRuns,
   useRefundFee,
+  useRefundRequests,
+  useDecideRefundRequest,
   useSponsorships,
   useCreateSponsorship,
   useFeeCredits,
@@ -27,6 +29,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { useAuthStore } from '@/stores/auth.store';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
@@ -331,15 +335,17 @@ function RefundTab() {
   const submit = async () => {
     try {
       const res = await refund.mutateAsync({ studentProfileId: studentId, amount: Number(amount), paymentMethod: method, reference: reference || undefined });
-      if (res.replayed) notify.success('Refund already recorded (idempotent replay)');
+      if (res.status === 'pending_approval') notify.success(`Refund of ${money(amount)} sent for approval`, { description: 'A second person releases the money from the list below.' });
+      else if (res.replayed) notify.success('Refund already recorded (idempotent replay)');
       else notify.success(`Refunded ${money(amount)}`);
       setAmount(''); setReference('');
-    } catch {
-      notify.error('Could not process refund');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not process refund');
     }
   };
 
   return (
+    <div className="space-y-4">
     <Card className="max-w-xl">
       <CardHeader><CardTitle className="flex items-center gap-2 text-base"><RotateCcw className="h-4 w-4" /> Refund a fee payment</CardTitle></CardHeader>
       <CardContent className="space-y-3">
@@ -378,7 +384,68 @@ function RefundTab() {
         <Button onClick={submit} disabled={!studentId || !amount || Number(amount) <= 0 || refund.isPending}>
           <RotateCcw className="h-4 w-4" /> Process refund
         </Button>
-        <p className="text-xs text-muted-foreground">Posts Dr Receivable / Cr Cash and records an outbound refund receipt. Replaying the same reference is safe.</p>
+        <p className="text-xs text-muted-foreground">
+          Without the approve permission this files a refund request; the money goes out when someone else approves it.
+          With it, the refund posts immediately. Replaying the same reference is safe.
+        </p>
+      </CardContent>
+    </Card>
+    <RefundRequestsCard />
+    </div>
+  );
+}
+
+/** Pending refunds: anyone who reads fees sees them; approvers release or refuse. */
+function RefundRequestsCard() {
+  const { data: requests } = useRefundRequests('pending');
+  const decide = useDecideRefundRequest();
+  const me = useAuthStore((s) => s.user?.id);
+  const canApprove = useAuthStore((s) => s.permissions.includes('school:fees:refund:approve'));
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  if (!requests || requests.length === 0) return null;
+
+  const act = async (id: string, decision: 'approve' | 'reject') => {
+    try {
+      await decide.mutateAsync({ id, decision, reason: reasons[id] });
+      notify.success(decision === 'approve' ? 'Refund approved and paid out' : 'Refund request refused');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not record the decision');
+    }
+  };
+
+  return (
+    <Card className="max-w-xl">
+      <CardHeader><CardTitle className="text-base">Refunds awaiting approval</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        {requests.map((r) => (
+          <div key={r.id} className="space-y-2 rounded-md border p-3 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-medium">{r.snapshot.studentName ?? r.snapshot.admissionNo}</div>
+                <div className="text-xs text-muted-foreground">
+                  {money(r.snapshot.amount)} · {r.snapshot.dto.paymentMethod.replace('_', ' ')} · requested {new Date(r.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <Badge variant="outline">Pending</Badge>
+            </div>
+            {canApprove && r.createdById !== me ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="h-8 flex-1"
+                  placeholder="Reason (required to refuse)"
+                  value={reasons[r.id] ?? ''}
+                  onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })}
+                />
+                <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => act(r.id, 'reject')}>Refuse</Button>
+                <Button size="sm" disabled={decide.isPending} onClick={() => act(r.id, 'approve')}>Approve &amp; pay out</Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {r.createdById === me ? 'You requested this — someone else must approve it.' : 'Waiting for an approver.'}
+              </p>
+            )}
+          </div>
+        ))}
       </CardContent>
     </Card>
   );

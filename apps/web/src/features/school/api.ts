@@ -2768,9 +2768,62 @@ export function useRefundFee() {
       bankAccountId?: string;
       reference?: string;
       notes?: string;
-    }) => (await api.post<{ payment: { id: string; paymentNumber?: string }; replayed: boolean; overpaymentCredit: number }>(`${S}/payments/refund`, dto)).data,
+    }) =>
+      (
+        await api.post<
+          | { status: 'refunded'; payment: { id: string; paymentNumber?: string }; replayed: boolean; overpaymentCredit: number }
+          | { status: 'pending_approval'; requestId: string }
+        >(`${S}/payments/refund`, dto)
+      ).data,
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
+      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+    },
+  });
+}
+
+/**
+ * Refunds are maker-checker (Wave 2.3): a Bursar's refund is filed as a
+ * request and paid out when a second person with the approve grant releases it.
+ */
+export interface RefundRequest {
+  id: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdById: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  snapshot: {
+    amount: number;
+    studentName: string | null;
+    admissionNo: string | null;
+    dto: { studentProfileId: string; paymentMethod: string; reference?: string; notes?: string };
+  };
+  decisions: Array<{ approverId: string; status: string; comment: string | null; decidedAt: string }>;
+}
+
+export function useRefundRequests(status: 'pending' | 'approved' | 'rejected' = 'pending', enabled = true) {
+  return useQuery({
+    queryKey: ['school', 'refund-requests', status],
+    enabled: enabled && canReadFees(),
+    queryFn: async () =>
+      (await api.get<RefundRequest[]>(`${S}/payments/refund-requests`, { params: { status } })).data,
+  });
+}
+
+export function useDecideRefundRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { id: string; decision: 'approve' | 'reject'; reason?: string }) =>
+      (
+        await api.post(
+          `${S}/payments/refund-requests/${v.id}/${v.decision}`,
+          v.decision === 'approve' ? { comment: v.reason } : { reason: v.reason },
+        )
+      ).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'refund-requests'] });
+      qc.invalidateQueries({ queryKey: ['school', 'statement'] });
+      qc.invalidateQueries({ queryKey: ['school', 'finance'] });
       qc.invalidateQueries({ queryKey: ['school', 'reports'] });
     },
   });

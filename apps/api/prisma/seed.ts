@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, type ProductType } from '@erp/shared';
+import { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, SCHOOL_ROLE_PRESETS, type ProductType } from '@erp/shared';
 import { seedUomCategories } from '../src/modules/core/product/uom-seed';
 import { seedAccountingCore } from '../src/modules/accounting/coa/coa-seeder';
 import { seedDmsRegistry, wireDmsRoleKeys } from '../src/modules/documents/dms.seed-registry';
@@ -82,6 +82,26 @@ async function main(): Promise<void> {
         description: preset.description,
         isSystem: true,
         permissions: preset.permissions,
+      },
+    });
+  }
+
+  // --- School staff presets (Head Teacher, Bursar, Registrar, …) ------------
+  // Same definitions bootstrap provisions. `update: {}` — once a tenant has a
+  // preset it is THE SCHOOL'S role; a re-seed never overwrites its edits.
+  // Without these a seeded tenant had only Administrator, so every staff
+  // workflow was testable only with full access (E2E audit, Wave 2.3).
+  for (const preset of SCHOOL_ROLE_PRESETS) {
+    await prisma.role.upsert({
+      where: { organizationId_name: { organizationId: org.id, name: preset.name } },
+      update: {},
+      create: {
+        organizationId: org.id,
+        name: preset.name,
+        description: preset.description,
+        isSystem: false,
+        dataScope: (preset.dataScope ?? 'school') as any,
+        permissions: [...preset.permissions],
       },
     });
   }
