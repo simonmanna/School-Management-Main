@@ -41,6 +41,19 @@ export interface SendInput {
    * otherwise lift a live reset/access token from the table (E2E audit A2/AD5).
    */
   storedBody?: string;
+  /**
+   * Idempotency for event-driven sends. Unique per (organization, channel) at
+   * the database, so a re-emitted event, a retried outbox row or a second
+   * reminder run produces no second message (E2E audit N1).
+   */
+  dedupeKey?: string;
+}
+
+/** A person to reach by their contact details — a guardian has no staff login. */
+export interface ContactRecipient {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
 }
 
 @Injectable()
@@ -78,7 +91,7 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  async send(input: SendInput): Promise<{ id: string; delivered: boolean }> {
+  async send(input: SendInput): Promise<{ id: string; delivered: boolean; duplicate?: boolean }> {
     // Honour per-user opt-out (defaults to enabled when missing).
     let enabled = true;
     if (input.userId) {
@@ -96,18 +109,27 @@ export class NotificationsService implements OnModuleInit {
     }
 
     // Always write the in-app row for durability, regardless of channel.
-    const row = await this.prisma.raw.notification.create({
-      data: {
-        organizationId: input.organizationId,
-        userId: input.userId ?? null,
-        channel: input.channel,
-        category: input.category ?? 'general',
-        title: input.title,
-        body: input.storedBody ?? input.body,
-        payload: (input.payload ?? {}) as any,
-        status: enabled ? 'pending' : 'failed',
-      },
-    });
+    let row: { id: string };
+    try {
+      row = await this.prisma.raw.notification.create({
+        data: {
+          organizationId: input.organizationId,
+          userId: input.userId ?? null,
+          channel: input.channel,
+          category: input.category ?? 'general',
+          title: input.title,
+          body: input.storedBody ?? input.body,
+          payload: (input.payload ?? {}) as any,
+          status: enabled ? 'pending' : 'failed',
+          dedupeKey: input.dedupeKey ?? null,
+        },
+      });
+    } catch (err: any) {
+      // The partial unique index on (organizationId, channel, dedupeKey): this
+      // exact message already went out. Not an error — the point of the key.
+      if (input.dedupeKey && err?.code === 'P2002') return { id: '', delivered: false, duplicate: true };
+      throw err;
+    }
 
     if (!enabled) return { id: row.id, delivered: false };
 
@@ -137,6 +159,55 @@ export class NotificationsService implements OnModuleInit {
       this.logger.warn(`Notification ${row.id} failed: ${String(err)}`);
       return { id: row.id, delivered: false };
     }
+  }
+
+  /**
+   * Reach a guardian (or any contact) on every channel they can receive: the
+   * portal inbox of the login linked to them, SMS to their phone, email to
+   * their address. Returns how many messages were actually delivered — a
+   * duplicate or a failed provider call is not a send.
+   *
+   * The fee, attendance and admissions subscribers used to call `send()` with
+   * no userId: SMS and email threw "requires userId", and an in-app row with a
+   * null user is shown to nobody, so no parent was ever told anything (N1).
+   */
+  async notifyContact(input: {
+    organizationId: string;
+    contact: ContactRecipient;
+    category: string;
+    title: string;
+    body: string;
+    payload?: Record<string, unknown>;
+    /** Per-message base key; the contact id and channel are appended. */
+    dedupeKey: string;
+  }): Promise<number> {
+    const { contact } = input;
+    const key = `${input.dedupeKey}:${contact.id}`;
+    const base = {
+      organizationId: input.organizationId,
+      category: input.category,
+      title: input.title,
+      body: input.body,
+      payload: { ...(input.payload ?? {}), contactId: contact.id },
+      dedupeKey: key,
+    };
+    let delivered = 0;
+    const portal = await this.prisma.raw.portalIdentity.findFirst({
+      where: { organizationId: input.organizationId, guardianContactId: contact.id, revokedAt: null },
+      select: { userId: true },
+    });
+    const attempts: SendInput[] = [];
+    if (portal?.userId) attempts.push({ ...base, channel: 'in_app', userId: portal.userId });
+    if (contact.phone) attempts.push({ ...base, channel: 'sms', recipient: { phone: contact.phone } });
+    if (contact.email) attempts.push({ ...base, channel: 'email', recipient: { email: contact.email } });
+    for (const a of attempts) {
+      const res = await this.send(a).catch((err) => {
+        this.logger.warn(`notifyContact ${a.channel} to contact ${contact.id} failed: ${String(err)}`);
+        return null;
+      });
+      if (res?.delivered) delivered += 1;
+    }
+    return delivered;
   }
 
   private async sendEmail(input: SendInput): Promise<void> {

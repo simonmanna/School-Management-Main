@@ -187,13 +187,16 @@ export class FeeNotificationsSubscriber implements OnModuleInit {
         .map((d) => new Date(d.dueDate as Date))
         .sort((a, b) => a.getTime() - b.getTime())[0];
 
-      await this.notifyGuardians(organizationId, s.id, overdue ? 'overdue' : 'due_soon', {
+      const delivered = await this.notifyGuardians(organizationId, s.id, overdue ? 'overdue' : 'due_soon', {
         // One reminder per pupil per day, however many invoices are involved.
         dedupeSuffix: new Date().toISOString().slice(0, 10),
         balance: this.ugx(balance.balance),
         due: oldestDue ? oldestDue.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : null,
       });
-      sent++;
+      // Count reminders that reached someone, not pupils looped over: a pupil
+      // with no guardian contact, or already reminded today, is not "sent".
+      if (delivered > 0) sent++;
+      else skipped++;
     }
     return { sent, skipped, students: students.length };
   }
@@ -241,46 +244,25 @@ export class FeeNotificationsSubscriber implements OnModuleInit {
     }
 
     const dedupeKey = `fee:${kind}:${studentProfileId}:${detail.dedupeSuffix ?? new Date().toISOString().slice(0, 10)}`;
+    const { dedupeSuffix: _suffix, ...rest } = detail;
 
+    // Every guardian who receives statements, on every channel they have —
+    // SMS matters most in a Ugandan school. Delivery is best-effort: a school
+    // with no provider configured still bills and collects normally.
+    let delivered = 0;
     for (const link of links) {
       const c: any = link.guardianContact;
-      await this.notifications
-        .send({
-          organizationId: orgId,
-          channel: 'in_app',
-          category: 'fees',
-          title,
-          body,
-          payload: { studentProfileId, kind, ...detail, dedupeKey },
-        } as any)
-        .catch(() => undefined);
-
-      // SMS is the one that matters in a Ugandan school. Best-effort: a school
-      // with no provider configured still bills and collects normally.
-      if (c?.phone) {
-        await this.notifications
-          .send({
-            organizationId: orgId,
-            channel: 'sms',
-            category: 'fees',
-            title,
-            body,
-            payload: { studentProfileId, kind, dedupeKey },
-          } as any)
-          .catch(() => undefined);
-      }
-      if (c?.email) {
-        await this.notifications
-          .send({
-            organizationId: orgId,
-            channel: 'email',
-            category: 'fees',
-            title,
-            body,
-            payload: { studentProfileId, kind, dedupeKey },
-          } as any)
-          .catch(() => undefined);
-      }
+      if (!c) continue;
+      delivered += await this.notifications.notifyContact({
+        organizationId: orgId,
+        contact: { id: c.id, email: c.email, phone: c.phone },
+        category: 'fees',
+        title,
+        body,
+        payload: { studentProfileId, kind, ...rest },
+        dedupeKey,
+      });
     }
+    return delivered;
   }
 }

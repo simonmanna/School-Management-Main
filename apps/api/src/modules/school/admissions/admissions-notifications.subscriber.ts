@@ -87,13 +87,17 @@ export class AdmissionsNotificationsSubscriber implements OnModuleInit {
         payload: { applicationId: p.applicationId, event: eventName },
       });
       if (ctx.email) {
+        // The family has no login: send to the address on the application. It
+        // used to go with no userId, which the email channel rejects (N1).
         await this.notifications.send({
           organizationId: p.organizationId,
           channel: 'email',
           category: 'admissions',
+          recipient: { email: ctx.email },
           title,
           body,
-          payload: { applicationId: p.applicationId, to: ctx.email },
+          payload: { applicationId: p.applicationId },
+          dedupeKey: `adm:${eventName}:${p.applicationId}`,
         });
       }
     } catch (err) {

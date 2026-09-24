@@ -152,38 +152,21 @@ export class AttendanceNotificationsSubscriber implements OnModuleInit {
     else if (kind === 'early') { title = 'Left early'; body = `${name} left early on ${date} (${detail.earlyDepartureMinutes ?? 0} min).`; }
     else { title = 'Attendance warning'; body = `${name}'s attendance has dropped to ${detail.pct ?? '?'}% (below ${detail.floor ?? '?'}%).`; }
 
+    const dedupeKey = `att:${kind}:${studentProfileId}:${date}`;
     for (const link of links) {
       const c: any = link.guardianContact;
-      const dedupeKey = `att:${kind}:${studentProfileId}:${date}`;
-      // In-app always; email/SMS best-effort (provider optional).
-      await this.notifications.send({
+      if (!c) continue;
+      // Portal inbox, SMS and email to the guardian's own details; the key
+      // makes a re-marked register not text the parent twice (N1).
+      await this.notifications.notifyContact({
         organizationId: orgId,
-        channel: 'in_app',
+        contact: { id: c.id, email: c.email, phone: c.phone },
         category: 'attendance',
         title,
         body,
-        payload: { studentProfileId, kind, ...detail, dedupeKey },
-      } as any);
-      if (c?.email) {
-        await this.notifications.send({
-          organizationId: orgId,
-          channel: 'email',
-          category: 'attendance',
-          title,
-          body,
-          payload: { studentProfileId, kind, dedupeKey },
-        } as any).catch(() => undefined);
-      }
-      if (c?.phone) {
-        await this.notifications.send({
-          organizationId: orgId,
-          channel: 'sms',
-          category: 'attendance',
-          title,
-          body,
-          payload: { studentProfileId, kind, dedupeKey },
-        } as any).catch(() => undefined);
-      }
+        payload: { studentProfileId, kind, ...detail },
+        dedupeKey,
+      });
     }
   }
 }

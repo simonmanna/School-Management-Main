@@ -4159,6 +4159,10 @@ model Notification {
   sentAt         DateTime?
   /// Failure reason (provider response, etc.).
   error          String?
+  /// Idempotency key for event-driven sends (E2E audit N1). Unique per
+  /// (organizationId, channel) via a PARTIAL unique index in migration
+  /// 20260924120000_notification_dedupe — Prisma cannot express the WHERE.
+  dedupeKey      String?
   createdAt      DateTime            @default(now())
 
   @@index([organizationId, userId, status, createdAt])
