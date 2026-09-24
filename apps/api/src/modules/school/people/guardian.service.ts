@@ -88,6 +88,37 @@ export class GuardianService {
       });
       if (already) throw new ConflictException('That guardian is already linked to this learner.');
 
+      // Re-linking a guardian who was unlinked earlier: the old row is only
+      // soft-deleted and still holds the (student, contact) unique key, so a
+      // fresh create failed with a 500. Bring the link back instead.
+      const removed = await tx.studentGuardian.findFirst({
+        where: { studentProfileId: dto.studentProfileId, guardianContactId: contact.id, deletedAt: { not: null } },
+      });
+      if (removed) {
+        await tx.studentGuardian.updateMany({
+          where: { id: removed.id, deletedAt: { not: null } },
+          data: {
+            deletedAt: null,
+            relationship: dto.relationship,
+            isPrimary: dto.isPrimary ?? false,
+            canPickup: dto.canPickup ?? true,
+            receivesStatements: dto.receivesStatements ?? true,
+          },
+        });
+        const restored = await tx.studentGuardian.findFirst({
+          where: { id: removed.id },
+          include: { studentProfile: true },
+        });
+        await this.audit.recordInTx(tx, {
+          entity: 'StudentGuardian',
+          entityId: removed.id,
+          action: 'restore',
+          oldValues: removed,
+          newValues: restored,
+        });
+        return { ...restored, contact };
+      }
+
       const link = await tx.studentGuardian.create({
         data: {
           organizationId,

@@ -8,6 +8,10 @@ import { SchedulerRegistry } from '@nestjs/schedule';
 import { BackupFrequency, BackupType, DestinationType, EncryptionType, InternetBehaviour, RetentionMode, RestoreScope } from '../../src/modules/backup/backup.dto';
 import { BACKUP_DEFAULTS } from '../../src/modules/backup/backup.constants';
 
+// Each test compiles a Nest module in beforeEach; under the full parallel unit
+// run that alone could pass the 5 s default and fail an otherwise green suite.
+jest.setTimeout(30_000);
+
 describe('BackupService', () => {
   let service: BackupService;
   let mockSettingsService: Partial<SettingsService>;

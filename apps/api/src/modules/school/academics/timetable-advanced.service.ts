@@ -211,37 +211,47 @@ export class TimetableAdvancedService {
   }) {
     const periods = await (this.prisma.client as any).period.findMany({ orderBy: { order: 'asc' } });
     if (periods.length === 0) throw new BadRequestException('Configure periods first');
-    const days = [1, 2, 3, 4, 5, 6, 7];
+    // Monday–Friday, walked in a fixed order. The draft used to pick random
+    // cells from all seven days: lessons landed on Saturday and Sunday, and two
+    // runs over the same input produced two different timetables.
+    const days = [1, 2, 3, 4, 5];
     const loads = dto.subjectLoads ?? [];
     const teacherOf: Record<string, string | undefined> = Object.fromEntries(
       (dto.subjectTeachers ?? []).map((t) => [t.subjectId, t.teacherPartnerId]),
     );
+    // Per subject per day — as a cap on the whole class it limited a week to
+    // ten lessons.
     const maxPerDay = dto.maxPerDay ?? 2;
 
     const placed: any[] = [];
-    const dayCount: Record<number, number> = {};
+    let cursor = 0; // rotates the starting day so subjects spread across the week
     for (const load of loads) {
       let remaining = load.perWeek;
-      let guard = 0;
-      while (remaining > 0 && guard++ < 1000) {
-        const day = days[Math.floor(Math.random() * days.length)];
-        const period = periods[Math.floor(Math.random() * periods.length)];
-        if ((dayCount[day] ?? 0) >= maxPerDay) continue;
-        const clash = await this.hasClash({
-          classId: dto.classId, sectionId: dto.sectionId ?? null,
-          dayOfWeek: day, periodId: period.id, teacherPartnerId: teacherOf[load.subjectId],
-        });
-        if (clash) continue;
-        // Never twice in the same cell of this draft.
-        if (placed.some((p) => p.dayOfWeek === day && p.periodId === period.id)) continue;
-        if (teacherOf[load.subjectId] && placed.some((p) => p.dayOfWeek === day && p.periodId === period.id && p.teacherPartnerId === teacherOf[load.subjectId])) continue;
-        placed.push({
-          classId: dto.classId, sectionId: dto.sectionId ?? null, dayOfWeek: day, periodId: period.id,
-          subjectId: load.subjectId, teacherPartnerId: teacherOf[load.subjectId] ?? null, type: 'lesson',
-        });
-        dayCount[day] = (dayCount[day] ?? 0) + 1;
-        remaining--;
+      const perDay: Record<number, number> = {};
+      // Spread first (one lesson per day, then a second pass), earliest free
+      // period first, until the load is placed or no cell is left.
+      for (let pass = 0; pass < maxPerDay && remaining > 0; pass++) {
+        for (let i = 0; i < days.length && remaining > 0; i++) {
+          const day = days[(cursor + i) % days.length];
+          if ((perDay[day] ?? 0) >= maxPerDay) continue;
+          for (const period of periods) {
+            if (placed.some((p) => p.dayOfWeek === day && p.periodId === period.id)) continue;
+            const clash = await this.hasClash({
+              classId: dto.classId, sectionId: dto.sectionId ?? null,
+              dayOfWeek: day, periodId: period.id, teacherPartnerId: teacherOf[load.subjectId],
+            });
+            if (clash) continue;
+            placed.push({
+              classId: dto.classId, sectionId: dto.sectionId ?? null, dayOfWeek: day, periodId: period.id,
+              subjectId: load.subjectId, teacherPartnerId: teacherOf[load.subjectId] ?? null, type: 'lesson',
+            });
+            perDay[day] = (perDay[day] ?? 0) + 1;
+            remaining--;
+            break;
+          }
+        }
       }
+      cursor++;
     }
     // The draft is committed through the one validated write path: whole-batch
     // conflict detection, teacher allocation, course offerings, the timetable

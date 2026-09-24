@@ -25,7 +25,7 @@ export interface CandidateReference {
   status: ReferenceStatus;
   verifiedAt: string | null;
   note: string | null;
-  student: { name: string | null; admissionNo: string; currentClassId: string | null; className: string | null } | null;
+  student: { name: string | null; admissionNo: string; classId: string | null; className: string | null } | null;
 }
 
 export interface CaFinding {

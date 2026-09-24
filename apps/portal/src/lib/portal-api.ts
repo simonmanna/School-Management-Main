@@ -70,7 +70,6 @@ export interface ParentChildRow {
     id: string;
     admissionNo: string;
     partnerId: string;
-    currentClassId: string | null;
     currentClass?: { name: string; gradeLevel?: { name: string } | null } | null;
     currentSection?: { name: string } | null;
     partner?: { name: string } | null;
@@ -288,7 +287,6 @@ export interface StudentDashboard {
   profile: {
     id: string;
     admissionNo: string;
-    currentClassId: string | null;
     currentClass?: { name: string; gradeLevel?: { name: string } | null } | null;
     partner?: { name: string } | null;
   } | null;
