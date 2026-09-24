@@ -123,6 +123,7 @@ import { SchoolAcademicYearsPage } from '@/pages/school/academic-years';
 import { SchoolTermsPage } from '@/pages/school/terms';
 import { SchoolDepartmentsPage } from '@/pages/school/departments';
 import { SchoolClassesPage } from '@/pages/school/classes';
+import { SchoolGradesLevelsPage } from '@/pages/school/grades-levels';
 import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolSettingsPage } from '@/pages/school/school-settings';
 import { SchoolStudentCategoriesPage } from '@/pages/school/student-categories';
@@ -589,6 +590,7 @@ export function App() {
           <Route path="/school/management/terms" element={<SchoolTermsPage />} />
           <Route path="/school/management/departments" element={<SchoolDepartmentsPage />} />
           <Route path="/school/management/classes" element={<SchoolClassesPage />} />
+          <Route path="/school/management/grades" element={<SchoolGradesLevelsPage />} />
           <Route path="/school/management/sections" element={<SchoolSectionsPage />} />
           {/* Streams ARE sections (ADR-029): the legacy page is gone; old links land on sections. */}
           <Route path="/school/management/streams" element={<Navigate to="/school/management/sections" replace />} />

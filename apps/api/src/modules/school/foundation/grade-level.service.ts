@@ -27,7 +27,12 @@ export class GradeLevelService extends AuditedCrudService<
   protected readonly entityName = 'GradeLevel';
   protected readonly searchFields = ['name', 'code'];
   protected readonly defaultOrderBy: Record<string, 'asc' | 'desc'> = { order: 'asc' as const };
-  protected readonly defaultInclude = { classes: true };
+  // The ladder is shown on the Grades page, so list/get carry its ends.
+  protected readonly defaultInclude = {
+    classes: true,
+    academicLevel: { select: { id: true, name: true } },
+    nextGradeLevel: { select: { id: true, name: true } },
+  };
 
   constructor(prisma: PrismaService, audit: AuditService) {
     super(prisma.client.gradeLevel as unknown as CrudDelegate, prisma, audit);

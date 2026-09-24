@@ -83,11 +83,16 @@ export const MOVEMENT_REASONS: readonly MovementReasonValue[] = [
  * new academic year's enrollment. WITHDRAWN and TRANSFERRED reopen to ACTIVE
  * because re-entry within the same year is an ordinary school event and the
  * history stays intact either way (placements are append-only).
+ *
+ * SUSPENDED → COMPLETED: a pupil suspended in the last weeks of the year still
+ * finished it. Without this edge promotion, repeat and graduation all failed
+ * for every suspended learner and the year-end rollover silently skipped them
+ * (E2E audit L1).
  */
 export const ENROLLMENT_TRANSITIONS: Readonly<Record<EnrollmentStatusValue, readonly EnrollmentStatusValue[]>> = {
   PENDING: ['ACTIVE', 'CANCELLED'],
   ACTIVE: ['SUSPENDED', 'WITHDRAWN', 'TRANSFERRED', 'COMPLETED'],
-  SUSPENDED: ['ACTIVE', 'WITHDRAWN', 'TRANSFERRED', 'CANCELLED'],
+  SUSPENDED: ['ACTIVE', 'WITHDRAWN', 'TRANSFERRED', 'COMPLETED', 'CANCELLED'],
   WITHDRAWN: ['ACTIVE'],
   TRANSFERRED: ['ACTIVE'],
   COMPLETED: [],
@@ -112,6 +117,19 @@ export function transitionError(from: EnrollmentStatusValue, to: EnrollmentStatu
  * are excluded from marking by participation status, not by losing their seat.
  */
 export const PLACEMENT_HOLDING_STATUSES: readonly EnrollmentStatusValue[] = ['PENDING', 'ACTIVE', 'SUSPENDED'];
+
+/**
+ * Statuses from which a learner may move on to next year (promote, repeat,
+ * graduate). COMPLETED is the year already closed ("Mark the year complete",
+ * then promote). A WITHDRAWN or TRANSFERRED learner left the school: promoting
+ * them used to mint an ACTIVE next-year enrollment for a pupil who is gone
+ * (E2E audit L1). PENDING never sat in a class; CANCELLED never existed.
+ */
+export const PROGRESSABLE_STATUSES: readonly EnrollmentStatusValue[] = ['ACTIVE', 'SUSPENDED', 'COMPLETED'];
+
+export function canProgress(status: EnrollmentStatusValue): boolean {
+  return PROGRESSABLE_STATUSES.includes(status);
+}
 
 /** Statuses an enrollment may be CREATED in. Every other status is reached through the FSM. */
 export const CREATABLE_STATUSES: readonly EnrollmentStatusValue[] = ['PENDING', 'ACTIVE'];

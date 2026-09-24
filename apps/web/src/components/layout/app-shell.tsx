@@ -249,6 +249,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/academic-years', label: 'Academic Years', icon: CalendarRange, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/terms', label: 'Terms / Semesters', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/classes', label: 'Classes / Grades', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/grades', label: 'Grade Ladder & Levels', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/sections', label: 'Streams / Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/settings', label: 'School Settings', icon: SettingsIcon, permission: PERMISSIONS.school.manageFoundation },

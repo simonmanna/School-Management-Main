@@ -9,6 +9,7 @@ import { ClassCohortService } from './class-cohort.service';
 import { ProgrammeService } from './programme.service';
 import { assertYearWritable } from '../foundation/academic-year-guard';
 import {
+  canProgress,
   canTransition,
   closeReasonFor,
   CREATABLE_STATUSES,
@@ -462,6 +463,7 @@ export class StudentEnrollmentService {
   async repeatInTx(tx: any, id: string, dto: RepeatGradeDto) {
     const current = await tx.studentEnrollment.findFirst({ where: { id } });
     if (!current) throw new NotFoundException(`Enrollment ${id} not found`);
+    this.assertProgressable(current.status);
     if (current.academicYearId === dto.toAcademicYearId) {
       throw new BadRequestException('A repeat places the learner in the NEXT academic year, not the current one.');
     }
@@ -532,6 +534,7 @@ export class StudentEnrollmentService {
       include: { gradeLevel: true },
     });
     if (!current) throw new NotFoundException(`Enrollment ${id} not found`);
+    this.assertProgressable(current.status);
     if (current.academicYearId === dto.toAcademicYearId) {
       throw new BadRequestException('Promotion places the learner in the NEXT academic year, not the current one.');
     }
@@ -656,11 +659,26 @@ export class StudentEnrollmentService {
   async graduateInTx(tx: any, id: string, reason: string, at: Date = new Date()) {
     const enrollment = await tx.studentEnrollment.findFirst({ where: { id } });
     if (!enrollment) throw new NotFoundException(`Enrollment ${id} not found`);
+    this.assertProgressable(enrollment.status);
+    // Already closed for the year: graduation only records the seat's end reason.
+    if (enrollment.status === 'COMPLETED') return enrollment;
     await this.placements.closeOpen(tx, id, at, 'GRADUATION');
     return this.changeStatusInTx(tx, id, { toStatus: 'COMPLETED', reason, effectiveAt: at.toISOString() });
   }
 
   /* ────────────────────────────── Helpers ─────────────────────────────── */
+
+  /** Promote / repeat / graduate only a learner who is still in (or finished) the year. See PROGRESSABLE_STATUSES. */
+  private assertProgressable(status: EnrollmentStatusValue) {
+    if (!canProgress(status)) {
+      throw new BadRequestException(
+        `This learner's enrollment is ${status.toLowerCase()}, so they cannot move on to next year. ` +
+          (status === 'WITHDRAWN' || status === 'TRANSFERRED'
+            ? 'Re-admit them first if they have come back.'
+            : 'Activate the enrollment first.'),
+      );
+    }
+  }
 
   /**
    * Work out the grade level and programme for a new enrollment. Either may be

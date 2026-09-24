@@ -103,6 +103,13 @@ export class PromotionRunService {
         skip.push({ ...base, outcome: 'skipped', toClassId: null, toSectionId: null, reason: 'already enrolled in the target year' });
         continue;
       }
+      // A PENDING learner never started the year, so there is nothing to move
+      // on from (PROGRESSABLE_STATUSES). Say so in the plan rather than letting
+      // execution fail the row.
+      if (e.status === 'PENDING') {
+        skip.push({ ...base, outcome: 'skipped', toClassId: null, toSectionId: null, reason: 'enrollment still pending — activate it first' });
+        continue;
+      }
 
       const rec = await this.latestRecommendation(client, e.studentProfileId, dto.fromTermId);
       if (rec === 'review') {

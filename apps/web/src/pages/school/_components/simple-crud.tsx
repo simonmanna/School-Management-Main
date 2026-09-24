@@ -117,10 +117,32 @@ export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryK
     try {
       const payload: Record<string, any> = {};
       for (const f of fields) {
+        if (f.hideForm || f.type === 'readonly') continue;
         let v = form[f.name];
         if (f.type === 'number') v = v === '' || v === undefined ? undefined : Number(v);
         if (f.type === 'boolean') v = !!v;
+        if (editing) {
+          // An edit sends only what the user CHANGED. Sending every field made
+          // saving an unrelated edit re-assert flags like `isCurrent`, and the
+          // API treats that as "make this the current year" — which cleared the
+          // school's current term (E2E audit Y1). Clearing a field sends null.
+          const before = editing[f.name];
+          const was =
+            f.type === 'date' || f.type === 'datetime'
+              ? formatDateForInput(before)
+              : f.type === 'boolean'
+                ? !!before
+                : (before ?? '');
+          const now = v === undefined ? '' : v;
+          if (String(now) === String(was)) continue;
+          payload[f.name] = now === '' ? null : now;
+          continue;
+        }
         if (v !== undefined && v !== '') payload[f.name] = v;
+      }
+      if (editing && Object.keys(payload).length === 0) {
+        close();
+        return;
       }
       if (editing) {
         await api.patch(`${path}/${editing.id}`, payload);

@@ -1,6 +1,7 @@
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { CurriculumService } from '../../src/modules/school/academics/academics.service';
 import {
+  canProgress,
   canTransition,
   CREATABLE_STATUSES,
   ENROLLMENT_STATUSES,
@@ -104,6 +105,19 @@ describe('Enrollment FSM', () => {
     expect(isReactivation('WITHDRAWN', 'ACTIVE')).toBe(true);
     expect(isReactivation('TRANSFERRED', 'ACTIVE')).toBe(true);
     expect(isReactivation('SUSPENDED', 'ACTIVE')).toBe(false);
+  });
+
+  it('a suspended learner can finish the year, so rollover does not skip them (L1)', () => {
+    expect(canTransition('SUSPENDED', 'COMPLETED')).toBe(true);
+  });
+
+  it('only a learner still in (or finished with) the year can move on to next year (L1)', () => {
+    expect(canProgress('ACTIVE')).toBe(true);
+    expect(canProgress('SUSPENDED')).toBe(true);
+    expect(canProgress('COMPLETED')).toBe(true);
+    for (const gone of ['WITHDRAWN', 'TRANSFERRED', 'CANCELLED', 'PENDING'] as const) {
+      expect(canProgress(gone)).toBe(false);
+    }
   });
 
   it('COMPLETED and CANCELLED are terminal', () => {
