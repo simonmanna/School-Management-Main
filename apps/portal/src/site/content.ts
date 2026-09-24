@@ -10,7 +10,9 @@
  * Anything genuinely dynamic (certificate verification, application status) is
  * read from the API at request time and lives in the pages, not here.
  *
- * ── Replace the entries marked TODO with the school's real details. ──
+ * ── Replace the entries marked TODO with the school's real details, then set
+ *    VITE_SITE_CONTENT_READY=true. Until then the public routes show a neutral
+ *    "website being prepared" page instead of this sample content. ──
  */
 
 export interface NewsItem {
@@ -48,8 +50,9 @@ export const SITE = {
   contact: {
     // TODO: the school's real address, numbers and inbox.
     addressLines: ['Plot 42, Kira Road', 'Nakawa Division', 'Kampala, Uganda'],
-    phone: '+256 700 000 000',
-    altPhone: '+256 414 000 000',
+    phone: '+250 790 600 100',
+    /** Same line as `phone`; linked via wa.me, which wants digits only. */
+    whatsapp: '+250 790 600 100',
     email: 'info@sunriseacademy.ac.ug',
     admissionsEmail: 'admissions@sunriseacademy.ac.ug',
     officeHours: [

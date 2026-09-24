@@ -68,9 +68,11 @@ export default function ContactPage() {
                     </a>
                     <a
                       className="block text-muted-foreground hover:underline"
-                      href={`tel:${SITE.contact.altPhone.replace(/\s/g, '')}`}
+                      href={`https://wa.me/${SITE.contact.whatsapp.replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                     >
-                      {SITE.contact.altPhone}
+                      WhatsApp {SITE.contact.whatsapp}
                     </a>
                   </div>
                 </Panel>
