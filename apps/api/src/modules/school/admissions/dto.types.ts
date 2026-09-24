@@ -90,11 +90,18 @@ export class UpdateApplicationDto {
 const REQUIRED_REASON_ACTIONS = ['accept', 'reject', 'waitlist', 'withdraw'] as const;
 
 export class ReviewApplicationDto {
-  @IsIn([...REQUIRED_REASON_ACTIONS, 'review', 'request_documents', 'screen', 'schedule_interview', 'complete_interview', 'reschedule', 'schedule_exam', 'exam_done', 'score', 'issue_offer', 'accept_offer', 'decline_offer', 'expire_offer'] as const)
+  // Offer actions are NOT accepted here: issue/accept/expire each have their own
+  // route and permission (school:admissions:offer). Through the generic review
+  // endpoint they bypassed that grant and created no OfferLetter (E2E audit P2).
+  @IsIn([...REQUIRED_REASON_ACTIONS, 'review', 'request_documents', 'screen', 'schedule_interview', 'complete_interview', 'reschedule', 'schedule_exam', 'exam_done', 'score', 'decline_offer'] as const)
   action!: string;
   /// Required (non-empty) for accept/reject/waitlist/withdraw; optional otherwise.
   @IsOptional() @IsString() reason?: string;
   @IsOptional() @IsString() notes?: string;
+}
+
+export class ReviewIdentityMatchDto {
+  @IsIn(['confirmed_same', 'dismissed'] as const) decision!: 'confirmed_same' | 'dismissed';
 }
 
 // ── Nationalities (organization-scoped master data) ──────────────────────────

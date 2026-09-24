@@ -9,14 +9,20 @@ import { AdmissionFeeService } from '../../src/modules/school/admissions/admissi
 
 const D = (n: number) => new Prisma.Decimal(n);
 
-function make(app: any, doc: any = null) {
+function make(app: any, doc: any = null, guardians: any[] = []) {
   const tx = {
+    admissionGuardian: { findMany: jest.fn().mockResolvedValue(guardians) },
+    studentGuardian: { findMany: jest.fn().mockResolvedValue([]) },
+    partner: { create: jest.fn().mockResolvedValue({ id: 'partner_new_payer' }) },
     admissionApplication: {
       findFirst: jest.fn().mockResolvedValue(app),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     admissionFee: { upsert: jest.fn().mockResolvedValue({}), updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-    contact: { findFirst: jest.fn().mockResolvedValue({ partnerId: 'partner_guardian' }) },
+    contact: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'contact_1', partnerId: 'partner_guardian' }),
+      create: jest.fn().mockResolvedValue({ id: 'contact_new', partnerId: 'partner_new_payer' }),
+    },
     document: {
       findFirst: jest.fn(async (args: any) => {
         if (args?.include?.lines) {
@@ -82,9 +88,31 @@ describe('AdmissionFeeService · charge', () => {
     );
   });
 
-  it('refuses an application with no guardian contact', async () => {
+  it('refuses an application with no guardian at all', async () => {
     const { svc } = make({ ...app, parentContactId: null });
     await expect(svc.charge('app_1', { amount: 50_000 })).rejects.toThrow(BadRequestException);
+  });
+
+  // AD4: the application form records guardians but never sends parentContactId.
+  it('bills the financially responsible guardian when no parent contact is linked', async () => {
+    const guardians = [
+      { id: 'g1', firstName: 'Primary', isPrimary: true, financiallyResponsible: false, contactId: null, email: null, phone: null },
+      { id: 'g2', firstName: 'Payer', lastName: 'Okello', isPrimary: false, financiallyResponsible: true, contactId: null, email: 'payer@example.test', phone: '0772000111' },
+    ];
+    const { svc, tx, documentBuilder } = make({ ...app, parentContactId: null }, null, guardians) as any;
+    await svc.charge('app_1', { amount: 50_000 });
+    expect(tx.partner.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Payer Okello', isCustomer: true }) }),
+    );
+    expect(tx.admissionApplication.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { parentContactId: 'contact_new' } }),
+    );
+    expect(documentBuilder.createDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ partnerId: 'partner_new_payer' }),
+      expect.anything(),
+    );
   });
 
   it.each(['rejected', 'withdrawn', 'enrolled'])('refuses a %s application', async (status) => {

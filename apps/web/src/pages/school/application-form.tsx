@@ -27,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
 import { statusMeta } from './_components/admission-status';
 import { ApplicationDocuments } from './_components/ApplicationDocuments';
+import { IdentityMatchesPanel } from './_components/IdentityMatchesPanel';
 
 const RELATIONSHIPS = ['father', 'mother', 'guardian', 'uncle', 'aunt', 'other'];
 // Nationality is now org-scoped master data (Task 6) — the hardcoded list is
@@ -459,6 +460,7 @@ export function SchoolApplicationFormPage() {
                 <Button variant="outline" size="sm" onClick={doReveal} disabled={revealNin.isPending}><ShieldCheck className="h-3.5 w-3.5" /> Reveal NIN</Button>
                 {revealed !== null && <span className="font-mono text-sm">{revealed}</span>}
               </div>
+              <IdentityMatchesPanel applicationId={id!} />
               <ApplicationDocuments
                 applicationId={id!}
                 admissionCycleId={existing?.admissionCycleId}

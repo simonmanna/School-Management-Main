@@ -723,11 +723,39 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
 
   /** Review a candidate identity match (confirm same person / dismiss). */
   async reviewIdentityMatch(matchId: string, decision: 'confirmed_same' | 'dismissed') {
-    const match = await this.prisma.client.applicantIdentityMatch.findFirst({ where: { id: matchId } });
-    if (!match) throw new NotFoundException(`Identity match ${matchId} not found`);
-    return this.prisma.client.applicantIdentityMatch.update({
-      where: { id: matchId },
-      data: { status: decision, reviewedById: this.tenant.userId ?? null, reviewedAt: new Date() },
+    // Validated by ReviewIdentityMatchDto at the edge; re-checked here because
+    // an arbitrary string used to be written straight into `status` (AD3).
+    if (decision !== 'confirmed_same' && decision !== 'dismissed') {
+      throw new BadRequestException(`decision must be 'confirmed_same' or 'dismissed'`);
+    }
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const match = await tx.applicantIdentityMatch.findFirst({ where: { id: matchId } });
+      if (!match) throw new NotFoundException(`Identity match ${matchId} not found`);
+      if (match.status !== 'open') {
+        throw new ConflictException(`This possible match was already ${String(match.status).replace('_', ' ')}.`);
+      }
+      const updated = await tx.applicantIdentityMatch.update({
+        where: { id: matchId },
+        data: { status: decision, reviewedById: this.tenant.userId ?? null, reviewedAt: new Date() },
+      });
+      // Confirming "same child" decides which student record the applicant
+      // becomes, so it is audited like any other admission decision.
+      await this.audit.recordInTx(tx, {
+        entity: 'ApplicantIdentityMatch',
+        entityId: matchId,
+        action: 'update',
+        oldValues: { status: match.status },
+        newValues: { status: decision, applicationId: match.applicationId, candidateId: match.candidateId },
+      });
+      return updated;
+    });
+  }
+
+  /** Candidate duplicate-pupil matches for an application, for the review panel. */
+  async identityMatches(applicationId: string) {
+    return this.prisma.client.applicantIdentityMatch.findMany({
+      where: { applicationId },
+      orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
     });
   }
 
@@ -779,6 +807,19 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       //    configuration demands that is not yet complete. A school configured
       //    Application → Enrollment has none, so a submitted application passes
       //    straight through; a Selective school does not.
+      // 0. The term must belong to the year the family applied for. Enrolling a
+      //    2027 applicant into a 2026 term placed them a year early, and the
+      //    capacity counted against the wrong year (E2E audit AD2).
+      if (app.academicYearId) {
+        const term = await tx.term.findFirst({ where: { id: dto.termId }, select: { academicYearId: true, name: true } });
+        if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
+        if (term.academicYearId !== app.academicYearId) {
+          throw new BadRequestException(
+            `${term.name} is not in the academic year this application is for. Choose a term of that year.`,
+          );
+        }
+      }
+
       const stages = this.workflow.stagesFor(app);
       this.workflow.validateProgress(app, 'ENROLLMENT', stages);
 
@@ -895,10 +936,14 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
       await this.copyApplicationDocuments(tx, app.id, profile.id);
 
-      await this.applyReview(tx, app.id, 'enroll', undefined, {
-        allowed: workflowAllowed,
-        skippedStages,
-      });
+      await this.applyReview(
+        tx,
+        app.id,
+        'enroll',
+        undefined,
+        { allowed: workflowAllowed, skippedStages },
+        app.status,
+      );
 
       await this.events.publishInTx(tx, EVENTS.SchoolAdmissionEnrolled, {
         organizationId,
@@ -1287,11 +1332,25 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
      * snapshot and never accepted from a request body.
      */
     workflow?: { allowed: readonly string[]; skippedStages: StageKey[] },
+    /**
+     * The status the caller validated against when it began. enroll() checks
+     * the workflow, eligibility and seat for the status it read FIRST, then does
+     * a lot of work before arriving here; a concurrent withdraw committed in
+     * between must fail this call, not be overwritten — the workflow shortcut
+     * would otherwise legalise 'enroll' from whatever status it finds now.
+     */
+    expectedStatus?: string,
   ) {
     const newStatus = STATUS_MAP[action];
     if (!newStatus) throw new BadRequestException(`Unknown admission action: ${action}`);
     const before = await tx.admissionApplication.findFirst({ where: { id: applicationId } });
     if (!before) throw new NotFoundException(`Application ${applicationId} not found`);
+    if (expectedStatus && before.status !== expectedStatus) {
+      throw new ConflictException(
+        `Application ${before.applicationNumber ?? applicationId} changed while you were working on it ` +
+          `(it is now '${before.status}'). Reload it and try again.`,
+      );
+    }
 
     // Decision-grade actions must carry a non-empty reason. Enforced here (not
     // just in the UI) so the rule holds even if the web client is bypassed.
@@ -1305,14 +1364,25 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     this.assertTransition(before.status, action, workflow?.allowed ?? []);
 
     const stampField = TIMESTAMP_MAP[action];
-    await tx.admissionApplication.updateMany({
-      where: { id: applicationId },
+    // Compare-and-set on the status we validated against. Two officers acting on
+    // one application at once (enroll vs withdraw) both read the same `before`
+    // and both passed the FSM check; the last write won and the history showed
+    // two transitions out of one state (E2E audit AD1). Now the loser updates
+    // nothing and gets a 409 instead of silently overwriting.
+    const cas = await tx.admissionApplication.updateMany({
+      where: { id: applicationId, status: expectedStatus ?? before.status },
       data: {
         status: newStatus,
         ...(reason ? { decisionNotes: reason } : {}),
         ...(stampField ? { [stampField]: new Date() } : {}),
       },
     });
+    if (cas.count === 0) {
+      throw new ConflictException(
+        `Application ${before.applicationNumber ?? applicationId} changed while you were working on it ` +
+          `(it is no longer '${before.status}'). Reload it and try again.`,
+      );
+    }
 
     // NOTE: the admission seat is released when the learner's enrollment ends
     // (StudentEnrollmentService), not here. `enrolled` is a TERMINAL admission status (ADMISSION_TRANSITIONS above),

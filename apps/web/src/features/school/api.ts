@@ -1156,6 +1156,44 @@ export function useIssuePortalLink() {
   });
 }
 
+/**
+ * A possible duplicate: this applicant may already be a pupil (or a sibling's
+ * record). Enrolment is BLOCKED while any match is open, and there was no
+ * screen to resolve one (E2E audit AD3).
+ */
+export interface IdentityMatch {
+  id: string;
+  applicationId: string;
+  candidateType: string;
+  candidateId: string;
+  candidateName: string;
+  matchMethod: string;
+  matchScore: string | number | null;
+  status: 'open' | 'confirmed_same' | 'dismissed';
+  reviewedAt: string | null;
+}
+
+export function useIdentityMatches(applicationId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'admissions', applicationId, 'identity-matches'],
+    enabled: !!applicationId,
+    queryFn: async () =>
+      (await api.get<IdentityMatch[]>(`${S}/admissions/${applicationId}/identity-matches`)).data,
+  });
+}
+
+export function useReviewIdentityMatch(applicationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, decision }: { id: string; decision: 'confirmed_same' | 'dismissed' }) =>
+      (await api.post(`${S}/admissions/identity-matches/${id}/review`, { decision })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'admissions', applicationId, 'identity-matches'] });
+      qc.invalidateQueries({ queryKey: ['school', 'admissions'] });
+    },
+  });
+}
+
 export interface EnrollAdmissionInput {
   applicationId: string;
   classId: string;

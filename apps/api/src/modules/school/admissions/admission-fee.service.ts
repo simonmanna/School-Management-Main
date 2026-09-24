@@ -10,6 +10,7 @@ import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
 import type { ChargeFeeDto, PayApplicationFeeDto } from './dto.types';
 import { SCHOOL_ACCOUNTS } from '../fees/school-accounts';
+import { normalizePhone } from '../people/guardian.service';
 
 export type AdmissionFeeState = 'unpaid' | 'pending' | 'paid' | 'waived';
 
@@ -312,15 +313,96 @@ export class AdmissionFeeService implements OnModuleInit {
     });
   }
 
+  /**
+   * Who pays the admission fee.
+   *
+   * The application form captures guardians as AdmissionGuardian rows and never
+   * sends `parentContactId`, so requiring it made the fee unchargeable from the
+   * UI (E2E audit AD4). Fall back to the guardian the family named as paying —
+   * financially responsible, else primary, else the first listed — reusing their
+   * existing contact when a sibling is already enrolled, otherwise opening a
+   * payer account for them. The chosen contact is written back to
+   * `parentContactId` so the charge, the payment and any waiver all bill the
+   * same account.
+   */
   private async feePartnerId(tx: any, app: any): Promise<string> {
-    if (!app.parentContactId) {
+    if (app.parentContactId) {
+      const contact = await tx.contact.findFirst({ where: { id: app.parentContactId }, select: { partnerId: true } });
+      if (!contact) throw new BadRequestException(`Guardian contact ${app.parentContactId} not found`);
+      return contact.partnerId;
+    }
+
+    const guardians = await tx.admissionGuardian.findMany({
+      where: { applicationId: app.id },
+      orderBy: { createdAt: 'asc' },
+    });
+    const payer =
+      guardians.find((g: any) => g.financiallyResponsible) ?? guardians.find((g: any) => g.isPrimary) ?? guardians[0];
+    if (!payer) {
       throw new BadRequestException(
-        `Application ${app.applicationNumber ?? app.id} has no guardian contact linked, so there is nobody to bill. ` +
-          'Link a parent/guardian contact to the application before charging the fee.',
+        `Application ${app.applicationNumber ?? app.id} lists no parent or guardian, so there is nobody to bill. ` +
+          'Add a guardian to the application before charging the fee.',
       );
     }
-    const contact = await tx.contact.findFirst({ where: { id: app.parentContactId }, select: { partnerId: true } });
-    if (!contact) throw new BadRequestException(`Guardian contact ${app.parentContactId} not found`);
-    return contact.partnerId;
+
+    let contact: { id: string; partnerId: string } | null = payer.contactId
+      ? await tx.contact.findFirst({ where: { id: payer.contactId }, select: { id: true, partnerId: true } })
+      : null;
+
+    // A parent who already has a child here is the SAME payer: match an existing
+    // guardian contact on email or phone, as enrolment's guardian promotion does.
+    const email = payer.email?.trim().toLowerCase() || null;
+    const phone = normalizePhone(payer.phone);
+    if (!contact && (email || phone)) {
+      const links = await tx.studentGuardian.findMany({
+        where: {
+          guardianContact: {
+            OR: [
+              ...(email ? [{ email: { equals: email, mode: 'insensitive' } }] : []),
+              ...(phone ? [{ phone: { contains: phone.slice(-9) } }] : []),
+            ],
+          },
+        },
+        include: { guardianContact: { select: { id: true, partnerId: true, email: true, phone: true } } },
+        take: 20,
+      });
+      contact =
+        links
+          .map((l: any) => l.guardianContact)
+          .find(
+            (c: any) => (email && c.email?.trim().toLowerCase() === email) || (phone && normalizePhone(c.phone) === phone),
+          ) ?? null;
+    }
+
+    if (!contact) {
+      const name = [payer.firstName, payer.lastName].filter(Boolean).join(' ').trim() || 'Guardian';
+      const partner = await tx.partner.create({
+        data: {
+          organizationId: app.organizationId,
+          code: `ADM-PAYER-${app.applicationNumber ?? app.id}`,
+          name,
+          isCompany: false,
+          isCustomer: true,
+          email: payer.email ?? null,
+          phone: payer.phone ?? null,
+        },
+      });
+      contact = await tx.contact.create({
+        data: {
+          organizationId: app.organizationId,
+          partnerId: partner.id,
+          firstName: payer.firstName,
+          lastName: payer.lastName ?? null,
+          email: payer.email ?? null,
+          phone: payer.phone ?? null,
+          isPrimary: true,
+        },
+        select: { id: true, partnerId: true },
+      });
+    }
+
+    await tx.admissionApplication.updateMany({ where: { id: app.id }, data: { parentContactId: contact!.id } });
+    app.parentContactId = contact!.id;
+    return contact!.partnerId;
   }
 }

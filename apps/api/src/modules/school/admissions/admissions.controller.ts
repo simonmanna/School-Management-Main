@@ -18,6 +18,7 @@ import {
   IssueOfferDto,
   ReEnrollDto,
   ReviewApplicationDto,
+  ReviewIdentityMatchDto,
   ScheduleInterviewDto,
   ScoreApplicationDto,
   TransferInDto,
@@ -57,8 +58,14 @@ export class AdmissionsController {
 
   @Post('identity-matches/:id/review')
   @RequirePermissions(PERMISSIONS.school.manageAdmissions)
-  reviewIdentityMatch(@Param('id') id: string, @Body('decision') decision: 'confirmed_same' | 'dismissed') {
-    return this.admissions.reviewIdentityMatch(id, decision);
+  reviewIdentityMatch(@Param('id') id: string, @Body() dto: ReviewIdentityMatchDto) {
+    return this.admissions.reviewIdentityMatch(id, dto.decision);
+  }
+
+  @Get(':id/identity-matches')
+  @RequirePermissions(PERMISSIONS.school.read)
+  identityMatches(@Param('id') id: string) {
+    return this.admissions.identityMatches(id);
   }
 
   @Patch(':id')
