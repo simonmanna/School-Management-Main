@@ -116,10 +116,15 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
     // A CLOSED term — modeled by a termFinancialClose row with status
     // 'closed' (per isTermClosed). Used to prove G5 (billing into a closed
     // term is rejected before any document is written).
+    // Its own (previous) year: a term must lie inside its academic year, which
+    // the database now enforces (Wave 4 calendar constraints).
+    const prevYear = await raw.academicYear.create({
+      data: { organizationId, name: `Y-prev-${Date.now()}`, startDate: new Date('2025-01-01'), endDate: new Date('2025-12-31') },
+    });
     const closedTerm = await raw.term.create({
       data: {
         organizationId,
-        academicYearId: year.id,
+        academicYearId: prevYear.id,
         name: 'Term 0 (closed)',
         startDate: new Date('2025-09-01'),
         endDate: new Date('2025-12-01'),

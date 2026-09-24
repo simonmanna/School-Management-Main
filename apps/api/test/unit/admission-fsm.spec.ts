@@ -15,7 +15,7 @@
  *    `acceptOffer` ignoring `expiresAt`, `enroll` never consulting the eligibility
  *    gate — were not caught. The regression tests for those are at the bottom.
  */
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AdmissionsService } from '../../src/modules/school/admissions/admissions.service';
 import { AdmissionsWorkflowService } from '../../src/modules/school/admissions/admissions-workflow.service';
 import { makePlacementLookupStub } from './_placement-stub';
@@ -338,8 +338,23 @@ describe('AdmissionsService.create — duplicate guard', () => {
         applicantLastName: last,
         applicantDob: '2018-04-15',
       }),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(ConflictException);
     expect(mocks.applicationCreate).not.toHaveBeenCalled();
+  });
+
+  it('allows a confirmed different child with the same name and birthday (allowDuplicate)', async () => {
+    const { service, mocks } = makeService();
+    mocks.applicationFindFirst.mockResolvedValue({ id: 'app_old', applicationNumber: 'APP-1' });
+    await service.create({
+      academicYearId: 'ay_1',
+      applicantFirstName: 'Alice',
+      applicantLastName: 'Nakimuli',
+      applicantDob: '2018-04-15',
+      allowDuplicate: true,
+    } as any);
+    expect(mocks.applicationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ allowDuplicate: true }) }),
+    );
   });
 
   it('allows a re-application in a different academic year', async () => {

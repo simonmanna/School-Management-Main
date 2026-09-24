@@ -747,6 +747,7 @@ model Contact {
   partner       Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   // H3: school guardianships that point at this Contact (see StudentGuardian).
   guardianships StudentGuardian[] @relation("GuardianContact")
+  admissionApplicationsAsParent AdmissionApplication[] @relation("AdmissionParentContact")
 
   @@index([organizationId])
   @@index([partnerId])
@@ -11027,6 +11028,8 @@ model SchoolClass {
   examSchedules         ExamSchedule[]
   admissionApplications AdmissionApplication[] @relation("AdmissionApplyingForClass")
   classCohorts          ClassCohort[]
+  admissionCapacities AdmissionCapacity[] @relation("AdmissionCapacityClass")
+  waitingListEntries  WaitingList[]       @relation("WaitingListClass")
 
   @@unique([organizationId, name])
   @@unique([organizationId, code])
@@ -11107,6 +11110,7 @@ model Subject {
 
   learningOutcomes LearningOutcome[]
   courseOfferings  CourseOffering[]
+  timetableOverrides TimetableOverride[] @relation("TimetableOverrideSubject")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -11480,6 +11484,7 @@ model StaffProfile {
   substituteSlots    TimetableSlot[]      @relation("TimetableSlotSubstitute")
   sections           Section[] // Class teacher (homeroom) assignments
   homeroomClasses    SchoolClass[]        @relation("HomeroomTeacher")
+  timetableOverridesAsTeacher TimetableOverride[] @relation("TimetableOverrideTeacher")
 
   @@unique([organizationId, employeeNo])
   @@index([organizationId])
@@ -11701,6 +11706,7 @@ model AdmissionCapacity {
   claimedSeats     Int     @default(0)
 
   admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
+  schoolClass    SchoolClass @relation("AdmissionCapacityClass", fields: [classId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, admissionCycleId, classId, sectionId])
   @@index([organizationId])
@@ -11852,6 +11858,10 @@ model AdmissionApplication {
   portalTokens        AdmissionPortalToken[]
   statusHistory       AdmissionStatusHistory[]
   workflow            AdmissionWorkflow?            @relation(fields: [workflowId], references: [id])
+  parentContact       Contact?                      @relation("AdmissionParentContact", fields: [parentContactId], references: [id], onDelete: SetNull)
+  /// Officer confirmed this is a DIFFERENT child despite matching name + date of
+  /// birth (twins, a common name). Exempts the row from the dedupe index (Wave 4).
+  allowDuplicate      Boolean                       @default(false)
 
   @@unique([organizationId, applicationNumber])
   @@index([organizationId])
@@ -12089,6 +12099,7 @@ model WaitingList {
   notes          String?
 
   application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  schoolClass SchoolClass @relation("WaitingListClass", fields: [classId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([classId, position])
@@ -13558,6 +13569,9 @@ model TimetableOverride {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   createdBy        String?
+  /// A StaffProfile id despite the name (same as TimetableSlot.teacherPartnerId).
+  teacherPartner   StaffProfile? @relation("TimetableOverrideTeacher", fields: [teacherPartnerId], references: [id], onDelete: SetNull)
+  subject          Subject? @relation("TimetableOverrideSubject", fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([classId, dayOfWeek, periodId])

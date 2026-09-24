@@ -27,6 +27,29 @@ const REQUIRED_INDEXES = [
     name: 'EnrollmentPlacement_one_open_per_enrollment',
     why: 'exactly one open placement per enrollment',
   },
+  // Wave 4 (E2E audit) — business invariants the database now owns.
+  { name: 'AcademicYear_one_current_per_org', why: 'at most one current academic year per school' },
+  { name: 'Term_one_current_per_org', why: 'at most one current term per school' },
+  { name: 'StudentEnrollment_one_active_per_student', why: 'a pupil holds at most one ACTIVE enrollment' },
+  { name: 'CourseOffering_one_per_cohort_subject_section', why: 'no duplicate course offering for a cohort' },
+  { name: 'AdmissionApplication_applicant_dedupe', why: 'the same child is not entered twice for a year' },
+  { name: 'Notification_org_channel_dedupeKey_key', why: 'a guardian is not messaged twice for one event' },
+];
+
+// Wave 4 — constraints and triggers created by migrations 20260924150000-155000.
+REQUIRED_CONSTRAINTS.push(
+  { table: 'AcademicYear', name: 'AcademicYear_dates_ordered', why: 'start before end' },
+  { table: 'Term', name: 'Term_dates_ordered', why: 'start before end' },
+  { table: 'AdmissionCapacity', name: 'AdmissionCapacity_counters_nonneg', why: 'seat counters never negative' },
+  { table: 'AdmissionApplication', name: 'AdmissionApplication_parentContactId_fkey', why: 'parent contact is a real contact' },
+  { table: 'TimetableOverride', name: 'TimetableOverride_teacherPartnerId_fkey', why: 'cover teacher is a real partner' },
+  { table: 'Waiver', name: 'Waiver_appliedAmount_range', why: 'a waiver never forgives more than its amount' },
+);
+const REQUIRED_TRIGGERS = [
+  { table: 'Term', name: 'term_within_year', why: 'a term lies inside its academic year' },
+  { table: 'AcademicYear', name: 'year_contains_terms', why: 'a year keeps containing its terms' },
+  { table: 'TimetableSlot', name: 'timetable_no_clash', why: 'no double-booked teacher/room/class' },
+  { table: '_UserRoles', name: 'user_roles_same_org', why: 'no cross-tenant role assignment (A5)' },
 ];
 
 const url = process.env.DATABASE_URL;
@@ -49,6 +72,16 @@ for (const c of REQUIRED_CONSTRAINTS) {
   );
   if (rows.length === 0) failures.push(`missing CONSTRAINT ${c.name} on "${c.table}" — ${c.why}`);
   else console.log(`✓ constraint ${c.name}`);
+}
+
+for (const t of REQUIRED_TRIGGERS) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM pg_trigger tg JOIN pg_class rel ON rel.oid = tg.tgrelid
+      WHERE tg.tgname = $1 AND rel.relname = $2 AND NOT tg.tgisinternal`,
+    [t.name, t.table],
+  );
+  if (rows.length === 0) failures.push(`missing TRIGGER ${t.name} on "${t.table}" — ${t.why}`);
+  else console.log(`✓ trigger ${t.name}`);
 }
 
 for (const i of REQUIRED_INDEXES) {

@@ -38,6 +38,12 @@ export class AdmissionGuardianDto {
 }
 
 export class CreateApplicationDto {
+  /**
+   * The officer confirms this is a DIFFERENT child with the same name and date
+   * of birth as an existing application this year (twins, a common name).
+   * Without it a match is refused — by the service and by a unique index.
+   */
+  @IsOptional() @IsBoolean() allowDuplicate?: boolean;
   @IsString() @IsNotEmpty() academicYearId!: string;
   @IsOptional() @IsString() admissionCycleId?: string;
   @IsString() @IsNotEmpty() applicantFirstName!: string;

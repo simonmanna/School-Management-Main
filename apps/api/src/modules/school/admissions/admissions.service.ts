@@ -302,10 +302,14 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       const normalizedLast = dto.applicantLastName.trim().toLowerCase();
       const dob = dto.applicantDob ? new Date(dto.applicantDob) : null;
 
-      const existing = await tx.admissionApplication.findFirst({
+      const existing = dto.allowDuplicate ? null : await tx.admissionApplication.findFirst({
         where: {
           organizationId,
           academicYearId: dto.academicYearId,
+          deletedAt: null,
+          // A withdrawn or rejected application does not block re-applying
+          // (matches the partial unique index, Wave 4).
+          status: { notIn: ['withdrawn', 'rejected'] },
           // Prisma's `equals` + `mode: 'insensitive'` handles the
           // case-insensitive name match. We also filter on
           // applicantDob so that two applicants with the same name
@@ -318,9 +322,10 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         },
       });
       if (existing) {
-        throw new BadRequestException(
+        throw new ConflictException(
           `An application already exists for ${dto.applicantFirstName} ${dto.applicantLastName}` +
-            ` in this academic year (${existing.applicationNumber}).`,
+            ` in this academic year (${existing.applicationNumber}). If this is a different child ` +
+            '(twins, a shared name), confirm it and submit again with allowDuplicate.',
         );
       }
 
@@ -388,7 +393,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         dto.admissionCycleId ?? null,
       );
 
-      const row = await tx.admissionApplication.create({
+      const row = await Promise.resolve(tx.admissionApplication.create({
         data: {
           organizationId,
           academicYearId: dto.academicYearId,
@@ -414,8 +419,18 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           ninIv: nin?.iv ?? null,
           ninTag: nin?.tag ?? null,
           customFields: dto.customFields ?? {},
+          allowDuplicate: dto.allowDuplicate ?? false,
           status,
         },
+      })).catch((err: any) => {
+        // Two simultaneous submissions both passed the check above; the partial
+        // unique index "AdmissionApplication_applicant_dedupe" stops the second.
+        if (err?.code === 'P2002') {
+          throw new ConflictException(
+            `An application already exists for ${dto.applicantFirstName} ${dto.applicantLastName} in this academic year.`,
+          );
+        }
+        throw err;
       });
 
       // Structured guardians (Phase 1) — no longer 12 flat strings in customFields.
