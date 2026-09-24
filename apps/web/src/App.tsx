@@ -81,7 +81,6 @@ import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-setting
 import { SchoolPromotionPage } from '@/pages/school/promotion';
 import { SchoolEnrollmentWorkspacePage } from '@/pages/school/enrollment/workspace';
 import { SchoolProgrammesPage } from '@/pages/school/enrollment/programmes';
-import { SchoolEnrollmentMigrationPage } from '@/pages/school/enrollment/migration';
 import { SchoolMessagingPage } from '@/pages/school/messaging';
 import { SchoolMealsPage } from '@/pages/school/meals';
 import { SchoolAdmissionsPage } from '@/pages/school/admissions';
@@ -569,7 +568,6 @@ export function App() {
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
           <Route path="/school/enrollment" element={<SchoolEnrollmentWorkspacePage />} />
           <Route path="/school/enrollment/programmes" element={<SchoolProgrammesPage />} />
-          <Route path="/school/enrollment/migration" element={<SchoolEnrollmentMigrationPage />} />
           <Route path="/school/messaging" element={<SchoolMessagingPage />} />
           <Route path="/school/meals" element={<SchoolMealsPage />} />
           <Route path="/school/admissions" element={<SchoolAdmissionsPage />} />

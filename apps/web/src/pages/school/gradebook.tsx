@@ -52,7 +52,7 @@ export function SchoolGradebookPage() {
     classId: classId || undefined,
     termId: termId || undefined,
     subjectId: subjectId || undefined,
-    streamId: streamId || undefined,
+    sectionId: streamId || undefined,
   });
   const cell = useGradebookCell();
   const deleteColumn = useDeleteGradebookColumn();

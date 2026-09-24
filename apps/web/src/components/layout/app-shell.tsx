@@ -47,7 +47,6 @@ import {
   MapPin,
   School,
   SlidersHorizontal,
-  Database,
   Layers,
   Link2,
   CalendarX2,
@@ -238,7 +237,6 @@ const NAV_SECTIONS: NavSection[] = [
       // they sit and keeps the history of every move.
       { to: '/school/enrollment', label: 'Enrollment & Placement', icon: Users, permission: PERMISSIONS.school.read },
       { to: '/school/enrollment/programmes', label: 'Programmes & Classes', icon: Layers, permission: PERMISSIONS.school.manageProgrammes },
-      { to: '/school/enrollment/migration', label: 'Enrollment Migration', icon: Database, permission: PERMISSIONS.school.runAcademicMigration },
     ],
   },
   {

@@ -4,20 +4,22 @@ import { api } from '@/lib/api';
 /**
  * Phase 1 — canonical enrollment and placement (ADR-018 / ADR-019).
  *
- * Deliberately a separate module from `features/school/api.ts`: that file talks
- * to the LEGACY per-term `Enrollment` (`/school/enrollments`), which stays as a
- * compatibility surface. Everything here talks to the canonical membership and
- * append-only placement history. Mixing them in one file is how a screen ends
- * up reading one and writing the other.
+ * Everything here talks to the canonical membership (`/school/student-enrollments`)
+ * and the append-only placement history (`/school/placements`). The legacy
+ * per-term `/school/enrollments` routes, streams-as-a-separate-model and the
+ * one-off enrollment migration are gone from the API (ADR-029: a class's
+ * subdivisions are its Sections), so nothing here may reference them — the
+ * route-inventory spec (`apps/api/test/unit/web-api-contract.spec.ts`) fails
+ * the build if a URL here has no controller behind it.
  */
 
 const S = '/school';
 
 /* ─────────────────────────────── Types ─────────────────────────────── */
 
-export type GroupingMode = 'NONE' | 'SECTION_ONLY' | 'STREAM_ONLY' | 'SECTION_AND_STREAM';
-
 export type ProgrammeStage =
+  | 'PRE_PRIMARY'
+  | 'PRIMARY'
   | 'PRIMARY_LOWER'
   | 'PRIMARY_UPPER'
   | 'LOWER_SECONDARY'
@@ -59,7 +61,6 @@ export interface Programme {
   name: string;
   stage: ProgrammeStage;
   curriculumAuthority?: string | null;
-  groupingMode: GroupingMode;
   description?: string | null;
   effectiveFrom: string;
   effectiveTo?: string | null;
@@ -74,25 +75,27 @@ export interface ClassCohort {
   academicYearId: string;
   classId: string;
   programmeId?: string | null;
-  groupingMode?: GroupingMode | null;
+  /** Per-year override of the class's `allowsStreams`; null follows the class (ADR-029). */
+  allowsSubdivision?: boolean | null;
   capacity?: number | null;
   status: 'PLANNED' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED';
-  schoolClass?: { id: string; name: string; gradeLevel?: { id: string; name: string; order: number } };
+  schoolClass?: { id: string; name: string; allowsStreams?: boolean; gradeLevel?: { id: string; name: string; order: number } };
   academicYear?: { id: string; name: string };
-  programme?: { id: string; code: string; name: string; groupingMode: GroupingMode } | null;
+  programme?: { id: string; code: string; name: string } | null;
   _count?: { placements: number };
 }
 
+/** `GET /school/class-cohorts/:id/grouping-options` (class-cohort.service.ts `groupingOptions`). */
 export interface GroupingOptions {
   cohortId: string;
   classId: string;
   className: string | null;
   academicYearId: string;
-  groupingMode: GroupingMode;
+  /** Whether this class is divided this year (cohort override, else the class). */
+  allowsSubdivision: boolean;
+  /** Divided AND has active sections — a placement must then name one. */
   requiresSection: boolean;
-  requiresStream: boolean;
-  sections: Array<{ id: string; name: string; capacity: number; classId: string }>;
-  streams: Array<{ id: string; name: string; capacity: number; classId: string; sectionId: string | null }>;
+  sections: Array<{ id: string; name: string; code?: string | null; capacity: number | null; classId: string; displayOrder?: number }>;
 }
 
 export interface Placement {
@@ -101,7 +104,6 @@ export interface Placement {
   termId: string;
   classCohortId: string;
   sectionId: string | null;
-  streamId: string | null;
   rollNumber: string | null;
   effectiveFrom: string;
   effectiveTo: string | null;
@@ -112,7 +114,6 @@ export interface Placement {
   term?: { id: string; name: string };
   classCohort?: { id: string; classId: string; schoolClass?: { id: string; name: string }; academicYear?: { id: string; name: string } };
   section?: { id: string; name: string } | null;
-  stream?: { id: string; name: string } | null;
 }
 
 export interface StudentEnrollmentRow {
@@ -128,7 +129,7 @@ export interface StudentEnrollmentRow {
   notes: string | null;
   student?: { id: string; admissionNo: string; partner?: { id: string; name: string; phone?: string | null } | null };
   academicYear?: { id: string; name: string };
-  programme?: { id: string; code: string; name: string; stage: ProgrammeStage; groupingMode: GroupingMode };
+  programme?: { id: string; code: string; name: string; stage: ProgrammeStage };
   gradeLevel?: { id: string; name: string; order: number };
   currentPlacement?: Placement | null;
   placements?: Placement[];
@@ -151,8 +152,6 @@ export interface RosterRow {
   rollNumber: string | null;
   sectionId: string | null;
   sectionName: string | null;
-  streamId: string | null;
-  streamName: string | null;
   termId: string;
   effectiveFrom: string;
   effectiveTo: string | null;
@@ -162,14 +161,14 @@ export interface PlacementPreview {
   ok: boolean;
   errors: string[];
   warnings: string[];
-  from: { placementId: string; classCohortId: string; sectionId: string | null; streamId: string | null; termId: string } | null;
+  /** The target is full and capacity is enforced; committing needs an override. */
+  needsCapacityOverride?: boolean;
+  from: { placementId: string; classCohortId: string; sectionId: string | null; termId: string } | null;
   to: {
     cohortId: string;
     classId: string;
     termId: string;
     sectionId: string | null;
-    streamId: string | null;
-    groupingMode: GroupingMode;
     warnings: string[];
   } | null;
 }
@@ -188,33 +187,6 @@ export interface BulkPlacementResult {
     warnings: string[];
     placementId?: string;
   }>;
-}
-
-export interface ReconciliationReport {
-  academicYearId: string | null;
-  legacyRows: number;
-  mappedRows: number;
-  unmappedRows: number;
-  unmapped: string[];
-  differenceCount: number;
-  differences: Array<{ legacyEnrollmentId: string; field: string; legacy: unknown; canonical: unknown }>;
-  canonicalEnrollments: number;
-  canonicalPlacements: number;
-  openPlacements: number;
-  duplicateOpenPlacements: Array<{ enrollmentId: string; open: number }>;
-  openExceptionQueue: number;
-  clean: boolean;
-}
-
-export interface MigrationException {
-  id: string;
-  migrationRunId: string;
-  sourceEntity: string;
-  sourceId: string;
-  reason: string;
-  resolvedAt: string | null;
-  resolutionNote: string | null;
-  createdAt: string;
 }
 
 /* ─────────────────────────── Foundation lookups ────────────────────── */
@@ -273,7 +245,7 @@ export function useUpdateProgramme() {
 export function useSeedUgandaProgrammes() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { linkGradeLevels?: boolean; groupingMode?: GroupingMode } = {}) =>
+    mutationFn: async (dto: { linkGradeLevels?: boolean } = {}) =>
       (await api.post<{ created: string[]; updated: string[]; unmatchedGrades: string[] }>(`${S}/programmes/seed-uganda`, dto)).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['school', 'programmes'] });
@@ -302,7 +274,7 @@ export function useGroupingOptions(cohortId?: string) {
 export function useGenerateCohorts() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { academicYearId: string; classIds?: string[]; groupingMode?: GroupingMode }) =>
+    mutationFn: async (dto: { academicYearId: string; classIds?: string[]; allowsSubdivision?: boolean | null }) =>
       (await api.post(`${S}/class-cohorts/generate`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'class-cohorts'] }),
   });
@@ -314,18 +286,6 @@ export function useUpdateCohort() {
     mutationFn: async ({ id, ...dto }: { id: string } & Record<string, unknown>) =>
       (await api.patch(`${S}/class-cohorts/${id}`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'class-cohorts'] }),
-  });
-}
-
-export function useAttachStreamToSection() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ streamId, sectionId }: { streamId: string; sectionId: string | null }) =>
-      (await api.patch(`${S}/streams/${streamId}/section`, { sectionId })).data,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['school', 'class-cohorts'] });
-      qc.invalidateQueries({ queryKey: ['school', 'streams'] });
-    },
   });
 }
 
@@ -396,7 +356,6 @@ export interface PlacementInput {
   classCohortId?: string;
   classId?: string;
   sectionId?: string | null;
-  streamId?: string | null;
   rollNumber?: string;
   effectiveFrom?: string;
   movementReason?: MovementReason;
@@ -480,7 +439,6 @@ export function useRepeatGrade() {
       toTermId: string;
       classId?: string;
       sectionId?: string | null;
-      streamId?: string | null;
       reason: string;
       effectiveFrom?: string;
     }) => (await api.post(`${S}/student-enrollments/${id}/repeat`, dto)).data,
@@ -500,7 +458,6 @@ export function usePromoteEnrollment() {
       toTermId: string;
       toClassId?: string;
       sectionId?: string | null;
-      streamId?: string | null;
       reason?: string;
       effectiveFrom?: string;
     }) => (await api.post(`${S}/student-enrollments/${id}/promote`, dto)).data,
@@ -510,7 +467,7 @@ export function usePromoteEnrollment() {
 
 /* ───────────────────────────── Placement ───────────────────────────── */
 
-export function useRoster(cohortId?: string, params: { at?: string; sectionId?: string; streamId?: string; termId?: string } = {}) {
+export function useRoster(cohortId?: string, params: { at?: string; sectionId?: string; termId?: string } = {}) {
   return useQuery({
     queryKey: ['school', 'placement-roster', cohortId, params],
     enabled: !!cohortId,
@@ -523,7 +480,6 @@ export interface MoveInput {
   classCohortId?: string;
   classId?: string;
   sectionId?: string | null;
-  streamId?: string | null;
   rollNumber?: string;
   effectiveFrom?: string;
   movementReason: MovementReason;
@@ -561,7 +517,6 @@ export function useBulkPlacement() {
         classCohortId?: string;
         classId?: string;
         sectionId?: string | null;
-        streamId?: string | null;
         rollNumber?: string;
       }>;
     }) => (await api.post<BulkPlacementResult>(`${S}/placements/bulk`, dto)).data,
@@ -593,70 +548,6 @@ export function useTermRollover() {
       ).data,
     onSuccess: (result) => {
       if (result?.committed) invalidateEnrollment(qc);
-    },
-  });
-}
-
-/* ────────────────────── Backfill / reconciliation ──────────────────── */
-
-export function useReconciliation(academicYearId?: string, enabled = true) {
-  return useQuery({
-    queryKey: ['school', 'enrollment-migration', 'reconcile', academicYearId],
-    enabled,
-    queryFn: async () =>
-      (await api.get<ReconciliationReport>(`${S}/enrollment-migration/reconcile`, { params: { academicYearId } })).data,
-  });
-}
-
-export function useMigrationExceptions(params: { migrationRunId?: string; resolved?: boolean } = {}) {
-  return useQuery({
-    queryKey: ['school', 'enrollment-migration', 'exceptions', params],
-    queryFn: async () =>
-      (await api.get<MigrationException[]>(`${S}/enrollment-migration/exceptions`, { params })).data,
-  });
-}
-
-export function useRunBackfill() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (dto: { dryRun?: boolean; academicYearId?: string; migrationRunId?: string }) =>
-      (
-        await api.post<{
-          migrationRunId: string;
-          dryRun: boolean;
-          legacyRows: number;
-          alreadyMapped: number;
-          candidates: number;
-          enrollmentsCreated: number;
-          enrollmentsReused: number;
-          placementsCreated: number;
-          exceptions: Array<{ sourceId: string; reason: string }>;
-        }>(`${S}/enrollment-migration/backfill`, dto)
-      ).data,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['school', 'enrollment-migration'] });
-      qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
-    },
-  });
-}
-
-export function useResolveMigrationException() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, resolutionNote }: { id: string; resolutionNote: string }) =>
-      (await api.post(`${S}/enrollment-migration/exceptions/${id}/resolve`, { resolutionNote })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'enrollment-migration'] }),
-  });
-}
-
-export function useRollbackMigration() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (migrationRunId: string) =>
-      (await api.post(`${S}/enrollment-migration/rollback/${migrationRunId}`, {})).data,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['school', 'enrollment-migration'] });
-      qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
     },
   });
 }
@@ -693,14 +584,9 @@ export const MOVEMENT_REASON_LABEL: Record<MovementReason, string> = {
   BACKFILL: 'Migrated from the old records',
 };
 
-export const GROUPING_MODE_LABEL: Record<GroupingMode, string> = {
-  NONE: 'No subdivision',
-  SECTION_ONLY: 'Sections only',
-  STREAM_ONLY: 'Streams only',
-  SECTION_AND_STREAM: 'Sections with streams',
-};
-
 export const STAGE_LABEL: Record<ProgrammeStage, string> = {
+  PRE_PRIMARY: 'Pre-Primary (Nursery)',
+  PRIMARY: 'Primary',
   PRIMARY_LOWER: 'Lower Primary',
   PRIMARY_UPPER: 'Upper Primary',
   LOWER_SECONDARY: 'Lower Secondary',

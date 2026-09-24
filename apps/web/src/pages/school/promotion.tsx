@@ -85,8 +85,8 @@ export function SchoolPromotionPage() {
   const [fromTermId, setFromTermId] = useState('');
   const [toTermId, setToTermId] = useState('');
   const [rolloverPlan, setRolloverPlan] = useState<{
-    total: number; promoted: number; graduated: number; skipped: number;
-    rows: Array<{ studentProfileId: string; admissionNo: string; outcome: string; toClassId?: string | null; reason?: string }>;
+    total: number; promoted: number; repeated: number; graduated: number; skipped: number; failed: number;
+    rows: Array<{ studentProfileId: string; admissionNo: string; outcome: string; toClassId?: string | null; reason?: string; error?: string }>;
     dryRun: boolean; committed: boolean;
   } | null>(null);
 
@@ -148,31 +148,38 @@ export function SchoolPromotionPage() {
     if (staged.length === 0) { notify.error('Mark at least one student first.'); return; }
     if (!toTermId && !termId) { notify.error('Choose a target term (filters or rollover To term).'); return; }
     const targetTerm = toTermId || termId;
-    let ok = 0, fail = 0;
+    let ok = 0;
+    // "Skipped" is a local decision — leave the pupil where they are. The API's
+    // PromoteStudentDto only accepts promoted | repeated | graduated, so sending
+    // it used to 400 and count as a failure (E2E audit E1/L1).
+    const skipped = staged.filter((s) => rows[s.id].status === 'skipped').length;
+    const failures: string[] = [];
     for (const s of staged) {
       const r = rows[s.id];
+      if (r.status === 'skipped') continue;
       try {
         await promoteMut.mutateAsync({
           studentProfileId: s.id,
           toTermId: targetTerm,
           toClassId: r.toClassId || undefined,
           outcome: r.status as 'promoted' | 'repeated' | 'graduated',
-          reason: r.status === 'skipped' ? 'Skipped by admin' : undefined,
         });
         ok++;
-      } catch {
-        fail++;
+      } catch (e: any) {
+        const msg = e?.response?.data?.message;
+        failures.push(`${nameOf(s)}: ${Array.isArray(msg) ? msg.join(' ') : (msg ?? 'failed')}`);
       }
     }
-    if (fail === 0) {
-      notify.success(`${ok} pupil${ok === 1 ? '' : 's'} moved up.`, {
+    const skippedNote = skipped ? ` ${skipped} left where they are.` : '';
+    if (failures.length === 0) {
+      notify.success(`${ok} pupil${ok === 1 ? '' : 's'} moved.${skippedNote}`, {
         description: 'Their new class list is ready.',
         action: { label: 'View class lists', onClick: () => navigate('/school/students') },
       });
       setRows({});
     } else {
-      notify.error(`Moved ${ok}, could not move ${fail}.`, {
-        description: 'Check that the target class and stream exist for the new term.',
+      notify.error(`Moved ${ok}, could not move ${failures.length}.${skippedNote}`, {
+        description: failures.slice(0, 5).join(' · ') + (failures.length > 5 ? ` · and ${failures.length - 5} more` : ''),
       });
     }
   };
@@ -183,27 +190,40 @@ export function SchoolPromotionPage() {
     try {
       const res = await rolloverMut.mutateAsync({ fromTermId, toTermId, dryRun: true });
       setRolloverPlan({
-        total: res.counts.total, promoted: res.counts.promoted, graduated: res.counts.graduated,
-        skipped: res.counts.skipped, dryRun: true, committed: false,
-        rows: [...(res.promote ?? []), ...(res.graduate ?? []), ...(res.skip ?? [])],
+        total: res.counts.total, promoted: res.counts.promoted, repeated: res.counts.repeated ?? 0,
+        graduated: res.counts.graduated, skipped: res.counts.skipped, failed: 0, dryRun: true, committed: false,
+        rows: [...(res.promote ?? []), ...(res.repeat ?? []), ...(res.graduate ?? []), ...(res.skip ?? [])],
       });
     } catch { notify.error('Could not compute the rollover plan'); }
   };
   const executeRollover = async () => {
     try {
       const res = await rolloverMut.mutateAsync({ fromTermId, toTermId, dryRun: false });
-      setRolloverPlan({
-        total: res.counts.total, promoted: res.counts.promoted, graduated: res.counts.graduated,
-        skipped: res.counts.skipped, dryRun: false, committed: true,
-        rows: [...(res.promote ?? []), ...(res.graduate ?? []), ...(res.skip ?? [])],
-      });
-      notify.success(
-        `Whole school moved up — ${res.counts.promoted} promoted, ${res.counts.graduated} graduated`,
-        {
-          description: 'Everyone now sits in their new class for the new term.',
-          action: { label: 'View class lists', onClick: () => navigate('/school/students') },
-        },
+      // Execution is per learner: one row can fail (a class missing in the new
+      // year, a withdrawn pupil) while the rest commit. Those rows must be
+      // shown, not buried under "Whole school moved up" (E2E audit L1).
+      const errors = new Map(
+        (res.executed ?? []).filter((x) => x.error).map((x) => [x.studentProfileId, x.error as string]),
       );
+      const planRows = [...(res.promote ?? []), ...(res.repeat ?? []), ...(res.graduate ?? []), ...(res.skip ?? [])]
+        .map((r) => (errors.has(r.studentProfileId) ? { ...r, error: errors.get(r.studentProfileId) } : r))
+        .sort((a, b) => Number(!!(b as { error?: string }).error) - Number(!!(a as { error?: string }).error));
+      setRolloverPlan({
+        total: res.counts.total, promoted: res.counts.promoted, repeated: res.counts.repeated ?? 0,
+        graduated: res.counts.graduated, skipped: res.counts.skipped, failed: errors.size, dryRun: false, committed: true,
+        rows: planRows,
+      });
+      const moved = (res.executed ?? []).length - errors.size;
+      if (errors.size === 0) {
+        notify.success(`Rollover done — ${moved} pupil${moved === 1 ? '' : 's'} moved`, {
+          description: `${res.counts.skipped} skipped. Everyone else now sits in their new class for the new term.`,
+          action: { label: 'View class lists', onClick: () => navigate('/school/students') },
+        });
+      } else {
+        notify.error(`Rollover finished with ${errors.size} pupil${errors.size === 1 ? '' : 's'} not moved`, {
+          description: `${moved} moved. The rows marked Failed below say why; fix them and run again.`,
+        });
+      }
     } catch (e: any) {
       notify.error(
         'Could not move the school up',
@@ -420,12 +440,18 @@ export function SchoolPromotionPage() {
 
         {rolloverPlan && (
           <div className="mt-4 space-y-3">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               <Mini icon={<Users className="h-4 w-4" />} label="Students" value={rolloverPlan.total} />
               <Mini icon={<ArrowRight className="h-4 w-4" />} label="To promote" value={rolloverPlan.promoted} />
+              <Mini icon={<ArrowRight className="h-4 w-4" />} label="To repeat" value={rolloverPlan.repeated} />
               <Mini icon={<GraduationCap className="h-4 w-4" />} label="To graduate" value={rolloverPlan.graduated} />
               <Mini icon={<SkipForward className="h-4 w-4" />} label="Skipped" value={rolloverPlan.skipped} />
             </div>
+            {rolloverPlan.failed > 0 && (
+              <p className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">
+                {rolloverPlan.failed} pupil{rolloverPlan.failed === 1 ? ' was' : 's were'} not moved — see the rows marked Failed.
+              </p>
+            )}
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead>
@@ -441,10 +467,12 @@ export function SchoolPromotionPage() {
                     <tr key={r.studentProfileId} className="border-b last:border-0">
                       <td className="py-2 pl-4 font-mono text-xs">{r.admissionNo}</td>
                       <td className="py-2 pr-4">
-                        <Badge variant="secondary">{r.outcome}</Badge>
+                        {r.error ? <Badge variant="destructive">Failed</Badge> : <Badge variant="secondary">{r.outcome}</Badge>}
                       </td>
                       <td className="py-2 pr-4">{r.toClassId ? classNameOf(r.toClassId) : '—'}</td>
-                      <td className="py-2 pr-4 text-muted-foreground">{r.reason ?? ''}</td>
+                      <td className={r.error ? 'py-2 pr-4 text-destructive' : 'py-2 pr-4 text-muted-foreground'}>
+                        {r.error ?? r.reason ?? ''}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -456,7 +484,9 @@ export function SchoolPromotionPage() {
               )}
             </div>
             {rolloverPlan.committed && (
-              <p className="text-xs text-emerald-600">✓ Committed — enrollments created, history untouched.</p>
+              <p className={rolloverPlan.failed ? 'text-xs text-amber-600' : 'text-xs text-emerald-600'}>
+                {rolloverPlan.failed ? '⚠ Partly committed' : '✓ Committed'} — enrollments created, history untouched.
+              </p>
             )}
           </div>
         )}

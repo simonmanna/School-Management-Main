@@ -9,7 +9,7 @@ import {
   useEnrollStudent, useSections, useSectionsForClass, useStudentEnrollments,
   useAcademicYears, useClasses, useAdmissionCycles, useNationalities, useStudentCategories,
   useTerms, useStudentResultSet,
-  type FeeStatement, type Guardian, useTerminology } from '@/features/school/api';
+  type FeeStatement, type Guardian, type PupilEnrollment, useTerminology } from '@/features/school/api';
 import { useUpdatePartner } from '@/features/partners/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -475,7 +475,7 @@ export function SchoolStudent360Page() {
         enrollments={enrollments ?? []}
         onDone={() => {
           qc.invalidateQueries({ queryKey: ['school', 'student', id] });
-          qc.invalidateQueries({ queryKey: ['school', 'enrollments', id] });
+          qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
         }}
       />
 
@@ -1085,7 +1085,7 @@ function PlacementDialog({
   currentSectionId: string | null;
   classes: any[];
   terms: any[];
-  enrollments: any[];
+  enrollments: PupilEnrollment[];
   onDone: () => void;
 }) {
   const labels = useTerminology();
@@ -1094,6 +1094,7 @@ function PlacementDialog({
   const [sectionId, setSectionId] = useState('');
   const [termId, setTermId] = useState('');
   const [rollNumber, setRollNumber] = useState('');
+  const [reason, setReason] = useState('');
   const sections = useSectionsForClass(classId || undefined);
 
   useEffect(() => {
@@ -1111,21 +1112,36 @@ function PlacementDialog({
     if (sectionId && !sections.data.some((x: any) => x.id === sectionId)) setSectionId('');
   }, [classId, sections.data, sectionId]);
 
-  const already = enrollments.find((e: any) => e.termId === termId && e.status === 'enrolled');
-  const termName = terms.find((t: any) => t.id === termId)?.name ?? 'this term';
+  // Membership is per academic year (ADR-018): a pupil already enrolled for the
+  // term's year is MOVED (the open placement is end-dated), not enrolled twice.
+  const term = terms.find((t: any) => t.id === termId);
+  const termName = term?.name ?? 'this term';
+  const yearEnrollment = term ? enrollments.find((e) => e.academicYearId === term.academicYearId) : undefined;
+  const seated = yearEnrollment && ['PENDING', 'ACTIVE', 'SUSPENDED'].includes(yearEnrollment.status);
+  const blocked = yearEnrollment && !seated;
+  const history = enrollments.flatMap((e) =>
+    e.placements.map((p) => ({ ...p, year: e.academicYear?.name ?? '', status: e.status })),
+  );
 
   const submit = async () => {
     if (!classId || !termId || !rollNumber.trim()) {
       notify.error('Class, term and roll number are required');
       return;
     }
+    if (seated && !reason.trim()) {
+      notify.error('Say why the pupil is moving — it is kept in their history');
+      return;
+    }
     try {
       await enroll.mutateAsync({
         studentProfileId,
+        academicYearId: term.academicYearId,
         classId,
         sectionId: sectionId || undefined,
         termId,
         rollNumber: rollNumber.trim(),
+        existingEnrollmentId: seated ? yearEnrollment.id : undefined,
+        reason: reason.trim() || undefined,
       });
       const label = [classes.find((c: any) => c.id === classId)?.name, sections.data.find((x: any) => x.id === sectionId)?.name]
         .filter(Boolean).join(' — ');
@@ -1178,21 +1194,36 @@ function PlacementDialog({
             <Input value={rollNumber} onChange={(e) => setRollNumber(e.target.value)} placeholder="E.g. 12" />
           </div>
 
-          {already && (
+          {seated && (
+            <div>
+              <Label>Why is the pupil moving? *</Label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="E.g. Parent request" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Already enrolled for this year — their current placement is end-dated, not overwritten.
+              </p>
+            </div>
+          )}
+
+          {blocked && (
             <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
-              This pupil already has an enrolment for {termName}. A pupil can hold only one
-              placement per term — end the existing one before creating another.
+              This pupil&apos;s enrollment for {termName}&apos;s year is {yearEnrollment.status.toLowerCase()}. Reinstate
+              it from the Enrollment workspace before placing them.
             </p>
           )}
 
-          {enrollments.length > 0 && (
+          {history.length > 0 && (
             <div className="rounded border p-2">
               <p className="mb-1 text-xs font-medium text-muted-foreground">Placement history</p>
               <ul className="space-y-0.5 text-xs">
-                {enrollments.slice(0, 6).map((e: any) => (
-                  <li key={e.id} className="flex justify-between gap-2">
-                    <span>{e.schoolClass?.name ?? e.classId?.slice(0, 6)}{e.section?.name ? ` — ${e.section.name}` : ''}</span>
-                    <span className="text-muted-foreground">{e.term?.name ?? ''} · {e.status}</span>
+                {history.slice(0, 6).map((p) => (
+                  <li key={p.id} className="flex justify-between gap-2">
+                    <span>
+                      {p.classCohort?.schoolClass?.name ?? '—'}
+                      {p.section?.name ? ` — ${p.section.name}` : ''}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {p.year} {p.term?.name ?? ''} · {p.effectiveTo ? 'ended' : 'current'}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1201,8 +1232,8 @@ function PlacementDialog({
         </div>
         <DialogFooter>
           <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>
-          <Button onClick={submit} disabled={enroll.isPending || !!already}>
-            {enroll.isPending ? 'Placing…' : 'Place pupil'}
+          <Button onClick={submit} disabled={enroll.isPending || !!blocked || !term}>
+            {enroll.isPending ? 'Placing…' : seated ? 'Move pupil' : 'Place pupil'}
           </Button>
         </DialogFooter>
       </DialogContent>

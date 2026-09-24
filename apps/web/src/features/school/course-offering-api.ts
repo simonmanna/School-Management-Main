@@ -11,14 +11,14 @@ export interface CourseOffering {
   id: string; code: string; name: string; academicYearId: string; termId: string;
   programmeId: string | null; classCohortId: string | null; classId: string | null;
   offeringType: OfferingType; audienceScope: AudienceScope; subjectId: string | null;
-  sectionId: string | null; streamId: string | null; curriculumId: string | null;
+  sectionId: string | null; curriculumId: string | null;
   competencyId: string | null; activityDefinitionId: string | null; status: OfferingStatus;
   effectiveFrom: string; effectiveTo: string | null; summary: string | null;
   subject?: { id: string; name: string; code: string } | null;
   programme?: { id: string; name: string; code: string } | null;
   term?: { id: string; name: string };
   classCohort?: { id: string; schoolClass?: { id: string; name: string } } | null;
-  section?: { id: string; name: string } | null; stream?: { id: string; name: string } | null;
+  section?: { id: string; name: string } | null;
   curriculum?: { id: string; name: string; version: number; status: string } | null;
   competency?: { id: string; code: string; description?: string } | null;
   teachers: Array<{ id: string; teacherPartnerId: string; role: string; isResponsible: boolean; effectiveTo: string | null; teacher?: { partner?: { name?: string } } }>;
@@ -29,7 +29,7 @@ export interface CourseOffering {
 export interface OfferingInput {
   code?: string; name: string; academicYearId: string; termId: string; programmeId: string;
   classCohortId?: string; offeringType: OfferingType; audienceScope: AudienceScope;
-  subjectId?: string; sectionId?: string; streamId?: string; curriculumId?: string;
+  subjectId?: string; sectionId?: string; curriculumId?: string;
   competencyId?: string; activityDefinitionId?: string; effectiveFrom: string; effectiveTo?: string;
   summary?: string; teachers?: Array<{ teacherPartnerId: string; role?: string; isResponsible?: boolean }>;
 }

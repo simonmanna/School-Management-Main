@@ -1161,7 +1161,6 @@ export interface EnrollAdmissionInput {
   classId: string;
   /** Subdivision of the class — "Stream" in the UI. Optional server-side too. */
   sectionId?: string;
-  streamId?: string;
   termId: string;
   rollNumber: string;
   student: { name: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string };
@@ -1194,8 +1193,10 @@ export interface RolloverPlan {
   fromTermId: string;
   toTermId: string;
   dryRun: boolean;
-  counts: { promoted: number; graduated: number; skipped: number; total: number };
+  counts: { promoted: number; repeated: number; graduated: number; skipped: number; total: number };
   promote: RolloverPlanRow[];
+  /** Learners whose published result recommends repeating (promotion-run.service.ts). */
+  repeat: RolloverPlanRow[];
   graduate: RolloverPlanRow[];
   skip: RolloverPlanRow[];
   executed?: Array<{ studentProfileId: string; outcome: string; enrollmentId: string | null; error?: string }>;
@@ -1303,7 +1304,6 @@ export interface RegisterStudentInput {
   studentCategoryId?: string | null;
   classId: string;
   sectionId?: string | null;
-  streamId?: string | null;
   termId: string;
   rollNumber: string;
   guardianName?: string;
@@ -1313,10 +1313,19 @@ export interface RegisterStudentInput {
 export function useRegisterStudent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: RegisterStudentInput) => (await api.post<{ profile: { id: string } }>(`${S}/enrollments/register`, dto)).data,
+    // `POST /school/students/register` (StudentAdmissionService.register). The
+    // old `/school/enrollments/register` route no longer exists — front-desk
+    // registration 404'd (E2E audit E2). The DTO rejects null for sectionId.
+    mutationFn: async ({ sectionId, ...dto }: RegisterStudentInput) =>
+      (
+        await api.post<{ profile: { id: string } }>(`${S}/students/register`, {
+          ...dto,
+          ...(sectionId ? { sectionId } : {}),
+        })
+      ).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['school', 'students'] });
-      qc.invalidateQueries({ queryKey: ['school', 'enrollments'] });
+      qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
     },
   });
 }
@@ -1341,42 +1350,100 @@ export function useUpdateStudent() {
 
 export interface EnrollStudentInput {
   studentProfileId: string;
+  /** The academic year of `termId` — the membership is per year. */
+  academicYearId: string;
   classId: string;
   /** The subdivision, shown to primary schools as "Stream". */
   sectionId?: string;
-  streamId?: string;
   termId: string;
   rollNumber: string;
-  effectiveDate?: string;
+  /**
+   * The pupil's membership for that year, when one exists. Then this is a MOVE
+   * (the open placement is end-dated, never overwritten); otherwise a new
+   * enrollment is opened with this as its first placement.
+   */
+  existingEnrollmentId?: string;
+  /** Required for a move — it is the audit trail. */
+  reason?: string;
 }
 
 /**
  * Place a pupil in a class for a term — the authoritative placement write.
  *
- * `POST /school/enrollments` has existed since the enrollment module was built
- * and had no client at all, which is why the only ways a pupil could be placed
- * were the admissions dialog and promotion, and why the Student 360 resorted to
- * editing the profile snapshot directly.
+ * The legacy per-term `POST /school/enrollments` is gone (E2E audit E2). A
+ * pupil with no membership for the year gets one via `POST
+ * /school/student-enrollments` with an opening `placement`; a pupil who already
+ * has one is moved via `POST /school/placements/:enrollmentId/move`.
  */
 export function useEnrollStudent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: EnrollStudentInput) => (await api.post(`${S}/enrollments`, dto)).data,
+    mutationFn: async (dto: EnrollStudentInput) => {
+      const sectionId = dto.sectionId || null;
+      if (dto.existingEnrollmentId) {
+        return (
+          await api.post(`${S}/placements/${dto.existingEnrollmentId}/move`, {
+            termId: dto.termId,
+            classId: dto.classId,
+            sectionId,
+            rollNumber: dto.rollNumber || undefined,
+            movementReason: 'CLASS_CHANGE',
+            reason: dto.reason?.trim() || 'Placed from the pupil profile',
+          })
+        ).data;
+      }
+      return (
+        await api.post(`${S}/student-enrollments`, {
+          studentProfileId: dto.studentProfileId,
+          academicYearId: dto.academicYearId,
+          status: 'ACTIVE',
+          placement: {
+            termId: dto.termId,
+            classId: dto.classId,
+            sectionId,
+            rollNumber: dto.rollNumber || undefined,
+            movementReason: 'INITIAL_PLACEMENT',
+          },
+        })
+      ).data;
+    },
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ['school', 'students'] });
       qc.invalidateQueries({ queryKey: ['school', 'student', v.studentProfileId] });
-      qc.invalidateQueries({ queryKey: ['school', 'enrollments'] });
+      qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
+      qc.invalidateQueries({ queryKey: ['school', 'placement-at'] });
     },
   });
 }
 
-/** A pupil's placement history — every term they have been enrolled for. */
+/**
+ * A pupil's memberships, newest year first, each with its placement history —
+ * `GET /school/student-enrollments/by-student/:id`.
+ */
+export interface PupilEnrollment {
+  id: string;
+  academicYearId: string;
+  status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'WITHDRAWN' | 'TRANSFERRED' | 'COMPLETED' | 'CANCELLED';
+  academicYear?: { id: string; name: string };
+  gradeLevel?: { id: string; name: string };
+  placements: Array<{
+    id: string;
+    termId: string;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    movementReason: string;
+    term?: { id: string; name: string } | null;
+    classCohort?: { classId: string; schoolClass?: { id: string; name: string } } | null;
+    section?: { id: string; name: string } | null;
+  }>;
+}
+
 export function useStudentEnrollments(studentProfileId: string | undefined) {
   return useQuery({
-    queryKey: ['school', 'enrollments', studentProfileId],
+    queryKey: ['school', 'student-enrollments', 'by-student', studentProfileId],
     enabled: !!studentProfileId,
     queryFn: async () =>
-      (await api.get<any[]>(`${S}/enrollments`, { params: { studentProfileId } })).data,
+      (await api.get<PupilEnrollment[]>(`${S}/student-enrollments/by-student/${studentProfileId}`)).data,
   });
 }
 
@@ -3770,18 +3837,17 @@ export interface ClassReportCardScope {
   classId: string;
   termId: string;
   sectionId?: string;
-  streamId?: string;
 }
 
 /** Who a class run would cover, so the count is visible before committing to it. */
 export function useReportCardClassRoll(scope: Partial<ClassReportCardScope>) {
-  const { classId, termId, sectionId, streamId } = scope;
+  const { classId, termId, sectionId } = scope;
   return useQuery({
-    queryKey: ['school', 'report-cards', 'class-roll', classId, termId, sectionId, streamId],
+    queryKey: ['school', 'report-cards', 'class-roll', classId, termId, sectionId],
     enabled: !!classId && !!termId,
     queryFn: async () =>
       (await api.get<ClassRollEntry[]>(`${S}/report-cards/class-roll`, {
-        params: { classId, termId, sectionId, streamId },
+        params: { classId, termId, sectionId },
       })).data,
   });
 }
@@ -6044,7 +6110,7 @@ export function useRemoveExamClass() {
   });
 }
 
-export function useMarkSheet(params: { examId?: string; classId?: string; subjectId?: string; streamId?: string }) {
+export function useMarkSheet(params: { examId?: string; classId?: string; subjectId?: string; sectionId?: string }) {
   const ready = !!params.examId && !!params.classId && !!params.subjectId;
   return useQuery({
     queryKey: ['school', 'marks', 'sheet', params],
@@ -6073,7 +6139,7 @@ export function useSaveMark() {
   });
 }
 
-export function useResultGrid(params: { examId?: string; classId?: string; streamId?: string }) {
+export function useResultGrid(params: { examId?: string; classId?: string; sectionId?: string }) {
   const ready = !!params.examId && !!params.classId;
   return useQuery({
     queryKey: ['school', 'marks', 'grid', params],
@@ -6689,7 +6755,7 @@ export interface GradebookSheet {
   policy: { id: string; name: string; weightsTotal: number; weightsValid: boolean } | null;
 }
 
-export function useGradebookSheet(params: { classId?: string; termId?: string; subjectId?: string; streamId?: string }) {
+export function useGradebookSheet(params: { classId?: string; termId?: string; subjectId?: string; sectionId?: string }) {
   const ready = !!params.classId && !!params.termId;
   return useQuery({
     queryKey: ['school', 'gradebook', 'sheet', params],

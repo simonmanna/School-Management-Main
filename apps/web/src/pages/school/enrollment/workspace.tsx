@@ -424,7 +424,6 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
   const { data: cohorts } = useClassCohorts({ academicYearId: row.academicYearId });
   const [cohortId, setCohortId] = useState(row.currentPlacement?.classCohortId ?? '');
   const [sectionId, setSectionId] = useState<string | undefined>(row.currentPlacement?.sectionId ?? undefined);
-  const [streamId, setStreamId] = useState<string | undefined>(row.currentPlacement?.streamId ?? undefined);
   const [reason, setReason] = useState('');
   const [movementReason, setMovementReason] = useState<MovementReason>('SECTION_CHANGE');
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
@@ -438,24 +437,25 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
     enrollmentId: row.id,
     classCohortId: cohortId || undefined,
     sectionId: sectionId ?? null,
-    streamId: streamId ?? null,
     effectiveFrom: new Date(effectiveFrom).toISOString(),
     movementReason,
     reason,
   };
 
-  // Re-validate whenever the target changes, so the "stream belongs to another
+  // Re-validate whenever the target changes, so the "section belongs to another
   // section" message arrives while the form is open rather than on submit.
   useEffect(() => {
     if (!cohortId) return;
     let cancelled = false;
+    // MovePlacementDto requires a reason; the preview runs before one is typed,
+    // and without a placeholder every preview 400'd and no warning ever showed.
     previewMut
-      .mutateAsync(payload)
+      .mutateAsync({ ...payload, reason: payload.reason.trim() || 'Preview' })
       .then((r) => { if (!cancelled) setPreview(r); })
       .catch(() => { if (!cancelled) setPreview(null); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cohortId, sectionId, streamId, effectiveFrom]);
+  }, [cohortId, sectionId, effectiveFrom]);
 
   const submit = async () => {
     try {
@@ -483,7 +483,7 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
             <Label>Class</Label>
             <Select
               value={cohortId}
-              onValueChange={(v) => { setCohortId(v); setSectionId(undefined); setStreamId(undefined); }}
+              onValueChange={(v) => { setCohortId(v); setSectionId(undefined); }}
             >
               <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
               <SelectContent>
@@ -498,9 +498,7 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
           <GroupingPicker
             cohortId={cohortId || undefined}
             sectionId={sectionId}
-            streamId={streamId}
             onSectionChange={setSectionId}
-            onStreamChange={setStreamId}
           />
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -629,7 +627,6 @@ function ReinstateDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose:
   const [termId, setTermId] = useState(yearTerms.find((t) => t.isCurrent)?.id ?? '');
   const [cohortId, setCohortId] = useState('');
   const [sectionId, setSectionId] = useState<string | undefined>();
-  const [streamId, setStreamId] = useState<string | undefined>();
   const [reason, setReason] = useState('');
   const [effectiveAt, setEffectiveAt] = useState(new Date().toISOString().slice(0, 10));
   const mut = useChangeEnrollmentStatus();
@@ -650,7 +647,6 @@ function ReinstateDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose:
               termId,
               classCohortId: cohortId,
               sectionId: sectionId ?? null,
-              streamId: streamId ?? null,
               effectiveFrom: new Date(effectiveAt).toISOString(),
               movementReason: 'RE_ENTRY',
             }
@@ -697,7 +693,7 @@ function ReinstateDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose:
                 </div>
                 <div className="space-y-1.5">
                   <Label>Class</Label>
-                  <Select value={cohortId} onValueChange={(v) => { setCohortId(v); setSectionId(undefined); setStreamId(undefined); }}>
+                  <Select value={cohortId} onValueChange={(v) => { setCohortId(v); setSectionId(undefined); }}>
                     <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
                     <SelectContent>
                       {(cohorts ?? []).map((c) => (
@@ -710,9 +706,7 @@ function ReinstateDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose:
               <GroupingPicker
                 cohortId={cohortId || undefined}
                 sectionId={sectionId}
-                streamId={streamId}
                 onSectionChange={setSectionId}
-                onStreamChange={setStreamId}
               />
             </>
           )}
@@ -988,7 +982,6 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
   const [studentProfileId, setStudentProfileId] = useState('');
   const [cohortId, setCohortId] = useState('');
   const [sectionId, setSectionId] = useState<string | undefined>();
-  const [streamId, setStreamId] = useState<string | undefined>();
   const [termId, setTermId] = useState('');
   const [rollNumber, setRollNumber] = useState('');
   const [admissionDate, setAdmissionDate] = useState(new Date().toISOString().slice(0, 10));
@@ -1012,7 +1005,6 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
       termId,
       classCohortId: cohortId,
       sectionId: sectionId ?? null,
-      streamId: streamId ?? null,
       rollNumber: rollNumber.trim() || undefined,
       effectiveFrom: new Date(admissionDate).toISOString(),
     };
@@ -1083,7 +1075,7 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
             </div>
             <div className="space-y-1.5">
               <Label>Class <span className="text-destructive">*</span></Label>
-              <Select value={cohortId} onValueChange={(v) => { setCohortId(v); setSectionId(undefined); setStreamId(undefined); }}>
+              <Select value={cohortId} onValueChange={(v) => { setCohortId(v); setSectionId(undefined); }}>
                 <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
                 <SelectContent>
                   {(cohorts ?? []).map((c) => (
@@ -1097,9 +1089,7 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
           <GroupingPicker
             cohortId={cohortId || undefined}
             sectionId={sectionId}
-            streamId={streamId}
             onSectionChange={setSectionId}
-            onStreamChange={setStreamId}
           />
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1183,7 +1173,6 @@ function RosterTab({ yearId }: { yearId: string }) {
                 <TableHead>Roll</TableHead>
                 <TableHead>Learner</TableHead>
                 <TableHead>Admission no.</TableHead>
-                <TableHead>Section</TableHead>
                 <TableHead>{labels.section}</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>In class since</TableHead>
@@ -1192,12 +1181,12 @@ function RosterTab({ yearId }: { yearId: string }) {
             <TableBody>
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
                 </TableRow>
               )}
               {!isLoading && (roster ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                     {cohortId ? 'Nobody was placed in this class on that date.' : 'Choose a class to see its list.'}
                   </TableCell>
                 </TableRow>
@@ -1208,7 +1197,6 @@ function RosterTab({ yearId }: { yearId: string }) {
                   <TableCell className="font-medium">{r.name ?? '—'}</TableCell>
                   <TableCell className="text-muted-foreground">{r.admissionNo ?? '—'}</TableCell>
                   <TableCell>{r.sectionName ?? '—'}</TableCell>
-                  <TableCell>{r.streamName ?? '—'}</TableCell>
                   <TableCell><StatusBadge status={r.enrollmentStatus} /></TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(r.effectiveFrom)}</TableCell>
                 </TableRow>
@@ -1232,7 +1220,6 @@ function BulkPlacementTab({ yearId }: { yearId: string }) {
   const [targetCohortId, setTargetCohortId] = useState('');
   const [termId, setTermId] = useState('');
   const [sectionId, setSectionId] = useState<string | undefined>();
-  const [streamId, setStreamId] = useState<string | undefined>();
   const [reason, setReason] = useState('');
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [result, setResult] = useState<BulkPlacementResult | null>(null);
@@ -1261,7 +1248,6 @@ function BulkPlacementTab({ yearId }: { yearId: string }) {
           enrollmentId: r.id,
           classCohortId: targetCohortId || undefined,
           sectionId: sectionId ?? null,
-          streamId: streamId ?? null,
         })),
       });
       setResult(res);
@@ -1297,7 +1283,7 @@ function BulkPlacementTab({ yearId }: { yearId: string }) {
             </div>
             <div className="space-y-1.5">
               <Label>To class</Label>
-              <Select value={targetCohortId} onValueChange={(v) => { setTargetCohortId(v); setSectionId(undefined); setStreamId(undefined); }}>
+              <Select value={targetCohortId} onValueChange={(v) => { setTargetCohortId(v); setSectionId(undefined); }}>
                 <SelectTrigger><SelectValue placeholder="Same class" /></SelectTrigger>
                 <SelectContent>
                   {(cohorts ?? []).map((c) => (
@@ -1322,9 +1308,7 @@ function BulkPlacementTab({ yearId }: { yearId: string }) {
           <GroupingPicker
             cohortId={targetCohortId || sourceCohortId || undefined}
             sectionId={sectionId}
-            streamId={streamId}
             onSectionChange={setSectionId}
-            onStreamChange={setStreamId}
           />
 
           <div className="space-y-1.5">
@@ -1450,7 +1434,7 @@ function RolloverTab({ yearId }: { yearId: string }) {
       <CardHeader>
         <CardTitle className="text-base">Roll placements into the next term</CardTitle>
         <CardDescription>
-          Carries every open placement forward with the same class, section and stream. Terms must belong to the same
+          Carries every open placement forward with the same class and section. Terms must belong to the same
           academic year — crossing years is promotion or repeating, not a rollover.
         </CardDescription>
       </CardHeader>

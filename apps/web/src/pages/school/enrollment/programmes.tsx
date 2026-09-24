@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { GraduationCap, Layers, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { GraduationCap, Layers, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -8,24 +8,28 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
-import { useAcademicYears, useClasses, useSections, useStreams, useTerminology } from '@/features/school/api';
+import { useAcademicYears, useTerminology } from '@/features/school/api';
 import {
   errorMessage,
-  GROUPING_MODE_LABEL,
   STAGE_LABEL,
-  useAttachStreamToSection,
   useClassCohorts,
   useGenerateCohorts,
   useGradeLevels,
   useProgrammes,
   useSeedUgandaProgrammes,
   useUpdateCohort,
-  useUpdateProgramme,
-  type GroupingMode,
 } from '@/features/school/enrollment-api';
-import { NONE, toId } from './_shared';
+import { NONE } from './_shared';
 
-const MODES: GroupingMode[] = ['NONE', 'SECTION_ONLY', 'STREAM_ONLY', 'SECTION_AND_STREAM'];
+/**
+ * Per-year subdivision override on a ClassCohort (ADR-029). `null` follows the
+ * class's own `allowsStreams`. The API dropped programme/cohort `groupingMode`
+ * and the separate Stream model; a class is divided into its Sections or not.
+ */
+const SUBDIVISION_VALUE = { follow: NONE, on: 'on', off: 'off' } as const;
+const toSubdivision = (v: string): boolean | null => (v === 'on' ? true : v === 'off' ? false : null);
+const fromSubdivision = (v: boolean | null | undefined): string =>
+  v === true ? SUBDIVISION_VALUE.on : v === false ? SUBDIVISION_VALUE.off : SUBDIVISION_VALUE.follow;
 
 /**
  * Programmes & Cohorts — the configuration behind every academic rule.
@@ -41,8 +45,8 @@ export function SchoolProgrammesPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Programmes &amp; classes</h1>
         <p className="text-sm text-muted-foreground">
-          How this school is organised: which programme each grade belongs to, how each class is subdivided, and which
-          classes exist in each academic year.
+          How this school is organised: which programme each grade belongs to, which classes exist in each academic
+          year, and whether each class is divided this year.
         </p>
       </header>
 
@@ -54,9 +58,6 @@ export function SchoolProgrammesPage() {
           <TabsTrigger value="cohorts">
             <Layers className="mr-1.5 h-4 w-4" /> Classes by year
           </TabsTrigger>
-          <TabsTrigger value="grouping">
-            <Wand2 className="mr-1.5 h-4 w-4" /> Sections &amp; streams
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="programmes" className="mt-4">
@@ -64,9 +65,6 @@ export function SchoolProgrammesPage() {
         </TabsContent>
         <TabsContent value="cohorts" className="mt-4">
           <CohortsTab />
-        </TabsContent>
-        <TabsContent value="grouping" className="mt-4">
-          <GroupingTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -77,7 +75,6 @@ function ProgrammesTab() {
   const { data: programmes, isLoading } = useProgrammes(true);
   const { data: gradeLevels } = useGradeLevels();
   const seed = useSeedUgandaProgrammes();
-  const update = useUpdateProgramme();
 
   const runSeed = async () => {
     try {
@@ -132,19 +129,18 @@ function ProgrammesTab() {
                 <TableHead>Stage</TableHead>
                 <TableHead>Authority</TableHead>
                 <TableHead>Grades</TableHead>
-                <TableHead>Default subdivision</TableHead>
                 <TableHead>In use</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
+                  <TableCell colSpan={5} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
                 </TableRow>
               )}
               {!isLoading && (programmes ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                     No programmes yet. Install the Uganda templates above to get started.
                   </TableCell>
                 </TableRow>
@@ -164,26 +160,6 @@ function ProgrammesTab() {
                           .filter(Boolean)
                           .join(', ')
                       : <span className="text-muted-foreground">Not linked</span>}
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      value={p.groupingMode}
-                      onValueChange={async (v) => {
-                        try {
-                          await update.mutateAsync({ id: p.id, groupingMode: v });
-                          notify.success('Default subdivision updated.');
-                        } catch (err) {
-                          notify.error(errorMessage(err));
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {MODES.map((m) => (
-                          <SelectItem key={m} value={m}>{GROUPING_MODE_LABEL[m]}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {p._count ? `${p._count.cohorts} classes · ${p._count.enrollments} learners` : '—'}
@@ -209,6 +185,7 @@ function CohortsTab() {
   const { data: cohorts, isLoading } = useClassCohorts({ academicYearId: yearId || undefined });
   const generate = useGenerateCohorts();
   const update = useUpdateCohort();
+  const labels = useTerminology();
 
   const run = async () => {
     try {
@@ -225,8 +202,8 @@ function CohortsTab() {
         <CardHeader>
           <CardTitle className="text-base">Classes for an academic year</CardTitle>
           <CardDescription>
-            Each class exists once per academic year. Sections and streams always belong to one of these, which is what
-            stops a teacher choosing a stream from a different class.
+            Each class exists once per academic year. Its {labels.sectionPlural.toLowerCase()} always belong to one of
+            these, which is what stops a teacher choosing a {labels.section.toLowerCase()} from a different class.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
@@ -280,10 +257,10 @@ function CohortsTab() {
                   <TableCell>{c.programme?.name ?? <span className="text-amber-600 dark:text-amber-400">Not mapped</span>}</TableCell>
                   <TableCell>
                     <Select
-                      value={c.groupingMode ?? NONE}
+                      value={fromSubdivision(c.allowsSubdivision)}
                       onValueChange={async (v) => {
                         try {
-                          await update.mutateAsync({ id: c.id, groupingMode: toId(v) ?? null });
+                          await update.mutateAsync({ id: c.id, allowsSubdivision: toSubdivision(v) });
                           notify.success('Subdivision updated for this class.');
                         } catch (err) {
                           notify.error(errorMessage(err));
@@ -292,112 +269,16 @@ function CohortsTab() {
                     >
                       <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={NONE}>
-                          Follow the programme{c.programme ? ` (${GROUPING_MODE_LABEL[c.programme.groupingMode]})` : ''}
+                        <SelectItem value={SUBDIVISION_VALUE.follow}>
+                          Follow the class ({c.schoolClass?.allowsStreams === false ? 'not divided' : `divided into ${labels.sectionPlural.toLowerCase()}`})
                         </SelectItem>
-                        {MODES.map((m) => (
-                          <SelectItem key={m} value={m}>{GROUPING_MODE_LABEL[m]}</SelectItem>
-                        ))}
+                        <SelectItem value={SUBDIVISION_VALUE.on}>Divided into {labels.sectionPlural.toLowerCase()} this year</SelectItem>
+                        <SelectItem value={SUBDIVISION_VALUE.off}>Not divided this year</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{c._count?.placements ?? 0}</TableCell>
                   <TableCell><Badge variant="outline">{c.status}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function GroupingTab() {
-  const labels = useTerminology();
-  const { data: classes } = useClasses();
-  const [classId, setClassId] = useState('');
-  const { data: sections } = useSections();
-  const { data: streams } = useStreams(classId || undefined);
-  const attach = useAttachStreamToSection();
-
-  const classSections = (sections?.data ?? []).filter((s) => s.classId === classId);
-  const classStreams = (streams?.data ?? []).filter((s) => s.classId === classId);
-
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Attach streams to sections</CardTitle>
-          <CardDescription>
-            Only needed when a class runs <strong>sections with streams</strong> — e.g. P5 → Section A → Red / Blue. A
-            stream may only sit under a section of its own class, and a stream already in use cannot be re-parented
-            without moving those learners first.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="w-64 space-y-1.5">
-            <Label>Class</Label>
-            <Select value={classId} onValueChange={setClassId}>
-              <SelectTrigger><SelectValue placeholder="Choose a class" /></SelectTrigger>
-              <SelectContent>
-                {(classes?.data ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{labels.section}</TableHead>
-                <TableHead>Belongs to section</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {!classId && (
-                <TableRow>
-                  <TableCell colSpan={2} className="py-10 text-center text-muted-foreground">
-                    Choose a class to see its streams.
-                  </TableCell>
-                </TableRow>
-              )}
-              {classId && classStreams.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2} className="py-10 text-center text-muted-foreground">
-                    This class has no streams.
-                  </TableCell>
-                </TableRow>
-              )}
-              {classStreams.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell>
-                    <Select
-                      value={(s as { sectionId?: string | null }).sectionId ?? NONE}
-                      onValueChange={async (v) => {
-                        try {
-                          await attach.mutateAsync({ streamId: s.id, sectionId: toId(v) ?? null });
-                          notify.success('Stream updated.');
-                        } catch (err) {
-                          notify.error(errorMessage(err));
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="w-56"><SelectValue placeholder="Not under a section" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NONE}>Not under a section</SelectItem>
-                        {classSections.map((sec) => (
-                          <SelectItem key={sec.id} value={sec.id}>{sec.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

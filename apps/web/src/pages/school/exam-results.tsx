@@ -54,7 +54,7 @@ export function SchoolExamResultsPage() {
   const { data: grid, isLoading, refetch } = useResultGrid({
     examId: examId || undefined,
     classId: classId || undefined,
-    streamId: streamId || undefined,
+    sectionId: streamId || undefined,
   });
   const lock = useLockMarks();
 

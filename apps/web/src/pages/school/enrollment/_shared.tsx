@@ -1,12 +1,11 @@
-import { useMemo } from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { useTerminology } from '@/features/school/api';
 import {
   ENROLLMENT_STATUS_TONE,
-  GROUPING_MODE_LABEL,
   MOVEMENT_REASON_LABEL,
   useGroupingOptions,
   type EnrollmentStatus,
@@ -36,114 +35,71 @@ export function ReasonBadge({ reason }: { reason: MovementReason }) {
 export const formatDate = (value?: string | null) =>
   value ? new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' }) : '—';
 
-/** "P5 · A / Red" — one line describing where a learner sits. */
+/** "P5 · North" — one line describing where a learner sits. */
 export function placementLabel(placement?: Placement | null): string {
   if (!placement) return 'No class';
   const cls = placement.classCohort?.schoolClass?.name ?? 'Unknown class';
-  const parts = [placement.section?.name, placement.stream?.name].filter(Boolean);
-  return parts.length ? `${cls} · ${parts.join(' / ')}` : cls;
+  return placement.section?.name ? `${cls} · ${placement.section.name}` : cls;
 }
 
 /**
- * Section/stream pickers driven by the cohort's grouping mode (ADR-019).
+ * Section picker driven by the cohort's grouping options (ADR-029: a class's
+ * subdivisions are its Sections, labelled "Stream" by default).
  *
  * The options come from the server, scoped to the cohort's own class, so a user
- * is never offered a stream from another class — the rule is enforced in the
- * API too, but a form that can only express legal states is the point.
+ * is never offered a section from another class — the rule is enforced in the
+ * API too, but a form that can only express legal states is the point. This
+ * used to read `groupingMode`/`streams`/`requiresStream`, which the API stopped
+ * returning, and crashed on `options.streams.filter` (E2E audit E1).
  */
 export function GroupingPicker({
   cohortId,
   sectionId,
-  streamId,
   onSectionChange,
-  onStreamChange,
   disabled,
 }: {
   cohortId?: string;
   sectionId?: string;
-  streamId?: string;
   onSectionChange: (value: string | undefined) => void;
-  onStreamChange: (value: string | undefined) => void;
   disabled?: boolean;
 }) {
   const { data: options, isLoading } = useGroupingOptions(cohortId);
-
-  const streams = useMemo(() => {
-    if (!options) return [];
-    if (options.groupingMode !== 'SECTION_AND_STREAM') return options.streams;
-    // In combined mode a stream belongs to the chosen section.
-    return options.streams.filter((s) => s.sectionId === sectionId);
-  }, [options, sectionId]);
+  const labels = useTerminology();
 
   if (!cohortId) return null;
   if (isLoading || !options) return <p className="text-sm text-muted-foreground">Loading class groups…</p>;
-  if (options.groupingMode === 'NONE') {
+  if (!options.allowsSubdivision || options.sections.length === 0) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Info className="h-4 w-4" /> This class is not divided into sections or streams.
+        <Info className="h-4 w-4" /> This {labels.class.toLowerCase()} is not divided into{' '}
+        {labels.sectionPlural.toLowerCase()}.
       </p>
     );
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {(options.requiresSection || options.sections.length > 0) && options.groupingMode !== 'STREAM_ONLY' && (
-        <div className="space-y-1.5">
-          <Label>Section {options.requiresSection && <span className="text-destructive">*</span>}</Label>
-          <Select
-            value={sectionId ?? NONE}
-            onValueChange={(v) => {
-              onSectionChange(toId(v));
-              if (options.groupingMode === 'SECTION_AND_STREAM') onStreamChange(undefined);
-            }}
-            disabled={disabled}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Choose a section" />
-            </SelectTrigger>
-            <SelectContent>
-              {!options.requiresSection && <SelectItem value={NONE}>No section</SelectItem>}
-              {options.sections.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {options.groupingMode !== 'SECTION_ONLY' && (
-        <div className="space-y-1.5">
-          <Label>Stream {options.requiresStream && <span className="text-destructive">*</span>}</Label>
-          <Select
-            value={streamId ?? NONE}
-            onValueChange={(v) => onStreamChange(toId(v))}
-            disabled={disabled || (options.groupingMode === 'SECTION_AND_STREAM' && !sectionId)}
-          >
-            <SelectTrigger>
-              <SelectValue
-                placeholder={
-                  options.groupingMode === 'SECTION_AND_STREAM' && !sectionId ? 'Choose a section first' : 'Choose a stream'
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {!options.requiresStream && <SelectItem value={NONE}>No stream</SelectItem>}
-              {streams.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {options.groupingMode === 'SECTION_AND_STREAM' && sectionId && streams.length === 0 && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              No streams are attached to this section yet. Attach them under Programmes &amp; Cohorts.
-            </p>
-          )}
-        </div>
+    <div className="space-y-1.5">
+      <Label>
+        {labels.section} {options.requiresSection && <span className="text-destructive">*</span>}
+      </Label>
+      <Select value={sectionId ?? NONE} onValueChange={(v) => onSectionChange(toId(v))} disabled={disabled}>
+        <SelectTrigger>
+          <SelectValue placeholder={`Choose a ${labels.section.toLowerCase()}`} />
+        </SelectTrigger>
+        <SelectContent>
+          {!options.requiresSection && <SelectItem value={NONE}>No {labels.section.toLowerCase()}</SelectItem>}
+          {options.sections.map((s) => (
+            <SelectItem key={s.id} value={s.id}>
+              {s.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {options.requiresSection && !sectionId && (
+        <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          This {labels.class.toLowerCase()} is divided — pick a {labels.section.toLowerCase()}.
+        </p>
       )}
     </div>
   );
@@ -151,10 +107,19 @@ export function GroupingPicker({
 
 /** A short line telling the user how this class is organised. */
 export function GroupingModeNote({ options }: { options?: GroupingOptions }) {
+  const labels = useTerminology();
   if (!options) return null;
+  const divided = options.allowsSubdivision && options.sections.length > 0;
   return (
     <p className="text-xs text-muted-foreground">
-      {options.className ?? 'This class'} is set up as <strong>{GROUPING_MODE_LABEL[options.groupingMode]}</strong>.
+      {options.className ?? `This ${labels.class.toLowerCase()}`}{' '}
+      {divided ? (
+        <>
+          is divided into <strong>{options.sections.length}</strong> {labels.sectionPlural.toLowerCase()}.
+        </>
+      ) : (
+        <>is not divided.</>
+      )}
     </p>
   );
 }

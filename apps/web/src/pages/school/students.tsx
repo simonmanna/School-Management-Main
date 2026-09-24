@@ -7,7 +7,6 @@ import {
   useUpdateStudent,
   useClasses,
   useSections,
-  useStreams,
   useTerms,
   useRegisterStudent,
   useGuardians,
@@ -45,10 +44,10 @@ export function SchoolStudentsPage() {
   const { data, isLoading } = useStudents({ search: search || undefined, pageSize: 50 });
   const { data: classes } = useClasses();
   const { data: sections } = useSections();
-  const { data: streams } = useStreams();
   const { data: terms } = useTerms();
   const create = useCreateStudent();
   const register = useRegisterStudent();
+  const vocab = useTerminology();
   const update = useUpdateStudent();
 
   const rows = useMemo(() => data?.data ?? [], [data]);
@@ -107,6 +106,10 @@ export function SchoolStudentsPage() {
         notify.error('Name, class, term and roll number are required');
         return;
       }
+      if (!quick.sectionId && (sections?.data ?? []).some((x: { classId: string; isActive?: boolean }) => x.classId === quick.classId && x.isActive !== false)) {
+        notify.error(`This class is divided — choose a ${vocab.section.toLowerCase()}`);
+        return;
+      }
       await register.mutateAsync({
         name: quick.name.trim(),
         admissionNo: quick.admissionNo?.trim() || undefined,
@@ -114,7 +117,6 @@ export function SchoolStudentsPage() {
         gender: (quick.gender || undefined) as 'male' | 'female' | 'other' | null,
         classId: quick.classId,
         sectionId: quick.sectionId || null,
-        streamId: quick.streamId || null,
         termId: quick.termId,
         rollNumber: quick.rollNumber.trim(),
         guardianName: quick.guardianName?.trim() || undefined,
@@ -256,7 +258,6 @@ export function SchoolStudentsPage() {
         terms={terms?.data ?? []}
         classes={classes?.data ?? []}
         sections={sections?.data ?? []}
-        streams={streams?.data ?? []}
         onSubmit={quickSubmit}
         busy={register.isPending}
       />
@@ -397,15 +398,19 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ro
  * a Contact is created and linked inline.
  */
 function QuickRegisterDialog({
-  open, onOpenChange, form, setForm, terms, classes, sections, streams, onSubmit, busy,
+  open, onOpenChange, form, setForm, terms, classes, sections, onSubmit, busy,
 }: {
   open: boolean; onOpenChange: (v: boolean) => void;
   form: Record<string, string>; setForm: (v: Record<string, string>) => void;
-  terms: any[]; classes: any[]; sections: any[]; streams: any[];
+  terms: any[]; classes: any[]; sections: any[];
   onSubmit: () => void; busy: boolean;
 }) {
   const labels = useTerminology();
   const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+  // A class's subdivisions are its Sections (ADR-029) — one picker, scoped to
+  // the chosen class. The form used to offer every section in the school plus a
+  // second "stream" list, and a divided class then failed with a generic error.
+  const classSections = (sections ?? []).filter((x: any) => x.classId === form.classId && x.isActive !== false);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
@@ -447,23 +452,23 @@ function QuickRegisterDialog({
             </div>
             <div>
               <Label>Class *</Label>
-              <select className={sel} value={form.classId ?? ''} onChange={(e) => setForm({ ...form, classId: e.target.value })}>
+              <select className={sel} value={form.classId ?? ''} onChange={(e) => setForm({ ...form, classId: e.target.value, sectionId: '' })}>
                 <option value="">Choose class</option>
                 {(classes ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <Label>Section</Label>
-              <select className={sel} value={form.sectionId ?? ''} onChange={(e) => setForm({ ...form, sectionId: e.target.value })}>
-                <option value="">—</option>
-                {(sections ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>{labels.section}</Label>
-              <select className={sel} value={form.streamId ?? ''} onChange={(e) => setForm({ ...form, streamId: e.target.value })}>
-                <option value="">—</option>
-                {(streams ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <Label>{labels.section}{classSections.length > 0 && ' *'}</Label>
+              <select
+                className={sel}
+                value={form.sectionId ?? ''}
+                disabled={!form.classId || classSections.length === 0}
+                onChange={(e) => setForm({ ...form, sectionId: e.target.value })}
+              >
+                <option value="">
+                  {!form.classId ? 'Choose a class first' : classSections.length ? `Choose a ${labels.section.toLowerCase()}` : 'Not divided'}
+                </option>
+                {classSections.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div>

@@ -77,7 +77,7 @@ export function SchoolEnterMarksPage() {
     examId: examId || undefined,
     classId: classId || undefined,
     subjectId: subjectId || undefined,
-    streamId: streamId || undefined,
+    sectionId: streamId || undefined,
   };
   const { data: sheet, isLoading, refetch } = useMarkSheet(sheetParams);
   const saveMark = useSaveMark();
