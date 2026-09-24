@@ -87,6 +87,8 @@ function makeService() {
       updateMany: capacityUpdateMany,
     },
     admissionCycle: { findFirst: jest.fn().mockResolvedValue({ id: 'cyc_1', academicYearId: 'ay_1', workflowId: null }) },
+    // AD2: enroll() checks the term belongs to the application's year.
+    term: { findFirst: jest.fn().mockResolvedValue({ id: 'term_1', academicYearId: 'ay_1', name: 'Term 1' }) },
     // Workflow resolution on create(): with no rows the snapshot falls back to the
     // built-in Standard workflow, i.e. pre-workflow behaviour.
     admissionWorkflow: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -228,7 +230,8 @@ describe('AdmissionsService.review — state machine', () => {
     expect(result.status).toBe('under_review');
     expect(mocks.applicationUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'app_1' },
+        // AD1: compare-and-set on the status the transition was validated against.
+        where: { id: 'app_1', status: 'submitted' },
         data: expect.objectContaining({ status: 'under_review' }),
       }),
     );

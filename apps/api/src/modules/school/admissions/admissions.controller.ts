@@ -222,19 +222,19 @@ export class AdmissionsController {
   }
 
   /** Receive payment against the fee invoice through the payment engine. */
+  // Taking money is the fee office's act (Bursar). Requiring admissions:write
+  // too — the guard ANDs its list — meant no preset could take the fee.
   @Post(':id/fee/pay')
   @UseInterceptors(IdempotencyInterceptor)
   @Idempotent()
-  // Taking money is the fee office's act (Bursar). Requiring admissions:write
-  // too — the guard ANDs its list — meant no preset could take the fee.
   @RequirePermissions(PERMISSIONS.school.collectPayments)
   payApplicationFee(@Param('id') id: string, @Body() dto: PayApplicationFeeDto) {
     return this.admissionFees.pay(id, dto);
   }
 
   /** Waive an unpaid fee: the invoice is voided and its journal reversed. */
-  @Post(':id/fee/waive')
   // Relief is an approval (Head Teacher); admissions:write on top made it Admin-only.
+  @Post(':id/fee/waive')
   @RequirePermissions(PERMISSIONS.school.approveWaivers)
   waiveApplicationFee(@Param('id') id: string, @Body() dto: WaiveApplicationFeeDto) {
     return this.admissionFees.waive(id, dto.reason);
@@ -302,8 +302,8 @@ export class AdmissionsController {
     return this.admissions.scoreApplicationWeighted(id, scores);
   }
 
-  @Post(':id/decision')
   // Deciding is its own grant (Head / Deputy); they do not process applications.
+  @Post(':id/decision')
   @RequirePermissions(PERMISSIONS.school.decideAdmissions)
   recordDecision(@Param('id') id: string, @Body('decision') decision: 'accepted' | 'rejected' | 'waitlisted', @Body('reason') reason?: string) {
     return this.admissions.recordDecision(id, decision, reason);
