@@ -34,6 +34,9 @@ const REQUIRED_INDEXES = [
   { name: 'CourseOffering_one_per_cohort_subject_section', why: 'no duplicate course offering for a cohort' },
   { name: 'AdmissionApplication_applicant_dedupe', why: 'the same child is not entered twice for a year' },
   { name: 'Notification_org_channel_dedupeKey_key', why: 'a guardian is not messaged twice for one event' },
+  // Wave 7 — the NULL cases the Prisma @@unique keys let through.
+  { name: 'TimetableVersion_unsectioned_version_key', why: 'one timetable version number per unstreamed class' },
+  { name: 'AcademicReminderLog_no_user_key', why: 'a school-wide reminder is logged once per milestone' },
 ];
 
 // Wave 4 — constraints and triggers created by migrations 20260924150000-155000.

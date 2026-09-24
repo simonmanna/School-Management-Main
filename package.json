@@ -24,7 +24,7 @@
     "gen:vertical": "node scripts/gen-vertical.mjs",
     "test": "pnpm -r test",
     "test:e2e": "vitest run tests/e2e",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r --workspace-concurrency=1 typecheck",
     "verify": "pnpm lint:arch && pnpm shared:build && pnpm typecheck && pnpm --filter @erp/api test",
     "academics:inventory": "node scripts/academic-inventory.mjs",
     "academics:phase4:rehearse": "node scripts/academic-phase4-rehearsal.cjs",

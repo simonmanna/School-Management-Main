@@ -620,6 +620,7 @@ export class HrLifecycleService {
         partnerId: emp.partnerId ?? null,
         userId: emp.userId ?? null,
         lastWorkingDay: ld.toISOString(),
+        reason: off.reason,
       });
 
       const saved = await tx.hrOffboarding.findUnique({ where: { id: off.id } });

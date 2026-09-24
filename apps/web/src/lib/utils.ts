@@ -1,15 +1,38 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useAuthStore } from '@/stores/auth.store';
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(n: number | string | null | undefined): string {
-  if (n == null) return 'UGX 0';
-  const v = typeof n === 'string' ? Number(n) : n;
-  if (Number.isNaN(v)) return 'UGX 0';
-  return `UGX ${v.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+/**
+ * The school's own currency (Organization.currencyCode, from the session).
+ * Formatters used to hard-code UGX, so a school configured in another currency
+ * saw every amount mislabelled (E2E audit P2). UGX until the session is known.
+ */
+export function orgCurrency(): string {
+  try {
+    return useAuthStore.getState().organization?.currencyCode || 'UGX';
+  } catch {
+    return 'UGX';
+  }
+}
+
+/** Minor units the currency actually uses (UGX 0, USD 2, KWD 3). */
+function fractionDigits(code: string): number {
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency: code }).resolvedOptions().maximumFractionDigits ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function formatCurrency(n: number | string | null | undefined, currency: string = orgCurrency()): string {
+  const digits = fractionDigits(currency);
+  const v = n == null ? 0 : typeof n === 'string' ? Number(n) : n;
+  const safe = Number.isNaN(v) ? 0 : v;
+  return `${currency} ${safe.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: digits })}`;
 }
 
 /**

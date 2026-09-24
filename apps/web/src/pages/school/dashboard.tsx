@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 import { Link } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -22,8 +23,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthStore } from '@/stores/auth.store';
 import { PERMISSIONS } from '@erp/shared';
 
-const money = (n: number | undefined) =>
-  (n ?? 0).toLocaleString('en-UG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Amount in the school's currency; the tiles used to prefix a literal "UGX"
+// and print two decimals UGX does not have.
+const money = (n: number | undefined) => formatCurrency(n ?? 0);
 const int = (n: number | undefined) => (n ?? 0).toLocaleString('en-UG');
 
 export function SchoolDashboardPage() {
@@ -182,7 +184,7 @@ export function SchoolDashboardPage() {
               </p>
               <Wallet className="h-4 w-4 text-muted-foreground/60" />
             </div>
-            <p className="mt-2 text-xl font-bold text-green-600">UGX {money(fin?.collectionsThisMonth)}</p>
+            <p className="mt-2 text-xl font-bold text-green-600">{money(fin?.collectionsThisMonth)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -193,7 +195,7 @@ export function SchoolDashboardPage() {
               </p>
               <Landmark className="h-4 w-4 text-muted-foreground/60" />
             </div>
-            <p className="mt-2 text-xl font-bold text-orange-600">UGX {money(fin?.outstanding ?? admin?.outstandingFees ?? undefined)}</p>
+            <p className="mt-2 text-xl font-bold text-orange-600">{money(fin?.outstanding ?? admin?.outstandingFees ?? undefined)}</p>
           </CardContent>
         </Card>
       </div>}

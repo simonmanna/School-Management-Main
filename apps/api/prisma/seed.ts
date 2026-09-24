@@ -1,3 +1,4 @@
+import { seedSchoolDefaults } from '../src/modules/core/school-defaults.seed';
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -39,14 +40,16 @@ async function main(): Promise<void> {
     update: {},
     create: {
       code: 'DEMO',
-      name: 'Demo Organization',
+      // A SCHOOL by default (Wave 7): this seed used to create a café tenant
+      // with a real-looking business name, address and phone on its receipts.
+      name: 'Demo Primary School',
       currencyCode: 'UGX',
       timezone: 'Africa/Kampala',
       receiptHeader: {
-        businessName: 'Abiliz Cafe',
-        addressLine1: 'AFEE COMPLEX, KASANGA',
-        addressLine2: 'Kampala, Uganda',
-        phone: '+256757920771',
+        businessName: 'Demo Primary School',
+        addressLine1: 'Kampala, Uganda',
+        addressLine2: '',
+        phone: '',
         // TIN prints on receipts once set (skipped while empty).
         taxId: '',
       },
@@ -293,22 +296,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // --- Clear old demo menu data (idempotent) ---------------------------------
-  await prisma.menuProduct.deleteMany({ where: { organizationId: org.id } });
-  await prisma.menuItem.deleteMany({ where: { organizationId: org.id } });
-  await prisma.menuCategory.deleteMany({ where: { organizationId: org.id } });
+  // --- School structure ------------------------------------------------------
+  // The same starting structure bootstrap gives a new school: nursery + P1–P7
+  // on a promotion ladder, a class per grade, attendance statuses, the PLE
+  // grading scale and a main campus. Only on a tenant that has no grades yet.
+  if ((await prisma.gradeLevel.count({ where: { organizationId: org.id } })) === 0) {
+    await seedSchoolDefaults(prisma, org.id);
+    console.log('School structure seeded (Baby–Top, P1–P7 ladder, classes, statuses, PLE scale).');
+  }
 
-  // --- Sunrise Cafe demo data ----------------------------------------------
-  // Adds cafe-specific categories + 32 products + stock + a cash register
-  // so a cashier opening /pos/terminal for the first time has a populated
-  // catalog and can open a shift without setup work.
-  await seedSunriseCafe(org.id, warehouse.id, tax.id, accountIds['1100']);
-
-  // --- Demo menu (79 items across 8 categories) -----------------------------
-  await seedDemoMenu(org.id, tax.id);
-
-  // --- Demo staff, PIN, and tables ------------------------------------------
-  await seedStaffAndTables(org.id, adminRole.id);
+  // --- Café / POS demo (opt-in) ---------------------------------------------
+  // The platform's POS vertical keeps its demo data, but a school system must
+  // not ship a café by default. Set SEED_CAFE_DEMO=true to include it.
+  if (process.env.SEED_CAFE_DEMO === 'true') {
+    await prisma.menuProduct.deleteMany({ where: { organizationId: org.id } });
+    await prisma.menuItem.deleteMany({ where: { organizationId: org.id } });
+    await prisma.menuCategory.deleteMany({ where: { organizationId: org.id } });
+    // Café categories + 32 products + stock + a cash register.
+    await seedSunriseCafe(org.id, warehouse.id, tax.id, accountIds['1100']);
+    // Demo menu (79 items across 8 categories).
+    await seedDemoMenu(org.id, tax.id);
+    // Demo staff, PIN, and tables.
+    await seedStaffAndTables(org.id, adminRole.id);
+  }
 
   // --- Default approval workflows -------------------------------------------
   // Without these the approval engine matches nothing and auto-approves every

@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 import { useState, useMemo } from 'react';
 import {
   BookOpen, Copy, ArrowLeftRight, Users, AlertTriangle, BarChart3,
@@ -28,7 +29,8 @@ import { useProducts } from '@/features/products/api';
 
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
 const fmtDateTime = (d?: string | null) => (d ? new Date(d).toLocaleString() : '—');
-const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
+// The school's own currency (Organization.currencyCode), not a hard-coded UGX.
+const money = (n: number | string | null | undefined) => formatCurrency(n);
 
 const statusBadge = (status: string) => {
   const variants: Record<string, string> = {
@@ -586,7 +588,9 @@ function StudentsTab() {
     return (students.data?.data ?? []).filter((s: any) =>
       s.partner?.name?.toLowerCase().includes(q) ||
       s.admissionNo?.toLowerCase().includes(q) ||
-      s.currentClassId?.toLowerCase().includes(q)
+      // Search by the class NAME the API derives from placement history; the
+      // class id it used to match was meaningless to a librarian typing "P5".
+      s.currentClass?.name?.toLowerCase().includes(q)
     );
   }, [students.data, search]);
 

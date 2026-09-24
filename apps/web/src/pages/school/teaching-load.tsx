@@ -16,8 +16,7 @@ import {
 } from '@/components/ui/table';
 import {
   useStaff, useClasses, useSubjects, useTeacherAssignments,
-  useCreateTeacherAssignment, useUpdateTeacherAssignment, useDeleteTeacherAssignment,
-} from '@/features/school/api';
+  useCreateTeacherAssignment, useUpdateTeacherAssignment, useDeleteTeacherAssignment, currentTerminology } from '@/features/school/api';
 
 interface TeacherAssignment {
   id: string;
@@ -294,7 +293,7 @@ export function SchoolTeachingLoadPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Section</Label>
+                <Label>{currentTerminology().section}</Label>
                 <Select value={form.sectionId} onValueChange={(v) => setForm((f) => ({ ...f, sectionId: v }))}>
                   <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
                   <SelectContent>

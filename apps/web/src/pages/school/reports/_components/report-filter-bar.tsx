@@ -9,8 +9,7 @@ import {
   useSectionsForClass,
   useStreams,
   useSubjects,
-  useTerms,
-} from '@/features/school/api';
+  useTerms, currentTerminology } from '@/features/school/api';
 import type { ReportCatalogEntry, ReportFilters } from '@/features/school/reports-api';
 
 /**
@@ -134,7 +133,7 @@ export function ReportFilterBar({
       )}
 
       {shows.has('sectionId') && (
-        <Field label="Section" required={required.has('sectionId')}>
+        <Field label={currentTerminology().section} required={required.has('sectionId')}>
           <Select
             value={filters.sectionId}
             onChange={(v) => set('sectionId', v)}

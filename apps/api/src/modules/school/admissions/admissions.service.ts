@@ -1212,17 +1212,25 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       select: { applicationId: true },
     });
     let expired = 0;
+    let failed = 0;
     for (const o of lapsed) {
-      await this.prisma.client.$transaction(async (tx: any) => {
-        await tx.offerLetter.updateMany({ where: { applicationId: o.applicationId }, data: { status: 'expired' } });
-        const app = await tx.admissionApplication.findFirst({ where: { id: o.applicationId } });
-        if (app && app.status === 'offer_issued') {
-          await this.applyReview(tx, o.applicationId, 'expire_offer', 'Offer lapsed unaccepted');
-        }
-      });
-      expired++;
+      // One bad application must not stop the sweep: a throw here used to
+      // abandon every offer after it until the next run hit the same row.
+      try {
+        await this.prisma.client.$transaction(async (tx: any) => {
+          await tx.offerLetter.updateMany({ where: { applicationId: o.applicationId }, data: { status: 'expired' } });
+          const app = await tx.admissionApplication.findFirst({ where: { id: o.applicationId } });
+          if (app && app.status === 'offer_issued') {
+            await this.applyReview(tx, o.applicationId, 'expire_offer', 'Offer lapsed unaccepted');
+          }
+        });
+        expired++;
+      } catch (err) {
+        failed++;
+        this.logger.warn(`Offer expiry failed for application ${o.applicationId}: ${String(err)}`);
+      }
     }
-    return { expired };
+    return { expired, failed };
   }
 
   async declineOffer(applicationId: string) {

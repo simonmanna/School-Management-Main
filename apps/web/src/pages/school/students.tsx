@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, GraduationCap, UserPlus, X, Zap } from 'lucide-react';
@@ -28,9 +29,14 @@ const STATUS_META: Record<StudentStatus, string> = {
   transferred: 'bg-sky-100 text-sky-700',
   withdrawn: 'bg-rose-100 text-rose-700',
   alumni: 'bg-slate-100 text-slate-700',
+  applicant: 'bg-slate-100 text-slate-700',
+  graduated: 'bg-violet-100 text-violet-700',
+  deceased: 'bg-zinc-200 text-zinc-700',
+  archived: 'bg-muted text-muted-foreground',
 };
 
-const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
+// The school's own currency (Organization.currencyCode), not a hard-coded UGX.
+const money = (n: number | string | null | undefined) => formatCurrency(n);
 
 export function SchoolStudentsPage() {
   const navigate = useNavigate();

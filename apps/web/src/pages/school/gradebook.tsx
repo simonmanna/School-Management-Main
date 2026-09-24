@@ -6,8 +6,7 @@ import {
   useAcademicYears, useTerms, useClasses, useClassSubdivisions,
   useGradebookSheet, useGradebookCell, useCreateGradebookColumn,
   useDeleteGradebookColumn, useLockGradebookColumn, usePolicyComponents,
-  type GradebookColumn, type GradebookStudent,
-} from '@/features/school/api';
+  type GradebookColumn, type GradebookStudent, currentTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -160,8 +159,8 @@ export function SchoolGradebookPage() {
             options={(classes?.data ?? []).map((c) => ({ value: c.id, label: c.name }))} className="min-w-[130px]" />
           <Picker label="Subject" value={subjectId} onChange={setSubjectId}
             options={(sheet?.subjects ?? []).map((s) => ({ value: s.id, label: s.name }))} className="min-w-[160px]" />
-          <Picker label="Stream" value={streamId} onChange={setStreamId}
-            options={streamList.map((s) => ({ value: s.id, label: s.name }))} placeholder="All streams" className="min-w-[120px]" />
+          <Picker label={currentTerminology().section} value={streamId} onChange={setStreamId}
+            options={streamList.map((s) => ({ value: s.id, label: s.name }))} placeholder={`All ${currentTerminology().sectionPlural.toLowerCase()}`} className="min-w-[120px]" />
         </CardContent>
       </Card>
 

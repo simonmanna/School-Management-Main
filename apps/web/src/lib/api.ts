@@ -60,11 +60,15 @@ async function refresh(): Promise<string | null> {
   const refreshToken = useAuthStore.getState().refreshToken;
   if (!refreshToken) return null;
   try {
-    const res = await axios.post<{ accessToken: string; refreshToken: string }>(
+    const res = await axios.post<{ accessToken: string; refreshToken: string; permissions?: string[] }>(
       `${baseURL}/auth/refresh`,
       { refreshToken },
     );
     useAuthStore.getState().setTokens(res.data.accessToken, res.data.refreshToken);
+    // The refresh response re-resolves permissions from the database; keep the
+    // UI's copy in step, or a revoked or newly granted permission only showed
+    // in the menus after a full sign-out (E2E audit P3).
+    if (Array.isArray(res.data.permissions)) useAuthStore.setState({ permissions: res.data.permissions });
     return res.data.accessToken;
   } catch {
     useAuthStore.getState().clear();

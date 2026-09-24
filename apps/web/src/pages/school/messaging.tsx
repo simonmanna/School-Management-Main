@@ -15,7 +15,7 @@ import {
   ShieldOff,
   Users,
 } from 'lucide-react';
-import { useClasses, useSections } from '@/features/school/api';
+import { useClasses, useSections, currentTerminology } from '@/features/school/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -325,7 +325,7 @@ export function SchoolMessagingPage() {
 
                   {(scope === 'class' || scope === 'section') && (
                     <div className="space-y-1">
-                      <Label>{scope === 'class' ? 'Class' : 'Section'}</Label>
+                      <Label>{scope === 'class' ? currentTerminology().class : currentTerminology().section}</Label>
                       <Select value={ids[0] ?? ''} onValueChange={(v) => setIds([v])}>
                         <SelectTrigger className="sm:w-2/3">
                           <SelectValue placeholder={`Select a ${scope}`} />

@@ -620,6 +620,8 @@ export interface DomainEventMap {
     partnerId: string | null;
     userId: string | null;
     lastWorkingDay: string;
+    /** HR offboarding reason (resignation, retirement, …); drives the school staff status. */
+    reason?: string | null;
   };
   'hr.leave.approved': {
     organizationId: string;

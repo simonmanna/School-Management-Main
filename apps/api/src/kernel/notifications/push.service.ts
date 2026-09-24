@@ -22,7 +22,7 @@ export class PushService implements OnModuleInit {
   private readonly logger = new Logger('PushService');
   private publicKey = '';
   private privateKey = '';
-  private subject = 'mailto:admin@cafe-pos.local';
+  private subject = 'mailto:admin@school.local';
 
   constructor(private readonly prisma: PrismaService) {}
 

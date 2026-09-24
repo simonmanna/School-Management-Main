@@ -40,6 +40,9 @@ const NewsItemPage = lazy(() => import('@/site/pages/news-item'));
 const ContactPage = lazy(() => import('@/site/pages/contact'));
 const PortalsPage = lazy(() => import('@/site/pages/portals'));
 const VerifyPage = lazy(() => import('@/site/pages/verify'));
+const UnconfiguredSitePage = lazy(() => import('@/site/pages/unconfigured'));
+/** Set once site/content.ts holds the school's real details. */
+const SITE_READY = import.meta.env.VITE_SITE_CONTENT_READY === 'true';
 
 /* ── Signed-in workspaces ── */
 // Shared by all three audiences: the school's message history for whoever is
@@ -69,13 +72,16 @@ export default function App() {
       <Routes>
         {/* ── The public website. No auth, no portal context fetch. ── */}
         <Route element={<SiteShell />}>
-          <Route index element={<HomePage />} />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="/academics" element={<AcademicsPage />} />
-          <Route path="/admissions" element={<AdmissionsPage />} />
-          <Route path="/news" element={<NewsPage />} />
-          <Route path="/news/:slug" element={<NewsItemPage />} />
-          <Route path="/contact" element={<ContactPage />} />
+          {/* The marketing pages carry sample content (site/content.ts) until the
+              school fills it in; publishing it under a real school's name would
+              invent its statistics, dates and phone numbers. */}
+          <Route index element={SITE_READY ? <HomePage /> : <UnconfiguredSitePage />} />
+          <Route path="/about" element={SITE_READY ? <AboutPage /> : <UnconfiguredSitePage />} />
+          <Route path="/academics" element={SITE_READY ? <AcademicsPage /> : <UnconfiguredSitePage />} />
+          <Route path="/admissions" element={SITE_READY ? <AdmissionsPage /> : <UnconfiguredSitePage />} />
+          <Route path="/news" element={SITE_READY ? <NewsPage /> : <UnconfiguredSitePage />} />
+          <Route path="/news/:slug" element={SITE_READY ? <NewsItemPage /> : <UnconfiguredSitePage />} />
+          <Route path="/contact" element={SITE_READY ? <ContactPage /> : <UnconfiguredSitePage />} />
           <Route path="/portals" element={<PortalsPage />} />
           <Route path="/verify" element={<VerifyPage />} />
         </Route>

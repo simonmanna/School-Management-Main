@@ -2,7 +2,6 @@
   "apps/portal/src/lib/portal-api.ts",
   "apps/web/src/features/school/api.ts",
   "apps/web/src/features/school/statutory-api.ts",
-  "apps/web/src/pages/school/library.tsx",
   "apps/web/src/pages/school/promotion.tsx",
   "apps/web/src/pages/school/student-360.tsx",
   "apps/web/src/pages/school/students.tsx"

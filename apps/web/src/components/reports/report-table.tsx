@@ -1,3 +1,4 @@
+import { orgCurrency } from '@/lib/utils';
 import { Link } from 'react-router-dom';
 import { DataTable, type Column } from '@/components/data-table';
 import type { ReportColumn, ReportRow, ReportRunResult } from '@/features/reports/types';
@@ -17,7 +18,7 @@ function formatCell(value: unknown, column: ReportColumn): string {
   if (value === null || value === undefined || value === '') return '—';
   switch (column.type) {
     case 'money': {
-      const prefix = column.format === '' ? '' : `${column.format ?? 'UGX'} `;
+      const prefix = column.format === '' ? '' : `${column.format ?? orgCurrency()} `;
       return `${prefix}${nf.format(Math.round(Number(value)))}`;
     }
     case 'int':

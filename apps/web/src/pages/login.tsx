@@ -116,10 +116,28 @@ interface LoginResponse {
 
 type View = 'login' | 'mfa' | 'forgot' | 'forgot-sent';
 
+function readRemembered(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode: nothing to remember */
+  }
+}
+
 export function LoginPage() {
   const [view, setView] = useState<View>('login');
-  const [orgCode, setOrgCode] = useState('DEMO');
-  const [email, setEmail] = useState('admin@demo.test');
+  // Remember the school code and email this browser last signed in with. The
+  // form used to arrive pre-filled with the DEMO tenant's admin account
+  // (Wave 7): a production login screen must not advertise a known login.
+  const [orgCode, setOrgCode] = useState(() => readRemembered('login.orgCode'));
+  const [email, setEmail] = useState(() => readRemembered('login.email'));
   const [password, setPassword] = useState('');
   const [mfaToken, setMfaToken] = useState('');
   const [mfaCode, setMfaCode] = useState('');
@@ -147,6 +165,8 @@ export function LoginPage() {
     mutationFn: async () =>
       (await api.post<LoginResponse>('/auth/mfa-login', { mfaToken, code: mfaCode })).data,
     onSuccess: (data) => {
+      remember('login.orgCode', orgCode);
+      remember('login.email', email);
       setSession(data);
       notify.success(`Welcome back, ${data.user.firstName}`);
       navigate('/');

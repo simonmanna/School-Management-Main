@@ -496,7 +496,11 @@ export class AuthService {
   /** Increment failed-login counter and lock if threshold exceeded. */
   private async recordFailedLogin(user: UserWithRoles | null): Promise<void> {
     if (!user) return;
-    const next = user.failedLoginCount + 1;
+    // A lock that has run out wipes the slate. The count used to carry on from
+    // where it stopped, so the first wrong password after a 15-minute lockout
+    // locked the account again at once.
+    const lockExpired = !!user.lockedUntil && user.lockedUntil.getTime() <= Date.now();
+    const next = (lockExpired ? 0 : user.failedLoginCount) + 1;
     const locked = next >= MAX_FAILED_ATTEMPTS;
     await this.prisma.client.user.update({
       where: { id: user.id },

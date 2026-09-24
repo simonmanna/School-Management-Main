@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Users, Edit } from 'lucide-react';
-import { useSections, useUpdateSection, useStaff, useClasses, type Section } from '@/features/school/api';
+import { useSections, useUpdateSection, useStaff, useClasses, type Section, currentTerminology } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,7 +105,7 @@ export function SchoolClassTeacherPage() {
               <TableRow>
                 <TableHead className="w-10">#</TableHead>
                 <TableHead>Class</TableHead>
-                <TableHead>Section</TableHead>
+                <TableHead>{currentTerminology().section}</TableHead>
                 <TableHead>Class Teacher</TableHead>
                 <TableHead>Teacher</TableHead>
                 <TableHead className="w-40 text-right">Actions</TableHead>
@@ -155,7 +155,7 @@ export function SchoolClassTeacherPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-1">
-              <Label className="text-xs">Section</Label>
+              <Label className="text-xs">{currentTerminology().section}</Label>
               <p className="font-medium">{editing?.name}</p>
             </div>
             <div className="space-y-1">

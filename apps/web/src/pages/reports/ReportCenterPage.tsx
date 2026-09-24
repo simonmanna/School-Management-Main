@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 /**
  * Report Center — unified report hub.
  * Tabs: Sales · Item Sales · Expenses · Purchases · Cash Flow Summary · Cash Flow Detailed
@@ -25,7 +26,7 @@ import { exportCSV } from '@/lib/export-csv';
 import { exportPDF } from '@/lib/export-pdf';
 
 const fmt = (n: number | string | null | undefined) =>
-  `UGX ${Number(n || 0).toLocaleString()}`;
+  formatCurrency(n || 0);
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 

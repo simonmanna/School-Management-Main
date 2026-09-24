@@ -222,7 +222,8 @@ export class NotificationsService implements OnModuleInit {
       this.logger.warn(`[DEV-EMAIL] to=${to} subject=${input.title} body=${input.body}`);
       return;
     }
-    const from = process.env.SMTP_FROM ?? 'no-reply@cafe-pos.local';
+    // The café-POS default leaked into school mail headers; set SMTP_FROM per deployment.
+    const from = process.env.SMTP_FROM ?? 'no-reply@school.local';
     await this.smtpTransport.sendMail({
       from,
       to,

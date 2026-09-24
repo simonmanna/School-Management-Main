@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import type { Request } from 'express';
@@ -14,12 +14,9 @@ import { Public } from './decorators/public.decorator';
 import { NoPermissionRequired } from './decorators/no-permission-required.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthUser } from './jwt-token.service';
-import { Idempotent } from '../idempotency/idempotent.decorator';
-import { IdempotencyInterceptor } from '../idempotency/idempotency.interceptor';
 
 @ApiTags('auth')
 @Controller('auth')
-@UseInterceptors(IdempotencyInterceptor)
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
@@ -32,9 +29,11 @@ export class AuthController {
    * the per-account lockout (10 failed → 15min lock), this gives defense in
    * depth against credential stuffing.
    */
+  // Not @Idempotent: login runs before any tenant exists, so the idempotency
+  // store (keyed per organization) threw a 500 whenever a client sent a key,
+  // and replaying a cached response would hand out the same tokens twice.
   @Public()
   @Throttle({ default: { limit: 10, ttl: 5 * 60 * 1000 } })
-  @Idempotent()
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto, req);

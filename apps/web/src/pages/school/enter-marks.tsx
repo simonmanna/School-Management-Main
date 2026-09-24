@@ -7,8 +7,7 @@ import {
 import {
   useAcademicYears, useTerms, useClassSubdivisions, useClassSubjects,
   useWorkspaceExams, useMarkSheet, useSaveMark, useLockMarks, useExamCoverage,
-  type MarkSheetStudent,
-} from '@/features/school/api';
+  type MarkSheetStudent, currentTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -277,9 +276,9 @@ export function SchoolEnterMarksPage() {
             className="min-w-[130px]" />
           <Picker label="Subject" value={subjectId} onChange={setSubjectId}
             options={paperSubjects.map((s) => ({ value: s.id, label: s.name }))} className="min-w-[160px]" />
-          <Picker label="Stream" value={streamId} onChange={setStreamId}
+          <Picker label={currentTerminology().section} value={streamId} onChange={setStreamId}
             options={streamList.map((s) => ({ value: s.id, label: s.name }))}
-            placeholder="All streams" className="min-w-[120px]" />
+            placeholder={`All ${currentTerminology().sectionPlural.toLowerCase()}`} className="min-w-[120px]" />
         </CardContent>
       </Card>
 
@@ -368,7 +367,7 @@ export function SchoolEnterMarksPage() {
                       <th className="w-10 px-4 py-2">#</th>
                       <th className="px-4 py-2">Student</th>
                       <th className="w-32 px-4 py-2">Admission no.</th>
-                      {streamList.length > 0 && <th className="w-28 px-4 py-2">Stream</th>}
+                      {streamList.length > 0 && <th className="w-28 px-4 py-2">{currentTerminology().section}</th>}
                       <th className="w-32 px-4 py-2">Mark</th>
                       <th className="w-16 px-4 py-2">Grade</th>
                       <th className="w-40 px-4 py-2">If not marked</th>

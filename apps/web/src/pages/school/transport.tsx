@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Bus, Route as RouteIcon, MapPin, Users, Plus } from 'lucide-react';
@@ -24,7 +25,8 @@ import {
 } from '@/features/school/api';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
-const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
+// The school's own currency (Organization.currencyCode), not a hard-coded UGX.
+const money = (n: number | string | null | undefined) => formatCurrency(n);
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function SchoolTransportPage() {

@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, UtensilsCrossed, ClipboardCheck, CalendarDays, Play, HandCoins, ChefHat, BarChart3, CreditCard } from 'lucide-react';
@@ -48,7 +49,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 
-const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
+// The school's own currency (Organization.currencyCode), not a hard-coded UGX.
+const money = (n: number | string | null | undefined) => formatCurrency(n);
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 const today = () => new Date().toISOString().slice(0, 10);
 

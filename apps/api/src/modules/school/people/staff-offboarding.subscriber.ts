@@ -12,12 +12,32 @@ type OffboardedPayload = {
   partnerId: string | null;
   userId: string | null;
   lastWorkingDay: string;
+  /** HR's offboarding reason; absent on events published before it was carried. */
+  reason?: string | null;
 };
+
+/**
+ * HR's reason → the staff status the school records. Everything used to land
+ * on 'terminated', so a teacher who retired or resigned appeared on the staff
+ * register as dismissed.
+ */
+export function leavingStatusFor(reason: string | null | undefined): StaffStatusValue {
+  switch (reason) {
+    case 'resignation':
+      return 'resigned';
+    case 'retirement':
+      return 'retired';
+    case 'contract_expiry':
+      return 'inactive';
+    default:
+      return 'terminated';
+  }
+}
 
 /**
  * HR posted a leaver's offboarding (`hr.employee.offboarded`). HR has already
  * disabled the login; the school side ends the person's teaching: StaffProfile
- * → terminated (with history), allocations end-dated at the last working day,
+ * → resigned / retired / terminated per HR's reason (with history), allocations end-dated at the last working day,
  * live lessons unassigned for cover, class-teacher roles cleared.
  *
  * The event is the only bridge — HR may not import the school vertical (ADR-011).
@@ -49,14 +69,15 @@ export class StaffOffboardingSubscriber implements OnModuleInit {
             if (!staff) return;
             if (LEAVING_STATUSES.includes(staff.status as StaffStatusValue)) return;
             const at = new Date(payload.lastWorkingDay);
-            await tx.staffProfile.updateMany({ where: { id: staff.id }, data: { status: 'terminated' } });
+            const toStatus = leavingStatusFor(payload.reason);
+            await tx.staffProfile.updateMany({ where: { id: staff.id }, data: { status: toStatus } });
             await tx.staffStatusHistory.create({
               data: {
                 organizationId: staff.organizationId,
                 staffProfileId: staff.id,
                 fromStatus: staff.status,
-                toStatus: 'terminated',
-                reason: `HR offboarding posted (last working day ${payload.lastWorkingDay.slice(0, 10)})`,
+                toStatus,
+                reason: `HR offboarding posted${payload.reason ? ` (${payload.reason})` : ''} (last working day ${payload.lastWorkingDay.slice(0, 10)})`,
                 changedById: null,
               },
             });
@@ -66,7 +87,7 @@ export class StaffOffboardingSubscriber implements OnModuleInit {
               entityId: staff.id,
               action: 'update',
               oldValues: { status: staff.status },
-              newValues: { status: 'terminated', employmentEnded: ended, source: 'hr.employee.offboarded' },
+              newValues: { status: toStatus, employmentEnded: ended, source: 'hr.employee.offboarded' },
             });
           }),
       );

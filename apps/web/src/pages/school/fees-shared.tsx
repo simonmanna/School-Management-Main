@@ -1,6 +1,8 @@
+import { formatCurrency } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 
-export const money = (n: number | string) => `UGX ${Number(n).toLocaleString()}`;
+/** Fee amounts in the school's own currency (was hard-coded UGX). */
+export const money = (n: number | string) => formatCurrency(n);
 export const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 
 export function Stat({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) {

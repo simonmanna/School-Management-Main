@@ -5,8 +5,7 @@ import {
 } from 'lucide-react';
 import {
   useAcademicYears, useTerms, useClassSubdivisions, useWorkspaceExams, useExamCoverage,
-  useResultGrid, useLockMarks, type ResultGrid,
-} from '@/features/school/api';
+  useResultGrid, useLockMarks, type ResultGrid, currentTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -149,9 +148,9 @@ export function SchoolExamResultsPage() {
             options={(exams ?? []).map((e) => ({ value: e.id, label: e.name }))} className="min-w-[190px]" />
           <Picker label="Class" value={classId} onChange={(v) => { setClassId(v); setStreamId(''); }}
             options={examClasses.map((c) => ({ value: c.classId, label: c.className }))} className="min-w-[140px]" />
-          <Picker label="Stream" value={streamId} onChange={setStreamId}
+          <Picker label={currentTerminology().section} value={streamId} onChange={setStreamId}
             options={streamList.map((s) => ({ value: s.id, label: s.name }))}
-            placeholder="All streams" className="min-w-[130px]" />
+            placeholder={`All ${currentTerminology().sectionPlural.toLowerCase()}`} className="min-w-[130px]" />
           <Picker label="Order by" value={sort} onChange={(v) => setSort(v as SortKey)}
             options={[{ value: 'position', label: 'Position' }, { value: 'name', label: 'Student name' }]}
             placeholder="Position" className="min-w-[130px]" />

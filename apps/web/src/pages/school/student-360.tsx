@@ -21,9 +21,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Users, CalendarCheck, Save } from 'lucide-react';
 import { notify } from '@/lib/notify';
-import { formatClass } from '@/lib/utils';
+import { formatClass, formatCurrency } from '@/lib/utils';
 
-const money = (n: number | string | null | undefined) => `UGX ${Number(n ?? 0).toLocaleString()}`;
+// The school's own currency (Organization.currencyCode), not a hard-coded UGX.
+const money = (n: number | string | null | undefined) => formatCurrency(n);
 const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
 

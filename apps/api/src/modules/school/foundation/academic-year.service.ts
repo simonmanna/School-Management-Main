@@ -346,10 +346,13 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
   protected readonly searchFields = ['name'];
   protected readonly defaultInclude = { academicYear: true };
 
+  // Terms were the one calendar object whose edits left no audit trail —
+  // re-dating a term moves fee periods and attendance windows (E2E audit P3).
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly events: EventBus,
+    private readonly audit: AuditService,
   ) {
     super(prisma.client.term as unknown as CrudDelegate);
   }
@@ -398,7 +401,9 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
       if (dto.isCurrent) {
         await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       }
-      return tx.term.create({ data: { ...dto, startDate, endDate } as any });
+      const row = await tx.term.create({ data: { ...dto, startDate, endDate } as any });
+      await this.audit.recordInTx(tx, { entity: 'Term', entityId: row.id, action: 'create', newValues: row });
+      return row;
     });
   }
 
@@ -422,6 +427,13 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
       const res = await tx.term.updateMany({ where: { id: termId }, data: { isCurrent: true } });
       if (res.count === 0) throw new NotFoundException(`Term ${termId} not found`);
       const row = await tx.term.findFirst({ where: { id: termId }, include: { academicYear: true } });
+      await this.audit.recordInTx(tx, {
+        entity: 'Term',
+        entityId: termId,
+        action: 'update',
+        oldValues: { isCurrent: term.isCurrent },
+        newValues: { isCurrent: true },
+      });
       this.events.publish(EVENTS.SchoolTermSetCurrent, {
         organizationId: this.tenant.organizationId,
         termId,
@@ -474,6 +486,8 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
         data: { ...dto, startDate, endDate } as any,
       });
       if (res.count === 0) throw new NotFoundException(`Term ${id} not found`);
+      const row = await tx.term.findFirst({ where: { id } });
+      await this.audit.recordInTx(tx, { entity: 'Term', entityId: id, action: 'update', oldValues: before, newValues: row });
       return tx.term.findFirst({ where: { id }, include: { academicYear: true } });
     });
   }
@@ -498,6 +512,7 @@ export class TermService extends BaseCrudService<Term, CreateTermDto, UpdateTerm
         throw new ConflictException(`Term "${before.name}" cannot be deleted because it has ${blockers.join(', ')}.`);
       }
       await tx.term.updateMany({ where: { id }, data: { deletedAt: new Date() } });
+      await this.audit.recordInTx(tx, { entity: 'Term', entityId: id, action: 'delete', oldValues: before });
     });
   }
 }
