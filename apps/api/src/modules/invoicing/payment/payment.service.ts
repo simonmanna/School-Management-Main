@@ -26,6 +26,16 @@ import { CreatePaymentDto } from './dto/payment.dto';
  * Cash payments may pass `cashSessionId` so the matching CashMovement is
  * written in the same transaction — the session's Z-report reconciles.
  */
+/**
+ * `SELECT … FOR UPDATE` on one row inside the caller's transaction. Residuals
+ * and unallocated amounts are read-modify-written, so the row must be locked
+ * before it is read (E2E audit F7). Table names are fixed literals here.
+ */
+async function lockRow(tx: any, table: 'Document' | 'Invoice' | 'Payment', id: string | undefined): Promise<void> {
+  if (!id || typeof tx?.$queryRawUnsafe !== 'function') return;
+  await tx.$queryRawUnsafe(`SELECT id FROM "${table}" WHERE id = $1 FOR UPDATE`, id);
+}
+
 @Injectable()
 export class PaymentService {
   constructor(
@@ -232,6 +242,7 @@ export class PaymentService {
 
         // R2: allocation may target a POS Invoice (separate from Document).
         if (alloc.invoiceId) {
+          await lockRow(tx, 'Invoice', alloc.invoiceId);
           const inv = await tx.invoice.findFirst({ where: { id: alloc.invoiceId } });
           if (!inv) throw new BadRequestException(`Invoice ${alloc.invoiceId} not found`);
           await tx.paymentAllocation.create({
@@ -253,6 +264,11 @@ export class PaymentService {
           continue;
         }
 
+        // F7: lock, THEN read. Two receipts against one invoice both read the
+        // same residual and each wrote `residual - mine`, so the second write
+        // erased the first (lost update). With the row lock the second waits
+        // and reads the first's committed residual.
+        await lockRow(tx, 'Document', alloc.documentId);
         const doc = await tx.document.findFirst({ where: { id: alloc.documentId } });
         if (!doc) throw new BadRequestException(`Document ${alloc.documentId} not found`);
 
@@ -395,6 +411,8 @@ export class PaymentService {
   ) {
     const run = async (db: any) => {
       const organizationId = this.tenant.organizationId;
+      // The payment's unallocated pot is read-modify-written below too.
+      await lockRow(db, 'Payment', dto.paymentId);
       const payment = await db.payment.findFirst({ where: { id: dto.paymentId, organizationId } });
       if (!payment) throw new BadRequestException(`Payment ${dto.paymentId} not found`);
       if (payment.status === 'cancelled') {
@@ -407,6 +425,7 @@ export class PaymentService {
         const amount = round(dec(a.amount), 6);
         if (amount.lessThanOrEqualTo(0)) continue;
 
+        await lockRow(db, 'Document', a.documentId);
         const doc = await db.document.findFirst({ where: { id: a.documentId, organizationId } });
         if (!doc) throw new BadRequestException(`Document ${a.documentId} not found`);
 

@@ -59,6 +59,7 @@ function makeCollectService(openInvoices: any[] = []) {
   const events = { publish: jest.fn(), publishInTx: jest.fn(async () => undefined) };
   const documentFindMany = jest.fn().mockResolvedValue(openInvoices);
   const tx = {
+    $queryRawUnsafe: jest.fn(async () => []), // F7 per-payer row lock
     studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }) },
     document: { findMany: documentFindMany },
     payment: { findFirst: jest.fn().mockResolvedValue({ id: 'pay_1', allocations: [] }) },

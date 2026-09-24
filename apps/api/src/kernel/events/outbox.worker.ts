@@ -24,6 +24,8 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly intervalMs = Number(process.env.OUTBOX_POLL_MS ?? '1000');
   private readonly batchSize = Number(process.env.OUTBOX_BATCH ?? '50');
   private readonly staleClaimMs = 30_000;
+  /** After this many failed attempts a row is parked as 'dead' for a human. */
+  static readonly MAX_ATTEMPTS = Number(process.env.OUTBOX_MAX_ATTEMPTS ?? '8');
 
   constructor(
     private readonly outbox: EventOutboxService,
@@ -56,38 +58,60 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     // Postgres column label, and a quoted identifier preserves camelCase — so
     // without the alias `row.event_name` is undefined and every event dispatches
     // to zero handlers (a latent bug that silently no-op'd all outbox handlers).
-    const claimed = await this.prisma.raw.$queryRaw<{ id: string; event_name: string; payload: any }[]>`
+    // The claim flips status to 'claimed'. It used to set only claimToken and
+    // leave status 'pending', so the next tick — or the second tick path the
+    // cron service ran every 30 s — claimed and dispatched the same rows again.
+    const claimed = await this.prisma.raw.$queryRaw<
+      { id: string; event_name: string; payload: any; attempts: number; completed: number[] }[]
+    >`
       UPDATE "EventOutbox"
-      SET "claimToken" = ${claimToken}, "claimedAt" = NOW()
+      SET "claimToken" = ${claimToken}, "claimedAt" = NOW(), "status" = 'claimed'
       WHERE "id" IN (
         SELECT "id" FROM "EventOutbox"
-        WHERE ("status" = 'pending' OR ("status" = 'claimed' AND "claimedAt" < ${staleBefore}))
+        WHERE ("status" = 'pending' AND "availableAt" <= NOW())
+           OR ("status" = 'claimed' AND "claimedAt" < ${staleBefore})
         ORDER BY "createdAt" ASC
         LIMIT ${this.batchSize}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING "id", "eventName" AS event_name, "payload"
+      RETURNING "id", "eventName" AS event_name, "payload", "attempts", "completedHandlers" AS completed
     `;
     if (claimed.length === 0) return 0;
     let shipped = 0;
     for (const row of claimed) {
-      const existing = await this.prisma.raw.eventOutbox.findUnique({ where: { id: row.id } });
-      const attempts = existing?.attempts ?? 0;
+      const attempts = Number(row.attempts ?? 0);
       try {
-        await this.outbox.dispatch({ id: row.id, eventName: row.event_name, payload: row.payload });
-        await this.prisma.raw.eventOutbox.update({
-          where: { id: row.id },
+        await this.outbox.dispatch(
+          { id: row.id, eventName: row.event_name, payload: row.payload },
+          {
+            completed: row.completed ?? [],
+            onHandlerDone: async (index) => {
+              await this.prisma.raw.$executeRaw`
+                UPDATE "EventOutbox" SET "completedHandlers" = array_append("completedHandlers", ${index})
+                WHERE "id" = ${row.id} AND "claimToken" = ${claimToken}`;
+            },
+          },
+        );
+        await this.prisma.raw.eventOutbox.updateMany({
+          where: { id: row.id, claimToken },
           data: { status: 'shipped', shippedAt: new Date(), claimToken: null, claimedAt: null },
         });
         shipped++;
       } catch (err) {
         const msg = String(err).slice(0, 500);
-        this.logger.warn(`Outbox row ${row.id} failed (attempt ${attempts + 1}): ${msg}`);
-        await this.prisma.raw.eventOutbox.update({
-          where: { id: row.id },
+        const next = attempts + 1;
+        const dead = next >= OutboxWorker.MAX_ATTEMPTS;
+        // Exponential backoff: 5 s, 10 s, 20 s … capped at one hour.
+        const backoffMs = Math.min(60 * 60_000, 5_000 * 2 ** attempts);
+        this.logger.warn(`Outbox row ${row.id} failed (attempt ${next}${dead ? ', now dead' : ''}): ${msg}`);
+        // updateMany: the row may be gone (tenant cleanup); do not throw.
+        await this.prisma.raw.eventOutbox.updateMany({
+          where: { id: row.id, claimToken },
           data: {
-            attempts: { increment: 1 },
+            attempts: next,
             lastError: msg,
+            status: dead ? 'dead' : 'pending',
+            availableAt: new Date(Date.now() + backoffMs),
             claimToken: null,
             claimedAt: null,
           },

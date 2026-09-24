@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, resolveAssetUrl } from '@/lib/api';
+import { useAttemptKey } from '@/lib/use-attempt-key';
 import { PERMISSIONS, TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -2025,8 +2026,22 @@ export interface CollectResult {
   replayed: boolean;
 }
 
+/** Everything a receipt, refund, credit or waiver changes on screen. */
+function invalidateMoney(qc: ReturnType<typeof useQueryClient>, studentProfileId?: string) {
+  qc.invalidateQueries({ queryKey: ['school', 'finance'] });
+  qc.invalidateQueries({ queryKey: ['school', 'reports'] });
+  qc.invalidateQueries({ queryKey: ['school', 'fee-defaulters'] });
+  qc.invalidateQueries({ queryKey: ['school', 'fee-credits'] });
+  qc.invalidateQueries({ queryKey: ['school', 'refund-requests'] });
+  if (studentProfileId) qc.invalidateQueries({ queryKey: ['school', 'statement', studentProfileId] });
+  else qc.invalidateQueries({ queryKey: ['school', 'statement'] });
+}
+
 export function useCollectPayment() {
   const qc = useQueryClient();
+  // One Idempotency-Key per attempt, reused on retry (F9): a dropped response
+  // retried by the bursar used to record the cash twice.
+  const attempt = useAttemptKey('collect');
   return useMutation({
     mutationFn: async (dto: {
       studentProfileId: string;
@@ -2041,12 +2056,15 @@ export function useCollectPayment() {
       allocations?: Array<{ documentId: string; amount: number }>;
       /** B1: turn whatever the tender does not settle into a fee credit. */
       convertOverpaymentToCredit?: boolean;
-    }) => (await api.post<CollectResult>(`${S}/payments/collect`, dto)).data,
+    }) =>
+      (
+        await api.post<CollectResult>(`${S}/payments/collect`, dto, {
+          headers: { 'Idempotency-Key': attempt.keyFor(dto) },
+        })
+      ).data,
     onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
-      qc.invalidateQueries({ queryKey: ['school', 'reports'] });
-      qc.invalidateQueries({ queryKey: ['school', 'finance', 'receipts'] });
-      qc.invalidateQueries({ queryKey: ['school', 'finance', 'clearance'] });
+      attempt.reset();
+      invalidateMoney(qc, v.studentProfileId);
     },
   });
 }
@@ -2759,6 +2777,7 @@ export function usePenaltyRuns() {
 
 export function useRefundFee() {
   const qc = useQueryClient();
+  const attempt = useAttemptKey('refund');
   return useMutation({
     mutationFn: async (dto: {
       studentProfileId: string;
@@ -2773,9 +2792,11 @@ export function useRefundFee() {
         await api.post<
           | { status: 'refunded'; payment: { id: string; paymentNumber?: string }; replayed: boolean; overpaymentCredit: number }
           | { status: 'pending_approval'; requestId: string }
-        >(`${S}/payments/refund`, dto)
+        >(`${S}/payments/refund`, dto, { headers: { 'Idempotency-Key': attempt.keyFor(dto) } })
       ).data,
     onSuccess: (_d, v) => {
+      attempt.reset();
+      invalidateMoney(qc, v.studentProfileId);
       qc.invalidateQueries({ queryKey: ['school', 'statement', v.studentProfileId] });
       qc.invalidateQueries({ queryKey: ['school', 'reports'] });
     },
@@ -2894,7 +2915,7 @@ export function useApplyWaiver() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => (await api.post<Waiver>(`${S}/finance/waivers/${id}/apply`)).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['school', 'waivers'] }); qc.invalidateQueries({ queryKey: ['school', 'fee-defaulters'] }); qc.invalidateQueries({ queryKey: ['school', 'bad-debtors'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['school', 'waivers'] }); qc.invalidateQueries({ queryKey: ['school', 'bad-debtors'] }); invalidateMoney(qc); },
   });
 }
 
@@ -2925,10 +2946,7 @@ export function useApplyCredits() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (studentProfileId: string) => (await api.post<{ totalApplied: string; appliedCreditIds: string[] }>(`${S}/finance/credits/${studentProfileId}/apply`)).data,
-    onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ['school', 'fee-credits'] });
-      qc.invalidateQueries({ queryKey: ['school', 'statement', v] });
-    },
+    onSuccess: (_d, v) => invalidateMoney(qc, v),
   });
 }
 
@@ -7394,8 +7412,12 @@ export function useChargeApplicationFee() {
   );
 }
 export function usePayApplicationFee() {
-  return useAdmissionFeeMutation(
-    async ({
+  // A fresh random key on EVERY call made the key useless: a retry was a new
+  // payment (F9). One key per attempt, reused until it succeeds.
+  const attempt = useAttemptKey('admfee');
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
       applicationId,
       ...body
     }: {
@@ -7407,9 +7429,14 @@ export function usePayApplicationFee() {
       bankAccountId?: string;
     }) =>
       (await api.post(`${S}/admissions/${applicationId}/fee/pay`, body, {
-        headers: { 'Idempotency-Key': `admfee-${applicationId}-${crypto.randomUUID()}` },
+        headers: { 'Idempotency-Key': attempt.keyFor({ applicationId, ...body }) },
       })).data,
-  );
+    onSuccess: () => {
+      attempt.reset();
+      qc.invalidateQueries({ queryKey: ['school', 'admissions'] });
+      invalidateMoney(qc);
+    },
+  });
 }
 export function useWaiveApplicationFee() {
   return useAdmissionFeeMutation(async ({ applicationId, reason }: { applicationId: string; reason?: string }) =>

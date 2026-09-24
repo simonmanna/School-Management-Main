@@ -1,3 +1,4 @@
+import { SCHOOL_FEE_SOURCE_TYPES } from '../fees/fee-document.constants';
 import { Injectable } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -296,8 +297,20 @@ export class ReportingService {
   async dailyCollections(days = 30) {
     const from = new Date();
     from.setDate(from.getDate() - days);
+    // F10: fee receipts only, and never a cancelled one. This counted every
+    // inbound payment — canteen/POS sales, and receipts later reversed — so
+    // the dashboard's collections chart disagreed with the fee cash book.
+    const pupils = await this.prisma.client.studentProfile.findMany({ select: { partnerId: true } });
     const payments = await this.prisma.client.payment.findMany({
-      where: { direction: 'inbound', paymentDate: { gte: from } },
+      where: {
+        direction: 'inbound',
+        status: { not: 'cancelled' },
+        paymentDate: { gte: from },
+        OR: [
+          { partnerId: { in: pupils.map((p) => p.partnerId).filter(Boolean) as string[] } },
+          { allocations: { some: { document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } } } } },
+        ],
+      },
       select: { paymentDate: true, amount: true },
     });
     const byDate: Record<string, number> = {};

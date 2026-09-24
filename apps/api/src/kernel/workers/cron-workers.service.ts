@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
-import { OutboxWorker } from '../events/outbox.worker';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { RecurringService } from '../recurring/recurring.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -25,21 +24,14 @@ export class CronWorkersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
-    private readonly outbox: OutboxWorker,
     private readonly webhooks: WebhooksService,
     private readonly recurring: RecurringService,
     private readonly notifications: NotificationsService,
   ) {}
 
-  @Cron(CronExpression.EVERY_30_SECONDS, { name: 'outbox-ship' })
-  async shipOutbox() {
-    // OutboxWorker ships events; we don't need a tenant context for that.
-    try {
-      await this.outbox.tick();
-    } catch (err) {
-      this.logger.warn(`Outbox tick failed: ${String(err)}`);
-    }
-  }
+  // No outbox cron here: OutboxWorker drives its own poll loop. A second tick
+  // path (this used to run tick() every 30 s) doubled the claimers for no
+  // benefit and, before claims set status, re-dispatched rows (Wave 3).
 
   @Cron(CronExpression.EVERY_MINUTE, { name: 'webhooks-retry' })
   async retryWebhooks() {

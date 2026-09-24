@@ -337,6 +337,10 @@ export class AdvancedFinanceService {
     if (!student) throw new NotFoundException(`Student ${waiver.studentProfileId} not found`);
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Two applies of one waiver must not both forgive it: lock, then re-read.
+      await tx.$queryRawUnsafe(`SELECT id FROM "Waiver" WHERE id = $1 FOR UPDATE`, waiver.id);
+      const current = await tx.waiver.findFirst({ where: { id: waiver.id } });
+      if (current.applied) return current;
       const docs = await tx.document.findMany({
         where: {
           ...OPEN_FEE_WHERE,
@@ -350,7 +354,11 @@ export class AdvancedFinanceService {
       // P0-3: money math in Decimal, not JS floats (FINANCIAL_INVARIANTS
       // §Money precision). A percentage-derived waiver produces fractions that
       // float arithmetic silently drifts on.
-      let remaining = round(dec(waiver.amount), 6);
+      // F8: only what has NOT been applied yet. A partial waiver re-applied
+      // later used to forgive its full amount again.
+      const alreadyApplied = round(dec(current.appliedAmount ?? 0), 6);
+      const outstanding = round(dec(waiver.amount), 6).minus(alreadyApplied);
+      let remaining = outstanding;
       const settled: string[] = [];
       for (const doc of docs) {
         if (remaining.lessThanOrEqualTo(ZERO)) break;
@@ -378,7 +386,7 @@ export class AdvancedFinanceService {
       // must be open (FINANCIAL_INVARIANTS §Period control).
       await this.controls.assertDocumentsPeriodOpen(settled, tx);
 
-      const appliedAmount = round(dec(waiver.amount), 6).minus(remaining);
+      const appliedAmount = outstanding.minus(remaining);
 
       // P0-2: the GL post below MUST happen on every path that mutated a
       // document. The previous code returned from inside this callback when
@@ -415,6 +423,7 @@ export class AdvancedFinanceService {
         where: { id: waiver.id },
         data: {
           applied: fullyApplied,
+          appliedAmount: alreadyApplied.plus(appliedAmount),
           ...(fullyApplied
             ? { status: 'applied' }
             : { reason: `${waiver.reason ?? ''} (partial: ${remaining.toString()} unapplied)` }),

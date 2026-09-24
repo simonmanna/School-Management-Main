@@ -4114,9 +4114,16 @@ model EventOutbox {
   /// wins. Cleared on success.
   claimToken     String?
   claimedAt      DateTime?
+  /// Not before this time: a failed row backs off before its next attempt.
+  availableAt    DateTime  @default(now())
+  /// Handler indexes (registration order) that already succeeded for this row,
+  /// so a retry re-runs only the handlers that failed (at-least-once, not
+  /// at-least-N-times for the ones that worked).
+  completedHandlers Int[]  @default([])
   createdAt      DateTime  @default(now())
   shippedAt      DateTime?
 
+  @@index([status, availableAt])
   @@index([status, createdAt])
   @@index([organizationId, status])
 }
@@ -15845,6 +15852,9 @@ model Waiver {
   reason           String?
   documentId       String? // the fee invoice the waiver was applied to (null = whole-student credit)
   applied          Boolean   @default(false)
+  /// How much of `amount` has already reduced receivable (E2E audit F8). A
+  /// partial application is re-applied for the REMAINDER only.
+  appliedAmount    Decimal   @default(0) @db.Decimal(20, 6)
   /// Set when the waiver was applied as a bad-debt write-off.
   badDebt          Boolean   @default(false)
   /// A4 approval workflow: pending | approved | rejected | applied | reversed.

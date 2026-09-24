@@ -21,6 +21,9 @@ import { PlacementLookupService } from '../enrollment/placement-lookup.service';
  */
 @Injectable()
 export class BillingRunService {
+  /** A 'processing' claim older than this is presumed abandoned and retried. */
+  static readonly STALE_MS = 10 * 60_000;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
@@ -79,17 +82,31 @@ export class BillingRunService {
       data: { status: 'running', startedAt: run.startedAt ?? new Date() },
     });
 
+    // An item left 'processing' by a crashed pass was never picked up again,
+    // so the run sat at "running" forever (Wave 3). `processedAt` doubles as
+    // the claim time: a claim older than STALE_MS is retried. Billing a pupil
+    // is idempotent (already-billed is detected), so a retry cannot double-bill.
+    const staleBefore = new Date(Date.now() - BillingRunService.STALE_MS);
     const items = await this.prisma.client.billingRunItem.findMany({
-      where: { organizationId, billingRunId: run.id, status: { in: ['pending', 'failed'] } },
+      where: {
+        organizationId,
+        billingRunId: run.id,
+        OR: [
+          { status: { in: ['pending', 'failed'] } },
+          { status: 'processing', OR: [{ processedAt: null }, { processedAt: { lt: staleBefore } }] },
+        ],
+      },
       take: limit,
     });
 
     let posted = 0, failed = 0, skipped = 0;
     for (const item of items) {
-      await this.prisma.client.billingRunItem.update({
-        where: { id: item.id },
-        data: { status: 'processing' },
+      // Compare-and-set claim: two concurrent passes must not bill one item twice.
+      const claim = await this.prisma.client.billingRunItem.updateMany({
+        where: { id: item.id, status: item.status, processedAt: item.processedAt },
+        data: { status: 'processing', processedAt: new Date() },
       });
+      if (claim.count === 0) continue;
       try {
         const res = await this.billing.billSingleStudent(item.studentProfileId, run.termId);
         if (res.status === 'posted') posted++;

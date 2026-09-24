@@ -115,8 +115,15 @@ export class EventOutboxService {
     this.handlers.set(eventName, list);
   }
 
-  /** Dispatch a single outbox row to in-process subscribers. */
-  async dispatch(row: { id: string; eventName: string; payload: unknown }): Promise<void> {
+  /**
+   * Dispatch a single outbox row to in-process subscribers. `completed` lists
+   * handler indexes that already succeeded on an earlier attempt; they are
+   * skipped, and `onHandlerDone` records each new success before the next runs.
+   */
+  async dispatch(
+    row: { id: string; eventName: string; payload: unknown },
+    opts: { completed?: number[]; onHandlerDone?: (index: number) => Promise<void> } = {},
+  ): Promise<void> {
     const handlers = this.handlers.get(row.eventName) ?? [];
     if (handlers.length === 0) {
       // No handler — silently mark shipped (the row is still durably stored
@@ -130,9 +137,12 @@ export class EventOutboxService {
       typeof organizationId === 'string' && organizationId && !this.tenant.optionalOrganizationId
         ? this.tenant.run({ organizationId }, fn)
         : fn();
-    for (const h of handlers) {
+    const done = new Set(opts.completed ?? []);
+    for (const [index, h] of handlers.entries()) {
+      if (done.has(index)) continue;
       try {
         await inTenant(async () => h(row.payload));
+        await opts.onHandlerDone?.(index);
       } catch (err) {
         this.logger.error(`Handler for ${row.eventName} failed: ${String(err)}`);
         throw err;

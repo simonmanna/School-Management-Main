@@ -29,6 +29,7 @@ function makeService(openInvoices: any[] = [], existingPayment: any = null) {
     .mockResolvedValue({ id: 'pay_1', allocations: [] });
 
   const tx = {
+    $queryRawUnsafe: jest.fn(async () => []), // F7 per-payer row lock
     studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }) },
     document: { findMany: documentFindMany },
     payment: { findFirst: paymentFindFirst },
@@ -244,7 +245,8 @@ describe('SchoolPaymentService.collect — delegation details', () => {
 
     await service.collect({ studentProfileId: 'stu_1', amount: 50_000, paymentMethod: 'cash' });
 
-    const feeEvents = events.publish.mock.calls.filter((c) => c[0] === 'school.fee.payment.recorded');
+    // Published inside the collect transaction now (Wave 3, events mid-tx).
+    const feeEvents = (events.publishInTx.mock.calls as any[]).filter((c) => c[1] === 'school.fee.payment.recorded');
     expect(feeEvents).toHaveLength(2);
   });
 });

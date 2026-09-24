@@ -260,9 +260,13 @@ export class SchoolFinanceQueryService {
     studentCount: number;
     owingCount: number;
   }> {
+    // F10: every pupil who can owe money, not only ACTIVE ones. A family that
+    // withdrew or a pupil who graduated owing fees still owes them; filtering
+    // on `active` made the school-wide outstanding disagree with the AR ledger
+    // by exactly the departed debtors. (A class filter still scopes by
+    // placement, which a departed pupil no longer holds.)
     const students = await this.prisma.client.studentProfile.findMany({
       where: {
-        status: 'active',
         deletedAt: null,
         ...(opts.classIds ? this.placements.studentWhere({ classIds: opts.classIds }) : {}),
       },
@@ -1266,8 +1270,18 @@ export class SchoolFinanceQueryService {
       byMethod.set(p.paymentMethod, row);
     }
 
+    // F10: FEE refunds only. Every outbound payment used to count — supplier
+    // payments and payroll made the fee cash book's "refunds" and "net cash"
+    // meaningless. A fee refund is an outbound payment to a pupil's payer.
+    const feePayers = await this.feePayerPartnerIds();
     const refunds = await this.prisma.client.payment.aggregate({
-      where: { organizationId, direction: 'outbound', paymentDate: { gte: from, lte: to }, status: { not: 'cancelled' } },
+      where: {
+        organizationId,
+        direction: 'outbound',
+        paymentDate: { gte: from, lte: to },
+        status: { not: 'cancelled' },
+        partnerId: { in: feePayers },
+      },
       _sum: { amount: true },
       _count: { _all: true },
     });
@@ -1296,6 +1310,53 @@ export class SchoolFinanceQueryService {
     };
   }
 
+  /** Partners that pay school fees: every pupil's partner plus every fee-invoice payer. */
+  private async feePayerPartnerIds(): Promise<string[]> {
+    const [pupils, payers] = await Promise.all([
+      this.prisma.client.studentProfile.findMany({ select: { partnerId: true } }),
+      this.prisma.client.document.findMany({
+        where: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } },
+        select: { partnerId: true },
+        distinct: ['partnerId'],
+      }),
+    ]);
+    return [...new Set([...pupils, ...payers].map((r: any) => r.partnerId).filter(Boolean))] as string[];
+  }
+
+  /**
+   * Fee money received in [from, to] and attributed to invoice lines whose
+   * description names `category` (case-insensitive). Each posted allocation is
+   * apportioned across its invoice's lines by line total. The categories
+   * "all", "fees" and "total" take every fee line.
+   */
+  private async collectedForCategory(category: string, from: Date | null, to: Date | null): Promise<number> {
+    const allocations = await this.prisma.client.paymentAllocation.findMany({
+      where: {
+        status: 'posted',
+        document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } },
+        payment: {
+          direction: 'inbound',
+          status: { not: 'cancelled' },
+          ...(from && to ? { paymentDate: { gte: from, lte: to } } : {}),
+        },
+      },
+      select: { amount: true, document: { select: { lines: { select: { description: true, total: true } } } } },
+    });
+    const wanted = category.trim().toLowerCase();
+    const everything = ['all', 'fees', 'total', 'all fees'].includes(wanted);
+    let sum = 0;
+    for (const a of allocations as any[]) {
+      const lines = a.document?.lines ?? [];
+      const whole = lines.reduce((t: number, l: any) => t + Number(l.total ?? 0), 0);
+      if (whole <= 0) continue;
+      const share = lines
+        .filter((l: any) => everything || String(l.description ?? '').toLowerCase().includes(wanted))
+        .reduce((t: number, l: any) => t + Number(l.total ?? 0), 0);
+      sum += (Number(a.amount) * share) / whole;
+    }
+    return Number(sum.toFixed(2));
+  }
+
   /**
    * E2 · income against budget.
    *
@@ -1318,18 +1379,12 @@ export class SchoolFinanceQueryService {
         const from = b.periodFrom ?? b.term?.startDate ?? b.academicYear?.startDate ?? null;
         const to = b.periodTo ?? b.term?.endDate ?? b.academicYear?.endDate ?? null;
 
-        const actual = await this.prisma.client.payment.aggregate({
-          where: {
-            organizationId,
-            direction: 'inbound',
-            status: { not: 'cancelled' },
-            ...(from && to ? { paymentDate: { gte: from, lte: to } } : {}),
-          },
-          _sum: { amount: true },
-        });
-
+        // F10: per-LINE actuals. Every budget row used to show the same number
+        // — all inbound money in the window, POS sales included — so "Tuition"
+        // and "Transport" both looked 400% achieved. Now each row gets the
+        // fee collections apportioned to invoice lines matching its category.
+        const collected = await this.collectedForCategory(b.category, from, to);
         const planned = Number(b.amount);
-        const collected = Number(actual._sum.amount ?? 0);
         return {
           id: b.id,
           category: b.category,

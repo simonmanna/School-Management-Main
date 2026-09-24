@@ -16,6 +16,7 @@ function makeCollect(opts: { residual: number } = { residual: 700_000 }) {
   const createCredit = jest.fn().mockResolvedValue({ id: 'cr_1', code: 'CR-000001' });
   const createReceipt = jest.fn().mockResolvedValue({ id: 'pay_1' });
   const tx = {
+    $queryRawUnsafe: jest.fn(async () => []), // F7 per-payer row lock
     studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }) },
     document: {
       findMany: jest.fn().mockResolvedValue([

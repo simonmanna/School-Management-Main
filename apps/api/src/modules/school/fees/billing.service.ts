@@ -203,70 +203,82 @@ export class BillingService {
     const skipped: any[] = [];
     const failed: any[] = [];
 
+    // Reported, not silently dropped: a pupil with no class this term, or no
+    // fee structure that targets them, is exactly what a bursar must chase.
+    for (const u of unplaced) skipped.push({ studentProfileId: u.id, reason: 'no_class_for_term' });
+
     for (const s of students) {
-      const schedule = schedules.find((sch) =>
+      // Every schedule whose structure targets this pupil is billed — tuition
+      // AND the boarding structure AND the uniform levy. `find` billed only the
+      // first match, silently dropping the rest (Wave 3).
+      const matching = schedules.filter((sch) =>
         this.appliesTo(sch.feeStructure.applicableTo as any, this.targetingAxes(s)),
       );
-      if (!schedule) continue;
-
-      const feeStructure = schedule.feeStructure;
-      const priced = await this.pricedComponents(feeStructure as any, itemsByVersion);
-      if (priced.components === null) {
-        // P1-G: a structure that cannot be priced from an immutable version is
-        // reported, never billed from its mutable JSON instead.
-        skipped.push({ studentProfileId: s.id, reason: 'unpriceable_structure', detail: priced.reason });
+      if (matching.length === 0) {
+        skipped.push({ studentProfileId: s.id, reason: 'no_matching_fee_structure' });
         continue;
       }
-      const components = priced.components;
-      const customDiscount = (assignByStudent.get(s.id)?.customDiscount ?? {}) as Record<string, number>;
-      const studentScholarships = scholarshipsByStudent.get(s.id) ?? [];
+      for (const schedule of matching) {
 
-      const lines = this.computeLines(
-        components,
-        customDiscount,
-        discounts,
-        studentScholarships,
-        s,
-        optInsByStudent.get(s.id) ?? new Map(),
-        this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
-      );
-      if (lines.length === 0) continue;
-
-      const issueDate = new Date();
-      const reference = `TERM-${dto.termId}`;
-
-      try {
-        const result = await this.billStudentTransaction(s, schedule, feeStructure, dto, lines, issueDate, reference);
-
-        if ((result as any)._skipped) {
-          skipped.push({ studentProfileId: s.id, documentId: (result as any).documentId, reason: 'already_billed' });
+        const feeStructure = schedule.feeStructure;
+        const priced = await this.pricedComponents(feeStructure as any, itemsByVersion);
+        if (priced.components === null) {
+          // P1-G: a structure that cannot be priced from an immutable version is
+          // reported, never billed from its mutable JSON instead.
+          skipped.push({ studentProfileId: s.id, reason: 'unpriceable_structure', detail: priced.reason });
           continue;
         }
+        const components = priced.components;
+        const customDiscount = (assignByStudent.get(s.id)?.customDiscount ?? {}) as Record<string, number>;
+        const studentScholarships = scholarshipsByStudent.get(s.id) ?? [];
 
-        const doc = (result as any).doc;
-        created.push(doc);
-        this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
-          organizationId,
-          documentId: doc.id,
-          schoolFeeInvoiceId: (result as any).sfi.id,
-          studentProfileId: s.id,
-          amount: doc.totalAmount.toString(),
-        });
-      } catch (err: any) {
-        // P0-6 / A3: a concurrent insert of the same (org, sourceType, sourceId,
-        // reference) or the SchoolFeeInvoice business key raises P2002 — treat
-        // as already-billed. Any other error is recorded per-student rather than
-        // aborting the whole run.
-        if (err?.code === 'P2002') {
-          const existing = await this.prisma.client.document.findFirst({
-            where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
-          });
-          if (existing) {
-            skipped.push({ studentProfileId: s.id, documentId: existing.id, reason: 'already_billed' });
+        const lines = this.computeLines(
+          components,
+          customDiscount,
+          discounts,
+          studentScholarships,
+          s,
+          optInsByStudent.get(s.id) ?? new Map(),
+          this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
+        );
+        if (lines.length === 0) continue;
+
+        const issueDate = new Date();
+        const reference = `TERM-${dto.termId}`;
+
+        try {
+          const result = await this.billStudentTransaction(s, schedule, feeStructure, dto, lines, issueDate, reference);
+
+          if ((result as any)._skipped) {
+            skipped.push({ studentProfileId: s.id, documentId: (result as any).documentId, reason: 'already_billed' });
             continue;
           }
+
+          const doc = (result as any).doc;
+          created.push(doc);
+          this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
+            organizationId,
+            documentId: doc.id,
+            schoolFeeInvoiceId: (result as any).sfi.id,
+            studentProfileId: s.id,
+            amount: doc.totalAmount.toString(),
+          });
+        } catch (err: any) {
+          // P0-6 / A3: a concurrent insert of the same (org, sourceType, sourceId,
+          // reference) or the SchoolFeeInvoice business key raises P2002 — treat
+          // as already-billed. Any other error is recorded per-student rather than
+          // aborting the whole run.
+          if (err?.code === 'P2002') {
+            const existing = await this.prisma.client.document.findFirst({
+              where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
+            });
+            if (existing) {
+              skipped.push({ studentProfileId: s.id, documentId: existing.id, reason: 'already_billed' });
+              continue;
+            }
+          }
+          failed.push({ studentProfileId: s.id, error: err?.message ?? String(err) });
         }
-        failed.push({ studentProfileId: s.id, error: err?.message ?? String(err) });
       }
     }
 
@@ -603,11 +615,33 @@ export class BillingService {
       where: { termId },
       include: { feeStructure: true },
     });
-    const schedule = schedules.find((sch) =>
+    const matching = schedules.filter((sch) =>
       this.appliesTo(sch.feeStructure.applicableTo as any, this.targetingAxes(s)),
     );
-    if (!schedule) return { status: 'skipped' };
+    if (matching.length === 0) return { status: 'skipped', reason: 'no fee structure applies to this pupil' };
 
+    // Bill every matching structure (Wave 3); report the first posted invoice
+    // and the total, keeping the single-result shape billing-run items store.
+    const results: Array<{ status: string; documentId?: string; schoolFeeInvoiceId?: string; amount?: string; reason?: string }> = [];
+    for (const schedule of matching) {
+      results.push(await this.billStudentForSchedule(s, schedule, termId, studentProfileId));
+    }
+    const posted = results.filter((r) => r.status === 'posted');
+    if (posted.length === 0) return results[0] as any;
+    return {
+      ...(posted[0] as any),
+      amount: posted.reduce((t, r) => t + Number(r.amount ?? 0), 0).toString(),
+    };
+  }
+
+  /** One pupil × one fee schedule: the unit billStudent repeats per matching structure. */
+  private async billStudentForSchedule(
+    s: any,
+    schedule: any,
+    termId: string,
+    studentProfileId: string,
+  ): Promise<{ status: 'posted' | 'skipped'; documentId?: string; schoolFeeInvoiceId?: string; amount?: string; reason?: string }> {
+    const organizationId = this.tenant.organizationId;
     const feeStructure = schedule.feeStructure;
     // P1-A: priced from the immutable published version, same as the bulk run.
     const priced = await this.pricedComponents(feeStructure as any);
@@ -1112,6 +1146,21 @@ export class SchoolPaymentService {
         }
       }
 
+      // F7: serialize tenders for one payer BEFORE reading residuals. Two
+      // cashiers taking money for the same family at once both computed their
+      // oldest-first allocation from the same residuals; the payment writer's
+      // row lock then made the second fail. Locking the payer's open fee
+      // documents here (in id order, so concurrent collects cannot deadlock)
+      // makes the second wait and allocate against what is really still owed.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "Document"
+          WHERE "organizationId" = $1 AND "partnerId" = $2 AND "amountResidual" > 0
+          ORDER BY id
+          FOR UPDATE`,
+        organizationId,
+        partnerId,
+      );
+
       // Choose the invoices + amounts to settle.
       //  1. Explicit `allocations` (wizard Allocation step): use exactly these
       //     {documentId, amount} entries. Each amount is capped at that
@@ -1232,8 +1281,10 @@ export class SchoolPaymentService {
 
       // School-domain signal, in addition to the engine's generic events, so
       // fee-specific subscribers (statements, guardian notifications) can react.
+      // Written in THIS transaction: publish() used its own, so a rolled-back
+      // collect still told parents they had paid (Wave 3, events mid-tx).
       for (const a of allocations) {
-        this.events.publish(EVENTS.SchoolFeePaymentRecorded, {
+        await this.events.publishInTx(tx, EVENTS.SchoolFeePaymentRecorded, {
           organizationId,
           paymentId: receipt.id,
           documentId: a.documentId,
@@ -1705,7 +1756,7 @@ export class SchoolPaymentService {
         );
       }
 
-      this.events.publish(EVENTS.SchoolFeeRefundRecorded, {
+      await this.events.publishInTx(tx, EVENTS.SchoolFeeRefundRecorded, {
         organizationId,
         paymentId: refund.id,
         studentProfileId: student.id,
