@@ -10,7 +10,7 @@ import { ASSESSMENT_KINDS } from '../../src/modules/school/assessment/assessment
 import { AssignmentService } from '../../src/modules/school/assessment/assignment.service';
 import { PortalIdentityService } from '../../src/kernel/auth/portal-identity.service';
 import { TeachingWorkspaceService } from '../../src/modules/school/teaching/teaching-workspace.service';
-import { placeInClass } from './_placement';
+import { placeInClass, upsertEnrollment } from './_placement';
 
 /** Real Postgres transactions and triggers; no web server, Redis, or mocked grade store. */
 describeDb('Phase 4 canonical assessment workflow', () => {
@@ -53,7 +53,7 @@ describeDb('Phase 4 canonical assessment workflow', () => {
       const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `S${i}`, enrollmentDate: year.startDate } });
       await placeInClass(db, { organizationId: organizationId, studentProfileId: s.id, classId: cls.id });
       learners.push(s.id);
-      const e = await db.studentEnrollment.create({ data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
+      const e = await upsertEnrollment(db, { data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
       await db.courseEnrollment.create({ data: { organizationId, courseOfferingId: course.id, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
     }
     const type = await db.examType.create({ data: { organizationId, name: 'Term exam', weight: 100 } });

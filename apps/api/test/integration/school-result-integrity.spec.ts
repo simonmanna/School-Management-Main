@@ -27,6 +27,7 @@ import { StudentService } from '../../src/modules/school/people/student.service'
 import { AcademicRosterService } from '../../src/modules/school/assessment/roster.service';
 import { ResultRunService } from '../../src/modules/school/assessment/result-run.service';
 import { ExamTypeService, ExamService, ExamScheduleService, GradeEntryService, ReportCardService } from '../../src/modules/school/examinations/examinations.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: A3 result spine', () => {
   const rawUrl = (() => {
@@ -57,6 +58,8 @@ describeDb('integration: A3 result spine', () => {
   // A class with one exam, marks entered + (optionally) approved, roster frozen.
   async function seedClass(tag: string, opts: { approve: boolean }) {
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: `G-${tag}`, order: 8 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     const classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: `Class ${tag}` } })).id;
     const s1: any = await asUser('registrar', () => students.create({ name: `S1 ${tag}`, admissionNo: `${tag}-1`, enrollmentDate: '2026-01-15', classId } as any));
     const s2: any = await asUser('registrar', () => students.create({ name: `S2 ${tag}`, admissionNo: `${tag}-2`, enrollmentDate: '2026-01-15', classId } as any));

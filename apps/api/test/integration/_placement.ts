@@ -339,3 +339,26 @@ export async function ensureProgrammeRoute(
   await raw.gradeLevel.update({ where: { id: gradeLevelId }, data: { academicLevelId: level.id } });
   return programme.id;
 }
+
+/**
+ * Create a learner's StudentEnrollment for a year, or adopt the one
+ * `placeInClass` / `linkLearner` already made. Specs that place a learner and
+ * then write their own enrollment for the SAME year used to hit the
+ * (organizationId, studentProfileId, academicYearId) unique key once
+ * `placeInClass` started creating canonical enrollments. Same `{ data }` shape
+ * as `studentEnrollment.create`, so call sites swap one-for-one.
+ */
+export async function upsertEnrollment(raw: any, args: { data: any }): Promise<any> {
+  const d = args.data;
+  return raw.studentEnrollment.upsert({
+    where: {
+      organizationId_studentProfileId_academicYearId: {
+        organizationId: d.organizationId,
+        studentProfileId: d.studentProfileId,
+        academicYearId: d.academicYearId,
+      },
+    },
+    update: { programmeId: d.programmeId, gradeLevelId: d.gradeLevelId },
+    create: d,
+  });
+}

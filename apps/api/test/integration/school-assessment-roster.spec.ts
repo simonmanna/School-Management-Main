@@ -28,6 +28,7 @@ import { StudentService } from '../../src/modules/school/people/student.service'
 import { AcademicRosterService } from '../../src/modules/school/assessment/roster.service';
 import { RubricService } from '../../src/modules/school/assessment/rubric.service';
 import { AssignmentService } from '../../src/modules/school/assessment/assignment.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: A2 rosters + assignments', () => {
   const rawUrl = (() => {
@@ -67,6 +68,8 @@ describeDb('integration: A2 rosters + assignments', () => {
     const year = await raw.academicYear.create({ data: { organizationId, name: '2026', startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') } });
     termId = (await raw.term.create({ data: { organizationId, academicYearId: year.id, name: 'Term 1', startDate: new Date('2026-01-15'), endDate: new Date('2026-04-15'), isCurrent: true } })).id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S2', order: 9 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S2 West' } })).id;
     subjectId = (await raw.subject.create({ data: { organizationId, code: 'ENG', name: 'English', isCore: true } })).id;
 

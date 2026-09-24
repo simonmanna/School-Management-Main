@@ -237,25 +237,34 @@ export class AccountResolverService {
             'chart of accounts.',
         );
       }
-      account = await client.account.create({
-        data: {
-          organizationId,
-          code,
-          name: def.name,
-          categoryId: category.id,
-          normalBalance: category.normalBalance,
-          isSystem: true,
-          isProtected: true,
-        },
+      // INSERT … ON CONFLICT DO NOTHING, then re-read. Two first-ever receipts
+      // on a new org (two concurrent MoMo callbacks) both reach here; a plain
+      // create made the loser hit the (organizationId, code) unique key, which
+      // aborts its whole transaction — the replay-safe collect then 500'd
+      // instead of returning the original receipt. With skipDuplicates the
+      // loser waits for the winner's commit and simply reads its row.
+      await client.account.createMany({
+        data: [
+          {
+            organizationId,
+            code,
+            name: def.name,
+            categoryId: category.id,
+            normalBalance: category.normalBalance,
+            isSystem: true,
+            isProtected: true,
+          },
+        ],
+        skipDuplicates: true,
       });
+      account = await client.account.findFirst({ where: { code } });
       this.invalidate(organizationId);
     }
 
     if (def.mappingKey) {
-      await client.accountMapping.upsert({
-        where: { organizationId_key: { organizationId, key: def.mappingKey } },
-        create: { organizationId, key: def.mappingKey, accountId: account.id },
-        update: {},
+      await client.accountMapping.createMany({
+        data: [{ organizationId, key: def.mappingKey, accountId: account.id }],
+        skipDuplicates: true,
       });
     }
     return account.id;

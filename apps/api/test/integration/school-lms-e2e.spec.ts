@@ -27,6 +27,7 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { AssessmentWorkflowService } from '../../src/modules/school/assessment/assessment-workflow.service';
+import { LmsMoodleModule } from '../../src/modules/school/lms/moodle/lms-moodle.module';
 import { CourseService } from '../../src/modules/school/lms/moodle/course/course.service';
 import { CourseModuleService } from '../../src/modules/school/lms/moodle/course/module.service';
 import { ViewEnvelopeService } from '../../src/modules/school/lms/moodle/course/view-envelope.service';
@@ -35,7 +36,7 @@ import { CompletionService } from '../../src/modules/school/lms/moodle/completio
 import { CourseBackupService } from '../../src/modules/school/lms/moodle/backup/course-backup.service';
 import { LmsOrphanCheckService } from '../../src/modules/school/lms/moodle/maintenance/orphan-check.service';
 import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
-import { placeInClass } from './_placement';
+import { placeInClass, upsertEnrollment } from './_placement';
 
 describeDb('integration: LMS → assessment → result, end to end', () => {
   const rawUrl = (() => {
@@ -175,7 +176,7 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     // grade bridge freezes a roster from, so without it adding a gradable
     // activity is refused ("Prepare official course enrollment…"). Two models,
     // one letter apart, and the fixture only had the first.
-    const officialEnrollment = await raw.studentEnrollment.create({
+    const officialEnrollment = await upsertEnrollment(raw, {
       data: {
         organizationId, studentProfileId, academicYearId: yearId, programmeId, gradeLevelId,
         admissionDate: new Date('2026-01-15'), status: 'ACTIVE',
@@ -191,7 +192,9 @@ describeDb('integration: LMS → assessment → result, end to end', () => {
     }
 
     moduleRef = await Test.createTestingModule({
-      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
+      // LmsMoodleModule is behind ENABLE_ADVANCED_LMS in SchoolModule; this spec
+      // exercises it, so it is imported explicitly rather than via the env flag.
+      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule, LmsMoodleModule],
     }).compile();
     await moduleRef.init();
 

@@ -24,7 +24,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { AssessmentBoardService } from '../../src/modules/school/assessment/assessment-board.service';
 import { GradebookService } from '../../src/modules/school/assessment/gradebook.service';
 import { AssessmentWorkflowService } from '../../src/modules/school/assessment/assessment-workflow.service';
-import { placeInClass } from './_placement';
+import { placeInClass, upsertEnrollment } from './_placement';
 
 describeDb('integration: assessments — one door, every kind', () => {
   const rawUrl = (() => {
@@ -107,7 +107,7 @@ describeDb('integration: assessments — one door, every kind', () => {
     courseOfferingId = course.id;
     await raw.courseOfferingTeacher.create({ data: { organizationId, courseOfferingId, teacherPartnerId, effectiveFrom: year.startDate, isResponsible: true } });
     for (const studentProfileId of studentIds) {
-      const e = await raw.studentEnrollment.create({ data: { organizationId, studentProfileId, programmeId: programme.id, academicYearId: year.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
+      const e = await upsertEnrollment(raw, { data: { organizationId, studentProfileId, programmeId: programme.id, academicYearId: year.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
       await raw.courseEnrollment.create({ data: { organizationId, courseOfferingId, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
     }
 

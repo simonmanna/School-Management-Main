@@ -21,6 +21,7 @@ import { InventoryModule } from '../../src/modules/inventory/inventory.module';
 import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { DocumentsModule } from '../../src/modules/documents/documents.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
+import { LmsMoodleModule } from '../../src/modules/school/lms/moodle/lms-moodle.module';
 import { EnrolmentService } from '../../src/modules/school/lms/moodle/enrolment/enrolment.service';
 import { LmsRolesService } from '../../src/modules/school/lms/moodle/context/roles.service';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
@@ -114,7 +115,8 @@ describeDb('integration: LMS teacher identity', () => {
     }
 
     moduleRef = await Test.createTestingModule({
-      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
+      // LmsMoodleModule is behind ENABLE_ADVANCED_LMS in SchoolModule; imported explicitly.
+      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule, LmsMoodleModule],
     }).compile();
     await moduleRef.init();
     tenant = moduleRef.get(TenantContextService);

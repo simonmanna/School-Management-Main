@@ -23,6 +23,7 @@ import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.se
 import { StudentService } from '../../src/modules/school/people/student.service';
 import { ExamTypeService, ExamService, ExamScheduleService } from '../../src/modules/school/examinations/examinations.service';
 import { ExamVenueService, ExamRegistrationService } from '../../src/modules/school/examinations/exam-ops.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: A4 exam operations', () => {
   const rawUrl = (() => {
@@ -55,6 +56,8 @@ describeDb('integration: A4 exam operations', () => {
     const year = await raw.academicYear.create({ data: { organizationId, name: '2026', startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') } });
     termId = (await raw.term.create({ data: { organizationId, academicYearId: year.id, name: 'Term 1', startDate: new Date('2026-01-15'), endDate: new Date('2026-04-15'), isCurrent: true } })).id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S3', order: 10 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S3 North' } })).id;
     subjectId = (await raw.subject.create({ data: { organizationId, code: 'PHY', name: 'Physics', isCore: true } })).id;
 
@@ -119,6 +122,8 @@ describeDb('integration: A4 exam operations', () => {
 
     // A second class in the SAME venue at the SAME slot → clash.
     const grade2 = await raw.gradeLevel.create({ data: { organizationId, name: `S3b-${Date.now()}`, order: 10 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade2.id);
     const class2 = await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade2.id, name: `S3 South ${Date.now()}` } });
     let err: any;
     await asUser(() => schedules.create({ examId: exam.id, classId: class2.id, subjectId, date: '2026-03-05T00:00:00.000Z', startTime: '09:00', maxMarks: 100, venueId: venue.id } as any)).catch((e) => { err = e; });

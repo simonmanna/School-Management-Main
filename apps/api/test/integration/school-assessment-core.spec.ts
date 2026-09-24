@@ -31,6 +31,7 @@ import { StudentService } from '../../src/modules/school/people/student.service'
 import { AssessmentPolicyService, AssessmentComponentService } from '../../src/modules/school/assessment/assessment-config.service';
 import { AssessmentService } from '../../src/modules/school/assessment/assessment.service';
 import { MarkingService } from '../../src/modules/school/assessment/marking.service';
+import { ensureProgrammeRoute } from './_placement';
 import {
   ExamTypeService,
   ExamService,
@@ -81,6 +82,8 @@ describeDb('integration: A1 assessment core', () => {
     const year = await raw.academicYear.create({ data: { organizationId, name: '2026', startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') } });
     termId = (await raw.term.create({ data: { organizationId, academicYearId: year.id, name: 'Term 1', startDate: new Date('2026-01-15'), endDate: new Date('2026-04-15'), isCurrent: true } })).id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     gradeLevelId = grade.id;
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId, name: 'S1 East' } })).id;
     subjectId = (await raw.subject.create({ data: { organizationId, code: 'MATH', name: 'Mathematics', isCore: true } })).id;

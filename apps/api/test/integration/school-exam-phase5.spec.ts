@@ -30,7 +30,7 @@ import { MarkingService } from '../../src/modules/school/assessment/marking.serv
 import { ResultRunService } from '../../src/modules/school/assessment/result-run.service';
 import { ResultIntegrityService } from '../../src/modules/school/assessment/result-integrity.service';
 import { PromotionDecisionService } from '../../src/modules/school/assessment/promotion-decision.service';
-import { placeInClass } from './_placement';
+import { placeInClass, upsertEnrollment } from './_placement';
 
 describeDb('Phase 5 examination and result integrity', () => {
   let moduleRef: TestingModule;
@@ -118,7 +118,7 @@ describeDb('Phase 5 examination and result integrity', () => {
       const s = await db.studentProfile.create({ data: { organizationId, partnerId: p.id, admissionNo: `P5-${i}`, enrollmentDate: year.startDate } });
       await placeInClass(db, { organizationId: organizationId, studentProfileId: s.id, classId: classId });
       learners.push(s.id);
-      const e = await db.studentEnrollment.create({ data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
+      const e = await upsertEnrollment(db, { data: { organizationId, studentProfileId: s.id, academicYearId: year.id, programmeId: programme.id, gradeLevelId: grade.id, admissionDate: year.startDate } });
       await db.courseEnrollment.create({ data: { organizationId, courseOfferingId: course.id, studentEnrollmentId: e.id, source: 'MANUAL', startDate: year.startDate } });
     }
 
@@ -524,7 +524,19 @@ describeDb('Phase 5 examination and result integrity', () => {
     }));
 
     // Applying is the only act that moves a learner, and it appends to history.
-    const applied: any = await run(() => promotion.apply({ resultSetId: setId, toTermId: nextTermId }));
+    // A placement must start inside its term, and "now" is its start, so the
+    // clock is pinned inside Term 2 for the apply only (dated-spec convention).
+    // Only Date is faked; timers stay real for Prisma and Nest.
+    jest.useFakeTimers({
+      now: new Date('2026-06-15T09:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+    });
+    let applied: any;
+    try {
+      applied = await run(() => promotion.apply({ resultSetId: setId, toTermId: nextTermId }));
+    } finally {
+      jest.useRealTimers();
+    }
     expect(applied.skipped).toEqual([]);
     expect(applied.applied).toBe(1);
     const decision = await db.promotionDecision.findFirst({ where: { id: one.id } });

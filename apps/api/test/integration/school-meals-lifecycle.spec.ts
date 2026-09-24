@@ -34,6 +34,7 @@ import {
 } from '../../src/modules/school/meals/meal-config.service';
 import { MealSessionService } from '../../src/modules/school/meals/meal-session.service';
 import { MealWalletService } from '../../src/modules/school/meals/meal-wallet.service';
+import { ensureProgrammeRoute } from './_placement';
 
 describeDb('integration: school meals V1 lifecycle', () => {
   const rawUrl = (() => {
@@ -86,6 +87,8 @@ describeDb('integration: school meals V1 lifecycle', () => {
     });
     termId = term.id;
     const grade = await raw.gradeLevel.create({ data: { organizationId, name: 'S1', order: 8 } });
+    // Enrollment resolves the programme via grade → academic level (ADR-028).
+    await ensureProgrammeRoute(raw, organizationId, grade.id);
     classId = (await raw.schoolClass.create({ data: { organizationId, gradeLevelId: grade.id, name: 'S1 East' } })).id;
 
     moduleRef = await Test.createTestingModule({

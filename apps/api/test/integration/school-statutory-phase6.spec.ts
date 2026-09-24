@@ -29,7 +29,7 @@ import { ProgrammeService } from '../../src/modules/school/enrollment/programme.
 import { CandidateReferenceService } from '../../src/modules/school/statutory/candidate-reference.service';
 import { UnebCaService } from '../../src/modules/school/statutory/uneb-ca.service';
 import { StatutoryExportService } from '../../src/modules/school/statutory/statutory-export.service';
-import { placeInClass } from './_placement';
+import { placeInClass, upsertEnrollment } from './_placement';
 
 describeDb('integration: Phase 6 statutory submissions (ADR-029)', () => {
   const rawUrl = (() => {
@@ -90,7 +90,7 @@ describeDb('integration: Phase 6 statutory submissions (ADR-029)', () => {
       },
     });
     await placeInClass(raw, { organizationId: organizationId, studentProfileId: profile.id, classId: classS4 });
-    await raw.studentEnrollment.create({
+    await upsertEnrollment(raw, {
       data: {
         organizationId,
         studentProfileId: profile.id,

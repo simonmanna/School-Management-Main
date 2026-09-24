@@ -72,6 +72,8 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
     for (const [code, name, type] of [
       ['SALES', 'Sales', 'sales'],
       ['CASH', 'Cash', 'cash'],
+      // Mobile-money and bank receipts post to the BANK journal.
+      ['BANK', 'Bank', 'bank'],
       ['GEN', 'General', 'general'],
     ] as const) {
       await raw.journal.create({ data: { organizationId, code, name, journalType: type } });

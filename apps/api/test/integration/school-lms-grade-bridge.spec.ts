@@ -26,6 +26,7 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { MarkingService } from '../../src/modules/school/assessment/marking.service';
+import { LmsMoodleModule } from '../../src/modules/school/lms/moodle/lms-moodle.module';
 import { LmsGradeBridgeService } from '../../src/modules/school/lms/moodle/grade/grade-bridge.service';
 import { QuestionBankService, QuestionService, PaperService, CbtAttemptService } from '../../src/modules/school/cbt/cbt.service';
 import { placeInClass } from './_placement';
@@ -121,7 +122,8 @@ describeDb('integration: LMS grade bridge — marks survive recompute, quizzes c
     rosterId = roster.id;
 
     moduleRef = await Test.createTestingModule({
-      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule],
+      // LmsMoodleModule is behind ENABLE_ADVANCED_LMS in SchoolModule; imported explicitly.
+      imports: [KernelModule, DocumentsModule, CoreModule, AccountingModule, InventoryModule, InvoicingModule, SchoolModule, LmsMoodleModule],
     }).compile();
     await moduleRef.init();
 
