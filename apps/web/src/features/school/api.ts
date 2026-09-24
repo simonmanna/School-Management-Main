@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, resolveAssetUrl } from '@/lib/api';
 import { PERMISSIONS, TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
 import { useAuthStore } from '@/stores/auth.store';
 
@@ -5218,9 +5218,26 @@ export async function uploadSchoolFile(file: File, ownerType = 'school_doc', own
   return res.data.id;
 }
 
-/** Signed download URL helper for a stored file. */
-export function fileUrl(id: string): string {
-  return `/api/v1/files/${id}/download`;
+/**
+ * Open a stored file in a new tab through a SIGNED, short-lived URL.
+ *
+ * `/files/:id/download` is public and demands a token/expiry/org signature, so
+ * the unsigned link the pages used to render answered 400 and no document could
+ * be viewed (E2E audit D1). `POST /files/:id/signed-url` applies the caller's
+ * permission and sensitivity checks, then mints the link. The tab is opened
+ * synchronously (before the await) so popup blockers allow it.
+ */
+export async function openStoredFile(id: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  try {
+    const { url } = (await api.post<{ url: string; expiresAt: string }>(`/files/${id}/signed-url`)).data;
+    const href = resolveAssetUrl(url) ?? url;
+    if (tab) tab.location.href = href;
+    else window.location.assign(href);
+  } catch (e) {
+    tab?.close();
+    throw e;
+  }
 }
 
 /* ───────────────────────── School Calendar & Events ─────────────────────────

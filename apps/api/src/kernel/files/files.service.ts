@@ -1,6 +1,7 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
+import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { createReadStream, createWriteStream, statSync } from 'node:fs';
-import { mkdir, unlink } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
 import { createHash, randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -43,6 +44,7 @@ export class FilesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
+    @Optional() private readonly audit?: AuditService,
   ) {
     this.driver = (process.env.STORAGE_DRIVER as 'local' | 's3') ?? 'local';
     if (this.driver !== 'local') {
@@ -138,6 +140,7 @@ export class FilesService {
         uploadedById: true,
         studentDocuments: { select: { type: true } },
         applicationDocuments: { select: { id: true } },
+        schoolDocs: { select: { category: true, type: true } },
       },
     });
     if (!file) throw new NotFoundException('File not found');
@@ -156,13 +159,19 @@ export class FilesService {
     uploadedById: string | null;
     studentDocuments: Array<{ type: string }>;
     applicationDocuments: Array<{ id: string }>;
+    schoolDocs?: Array<{ category: string; type: string }>;
   }) {
     if (file.uploadedById && file.uploadedById === this.tenant.userId) return;
     const held = new Set(this.tenant.permissions ?? []);
     if (held.has('*')) return;
     const required: string[] = [];
+    const MEDICAL = /medical|health|immuni[sz]ation/i;
+    // SchoolDoc (the documents register) is checked too: a health record filed
+    // there was openable with `school:documents:read` alone (E2E audit P2).
     const medical =
-      /medical|health/i.test(file.ownerType ?? '') || file.studentDocuments.some((d) => /medical|health|immuni[sz]ation/i.test(d.type));
+      /medical|health/i.test(file.ownerType ?? '') ||
+      file.studentDocuments.some((d) => MEDICAL.test(d.type)) ||
+      (file.schoolDocs ?? []).some((d) => MEDICAL.test(d.category) || MEDICAL.test(d.type));
     if (medical) required.push('school:medical:read');
     if (file.applicationDocuments.length > 0) required.push('school:admissions:write');
     if (/^Hr/.test(file.ownerType ?? '')) required.push('hr:read');
@@ -222,18 +231,63 @@ export class FilesService {
     return { stream: createReadStream(fullPath), size };
   }
 
+  /**
+   * Retire a file (E2E audit P2 / D-series).
+   *
+   * It used to unlink the bytes FIRST and soft-delete after — a failure in
+   * between left a live row pointing at nothing, and a file still attached to a
+   * document or application vanished from under it. It also skipped the
+   * sensitivity check that opening applies, so anyone with documents:write
+   * could destroy a health record they could not read, unaudited.
+   *
+   * Now: refuse while anything still references the file, apply the same
+   * "may open" rule, soft-delete, and audit. The bytes are retained — deleting
+   * a record's evidence is a retention decision, not a click.
+   */
   async remove(fileId: string): Promise<void> {
-    const file = await this.prisma.client.file.findFirst({ where: { id: fileId } });
-    if (!file) throw new NotFoundException('File not found');
-    if (file.organizationId !== this.tenant.organizationId) {
+    const file = await this.prisma.client.file.findFirst({
+      where: { id: fileId, deletedAt: null },
+      select: {
+        id: true,
+        organizationId: true,
+        filename: true,
+        ownerType: true,
+        uploadedById: true,
+        studentDocuments: { select: { type: true } },
+        applicationDocuments: { select: { id: true } },
+        schoolDocs: { select: { category: true, type: true } },
+        _count: {
+          select: {
+            schoolDocs: true,
+            schoolDocSignatures: true,
+            studentDocuments: true,
+            applicationDocuments: true,
+            documentAttachments: true,
+            hrEmployeeDocuments: true,
+          },
+        },
+      },
+    });
+    if (!file || file.organizationId !== this.tenant.organizationId) {
       throw new NotFoundException('File not found');
     }
-    if (this.driver === 'local') {
-      await unlink(join(this.localDir, file.storageKey)).catch(() => undefined);
+    this.assertMayOpen(file);
+    const refs = Object.entries(file._count).filter(([, n]) => (n as number) > 0);
+    if (refs.length > 0) {
+      throw new ConflictException(
+        `This file is still attached (${refs.map(([k, n]) => `${n} ${k}`).join(', ')}). ` +
+          'Remove the document that uses it first.',
+      );
     }
     await this.prisma.client.file.update({
       where: { id: fileId },
       data: { deletedAt: new Date() },
+    });
+    await this.audit?.record({
+      entity: 'File',
+      entityId: fileId,
+      action: 'delete',
+      oldValues: { filename: file.filename, ownerType: file.ownerType },
     });
   }
 

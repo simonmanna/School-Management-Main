@@ -24,7 +24,7 @@ import { notify } from '@/lib/notify';
 import {
   useSchoolDocs, useCreateSchoolDoc, useVerifySchoolDoc, useSignSchoolDoc,
   useDeleteSchoolDoc, useSchoolDocVersions,
-  uploadSchoolFile, fileUrl, type SchoolDocRow,
+  uploadSchoolFile, openStoredFile, type SchoolDocRow,
 } from '@/features/school/api';
 
 const CATEGORIES = [
@@ -182,9 +182,13 @@ export default function DocumentManagementPage() {
                   return (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">
-                        <a href={fileUrl(d.fileId)} target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openStoredFile(d.fileId).catch((e: any) => notify.error(e?.response?.data?.message ?? 'Could not open the file'))}
+                          className="hover:underline flex items-center gap-1 text-left"
+                        >
                           <Eye className="h-3.5 w-3.5" /> {d.title}
-                        </a>
+                        </button>
                         {d.file?.filename && <div className="text-xs text-muted-foreground">{d.file.filename}</div>}
                       </TableCell>
                       <TableCell>{cat}</TableCell>

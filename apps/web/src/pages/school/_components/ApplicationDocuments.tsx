@@ -6,7 +6,7 @@ import {
   useAddDocument,
   useVerifyDocument,
   uploadSchoolFile,
-  fileUrl,
+  openStoredFile,
   type AdmissionDocument,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -79,14 +79,13 @@ export function ApplicationDocuments({
                     </Badge>
                   )}
                   {doc && (
-                    <a
-                      href={fileUrl(doc.fileId)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => openStoredFile(doc.fileId).catch((e: any) => notify.error(e?.response?.data?.message ?? 'Could not open the file'))}
                       className="text-xs text-indigo-600 hover:underline"
                     >
                       View
-                    </a>
+                    </button>
                   )}
                 </div>
               </li>
