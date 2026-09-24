@@ -16,5 +16,5 @@ export interface AccountingBootstrap {
    * chart of accounts including its hierarchy, journals, and every
    * account-determination mapping. Idempotent.
    */
-  seedOrganization(organizationId: string): Promise<void>;
+  seedOrganization(organizationId: string, client?: unknown): Promise<void>;
 }

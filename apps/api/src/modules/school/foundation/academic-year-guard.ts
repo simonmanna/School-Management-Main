@@ -53,3 +53,31 @@ export async function assertYearWritable(
   }
   return year;
 }
+
+/**
+ * Closed-year protection for records keyed by TERM (Wave 5): marks, exams,
+ * report cards and fee invoices. A term's year that is CLOSED or ARCHIVED
+ * refuses the write, exactly as enrollment and placement already did.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function assertTermWritable(tx: any, organizationId: string, termId: string | null | undefined) {
+  if (!termId) return null;
+  const term = await tx.term.findFirst({ where: { id: termId }, select: { academicYearId: true } });
+  // An unknown term is the caller's error to report (with its own wording).
+  if (!term?.academicYearId) return null;
+  return assertYearWritable(tx, organizationId, term.academicYearId, 'modify');
+}
+
+/**
+ * Closed-year protection for records keyed by DATE (attendance): the year whose
+ * dates contain the day. A day in no year is left to the caller's own rules.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function assertDateWritable(tx: any, organizationId: string, date: Date) {
+  const year = await tx.academicYear.findFirst({
+    where: { deletedAt: null, startDate: { lte: date }, endDate: { gte: date } },
+    select: { id: true },
+  });
+  if (!year) return null;
+  return assertYearWritable(tx, organizationId, year.id, 'modify');
+}

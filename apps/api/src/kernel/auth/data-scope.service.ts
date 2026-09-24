@@ -85,6 +85,20 @@ export class DataScopeService {
   }
 
   /**
+   * Classes whose pupils the caller may LIST (E2E audit R1, Wave 5). A
+   * `school` scope reads everything; a `class`/`own` scope reads only the
+   * classes the teacher actually teaches — definite, so a teacher with no
+   * classes sees nobody rather than everybody.
+   */
+  async readableClassIds(): Promise<string[] | 'all'> {
+    const scope = await this.effective();
+    if (scope === 'school') return 'all';
+    const staffProfileId = await this.identity.staffProfileIdForCaller();
+    if (!staffProfileId) return [];
+    return this.taughtClassIds(staffProfileId);
+  }
+
+  /**
    * The classes this staff member actually teaches — assignments plus timetable.
    *
    * Returns a DEFINITE list: empty means "teaches nothing", never "teaches

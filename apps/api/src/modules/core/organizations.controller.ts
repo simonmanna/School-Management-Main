@@ -26,7 +26,7 @@ class BootstrapDto {
   @ApiProperty() @IsString() organizationCode!: string;
   @ApiProperty() @IsString() organizationName!: string;
   @ApiProperty({ required: false }) @IsOptional() @IsString() timezone?: string;
-  @ApiProperty({ required: false, default: 'USD' }) @IsOptional() @IsString() currencyCode?: string;
+  @ApiProperty({ required: false, default: 'UGX' }) @IsOptional() @IsString() currencyCode?: string;
   @ApiProperty() @IsEmail() adminEmail!: string;
   @ApiProperty() @IsString() adminFirstName!: string;
   @ApiProperty({ required: false }) @IsOptional() @IsString() adminLastName?: string;

@@ -78,8 +78,12 @@ export class EmployeeIdentityService {
 
     let staffProfileId: string | null = null;
     if (employee.partnerId) {
+      // Only an ACTIVE member of staff acts as themselves. A suspended, on-leave
+      // or inactive teacher kept their register and marking rights, because
+      // nothing looked at the status (Wave 5). Returning no staff profile makes
+      // every own-class check refuse; the allocations are kept for their return.
       const profile = await this.db.staffProfile.findFirst({
-        where: { partnerId: employee.partnerId, deletedAt: null },
+        where: { partnerId: employee.partnerId, deletedAt: null, status: 'active' },
         select: { id: true },
       });
       staffProfileId = profile?.id ?? null;

@@ -1,3 +1,4 @@
+import { seedSchoolDefaults } from './school-defaults.seed';
 import {
   BadRequestException,
   ConflictException,
@@ -71,12 +72,19 @@ export class OrganizationsService {
       ? await bcrypt.hash(params.adminPassword, 10)
       : await bcrypt.hash(randomPassword(), 10);
 
-    const org = await this.prisma.raw.organization.create({
+    // One transaction (E2E audit S1/C1): a failure half-way used to leave an
+    // organization with no admin, no chart of accounts or no roles — and its
+    // code taken, so the operator could not simply retry.
+    const { org, user } = await this.prisma.raw.$transaction(
+      async (tx: any) => {
+    const org = await tx.organization.create({
       data: {
         code: params.organizationCode,
         name: params.organizationName,
-        currencyCode: params.currencyCode ?? 'USD',
-        timezone: params.timezone ?? 'UTC',
+        // A Ugandan school by default (C1): these used to be USD / UTC, so every
+        // receipt and date of a new school was wrong until someone noticed.
+        currencyCode: params.currencyCode ?? 'UGX',
+        timezone: params.timezone ?? 'Africa/Kampala',
       },
     });
 
@@ -84,13 +92,16 @@ export class OrganizationsService {
     // journals, and ALL account-determination mappings) from the shared template.
     // Injected through a kernel token because core may not import accounting.
     if (this.accountingBootstrap) {
-      await this.accountingBootstrap.seedOrganization(org.id);
+      await this.accountingBootstrap.seedOrganization(org.id, tx);
     }
-    await this.seedAdminRoleAndMappings(org.id);
-    await this.seedPostingRules(org.id);
+    await this.seedAdminRoleAndMappings(org.id, tx);
+    await this.seedPostingRules(org.id, tx);
+    // C2: grades P1–P7 and nursery with the promotion ladder, one class per
+    // grade, attendance statuses, the PLE grading scale and a main campus.
+    await seedSchoolDefaults(tx, org.id);
 
     // Create the admin user (no tenant context yet).
-    const user = await this.prisma.raw.user.create({
+    const user = await tx.user.create({
       data: {
         organizationId: org.id,
         email: params.adminEmail.toLowerCase(),
@@ -99,18 +110,18 @@ export class OrganizationsService {
         lastName: params.adminLastName ?? null,
       },
     });
-    const adminRole = await this.prisma.raw.role.findUnique({
+    const adminRole = await tx.role.findUnique({
       where: { organizationId_name: { organizationId: org.id, name: 'Administrator' } },
     });
     if (adminRole) {
-      await this.prisma.raw.user.update({
+      await tx.user.update({
         where: { id: user.id },
         data: { roles: { connect: [{ id: adminRole.id }] } },
       });
     }
     // Open the current fiscal period.
     const year = new Date().getUTCFullYear();
-    await this.prisma.raw.fiscalPeriod.create({
+    await tx.fiscalPeriod.create({
       data: {
         organizationId: org.id,
         name: `FY${year}`,
@@ -119,6 +130,10 @@ export class OrganizationsService {
         status: 'open',
       },
     });
+        return { org, user };
+      },
+      { timeout: 180_000, maxWait: 20_000 },
+    );
 
     let inviteToken: string | undefined;
     if (!params.adminPassword) {
@@ -127,14 +142,19 @@ export class OrganizationsService {
         userId: user.id,
         organizationId: org.id,
       });
+      const webUrl = (process.env.WEB_URL ?? '').replace(/\/$/, '');
       await this.notifications.send({
         organizationId: org.id,
         userId: user.id,
         channel: 'email',
         category: 'auth',
         title: 'You have been invited to ' + params.organizationName,
-        body: 'Use the link in this email to set your password and sign in.',
-        payload: { token: inviteToken, kind: 'invite' },
+        body:
+          `Open this link to set your password and sign in as the first administrator of ` +
+          `${params.organizationName} (school code ${params.organizationCode}). It expires in 7 days.\n\n` +
+          `${webUrl}/accept-invite?token=${encodeURIComponent(inviteToken)}`,
+        storedBody: `Administrator invitation sent to ${user.email}.`,
+        payload: { kind: 'invite' },
       });
     }
 
@@ -171,7 +191,7 @@ export class OrganizationsService {
     });
   }
 
-  private async seedAdminRoleAndMappings(orgId: string) {
+  private async seedAdminRoleAndMappings(orgId: string, db: any = this.prisma.raw) {
     // Seed permissions catalog (global).
     const { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, SCHOOL_ROLE_PRESETS } = await import('@erp/shared');
     for (const k of ALL_PERMISSIONS) {
@@ -182,7 +202,7 @@ export class OrganizationsService {
       const idx = k.lastIndexOf(separator);
       const resource = idx >= 0 ? k.slice(0, idx) : k;
       const action = idx >= 0 ? k.slice(idx + 1) : k;
-      await this.prisma.raw.permission.upsert({
+      await db.permission.upsert({
         where: { key: k },
         update: { resource, action },
         create: { key: k, resource, action },
@@ -198,10 +218,10 @@ export class OrganizationsService {
       { code: 'INR', symbol: '₹', name: 'Indian Rupee', decimalPlaces: 2 },
     ];
     for (const c of currencies) {
-      await this.prisma.raw.currency.upsert({ where: { code: c.code }, update: c, create: c });
+      await db.currency.upsert({ where: { code: c.code }, update: c, create: c });
     }
     // Create the admin role with all permissions.
-    await this.prisma.raw.role.create({
+    await db.role.create({
       data: {
         organizationId: orgId,
         name: 'Administrator',
@@ -214,7 +234,7 @@ export class OrganizationsService {
     // subject type, so an org without these can mint portal logins that hold no
     // authority at all and 403 on every route they were created to reach.
     for (const preset of PORTAL_ROLE_PRESETS) {
-      await this.prisma.raw.role.create({
+      await db.role.create({
         data: {
           organizationId: orgId,
           name: preset.name,
@@ -230,7 +250,7 @@ export class OrganizationsService {
     // bootstrap never stomps an edit. `dataScope` is carried so a Class Teacher
     // is `class` and everyone else `school` from the moment they are provisioned.
     for (const preset of SCHOOL_ROLE_PRESETS) {
-      await this.prisma.raw.role.upsert({
+      await db.role.upsert({
         where: { organizationId_name: { organizationId: orgId, name: preset.name } },
         update: {},
         create: {
@@ -244,12 +264,12 @@ export class OrganizationsService {
       });
     }
     // Seed UOM categories + units (factor engine) and tax defaults.
-    await seedUomCategories(this.prisma.raw, orgId);
-    await this.prisma.raw.tax.create({
+    await seedUomCategories(db, orgId);
+    await db.tax.create({
       data: { organizationId: orgId, name: 'No Tax', code: 'NONE', type: 'vat', rate: 0 },
     });
     // Seed branch.
-    await this.prisma.raw.branch.create({
+    await db.branch.create({
       data: { organizationId: orgId, code: 'MAIN', name: 'Head Office' },
     });
   }
@@ -261,7 +281,7 @@ export class OrganizationsService {
    * these lines later, add product-level overrides, or change accountSource
    * to `literal`/`category_field`/`product_field`.
    */
-  private async seedPostingRules(orgId: string) {
+  private async seedPostingRules(orgId: string, db: any = this.prisma.raw) {
     const rules: Array<{
       movementType: string;
       lineIndex: number;
@@ -316,7 +336,7 @@ export class OrganizationsService {
     ];
 
     for (const r of rules) {
-      await this.prisma.raw.inventoryPostingRule.create({
+      await db.inventoryPostingRule.create({
         data: {
           organizationId: orgId,
           movementType: r.movementType as any,

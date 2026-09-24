@@ -1,3 +1,4 @@
+import { ScopedToClass } from '../../../kernel/auth/guards/scoped-to-class.decorator';
 import { Body, Controller, Delete, Get, Param, Post, Put, Patch, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -63,12 +64,14 @@ export class StudentAttendanceController {
   }
 
   @Get('register')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   register(@Query('classId') classId: string, @Query('date') date: string, @Query('periodId') periodId?: string) {
     return this.attendance.dailyRegister(classId, date, periodId || undefined);
   }
 
   @Get('weekly')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   weekly(@Query('classId') classId: string, @Query('weekStart') weekStart: string) {
     return this.attendance.weekly(classId, weekStart);
@@ -87,6 +90,7 @@ export class StudentAttendanceController {
   /** P-att-status: org attendance summary across a date range — powers the
    *  Attendance Report page (cards + per-day status breakdown). */
   @Get('report')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   report(
     @Query('classId') classId: string,

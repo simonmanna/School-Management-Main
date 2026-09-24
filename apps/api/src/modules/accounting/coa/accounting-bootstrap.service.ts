@@ -14,7 +14,8 @@ import { seedAccountingCore } from './coa-seeder';
 export class AccountingBootstrapService implements AccountingBootstrap {
   constructor(private readonly prisma: PrismaService) {}
 
-  async seedOrganization(organizationId: string): Promise<void> {
-    await seedAccountingCore(this.prisma.raw, organizationId);
+  /** `client` lets bootstrap run the whole seed inside its transaction. */
+  async seedOrganization(organizationId: string, client?: unknown): Promise<void> {
+    await seedAccountingCore((client as any) ?? this.prisma.raw, organizationId);
   }
 }

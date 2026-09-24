@@ -1,3 +1,4 @@
+import { ScopedToClass } from '../../../kernel/auth/guards/scoped-to-class.decorator';
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -33,6 +34,7 @@ export class MarksWorkspaceController {
   }
 
   @Get('subjects')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   subjects(@Query('classId') classId: string) {
     return this.service.subjectsForClass(classId);
@@ -51,6 +53,7 @@ export class MarksWorkspaceController {
   }
 
   @Get('sheet')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   sheet(
     @Query('examId') examId: string,
@@ -68,6 +71,7 @@ export class MarksWorkspaceController {
   }
 
   @Get('grid')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   grid(
     @Query('examId') examId: string,

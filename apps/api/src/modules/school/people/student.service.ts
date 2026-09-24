@@ -1,4 +1,5 @@
-import { ConflictException, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
+import { ConflictException, Injectable, BadRequestException, NotFoundException, ForbiddenException, Optional } from '@nestjs/common';
 import type { StudentProfile, Partner } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -64,6 +65,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     private readonly finance: SchoolFinanceQueryService,
     private readonly placements: PlacementLookupService,
     private readonly admission: StudentAdmissionService,
+    @Optional() private readonly dataScope?: DataScopeService,
   ) {
     super(prisma.client.studentProfile as unknown as CrudDelegate);
   }
@@ -89,8 +91,15 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
 
   /** Paginated roster, optionally narrowed to learners placed in a class or stream now. */
   override async list(query: PaginationQuery & StudentListQueryDto): Promise<PaginatedResult<StudentProfile>> {
+    // R1 (Wave 5): a class-scoped teacher lists only the pupils of classes they
+    // teach. Every staff preset holds school:read, so the Class Teacher's
+    // `dataScope: 'class'` used to change nothing here — the whole school came back.
+    const readable = this.dataScope ? await this.dataScope.readableClassIds() : 'all';
+    if (readable !== 'all' && query.classId && !readable.includes(query.classId)) {
+      throw new ForbiddenException('You may only list the pupils of classes you teach');
+    }
     const target = {
-      ...(query.classId ? { classIds: [query.classId] } : {}),
+      ...(query.classId ? { classIds: [query.classId] } : readable !== 'all' ? { classIds: readable } : {}),
       ...(query.sectionId ? { sectionIds: [query.sectionId] } : {}),
     };
     if (Object.keys(target).length === 0) {

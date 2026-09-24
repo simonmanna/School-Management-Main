@@ -1,3 +1,4 @@
+import { assertTermWritable } from '../foundation/academic-year-guard';
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -90,6 +91,8 @@ export class BillingService {
    * FeeComponent. Each invoice is immediately posted to the GL.
    */
   async generateForTerm(dto: GenerateBillingDto) {
+    // No new invoices into a closed year (Wave 5 closed-year guard).
+    await assertTermWritable(this.prisma.client, this.tenant.organizationId, dto.termId);
     const organizationId = this.tenant.organizationId;
 
     // A4.1: no fee posting into a financially-closed term.
@@ -599,6 +602,8 @@ export class BillingService {
     /** Why the student was skipped — e.g. a structure with no published version (P1-G). */
     reason?: string;
   }> {
+    // No new invoices into a closed year (Wave 5 closed-year guard).
+    await assertTermWritable(this.prisma.client, this.tenant.organizationId, termId);
     const organizationId = this.tenant.organizationId;
     const found = await this.prisma.client.studentProfile.findFirst({
       where: { id: studentProfileId, status: 'active' },

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, FileText, ListChecks, MessageSquare, Workflow } from 'lucide-react';
+import { Plus, Trash2, FileText, ListChecks, MessageSquare, Workflow, Armchair, UserPlus } from 'lucide-react';
+import { CyclesCapacityTab, IntakeTab } from './_components/admissions-setup-tabs';
 import {
   useAdmissionRequirements,
   useUpsertRequirement,
@@ -20,16 +21,16 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
 
-type Tab = 'requirements' | 'templates' | 'enquiries';
+type Tab = 'cycles' | 'intake' | 'requirements' | 'templates' | 'enquiries';
 
 export function SchoolAdmissionsConfigPage() {
-  const [tab, setTab] = useState<Tab>('requirements');
+  const [tab, setTab] = useState<Tab>('cycles');
   return (
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Admissions configuration</h1>
-          <p className="text-sm text-muted-foreground">Requirements, offer-letter templates and enquiries.</p>
+          <p className="text-sm text-muted-foreground">Cycles and seats, intake, requirements, offer-letter templates and enquiries.</p>
         </div>
         {/* Which stages a school requires lives on its own page — it is a different
             kind of setting from the per-item CRUD in these tabs. */}
@@ -41,7 +42,7 @@ export function SchoolAdmissionsConfigPage() {
         </Link>
       </div>
       <div className="flex gap-1 border-b">
-        {([['requirements', 'Requirements', ListChecks], ['templates', 'Offer templates', FileText], ['enquiries', 'Enquiries', MessageSquare]] as const).map(([k, label, Icon]) => (
+        {([['cycles', 'Cycles & seats', Armchair], ['intake', 'Intake', UserPlus], ['requirements', 'Requirements', ListChecks], ['templates', 'Offer templates', FileText], ['enquiries', 'Enquiries', MessageSquare]] as const).map(([k, label, Icon]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -51,6 +52,8 @@ export function SchoolAdmissionsConfigPage() {
           </button>
         ))}
       </div>
+      {tab === 'cycles' && <CyclesCapacityTab />}
+      {tab === 'intake' && <IntakeTab />}
       {tab === 'requirements' && <RequirementsTab />}
       {tab === 'templates' && <TemplatesTab />}
       {tab === 'enquiries' && <EnquiriesTab />}

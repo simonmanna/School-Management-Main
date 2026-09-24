@@ -1,3 +1,4 @@
+import { ScopedToClass } from '../../../kernel/auth/guards/scoped-to-class.decorator';
 import { Body, Controller, Delete, Get, GoneException, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
@@ -19,6 +20,7 @@ export class GradebookController {
   constructor(private readonly service: GradebookService) {}
 
   @Get('sheet')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   sheet(
     @Query('classId') classId: string,
@@ -30,6 +32,7 @@ export class GradebookController {
   }
 
   @Get('subjects')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   subjects(@Query('classId') classId: string) {
     return this.service.subjectsForClass(classId);

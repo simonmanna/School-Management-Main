@@ -1,3 +1,4 @@
+import { ScopedToClass } from '../../../kernel/auth/guards/scoped-to-class.decorator';
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res, StreamableFile } from '@nestjs/common';
 import { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
@@ -258,6 +259,7 @@ export class ReportCardController {
 
   /** Who a class run would cover — shown before generating, so the count is not a surprise. */
   @Get('class-roll')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   classRoll(
     @Query('classId') classId: string,
@@ -275,6 +277,7 @@ export class ReportCardController {
    * reaches the portal.
    */
   @Get('class-pdf')
+  @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
   async classPdf(
     @Query('classId') classId: string,

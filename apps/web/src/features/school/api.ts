@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, resolveAssetUrl } from '@/lib/api';
+import { queryClient } from '@/lib/query-client';
 import { useAttemptKey } from '@/lib/use-attempt-key';
 import { PERMISSIONS, TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
 import { useAuthStore } from '@/stores/auth.store';
@@ -21,7 +22,17 @@ export interface SchoolOverview {
   organizationId: string;
 }
 
-export type StudentStatus = 'active' | 'suspended' | 'transferred' | 'withdrawn' | 'alumni';
+/** Mirrors the API's StudentStatus enum (schema.prisma). `alumni` is legacy. */
+export type StudentStatus =
+  | 'applicant'
+  | 'active'
+  | 'suspended'
+  | 'transferred'
+  | 'withdrawn'
+  | 'graduated'
+  | 'deceased'
+  | 'archived'
+  | 'alumni';
 
 export interface Student {
   id: string;
@@ -143,6 +154,15 @@ export function useTerminology(): Terminology {
     staleTime: 5 * 60 * 1000,
   });
   return data ?? TERMINOLOGY_DEFAULTS;
+}
+
+/**
+ * The school's terminology outside a component (props, table headers built in
+ * helpers). Reads the same cached query `useTerminology` fills; defaults until
+ * it has loaded. Prefer the hook inside components.
+ */
+export function currentTerminology(): Terminology {
+  return queryClient.getQueryData<Terminology>(['school', 'terminology']) ?? TERMINOLOGY_DEFAULTS;
 }
 
 export function useSchoolOverview() {

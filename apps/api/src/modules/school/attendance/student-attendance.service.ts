@@ -1,3 +1,4 @@
+import { assertDateWritable } from '../foundation/academic-year-guard';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -56,6 +57,8 @@ export class StudentAttendanceService {
     // Prisma compound-unique upsert (null keys aren't upsertable). Find-then-
     // create/update instead; the DB partial unique indexes are the safety net.
     await this.prisma.client.$transaction(async (tx: any) => {
+      // A closed year's registers are history (Wave 5 closed-year guard).
+      await assertDateWritable(tx, organizationId, date);
       for (const e of dto.entries) {
         const cfg = cfgByCode[e.status];
         const statusCfgId = cfg?.id ?? null;

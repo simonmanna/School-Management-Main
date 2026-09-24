@@ -1,3 +1,4 @@
+import { assertTermWritable, assertYearWritable } from '../foundation/academic-year-guard';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Exam, ExamSchedule, ExamType, GradeEntry, GradingScale } from '@prisma/client';
 import { PERMISSIONS } from '@erp/shared';
@@ -111,6 +112,8 @@ export class ExamScheduleService extends BaseCrudService<ExamSchedule, CreateExa
    * the same date + start time. Returns structured conflicts as a 400 body.
    */
   async create(dto: CreateExamScheduleDto): Promise<ExamSchedule> {
+    const exam = await this.prisma.client.exam.findFirst({ where: { id: dto.examId }, select: { termId: true, organizationId: true } });
+    if (exam) await assertTermWritable(this.prisma.client, exam.organizationId, exam.termId);
     const d = dto as CreateExamScheduleDto & { venueId?: string; invigilatorId?: string; date: string; startTime: string };
     if (d.venueId || d.invigilatorId) {
       const day = new Date(d.date);
@@ -198,6 +201,12 @@ export class GradeEntryService extends BaseCrudService<GradeEntry, { examSchedul
     const system = profile?.gradingSystem ?? undefined;
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Marks for a closed year are frozen (Wave 5 closed-year guard).
+      const sched = await tx.examSchedule.findFirst({
+        where: { id: dto.examScheduleId },
+        select: { exam: { select: { termId: true } } },
+      });
+      await assertTermWritable(tx, organizationId, sched?.exam?.termId);
       // Validate every entry up front so a bad row can't half-apply.
       for (const e of dto.entries) {
         const maxMarks = e.maxMarks ?? 100;
@@ -742,6 +751,8 @@ export class ReportCardService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const term = await tx.term.findFirst({ where: { id: dto.termId } });
       if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
+      // A closed year's report cards are the record; they are not regenerated.
+      await assertYearWritable(tx, organizationId, term.academicYearId, 'modify');
 
       // A3: the published result spine is the source of truth — a versioned,
       // immutable, reproducible snapshot. Where a term has not been published

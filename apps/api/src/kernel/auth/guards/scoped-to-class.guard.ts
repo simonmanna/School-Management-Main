@@ -25,7 +25,9 @@ export class ScopedToClassGuard implements CanActivate {
     if (!field) return true; // not configured on this handler
 
     const request = context.switchToHttp().getRequest();
-    const raw: unknown = request.params?.[field] ?? request.body?.[field];
+    // Reads name the class in the query string (?classId=), writes in the
+    // params or body — all three are checked (Wave 5, teacher read scoping).
+    const raw: unknown = request.params?.[field] ?? request.query?.[field] ?? request.body?.[field];
 
     if (typeof raw !== 'string' && !Array.isArray(raw)) {
       throw new ForbiddenException('No class was named for a class-scoped route');
