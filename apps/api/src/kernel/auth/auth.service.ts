@@ -24,26 +24,34 @@ interface UserWithRoles {
   passwordHash: string;
   isActive: boolean;
   mfaSecret: string | null;
+  mfaSecretIv?: string | null;
+  mfaSecretTag?: string | null;
   failedLoginCount: number;
   lockedUntil: Date | null;
   roles: { name: string; permissions: string[] }[];
 }
 
-/** Read the decrypted MFA secret, handling the case where encryption columns
- * exist but are null (legacy row created before F.5). */
-function readMfaSecret(user: { mfaSecret: string | null }, enc: EncryptionService): string | null {
+/**
+ * Read the decrypted MFA secret.
+ *
+ * `verifyMfaEnrollment` stores AES-GCM ciphertext in `mfaSecret` and its iv and
+ * auth tag in `mfaSecretIv` / `mfaSecretTag`. This used to decrypt with EMPTY
+ * iv/tag, which always threw, and the catch then handed the CIPHERTEXT to the
+ * TOTP check — so every user who enrolled MFA was locked out at the next login
+ * (E2E audit A1). A row with no iv/tag is a legacy plaintext secret (written
+ * before encryption, or with no key configured).
+ */
+export function readMfaSecret(
+  user: { mfaSecret: string | null; mfaSecretIv?: string | null; mfaSecretTag?: string | null },
+  enc: EncryptionService,
+): string | null {
   if (!user.mfaSecret) return null;
+  if (!user.mfaSecretIv || !user.mfaSecretTag) return user.mfaSecret;
   try {
-    return enc.decrypt({
-      ciphertext: user.mfaSecret,
-      // We packed iv/tag into the same column for backwards compatibility;
-      // new code uses the dedicated columns. For legacy rows, treat the
-      // stored value as plaintext (login attempt log will surface this).
-      iv: '',
-      tag: '',
-    });
+    return enc.decrypt({ ciphertext: user.mfaSecret, iv: user.mfaSecretIv, tag: user.mfaSecretTag });
   } catch {
-    return user.mfaSecret;
+    // Tampered, or the key changed: "misconfigured", never a guessable fallback.
+    return null;
   }
 }
 
@@ -87,8 +95,9 @@ export class AuthService {
     }
 
     return this.tenant.run({ organizationId: org.id }, async () => {
+      // Case-insensitive: "Jane@School.ug" and "jane@school.ug" are one mailbox.
       const user = (await this.prisma.client.user.findFirst({
-        where: { email: dto.email, isActive: true },
+        where: { email: { equals: dto.email.trim(), mode: 'insensitive' }, isActive: true },
         include: { roles: true },
       })) as UserWithRoles | null;
 
@@ -285,6 +294,27 @@ export class AuthService {
       where: { id: auth.sub },
       data: { mfaSecret: null, mfaSecretIv: null, mfaSecretTag: null, mfaEnrolledAt: null },
     });
+    return { ok: true };
+  }
+
+  /**
+   * Server-side logout: revoke the presented refresh token. The web and portal
+   * only dropped tokens from storage, so a copied refresh token stayed valid for
+   * its full lifetime. Always answers ok — whether the token existed is not the
+   * caller's business.
+   */
+  async logout(dto: RefreshDto): Promise<{ ok: true }> {
+    const tokenHash = hashRefreshToken(dto.refreshToken);
+    const row = await this.prisma.raw.refreshToken.findFirst({
+      where: { tokenHash },
+      select: { id: true, organizationId: true, userId: true, revokedAt: true },
+    });
+    if (row && !row.revokedAt) {
+      await this.prisma.raw.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
+      await this.tenant.run({ organizationId: row.organizationId, userId: row.userId }, () =>
+        this.audit.record({ entity: 'User', entityId: row.userId, action: 'update', newValues: { loggedOut: true } }),
+      );
+    }
     return { ok: true };
   }
 

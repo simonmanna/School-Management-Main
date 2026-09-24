@@ -5,6 +5,7 @@ import {
   LogOut, ChevronDown, School, Bell,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { serverLogout } from '@/lib/server-logout';
 import { Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils';
 
@@ -123,6 +124,7 @@ function Header({ audience }: { audience: 'parent' | 'student' | 'teacher' }) {
           aria-label="Sign out"
           className="rounded-lg p-2 text-muted-foreground hover:bg-muted"
           onClick={() => {
+            serverLogout();
             clear();
             navigate('/login', { replace: true });
           }}

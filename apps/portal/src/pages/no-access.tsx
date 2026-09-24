@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { ShieldQuestion } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { serverLogout } from '@/lib/server-logout';
 import { Button, Card, CardContent } from '@/components/ui';
 
 /**
@@ -29,6 +30,7 @@ export function NoAccessPage() {
             variant="outline"
             className="mt-2 w-full"
             onClick={() => {
+              serverLogout();
               clear();
               navigate('/login', { replace: true });
             }}

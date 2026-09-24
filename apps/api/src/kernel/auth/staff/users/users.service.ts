@@ -110,10 +110,12 @@ export class UsersService {
     const orgId = this.tenant.organizationId;
     if (!orgId) throw new ForbiddenException('Tenant context required');
 
+    // Emails are stored lower-case so login and reset match however they are typed.
+    const email = dto.email.trim().toLowerCase();
     const existing = await this.prisma.client.user.findFirst({
-      where: { organizationId: orgId, email: dto.email },
+      where: { organizationId: orgId, email: { equals: email, mode: 'insensitive' } },
     });
-    if (existing) throw new ConflictException(`A user with email "${dto.email}" already exists`);
+    if (existing) throw new ConflictException(`A user with email "${email}" already exists`);
 
     const roles = await this.resolveRoles(orgId, dto.roleIds);
     await this.assertCanAssign(roles);
@@ -123,7 +125,7 @@ export class UsersService {
       const created = await tx.user.create({
         data: {
           organizationId: orgId,
-          email: dto.email,
+          email,
           passwordHash,
           firstName: dto.firstName,
           lastName: dto.lastName ?? null,
@@ -200,6 +202,8 @@ export class UsersService {
           `Hello ${dto.firstName},\n\n` +
           `An account has been created for you. Open the link below to choose a password. ` +
           `It expires in 7 days.\n\n${acceptUrl}\n`,
+        // The stored row must not keep a live token (E2E audit A2).
+        storedBody: `Invitation link sent to ${email}.`,
         payload: { kind: 'invite' },
       })
       .catch(() => undefined); // delivery failure must not undo the account; re-invite via reset
@@ -215,9 +219,10 @@ export class UsersService {
     if (!current) throw new NotFoundException(`User ${id} not found`);
     await this.assertCanManage(id);
 
+    if (dto.email) dto.email = dto.email.trim().toLowerCase();
     if (dto.email && dto.email !== current.email) {
       const collision = await this.prisma.client.user.findFirst({
-        where: { organizationId: current.organizationId, email: dto.email, NOT: { id } },
+        where: { organizationId: current.organizationId, email: { equals: dto.email, mode: 'insensitive' }, NOT: { id } },
       });
       if (collision) throw new ConflictException(`Email "${dto.email}" is already in use`);
     }
@@ -310,6 +315,38 @@ export class UsersService {
       });
     });
     this.events.publish(EVENTS.UserPasswordReset, { id, organizationId: user.organizationId });
+  }
+
+  /**
+   * Clear a user's MFA enrolment so they can sign in with their password and
+   * enrol again — the recovery path for a lost phone, and for every account
+   * locked out by the old MFA read-back bug (E2E audit A1). Same manage guard
+   * as a password reset; audited; all sessions are revoked.
+   */
+  async resetMfa(id: string): Promise<SafeUser> {
+    const user = await this.prisma.client.user.findFirst({ where: { id } });
+    if (!user) throw new NotFoundException(`User ${id} not found`);
+    await this.assertCanManage(id);
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id },
+        data: { mfaSecret: null, mfaSecretIv: null, mfaSecretTag: null, mfaEnrolledAt: null },
+      });
+      await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+      const after = await tx.user.findFirst({
+        where: { id },
+        include: { roles: { select: { id: true, name: true } } },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'User',
+        entityId: id,
+        action: 'update',
+        oldValues: { mfaEnrolled: !!user.mfaSecret },
+        newValues: { mfaEnrolled: false, mfaResetByAdmin: true },
+      });
+      return after!;
+    });
+    return toSafe(updated);
   }
 
   async unlock(id: string): Promise<SafeUser> {

@@ -48,9 +48,19 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 5 * 60 * 1000 } })
   @Post('refresh')
   refresh(@Body() dto: RefreshDto, @Req() req: Request) {
     return this.auth.refresh(dto, req);
+  }
+
+  /** Revoke the presented refresh token. Public: the access token may already be expired. */
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 5 * 60 * 1000 } })
+  @HttpCode(200)
+  @Post('logout')
+  logout(@Body() dto: RefreshDto) {
+    return this.auth.logout(dto);
   }
 
   @NoPermissionRequired('reads only the identity of the calling user')

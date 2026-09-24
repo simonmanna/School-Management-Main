@@ -57,14 +57,24 @@ export class AdmissionsPortalService {
       },
     });
 
-    const link = `${process.env.PORTAL_BASE_URL ?? ''}/apply/track?token=${raw}`;
+    // The applicant has no login, so the link goes to the address on file
+    // directly. It used to be sent with no userId — the email channel threw and
+    // the family never received it — and the raw token was stored in both the
+    // body and payload.href of the notification row (E2E audit AD5).
+    // The tracking page is the WEB app's public `/apply/track` route.
+    const portalUrl = (process.env.WEB_URL ?? process.env.PORTAL_BASE_URL ?? '').replace(/\/$/, '');
+    const link = `${portalUrl}/apply/track?token=${encodeURIComponent(raw)}`;
     await this.notifications.send({
       organizationId,
       channel: 'email',
       category: 'admissions',
+      recipient: { email },
       title: 'Your application access link',
-      body: `Track application ${app.applicationNumber}: ${link}`,
-      payload: { href: link },
+      body:
+        `Use this link to follow application ${app.applicationNumber}, upload documents and answer an offer. ` +
+        `It is personal to you — do not forward it.\n\n${link}`,
+      storedBody: `Access link for application ${app.applicationNumber} sent to ${email}.`,
+      payload: { kind: 'admission_access_link', applicationId },
     });
     // The raw token is returned only so a dev/test caller can follow the link;
     // in production the applicant receives it by email above.

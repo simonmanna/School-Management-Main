@@ -67,6 +67,13 @@ export class UsersController {
     return this.users.resetPassword(id, dto.newPassword);
   }
 
+  @Post(':id/reset-mfa')
+  @HttpCode(200)
+  @RequirePermissions(PERMISSIONS.user.update)
+  resetMfa(@Param('id') id: string) {
+    return this.users.resetMfa(id);
+  }
+
   @Post(':id/unlock')
   @HttpCode(200)
   @RequirePermissions(PERMISSIONS.user.update)

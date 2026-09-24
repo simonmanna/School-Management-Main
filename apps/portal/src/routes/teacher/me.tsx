@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { Receipt, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { serverLogout } from '@/lib/server-logout';
 import { useMyPayslips } from '@/lib/portal-api';
 import { formatCurrency } from '@/lib/utils';
 import { Button, Card, CardContent, CardHeader, CardTitle, Skeleton, PageTitle, Badge } from '@/components/ui';
@@ -53,6 +54,7 @@ export default function TeacherMe() {
         size="lg"
         className="w-full"
         onClick={() => {
+          serverLogout();
           clear();
           navigate('/login', { replace: true });
         }}

@@ -78,6 +78,7 @@ interface OrgUser {
   firstName: string;
   lastName: string | null;
   isActive: boolean;
+  mfaEnrolled?: boolean;
   roles: { id: string; name: string }[];
 }
 
@@ -608,6 +609,14 @@ export function CompanySettingsPage() {
     onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
   });
 
+  // Recovery for a lost authenticator (and for accounts locked out by the old
+  // MFA read-back bug, E2E audit A1): clears the enrolment and signs them out.
+  const resetMfa = useMutation({
+    mutationFn: async (id: string) => (await api.post(`/users/${id}/reset-mfa`)).data,
+    onSuccess: () => { notify.success('Two-step sign-in reset. They can sign in with their password and enrol again.'); qc.invalidateQueries({ queryKey: ['organization-users'] }); },
+    onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
+  });
+
   const changePwd = useMutation({
     mutationFn: async () => (await api.post('/auth/change-password', { currentPassword: oldPwd, newPassword: newPwd })).data,
     onSuccess: () => {
@@ -1006,6 +1015,11 @@ export function CompanySettingsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant={u.isActive ? 'default' : 'outline'}>{u.isActive ? 'active' : 'inactive'}</Badge>
+                        {u.mfaEnrolled && u.id !== auth.user?.id && (
+                          <Button size="sm" variant="ghost" onClick={() => resetMfa.mutate(u.id)} disabled={resetMfa.isPending}>
+                            Reset MFA
+                          </Button>
+                        )}
                         {u.isActive && u.id !== auth.user?.id && (
                           <Button size="sm" variant="ghost" onClick={() => deactivate.mutate(u.id)}>Deactivate</Button>
                         )}

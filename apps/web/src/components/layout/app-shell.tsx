@@ -101,6 +101,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { useAuthStore } from '@/stores/auth.store';
+import { serverLogout } from '@/lib/server-logout';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { GlobalSearch } from '@/components/global-search';
@@ -753,6 +754,7 @@ export function AppShell() {
     )?.label ?? (location.pathname === '/' ? 'Dashboard' : '');
 
   const logout = () => {
+    serverLogout();
     clear();
     navigate('/login', { replace: true });
   };

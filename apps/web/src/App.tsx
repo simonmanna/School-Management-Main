@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from '@/components/protected-route';
 import { AppShell } from '@/components/layout/app-shell';
 import { LoginPage } from '@/pages/login';
+import { SetPasswordPage } from '@/pages/set-password';
 import { PartnersPage } from '@/pages/partners';
 import { CustomersPage, CustomerDetailPage } from '@/pages/customers';
 import { SuppliersPage, SupplierDetailPage } from '@/pages/suppliers';
@@ -311,6 +312,9 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Staff invite / password-reset email links land here (public). */}
+      <Route path="/accept-invite" element={<SetPasswordPage mode="invite" />} />
+      <Route path="/reset-password" element={<SetPasswordPage mode="reset" />} />
       {/* Digital Menu — customer-facing public route (no auth, no shell). */}
       <Route path="/menu/:branchId/:tableId" element={<DigitalMenuPage />} />
       {/* Applicant portal — magic-link tracking page (no auth, no shell). */}

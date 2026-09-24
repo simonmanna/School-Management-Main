@@ -79,7 +79,7 @@ export class OneTimeTokenService {
       return { ok: true };
     }
     const user = await this.prisma.raw.user.findFirst({
-      where: { organizationId: org.id, email, isActive: true },
+      where: { organizationId: org.id, email: { equals: email.trim(), mode: 'insensitive' }, isActive: true },
     });
     if (user) {
       const token = await this.issue({
@@ -88,14 +88,26 @@ export class OneTimeTokenService {
         organizationId: org.id,
         payload: { ip: request?.ip },
       });
+      // The link IS the email (E2E audit A2): the body used to say "click the
+      // link" with no link, and the raw token sat in Notification.payload where
+      // any notifications reader could lift it. The token now travels only in
+      // the email body.
+      const webUrl = (process.env.WEB_URL ?? '').replace(/\/$/, '');
+      const resetUrl =
+        `${webUrl}/reset-password?token=${encodeURIComponent(token)}` +
+        `&org=${encodeURIComponent(organizationCode)}`;
       await this.notifications.send({
         organizationId: org.id,
         userId: user.id,
         channel: 'email',
         category: 'auth',
         title: 'Reset your password',
-        body: `Click the link to reset your password. The link expires in 30 minutes.`,
-        payload: { token, kind: 'password_reset' },
+        body:
+          `Someone asked to reset the password for ${user.email}. If it was you, open this link ` +
+          `to choose a new one. It expires in 30 minutes and works once.\n\n${resetUrl}\n\n` +
+          `If you did not ask for this, ignore this email — your password stays the same.`,
+        storedBody: `Password reset link sent to ${user.email}.`,
+        payload: { kind: 'password_reset' },
       });
       await this.audit.record({
         entity: 'User',
@@ -123,16 +135,20 @@ export class OneTimeTokenService {
       where: { userId: consumed.userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    await this.audit.record({
-      entity: 'User',
-      entityId: consumed.userId,
-      action: 'update',
-      newValues: { passwordResetCompleted: true },
-    });
-    this.events.publish('user.password_reset' as any, {
-      userId: consumed.userId,
-      organizationId: consumed.organizationId,
-      at: new Date().toISOString(),
+    // This route is public, so there is no request tenant: without one the
+    // event bus refused the publish ("No tenant context") and the event was lost.
+    await this.tenant.run({ organizationId: consumed.organizationId, userId: consumed.userId }, async () => {
+      await this.audit.record({
+        entity: 'User',
+        entityId: consumed.userId,
+        action: 'update',
+        newValues: { passwordResetCompleted: true },
+      });
+      this.events.publish('user.password_reset' as any, {
+        userId: consumed.userId,
+        organizationId: consumed.organizationId,
+        at: new Date().toISOString(),
+      });
     });
     return { ok: true };
   }
@@ -153,12 +169,14 @@ export class OneTimeTokenService {
       where: { id: consumed.userId },
       data: { passwordHash: hash, isActive: true, failedLoginCount: 0, lockedUntil: null },
     });
-    await this.audit.record({
-      entity: 'User',
-      entityId: consumed.userId,
-      action: 'update',
-      newValues: { inviteAccepted: true, activated: true },
-    });
+    await this.tenant.run({ organizationId: consumed.organizationId, userId: consumed.userId }, () =>
+      this.audit.record({
+        entity: 'User',
+        entityId: consumed.userId,
+        action: 'update',
+        newValues: { inviteAccepted: true, activated: true },
+      }),
+    );
     return { ok: true, userId: consumed.userId, organizationId: consumed.organizationId };
   }
 }

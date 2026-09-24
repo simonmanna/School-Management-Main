@@ -29,6 +29,18 @@ export interface SendInput {
   title: string;
   body: string;
   payload?: Record<string, unknown>;
+  /**
+   * Deliver to this address instead of the user's own. For people who have no
+   * login — an applicant family, a guardian — email/SMS used to throw
+   * "requires userId" and nothing was ever sent (E2E audit AD5, N1).
+   */
+  recipient?: { email?: string | null; phone?: string | null };
+  /**
+   * What the stored Notification row keeps instead of `body`. A body carrying a
+   * one-time link must not persist it: anyone who can read notifications could
+   * otherwise lift a live reset/access token from the table (E2E audit A2/AD5).
+   */
+  storedBody?: string;
 }
 
 @Injectable()
@@ -91,7 +103,7 @@ export class NotificationsService implements OnModuleInit {
         channel: input.channel,
         category: input.category ?? 'general',
         title: input.title,
-        body: input.body,
+        body: input.storedBody ?? input.body,
         payload: (input.payload ?? {}) as any,
         status: enabled ? 'pending' : 'failed',
       },
@@ -128,17 +140,21 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendEmail(input: SendInput): Promise<void> {
-    if (!input.userId) throw new Error('email channel requires userId');
-    const user = await this.prisma.raw.user.findFirst({ where: { id: input.userId } });
-    if (!user?.email) throw new Error('User has no email address on file');
+    let to = input.recipient?.email?.trim() || null;
+    if (!to) {
+      if (!input.userId) throw new Error('email channel requires userId or recipient.email');
+      const user = await this.prisma.raw.user.findFirst({ where: { id: input.userId } });
+      to = user?.email ?? null;
+    }
+    if (!to) throw new Error('No email address on file');
     if (!this.smtpTransport) {
-      this.logger.warn(`[DEV-EMAIL] to=${user.email} subject=${input.title} body=${input.body}`);
+      this.logger.warn(`[DEV-EMAIL] to=${to} subject=${input.title} body=${input.body}`);
       return;
     }
     const from = process.env.SMTP_FROM ?? 'no-reply@cafe-pos.local';
     await this.smtpTransport.sendMail({
       from,
-      to: user.email,
+      to,
       subject: input.title,
       text: input.body,
       html: `<p>${escapeHtml(input.body)}</p>`,
@@ -146,16 +162,20 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendSms(input: SendInput, notificationId: string): Promise<void> {
-    if (!input.userId) throw new Error('sms channel requires userId');
+    const direct = input.recipient?.phone?.trim() || null;
+    if (!direct && !input.userId) throw new Error('sms channel requires userId or recipient.phone');
     if (!this.twilioClient) {
-      this.logger.warn(`[DEV-SMS] user=${input.userId} body=${input.body}`);
+      this.logger.warn(`[DEV-SMS] to=${direct ?? `user:${input.userId}`} body=${input.body}`);
       return;
     }
-    const user = await this.prisma.raw.user.findFirst({ where: { id: input.userId } });
-    const partner = user?.email
-      ? await this.prisma.raw.partner.findFirst({ where: { organizationId: input.organizationId, email: user.email } })
-      : null;
-    const phone = partner?.phone;
+    let phone = direct;
+    if (!phone) {
+      const user = await this.prisma.raw.user.findFirst({ where: { id: input.userId! } });
+      const partner = user?.email
+        ? await this.prisma.raw.partner.findFirst({ where: { organizationId: input.organizationId, email: user.email } })
+        : null;
+      phone = partner?.phone ?? null;
+    }
     if (!phone) throw new Error('No phone number on file');
     await this.twilioClient.messages.create({
       from: process.env.TWILIO_FROM ?? '',
