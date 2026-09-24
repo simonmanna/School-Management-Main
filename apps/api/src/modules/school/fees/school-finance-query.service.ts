@@ -1222,12 +1222,52 @@ export class SchoolFinanceQueryService {
     const balance = await this.studentBalance(studentProfileId);
     const clearance = await this.feeClearance(studentProfileId);
 
+    // Money paid before (or beyond) any invoice is held as a fee credit, not
+    // allocated — so it is on no ledger row and in no balance figure, and a
+    // parent who paid in advance was handed a statement showing nothing (found
+    // by the Wave 6 web smoke). The balance identity above is AR-only by
+    // design (FINANCIAL_INVARIANTS); credit on account is reported beside it,
+    // with the receipts that funded it this term.
+    const credits = await this.prisma.client.feeCredit.findMany({
+      where: { organizationId, studentProfileId, status: { notIn: ['reversed', 'expired'] } },
+      select: { code: true, amount: true, remaining: true, sourcePaymentId: true, createdAt: true, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const creditOnAccount = credits
+      .filter((c) => c.isActive)
+      .reduce((t, c) => t + Number(c.remaining), 0);
+    const funded = credits.filter(
+      (c) =>
+        c.sourcePaymentId &&
+        (!term?.startDate || c.createdAt >= term.startDate) &&
+        (!term?.endDate || c.createdAt <= new Date(term.endDate.getTime() + 86_399_999)),
+    );
+    const receipts = funded.length
+      ? await this.prisma.client.payment.findMany({
+          where: { organizationId, id: { in: funded.map((c) => c.sourcePaymentId!) } },
+          select: { id: true, paymentNumber: true, paymentDate: true, paymentMethod: true },
+        })
+      : [];
+    const receiptById = new Map(receipts.map((r) => [r.id, r]));
+    const advanceReceipts = funded.map((c) => {
+      const r = receiptById.get(c.sourcePaymentId!);
+      return {
+        date: (r?.paymentDate ?? c.createdAt).toISOString(),
+        reference: r?.paymentNumber ?? c.code,
+        method: r?.paymentMethod ?? null,
+        creditCode: c.code,
+        amount: Number(c.amount),
+      };
+    });
+
     return {
       school,
       student: await this.withPlacedClass(student, term?.id),
       term,
       ledger,
       balance,
+      creditOnAccount,
+      advanceReceipts,
       clearance,
       generatedAt: new Date().toISOString(),
     };

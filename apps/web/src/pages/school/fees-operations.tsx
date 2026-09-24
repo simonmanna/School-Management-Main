@@ -731,7 +731,19 @@ export function SchoolFeeStatementPage() {
               </TableBody>
             </Table>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {(st.advanceReceipts ?? []).length > 0 && (
+              <div className="space-y-1 text-xs">
+                <p className="font-medium">Paid in advance — held as credit</p>
+                {(st.advanceReceipts ?? []).map((a: any) => (
+                  <div key={a.creditCode} className="flex justify-between gap-2">
+                    <span>{new Date(a.date).toLocaleDateString()} · <span className="font-mono">{a.reference}</span></span>
+                    <span className="tabular-nums">{money(a.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               <Stat label="Billed (all time)" value={money(st.balance?.billed ?? 0)} />
               <Stat label="Paid" value={money(st.balance?.collected ?? 0)} tone="emerald" />
               <Stat label="Waived / credited" value={money((st.balance?.waived ?? 0) + (st.balance?.credited ?? 0))} />
@@ -740,6 +752,7 @@ export function SchoolFeeStatementPage() {
                 value={money(st.balance?.balance ?? 0)}
                 tone={(st.balance?.balance ?? 0) > 0 ? 'rose' : 'emerald'}
               />
+              <Stat label="Credit on account" value={money(st.creditOnAccount ?? 0)} tone="emerald" />
             </div>
 
             {st.clearance && (

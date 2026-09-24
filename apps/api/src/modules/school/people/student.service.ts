@@ -102,14 +102,20 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       ...(query.classId ? { classIds: [query.classId] } : readable !== 'all' ? { classIds: readable } : {}),
       ...(query.sectionId ? { sectionIds: [query.sectionId] } : {}),
     };
-    if (Object.keys(target).length === 0) {
+    // The search box says "name or admission no", but the name lives on the
+    // Partner, which the base list cannot reach — a pupil registered a moment
+    // ago was unfindable by name at the fee desk. Searches take this path.
+    if (Object.keys(target).length === 0 && !query.search) {
       const page = await super.list(query);
       return { ...page, data: (await this.withPlacement(page.data)) as any };
     }
     const page = Math.max(1, Number(query.page) || 1);
     const pageSize = Math.min(500, Math.max(1, Number(query.pageSize) || 50));
-    const where: Record<string, unknown> = { ...this.placements.studentWhere(target) };
-    if (query.search) where.admissionNo = { contains: query.search, mode: 'insensitive' };
+    const where: Record<string, unknown> = Object.keys(target).length ? { ...this.placements.studentWhere(target) } : {};
+    if (query.search) {
+      const term = { contains: query.search, mode: 'insensitive' };
+      where.OR = [{ admissionNo: term }, { partner: { name: term } }];
+    }
     const [rows, total] = await Promise.all([
       this.prisma.client.studentProfile.findMany({
         where,
