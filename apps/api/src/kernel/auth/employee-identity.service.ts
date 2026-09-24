@@ -69,8 +69,9 @@ export class EmployeeIdentityService {
       select: { id: true, partnerId: true },
     });
 
-    // An org may run the school vertical without HR. Fall back to resolving the
-    // staff profile straight off the Partner when there is no HR record.
+    // No HR record linked to this login → no staff identity. There is NO
+    // fallback: an unlinked teacher cannot act as themselves until an admin
+    // links the login (HR → employee → System access, E2E audit T1).
     if (!employee) {
       return { userId: uid, hrEmployeeId: null, partnerId: null, staffProfileId: null };
     }

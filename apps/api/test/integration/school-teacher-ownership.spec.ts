@@ -18,6 +18,8 @@
  *   ownership without the state → still refused (approval stays separate)
  */
 import { Test, TestingModule } from '@nestjs/testing';
+import { HrModule } from '../../src/modules/hr/hr.module';
+import { HrOrgService } from '../../src/modules/hr/hr-org.service';
 import { ForbiddenException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PERMISSIONS } from '@erp/shared';
@@ -84,6 +86,8 @@ describeDb('integration: teacher owner-scoped writes', () => {
   let termId = '';
   let aliceOfferingId = '';
   let bobOfferingId = '';
+
+  let hrOrg: HrOrgService;
 
   const as = <T>(userId: string, permissions: string[], fn: () => Promise<T>): Promise<T> =>
     tenant.run({ organizationId, userId, permissions }, fn);
@@ -252,6 +256,7 @@ describeDb('integration: teacher owner-scoped writes', () => {
         InventoryModule,
         InvoicingModule,
         SchoolModule,
+        HrModule,
       ],
     }).compile();
     await moduleRef.init();
@@ -259,6 +264,7 @@ describeDb('integration: teacher owner-scoped writes', () => {
     attendance = moduleRef.get(StudentAttendanceService);
     marking = moduleRef.get(MarkingService);
     lessonPlans = moduleRef.get(LessonPlanningService);
+    hrOrg = moduleRef.get(HrOrgService);
   });
 
   afterAll(async () => {
@@ -286,6 +292,21 @@ describeDb('integration: teacher owner-scoped writes', () => {
     it('still lets the office mark any class', async () => {
       await as(officeUserId, OFFICE, () => attendance.mark(register(aliceClassId) as any));
       await as(officeUserId, OFFICE, () => attendance.mark(register(bobClassId) as any));
+    });
+
+    // T1: the link is the whole of a teacher's identity. Until HR links the
+    // login to the employee record the teacher can mark nothing; the API route
+    // existed but had no screen, so this was never done in practice.
+    it('an unlinked teacher is blocked until HR links their login, then can mark (T1)', async () => {
+      const emp = await raw.hrEmployee.findFirstOrThrow({ where: { organizationId, userId: aliceUserId } });
+      const HR = ['hr:employee_identity'];
+      await as(officeUserId, HR, () => hrOrg.linkUser(emp.id, null));
+      await expect(
+        as(aliceUserId, TEACHER, () => attendance.mark(register(aliceClassId) as any)),
+      ).rejects.toThrow(ForbiddenException);
+
+      await as(officeUserId, HR, () => hrOrg.linkUser(emp.id, aliceUserId));
+      await as(aliceUserId, TEACHER, () => attendance.mark(register(aliceClassId) as any));
     });
 
     it('BLOCKS a login with no staff record, even holding the own grant', async () => {

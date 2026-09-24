@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SkillsTab, ExperienceTab, DocumentsTab, QualificationsTab, CertificationsTab } from './employee-detail-tabs';
 import { useMoneyFormatter } from '@/lib/format';
+import { SystemAccessCard } from './SystemAccessCard';
 
 
 const EMP_TYPE_STYLE: Record<string, string> = {
@@ -89,6 +90,13 @@ export function HrEmployeeDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
+      <SystemAccessCard
+        employeeId={emp.id}
+        userId={(emp as { userId?: string | null }).userId ?? null}
+        email={emp.email ?? null}
+        firstName={emp.firstName}
+        lastName={emp.lastName ?? null}
+      />
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Employment & pay */}
         <Card>
