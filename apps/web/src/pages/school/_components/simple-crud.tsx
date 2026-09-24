@@ -46,9 +46,11 @@ export interface SimpleCrudProps {
   queryKey: string;
   /** Optional subtitle. */
   subtitle?: string;
+  /** Extra per-row actions, rendered before Edit / Delete. */
+  rowActions?: (row: any) => React.ReactNode;
 }
 
-export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryKey, subtitle }: SimpleCrudProps) {
+export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryKey, subtitle, rowActions }: SimpleCrudProps) {
   const qc = useQueryClient();
   const path = `${S}/${endpoint}`;
   const { data, isLoading } = useQuery({
@@ -212,6 +214,7 @@ export function SimpleCrud({ title, endpoint, nameField, columns, fields, queryK
                     return <td key={c.key} className="px-4 py-2">{val}</td>;
                   })}
                   <td className="px-4 py-2 text-right">
+                    {rowActions?.(row)}
                     <Button variant="ghost" size="icon" onClick={() => openEdit(row)} aria-label="Edit">
                       <Pencil className="h-4 w-4" />
                     </Button>

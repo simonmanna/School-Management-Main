@@ -106,6 +106,24 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
     });
   }
 
+  /**
+   * The year the school is working in: the one flagged current, else the ACTIVE
+   * year whose dates contain today. Never "the first year in the list" — that
+   * returned a PLANNING year as current (E2E audit P2).
+   */
+  async current(): Promise<AcademicYear | null> {
+    const flagged = await this.prisma.client.academicYear.findFirst({
+      where: { isCurrent: true, deletedAt: null },
+      include: { terms: true },
+    });
+    if (flagged) return flagged;
+    const today = new Date();
+    return this.prisma.client.academicYear.findFirst({
+      where: { status: 'ACTIVE', deletedAt: null, startDate: { lte: today }, endDate: { gte: today } },
+      include: { terms: true },
+    });
+  }
+
   async setCurrent({ academicYearId }: SetCurrentYearDto): Promise<AcademicYear> {
     return this.prisma.client.$transaction(async (tx: any) => {
       await lockYear(tx, this.tenant.organizationId, academicYearId);
@@ -122,6 +140,13 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
               : 'An archived year cannot become current again.'),
         );
       }
+      // Re-selecting the year that is ALREADY current changes nothing. It used to
+      // fall through and clear the current term, so saving any edit to the
+      // current year (the form re-sends isCurrent) silently left the school
+      // with no current term (E2E audit Y1).
+      if (target.isCurrent && target.status === 'ACTIVE') {
+        return tx.academicYear.findFirst({ where: { id: academicYearId }, include: { terms: true } });
+      }
       await tx.academicYear.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
       // Making a year current also makes it ACTIVE: a year the school is
       // working in is not still being planned, and it is certainly not closed.
@@ -132,8 +157,9 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
         data: { isCurrent: true, status: 'ACTIVE', closedAt: null, closedById: null },
       });
       if (res.count === 0) throw new NotFoundException(`AcademicYear ${academicYearId} not found`);
-      // Also unset any "current" terms; the operator must re-pick one for the new year.
-      await tx.term.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+      // The current year really changed: a term of the old year cannot stay
+      // current, so the operator re-picks one for the new year.
+      await tx.term.updateMany({ where: { isCurrent: true, academicYearId: { not: academicYearId } }, data: { isCurrent: false } });
       const row = await tx.academicYear.findFirst({ where: { id: academicYearId }, include: { terms: true } });
       await this.audit.recordInTx(tx, {
         entity: 'AcademicYear',
@@ -242,8 +268,13 @@ export class AcademicYearService extends BaseCrudService<AcademicYear, CreateAca
         }
       }
 
-      // A closed or archived year cannot also be the current one.
+      // A closed or archived year cannot also be the current one — nor can any
+      // of its terms. Closing used to leave its term flagged current, so every
+      // "this term" screen kept writing into a closed year's term (Y1).
       const clearsCurrent = to === 'CLOSED' || to === 'ARCHIVED';
+      if (clearsCurrent) {
+        await tx.term.updateMany({ where: { academicYearId: id, isCurrent: true }, data: { isCurrent: false } });
+      }
       await tx.academicYear.updateMany({
         where: { id },
         data: {

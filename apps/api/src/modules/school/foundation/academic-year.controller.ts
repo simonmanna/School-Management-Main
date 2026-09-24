@@ -28,10 +28,8 @@ export class AcademicYearController {
 
   @Get('current')
   @RequirePermissions(PERMISSIONS.school.read)
-  async current() {
-    const year = await this.years.list({ page: 1, pageSize: 1 } as any);
-    const found = year.data.find((y: any) => y.isCurrent);
-    return found ?? year.data[0] ?? null;
+  current() {
+    return this.years.current();
   }
 
   @Get(':id')
