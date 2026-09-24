@@ -132,12 +132,21 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
   const createCustomerRefund = jest.fn().mockResolvedValue({ id: 'refund_1' });
   const feeCreditUpdate = jest.fn().mockResolvedValue({});
   const feeCreditClaim = jest.fn().mockResolvedValue({ count: 1 });
+  // E2E audit F4: the cash portion is drawn down on the source receipt with a
+  // conditional decrement, after the payer's receipts are row-locked.
+  const paymentClaim = jest.fn().mockResolvedValue({ count: 1 });
+  const lockReceipts = jest.fn().mockResolvedValue([]);
   const tx = {
+    $queryRawUnsafe: lockReceipts,
     studentProfile: {
       findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }),
     },
     payment: {
       findFirst: jest.fn().mockResolvedValue(null), // no replay
+      findMany: jest.fn().mockResolvedValue(
+        opts.unallocated ? [{ id: 'pay_1', unallocatedAmount: new Prisma.Decimal(opts.unallocated) }] : [],
+      ),
+      updateMany: paymentClaim,
       aggregate: jest.fn().mockResolvedValue({
         _sum: { unallocatedAmount: new Prisma.Decimal(opts.unallocated) },
       }),
@@ -199,7 +208,7 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
     reversals as any,
     advanced as any,
   );
-  return { service, createCustomerRefund, feeCreditUpdate, feeCreditClaim, posting };
+  return { service, createCustomerRefund, feeCreditUpdate, feeCreditClaim, posting, paymentClaim, lockReceipts, finance, tx };
 }
 
 describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
@@ -282,6 +291,28 @@ describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
     expect(feeCreditClaim).not.toHaveBeenCalled();
     expect(feeCreditUpdate).not.toHaveBeenCalled();
     expect(posting.post).not.toHaveBeenCalled();
+  });
+
+  it('draws the refunded cash down on the source receipt, so it cannot be refunded twice (F4)', async () => {
+    // The defect: nothing reduced a receipt's unallocated value when it was
+    // paid back, so the entitlement never shrank and the same overpayment
+    // could be refunded again and again.
+    const { service, paymentClaim, lockReceipts, finance, tx } = makeRefundService({ unallocated: 500_000, creditRemaining: 0 });
+    await service.refundFee(dto);
+    expect(lockReceipts).toHaveBeenCalledWith(expect.stringContaining('FOR UPDATE'), 'org_test', 'p_1');
+    // The entitlement is read on the refund's own transaction, after the lock.
+    expect(finance.refundableBreakdown).toHaveBeenCalledWith('p_1', 'stu_1', tx);
+    expect(paymentClaim).toHaveBeenCalledWith({
+      where: { id: 'pay_1', unallocatedAmount: { gte: new Prisma.Decimal(500_000) } },
+      data: { unallocatedAmount: { decrement: new Prisma.Decimal(500_000) } },
+    });
+  });
+
+  it('aborts, paying nothing, when a racing refund already drew the receipt down (F4)', async () => {
+    const { service, paymentClaim, createCustomerRefund } = makeRefundService({ unallocated: 500_000, creditRemaining: 0 });
+    paymentClaim.mockResolvedValueOnce({ count: 0 });
+    await expect(service.refundFee(dto)).rejects.toThrow(/changed while it was being prepared/);
+    expect(createCustomerRefund).not.toHaveBeenCalled();
   });
 
   it('never treats an overpayment and the credit it funded as two pots (P1-3)', async () => {

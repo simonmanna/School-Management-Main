@@ -171,37 +171,6 @@ export class OrganizationsService {
     });
   }
 
-  /** Invite a new user to the current organization. */
-  async inviteUser(params: { email: string; firstName: string; lastName?: string; roleId?: string }) {
-    const orgId = this.tenant.organizationId;
-    const existing = await this.prisma.raw.user.findUnique({
-      where: { organizationId_email: { organizationId: orgId, email: params.email.toLowerCase() } },
-    });
-    if (existing) throw new ConflictException('A user with this email already exists in your organization');
-    const passwordHash = await bcrypt.hash(randomPassword(), 10);
-    const user = await this.prisma.raw.user.create({
-      data: {
-        organizationId: orgId,
-        email: params.email.toLowerCase(),
-        passwordHash,
-        firstName: params.firstName,
-        lastName: params.lastName ?? null,
-        ...(params.roleId ? { roles: { connect: [{ id: params.roleId }] } } : {}),
-      },
-    });
-    const token = await this.tokens.issue({ purpose: 'invite', userId: user.id, organizationId: orgId });
-    await this.notifications.send({
-      organizationId: orgId,
-      userId: user.id,
-      channel: 'email',
-      category: 'auth',
-      title: 'You have been invited',
-      body: 'Click the link to set your password.',
-      payload: { token, kind: 'invite' },
-    });
-    return { id: user.id, email: user.email, inviteToken: token };
-  }
-
   private async seedAdminRoleAndMappings(orgId: string) {
     // Seed permissions catalog (global).
     const { ALL_PERMISSIONS, PORTAL_ROLE_PRESETS, SCHOOL_ROLE_PRESETS } = await import('@erp/shared');

@@ -17,7 +17,7 @@ export class FinanceControlsController {
   /* ── Adjustments ── */
 
   @Get('adjustments')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listAdjustments(@Query('studentProfileId') studentProfileId?: string, @Query('status') status?: string) {
     return this.controls.listAdjustments(studentProfileId, status);
   }
@@ -47,14 +47,14 @@ export class FinanceControlsController {
   /* ── Term financial close ── */
 
   @Get('terms/:termId/close-status')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   closeStatus(@Param('termId') termId: string) {
     return this.controls.getTermCloseStatus(termId);
   }
 
   /** Term-scoped totals exactly as a close would freeze them. */
   @Get('terms/:termId/close-preview')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   closePreview(@Param('termId') termId: string) {
     return this.controls.termTotalsSnapshot(termId);
   }

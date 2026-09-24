@@ -8,13 +8,13 @@ export class BillingRunController {
   constructor(private readonly runs: BillingRunService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list() {
     return this.runs.list();
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   get(@Param('id') id: string) {
     return this.runs.get(id);
   }

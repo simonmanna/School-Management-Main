@@ -44,6 +44,7 @@ import {
   useTerms,
   useSchoolProfile,
   type BatchRow,
+  type DiscountAppliesTo,
   type ReceiptRow,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1085,23 +1086,52 @@ export function SchoolFeeOverridesPage() {
 export function SchoolDiscountsPage() {
   const { data: discounts, isLoading } = useDiscounts();
   const create = useCreateDiscount();
+  const { data: classes } = useClasses();
   const [draft, setDraft] = useState({ code: '', name: '', type: 'percentage' as 'percentage' | 'fixed_amount', value: '' });
+  // Who the discount is for. There is no "blank = everyone": an untargeted
+  // discount used to reach every pupil in the school, so the whole-school case
+  // must be chosen deliberately.
+  const [scope, setScope] = useState<'students' | 'classes' | 'all'>('students');
+  const [classIds, setClassIds] = useState<string[]>([]);
+  const [pupils, setPupils] = useState<Array<{ id: string; label: string }>>([]);
+  const [search, setSearch] = useState('');
+  const { data: found } = useStudents({ search: search || undefined, pageSize: 20 });
+
+  const appliesTo: DiscountAppliesTo =
+    scope === 'all' ? { allStudents: true }
+    : scope === 'classes' ? { classIds }
+    : { studentProfileIds: pupils.map((p) => p.id) };
 
   const save = async () => {
     if (!draft.code.trim() || !draft.name.trim()) return notify.error('A code and a name are required');
     if (!(Number(draft.value) > 0)) return notify.error('Enter a value above zero');
+    if (scope === 'classes' && classIds.length === 0) return notify.error('Pick at least one class');
+    if (scope === 'students' && pupils.length === 0) return notify.error('Add at least one pupil');
     try {
       await create.mutateAsync({
         code: draft.code.trim().toUpperCase(),
         name: draft.name.trim(),
         type: draft.type,
         value: Number(draft.value),
+        appliesTo,
       });
       notify.success(`Discount ${draft.code.toUpperCase()} created`);
       setDraft({ code: '', name: '', type: 'percentage', value: '' });
+      setClassIds([]);
+      setPupils([]);
     } catch (e) {
       notify.error(apiError(e, 'Could not create the discount'));
     }
+  };
+
+  const describe = (a: DiscountAppliesTo | null | undefined) => {
+    if (!a) return 'No one';
+    if (a.allStudents) return 'Whole school';
+    const parts: string[] = [];
+    if (a.studentProfileIds?.length) parts.push(`${a.studentProfileIds.length} pupil(s)`);
+    if (a.classIds?.length) parts.push(`${a.classIds.length} class(es)`);
+    if (a.gradeLevelIds?.length) parts.push(`${a.gradeLevelIds.length} grade level(s)`);
+    return parts.join(' · ') || 'No one';
   };
 
   return (
@@ -1134,10 +1164,64 @@ export function SchoolDiscountsPage() {
           </div>
           <div className="flex items-end gap-2">
             <div className="flex-1">
-              <Label className="text-xs">{draft.type === 'percentage' ? 'Percent' : 'Amount'}</Label>
+              <Label className="text-xs">{draft.type === 'percentage' ? 'Percent' : 'Amount per pupil'}</Label>
               <Input inputMode="numeric" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value.replace(/[^\d.]/g, '') })} />
             </div>
             <Button onClick={save} disabled={create.isPending}>Add</Button>
+          </div>
+          <div className="space-y-2 sm:col-span-5">
+            <Label className="text-xs">Applies to</Label>
+            <select className={sel} value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+              <option value="students">Specific pupils</option>
+              <option value="classes">Whole classes</option>
+              <option value="all">Every pupil in the school</option>
+            </select>
+            {scope === 'classes' && (
+              <div className="flex flex-wrap gap-3 text-sm">
+                {(classes?.data ?? []).map((c) => (
+                  <label key={c.id} className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={classIds.includes(c.id)}
+                      onChange={(e) => setClassIds(e.target.checked ? [...classIds, c.id] : classIds.filter((x) => x !== c.id))}
+                    />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            {scope === 'students' && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <Input placeholder="Search name or admission no…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                  <select
+                    className={`${sel} mt-1`}
+                    value=""
+                    onChange={(e) => {
+                      const s = (found?.data ?? []).find((x: any) => x.id === e.target.value) as any;
+                      if (s && !pupils.some((p) => p.id === s.id)) {
+                        setPupils([...pupils, { id: s.id, label: `${s.partner?.name ?? ''} · ${s.admissionNo}` }]);
+                      }
+                    }}
+                  >
+                    <option value="">Add a pupil…</option>
+                    {(found?.data ?? []).map((s: any) => (
+                      <option key={s.id} value={s.id}>{s.partner?.name} · {s.admissionNo}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {pupils.map((p) => (
+                    <Badge key={p.id} variant="secondary" className="cursor-pointer" onClick={() => setPupils(pupils.filter((x) => x.id !== p.id))}>
+                      {p.label} ×
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {scope === 'all' && (
+              <p className="text-xs text-muted-foreground">This discount will reduce every pupil's bill at the next billing run.</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1146,21 +1230,22 @@ export function SchoolDiscountsPage() {
         <CardHeader className="pb-2"><CardTitle className="text-base"><Users className="mr-1 inline h-4 w-4" /> Active discounts</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Value</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Type</TableHead><TableHead>Applies to</TableHead><TableHead className="text-right">Value</TableHead></TableRow></TableHeader>
             <TableBody>
-              {isLoading && <TableRow><TableCell colSpan={4} className="text-muted-foreground">Loading…</TableCell></TableRow>}
+              {isLoading && <TableRow><TableCell colSpan={5} className="text-muted-foreground">Loading…</TableCell></TableRow>}
               {(discounts?.data ?? []).map((d) => (
                 <TableRow key={d.id}>
                   <TableCell className="font-mono text-xs">{d.code}</TableCell>
                   <TableCell>{d.name}</TableCell>
                   <TableCell className="capitalize">{d.type.replace('_', ' ')}</TableCell>
+                  <TableCell>{describe(d.appliesTo)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {d.type === 'percentage' ? `${d.value}%` : money(d.value)}
                   </TableCell>
                 </TableRow>
               ))}
               {!isLoading && (discounts?.data ?? []).length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-muted-foreground">No discounts yet.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="text-muted-foreground">No discounts yet.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

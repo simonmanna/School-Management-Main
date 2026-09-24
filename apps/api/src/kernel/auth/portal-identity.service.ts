@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { PortalClaim, SchoolPrincipal } from './portal-identity.types';
@@ -59,6 +60,14 @@ export class PortalIdentityService {
     if (claim?.kind === 'guardian' && claim.guardianContactIds?.length) {
       return { kind: 'guardian', userId, guardianContactIds: claim.guardianContactIds };
     }
+    // No claim used to mean "staff", and staff pass every per-student gate. A
+    // parent whose portal identity was revoked still holds the Parent role, signs
+    // in with no claim, and so became staff — able to read every pupil. A family
+    // account (portal grant, no staff read authority) without a live claim is
+    // nobody, not staff.
+    if (isFamilyOnlyAccount(this.tenant.permissions ?? [])) {
+      throw new ForbiddenException('This portal account is not linked to a student or guardian');
+    }
     return { kind: 'staff', userId };
   }
 
@@ -115,4 +124,15 @@ export class PortalIdentityService {
     }
     return [];
   }
+}
+
+/**
+ * True for an account whose only school authority is the family portal: it holds
+ * the parent or student portal grant and nothing that lets staff read the school.
+ * Administrators hold every grant (including the portal ones) plus `school:read`,
+ * so they are never family-only.
+ */
+export function isFamilyOnlyAccount(permissions: readonly string[]): boolean {
+  if (permissions.includes('*') || permissions.includes(PERMISSIONS.school.read)) return false;
+  return permissions.includes(PERMISSIONS.school.parentPortal) || permissions.includes(PERMISSIONS.school.studentPortal);
 }

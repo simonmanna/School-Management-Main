@@ -4,7 +4,9 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import type { Role, User } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { TenantContextService } from '../../../tenancy/tenant-context.service';
@@ -13,8 +15,11 @@ import { EventBus } from '../../../events/event-bus';
 import { PasswordService } from '../../password.service';
 import { PermissionResolverService } from '../../permission-resolver.service';
 import { DataScopeService } from '../../data-scope.service';
+import { OneTimeTokenService } from '../../one-time-token.service';
+import { NotificationsService } from '../../../notifications/notifications.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
 import { EVENTS } from '@erp/shared';
 
 /** Public shape returned by the API — never includes passwordHash. */
@@ -61,6 +66,8 @@ export class UsersService {
     private readonly password: PasswordService,
     private readonly resolver: PermissionResolverService,
     private readonly dataScope: DataScopeService,
+    @Optional() private readonly tokens?: OneTimeTokenService,
+    @Optional() private readonly notifications?: NotificationsService,
   ) {}
 
   async list(query: { search?: string; page?: number; pageSize?: number }) {
@@ -137,6 +144,69 @@ export class UsersService {
     return toSafe(user);
   }
 
+  /**
+   * Invite a user who sets their own password. Same escalation guard as
+   * `create` — the actor can only hand out roles within their own authority.
+   * The one-time token travels by email only; it is never returned to the
+   * caller, or an inviter could redeem it and sign in as the invitee.
+   */
+  async invite(dto: InviteUserDto): Promise<SafeUser> {
+    const orgId = this.tenant.organizationId;
+    if (!orgId) throw new ForbiddenException('Tenant context required');
+    if (!this.tokens || !this.notifications) throw new Error('Invitations are not available in this context');
+    const email = dto.email.trim().toLowerCase();
+
+    const existing = await this.prisma.client.user.findFirst({ where: { organizationId: orgId, email } });
+    if (existing) throw new ConflictException(`A user with email "${email}" already exists`);
+
+    const roles = await this.resolveRoles(orgId, dto.roleIds ?? []);
+    await this.assertCanAssign(roles);
+    // Unusable until the invite is redeemed: nobody knows this password.
+    const passwordHash = await this.password.hash(randomBytes(24).toString('base64url'));
+
+    const user = await this.prisma.client.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          organizationId: orgId,
+          email,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName ?? null,
+          isActive: true,
+          roles: { connect: roles.map((r) => ({ id: r.id })) },
+        },
+        include: { roles: { select: { id: true, name: true } } },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'User',
+        entityId: created.id,
+        action: 'create',
+        newValues: { id: created.id, email: created.email, firstName: created.firstName, roleIds: roles.map((r) => r.id), invited: true },
+      });
+      return created;
+    });
+
+    const token = await this.tokens.issue({ purpose: 'invite', userId: user.id, organizationId: orgId });
+    const webUrl = (process.env.WEB_URL ?? '').replace(/\/$/, '');
+    const acceptUrl = `${webUrl}/accept-invite?token=${encodeURIComponent(token)}`;
+    await this.notifications
+      .send({
+        organizationId: orgId,
+        userId: user.id,
+        channel: 'email',
+        category: 'auth',
+        title: 'You have been invited',
+        body:
+          `Hello ${dto.firstName},\n\n` +
+          `An account has been created for you. Open the link below to choose a password. ` +
+          `It expires in 7 days.\n\n${acceptUrl}\n`,
+        payload: { kind: 'invite' },
+      })
+      .catch(() => undefined); // delivery failure must not undo the account; re-invite via reset
+    this.events.publish(EVENTS.UserCreated, { id: user.id, organizationId: orgId });
+    return toSafe(user);
+  }
+
   async update(id: string, dto: UpdateUserDto): Promise<SafeUser> {
     const current = await this.prisma.client.user.findFirst({
       where: { id },
@@ -159,6 +229,11 @@ export class UsersService {
       await this.assertCanAssign(roles);
       await this.guardLastAdmin(id, roles.map((r) => r.id));
       resolvedRoles = roles.map((r) => ({ id: r.id, name: r.name }));
+    }
+
+    // Deactivating someone must not strip the organization of its last administrator.
+    if (dto.isActive === false && current.isActive) {
+      await this.guardLastAdmin(id, []);
     }
 
     // Guard against self-demotion / self-deactivation.
@@ -190,6 +265,10 @@ export class UsersService {
       });
       if (resolvedRoles) {
         await tx.user.update({ where: { id }, data: { roles: { set: resolvedRoles.map((r) => ({ id: r.id })) } } });
+      }
+      if (dto.isActive === false && current.isActive) {
+        // A deactivated user must not keep refreshing their way back in.
+        await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
       }
       const after = await tx.user.findFirst({
         where: { id },

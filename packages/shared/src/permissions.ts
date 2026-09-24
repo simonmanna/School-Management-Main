@@ -521,6 +521,10 @@ export const PERMISSIONS = {
     manageSavedReports: 'school:reports:saved:write',
     scheduleReports: 'school:reports:schedule',
     manageFees: 'school:fees:write',
+    // Read any pupil's fee balance, ledger, invoices, receipts and the finance
+    // dashboards. Split from `school:read`, which every staff preset holds — a
+    // class teacher or the librarian has no business reading family finances.
+    readFees: 'school:fees:read',
     manageDocuments: 'school:documents:write',
     readDocuments: 'school:documents:read',
     collectPayments: 'school:fees:collect',
@@ -970,6 +974,7 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:courses:write': { label: 'Manage course offerings', description: 'Create, staff, publish, close and roll over canonical teaching contexts.', group: 'School', subgroup: 'Teaching' },
   'school:courses:teach': { label: 'Teach assigned courses', description: 'Use teaching tools only inside an assigned offering.', group: 'School', subgroup: 'Teaching' },
   'school:courses:enrol': { label: 'Manage course rosters', description: 'Generate compulsory rosters and record elective, remedial, opt-out or withdrawal decisions.', group: 'School', subgroup: 'Enrollment' },
+  'school:fees:read': { label: 'View fees & balances', description: 'Read fee balances, ledgers, invoices, receipts and finance dashboards for any pupil.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
   'school:fees:write': { label: 'Manage fee structures', description: 'Configure fee categories/structures/schedules.', group: 'School', subgroup: 'Fees & Finance' },
   'school:fees:collect': { label: 'Collect payments', description: 'Record fee payments at the till/gate.', group: 'School', subgroup: 'Fees & Finance' },
   'school:fees:refund': { label: 'Issue refund', description: 'Pay money back to a payer.', group: 'School', subgroup: 'Fees & Finance' },
@@ -1188,6 +1193,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:reports:read',
       'school:reports:export',
       'school:reports:finance:read',
+      'school:fees:read',
       'school:reports:audit:read',
       'school:reports:saved:write',
     ],
@@ -1222,6 +1228,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:reports:read',
       'school:reports:export',
       'school:reports:finance:read',
+      'school:fees:read',
       'school:reports:saved:write',
     ],
   },

@@ -20,7 +20,7 @@ export class ReportingController {
   }
 
   @Get('finance')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   financeDashboard() {
     return this.reports.financeDashboard();
   }
@@ -32,7 +32,7 @@ export class ReportingController {
   }
 
   @Get('outstanding-by-class')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   outstandingByClass() {
     return this.reports.outstandingByClass();
   }
@@ -50,7 +50,7 @@ export class ReportingController {
   }
 
   @Get('daily-collections')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   dailyCollections(@Query('days') days?: string) {
     return this.reports.dailyCollections(Number(days ?? '30'));
   }

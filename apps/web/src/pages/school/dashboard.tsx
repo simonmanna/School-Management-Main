@@ -19,6 +19,8 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 
 const money = (n: number | undefined) =>
   (n ?? 0).toLocaleString('en-UG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,6 +29,8 @@ const int = (n: number | undefined) => (n ?? 0).toLocaleString('en-UG');
 export function SchoolDashboardPage() {
   const { data: admin } = useSchoolAdminDashboard();
   const { data: fin } = useSchoolFinanceDashboard();
+  // Fee figures are for finance roles only (school:fees:read), not every staff member.
+  const canReadFees = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.readFees));
   const { data: academic } = useSchoolAcademicDashboard();
   const { data: attendance } = useSchoolAttendanceToday();
   const { data: top } = useSchoolTopPerformers(5);
@@ -169,7 +173,7 @@ export function SchoolDashboardPage() {
           to one month of collections, which is not a quantity that means
           anything; "Deferred Revenue" was hardcoded to zero. Neither is worth
           showing over saying less, accurately. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {canReadFees && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -189,10 +193,10 @@ export function SchoolDashboardPage() {
               </p>
               <Landmark className="h-4 w-4 text-muted-foreground/60" />
             </div>
-            <p className="mt-2 text-xl font-bold text-orange-600">UGX {money(fin?.outstanding ?? admin?.outstandingFees)}</p>
+            <p className="mt-2 text-xl font-bold text-orange-600">UGX {money(fin?.outstanding ?? admin?.outstandingFees ?? undefined)}</p>
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       {/* ── Marking progress + top of the school ──────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -242,7 +246,7 @@ export function SchoolDashboardPage() {
       </div>
 
       {/* ── Fee charts ─────────────────────────────────────────────────────── */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {canReadFees && <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader><CardTitle className="text-base">Fees owed, by class</CardTitle></CardHeader>
           <CardContent className="h-72">
@@ -272,7 +276,7 @@ export function SchoolDashboardPage() {
             </ResponsiveContainer>
           </CardContent>
         </Card>
-      </div>
+      </div>}
 
       <Card>
         <CardHeader><CardTitle className="text-base">Go to</CardTitle></CardHeader>
@@ -281,8 +285,8 @@ export function SchoolDashboardPage() {
           <span className="text-muted-foreground">·</span>
           <Link className="text-primary hover:underline" to="/school/attendance">Attendance</Link>
           <span className="text-muted-foreground">·</span>
-          <Link className="text-primary hover:underline" to="/school/fees">Fees &amp; billing</Link>
-          <span className="text-muted-foreground">·</span>
+          {canReadFees && <><Link className="text-primary hover:underline" to="/school/fees">Fees &amp; billing</Link>
+          <span className="text-muted-foreground">·</span></>}
           <Link className="text-primary hover:underline" to="/school/report-cards">Report cards</Link>
         </CardContent>
       </Card>

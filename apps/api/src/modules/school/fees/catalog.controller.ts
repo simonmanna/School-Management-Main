@@ -42,13 +42,13 @@ export class FeeStructureController {
   constructor(private readonly service: FeeStructureService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -66,7 +66,7 @@ export class FeeStructureController {
   }
 
   @Get(':id/versions')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   versions(@Param('id') id: string) {
     return this.service.listVersions(id);
   }
@@ -93,19 +93,19 @@ export class FeeScheduleController {
   constructor(private readonly service: FeeScheduleService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get('for-term/:termId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   forTerm(@Param('termId') id: string) {
     return this.service.forTerm(id);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -135,19 +135,19 @@ export class StudentFeeAssignmentController {
   constructor(private readonly service: StudentFeeAssignmentService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get('by-student/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   byStudent(@Param('studentProfileId') id: string) {
     return this.service.byStudent(id);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -183,7 +183,7 @@ export class StudentOptionalFeeController {
   constructor(private readonly service: StudentOptionalFeeService) {}
 
   @Get('roster')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   roster(
     @Query('termId') termId: string,
     @Query('feeCategoryId') feeCategoryId: string,
@@ -194,7 +194,7 @@ export class StudentOptionalFeeController {
   }
 
   @Get('by-student/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   byStudent(@Param('studentProfileId') id: string) {
     return this.service.byStudent(id);
   }
@@ -218,13 +218,13 @@ export class DiscountController {
   constructor(private readonly service: DiscountService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -254,19 +254,19 @@ export class ScholarshipController {
   constructor(private readonly service: ScholarshipService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get('active-for/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   activeFor(@Param('studentProfileId') id: string) {
     return this.service.activeForStudent(id);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -296,19 +296,19 @@ export class InstallmentPlanController {
   constructor(private readonly service: InstallmentPlanService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get('by-student/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   byStudent(@Param('studentProfileId') id: string) {
     return this.service.byStudent(id);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -338,13 +338,13 @@ export class PenaltyRuleController {
   constructor(private readonly service: PenaltyRuleService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
@@ -374,19 +374,19 @@ export class PenaltyRunController {
   constructor(private readonly service: PenaltyRunService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list() {
     return this.service.list();
   }
 
   @Get('by-schedule/:scheduleId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   bySchedule(@Param('scheduleId') id: string) {
     return this.service.bySchedule(id);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   get(@Param('id') id: string) {
     return this.service.get(id);
   }
@@ -397,13 +397,13 @@ export class FeeCategoryController {
   constructor(private readonly service: FeeCategoryService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(@Query() q: PaginationDto) {
     return this.service.list(q);
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }

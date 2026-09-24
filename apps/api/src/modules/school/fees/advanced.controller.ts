@@ -55,14 +55,14 @@ export class AdvancedFinanceController {
   }
 
   @Get('sponsorships')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listSponsorships(@Query() q: PaginationDto, @Query('studentProfileId') studentProfileId?: string) {
     this.assertSponsorshipEnabled();
     return this.finance.listSponsorships(studentProfileId);
   }
 
   @Get('sponsors/:sponsorId/statement')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   sponsorStatement(@Param('sponsorId') sponsorId: string) {
     this.assertSponsorshipEnabled();
     return this.finance.sponsorStatement(sponsorId);
@@ -74,7 +74,7 @@ export class AdvancedFinanceController {
    * Unguarded by design — it is the question, not the feature.
    */
   @Get('sponsorships/availability')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   sponsorshipAvailability() {
     return {
       enabled: process.env.SCHOOL_SPONSORSHIP_ENABLED === 'true',
@@ -93,7 +93,7 @@ export class AdvancedFinanceController {
   }
 
   @Get('waivers')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listWaivers(@Query('studentProfileId') studentProfileId?: string) {
     return this.finance.listWaivers(studentProfileId);
   }
@@ -132,7 +132,7 @@ export class AdvancedFinanceController {
   }
 
   @Get('credits')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listCredits(@Query('studentProfileId') studentProfileId?: string) {
     return this.finance.listCredits(studentProfileId);
   }
@@ -153,7 +153,7 @@ export class AdvancedFinanceController {
   }
 
   @Get('waiver-categories')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listWaiverCategories(@Query('includeInactive') includeInactive?: string) {
     return this.finance.listWaiverCategories(includeInactive === 'true');
   }
@@ -196,7 +196,7 @@ export class AdvancedFinanceController {
 
   /* Fee defaulters & bad debtors (read-only reports) */
   @Get('fee-defaulters')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   feeDefaulters(
     @Query('asOf') asOf?: string,
     @Query('minBalance') minBalance?: string,
@@ -206,7 +206,7 @@ export class AdvancedFinanceController {
   }
 
   @Get('bad-debtors')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   badDebtors(
     @Query('asOf') asOf?: string,
     @Query('thresholdDays') thresholdDays?: string,
@@ -225,7 +225,7 @@ export class AdvancedFinanceController {
 
   /* Aging (P2) */
   @Get('aging')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   aging(@Query('asOf') asOf?: string) {
     return this.finance.aging(asOf);
   }

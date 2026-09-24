@@ -22,14 +22,14 @@ export class MobileMoneyController {
 
   /** Which providers are configured, so the UI offers only those. */
   @Get('availability')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   availability() {
     return this.momo.availability();
   }
 
   /** What the parent is being asked to clear. */
   @Get('quote/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   quote(@Param('studentProfileId') studentProfileId: string) {
     return this.momo.quoteFor(studentProfileId);
   }
@@ -48,7 +48,7 @@ export class MobileMoneyController {
   }
 
   @Get('gateways')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   gateways() {
     return this.momo.listGateways();
   }
@@ -62,13 +62,13 @@ export class MobileMoneyController {
 
   /** Clearing balance per provider: GL vs unsettled collections. */
   @Get('clearing')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   clearing() {
     return this.momo.clearingPosition();
   }
 
   @Get('settlements')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   settlements() {
     return this.momo.listSettlements();
   }
@@ -81,7 +81,7 @@ export class MobileMoneyController {
   }
 
   @Get('requests')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list(
     @Query('studentProfileId') studentProfileId?: string,
     @Query('status') status?: string,

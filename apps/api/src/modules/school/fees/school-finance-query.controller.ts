@@ -14,21 +14,21 @@ export class SchoolFinanceQueryController {
   constructor(private readonly finance: SchoolFinanceQueryService) {}
 
   @Get('students/:id/balance')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   @ScopedToStudent('id')
   balance(@Param('id') id: string) {
     return this.finance.studentBalance(id);
   }
 
   @Get('students/:id/ledger')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   @ScopedToStudent('id')
   ledger(@Param('id') id: string, @Query('from') from?: string, @Query('to') to?: string) {
     return this.finance.studentLedger(id, { from, to });
   }
 
   @Get('invoices')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   listInvoices(
     @Query('studentProfileId') studentProfileId?: string,
     @Query('termId') termId?: string,
@@ -40,26 +40,26 @@ export class SchoolFinanceQueryController {
   }
 
   @Get('invoices/:id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   getInvoice(@Param('id') id: string) {
     return this.finance.getInvoice(id);
   }
 
   /** Accounting trail for fee-produced journal entries (receipts, invoices, settlements). */
   @Get('journal/:id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   feeJournal(@Param('id') id: string) {
     return this.finance.feeJournal(id);
   }
 
   @Get('reconciliation/ar-gl')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   reconcileArGl() {
     return this.finance.reconcileCurrentArToGl();
   }
 
   @Get('reconciliation/credit-liability')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   reconcileCreditLiability() {
     return this.finance.reconcileCreditLiability();
   }
@@ -69,7 +69,7 @@ export class SchoolFinanceQueryController {
    * An empty `drifted` array is the gate passing.
    */
   @Get('reconciliation/cached-projections')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   reconcileCachedProjections() {
     return this.finance.reconcileCachedProjections();
   }
@@ -81,7 +81,7 @@ export class SchoolFinanceQueryController {
    * never mistaken for an accounting defect.
    */
   @Get('reconciliation/operational-cash')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   reconcileOperationalCash() {
     return this.finance.reconcileOperationalCash();
   }
@@ -89,7 +89,7 @@ export class SchoolFinanceQueryController {
   /* ── B2 · receipts a bursar can find again ── */
 
   @Get('receipts')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   searchReceipts(
     @Query('q') q?: string,
     @Query('from') from?: string,
@@ -107,7 +107,7 @@ export class SchoolFinanceQueryController {
   }
 
   @Get('receipts/:id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   getReceipt(@Param('id') id: string) {
     return this.finance.getReceipt(id);
   }
@@ -115,7 +115,7 @@ export class SchoolFinanceQueryController {
   /* ── C1 · fee clearance before exams ── */
 
   @Get('clearance/student/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   feeClearance(
     @Param('studentProfileId') studentProfileId: string,
     @Query('thresholdPercent') thresholdPercent?: string,
@@ -126,7 +126,7 @@ export class SchoolFinanceQueryController {
   }
 
   @Get('clearance/class/:classId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   classFeeClearance(@Param('classId') classId: string, @Query('thresholdPercent') thresholdPercent?: string) {
     return this.finance.classFeeClearance(classId, {
       thresholdPercent: thresholdPercent ? Number(thresholdPercent) : undefined,
@@ -136,7 +136,7 @@ export class SchoolFinanceQueryController {
   /* ── C4 · the statement a parent is handed ── */
 
   @Get('statement/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   termStatement(@Param('studentProfileId') studentProfileId: string, @Query('termId') termId?: string) {
     return this.finance.termStatement(studentProfileId, termId);
   }
@@ -146,7 +146,7 @@ export class SchoolFinanceQueryController {
    * window when a parent disputes a balance.
    */
   @Get('explain/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   explainBalance(@Param('studentProfileId') studentProfileId: string) {
     return this.finance.explainBalance(studentProfileId);
   }
@@ -154,7 +154,7 @@ export class SchoolFinanceQueryController {
   /* ── D2 · instalment progress ── */
 
   @Get('installments/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   installmentProgress(@Param('studentProfileId') studentProfileId: string, @Query('termId') termId?: string) {
     return this.finance.installmentProgress(studentProfileId, termId);
   }
@@ -162,13 +162,13 @@ export class SchoolFinanceQueryController {
   /* ── E1 / E2 · reports that leave the screen ── */
 
   @Get('reports/cash-book')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   dailyCashBook(@Query('date') date?: string) {
     return this.finance.dailyCashBook(date);
   }
 
   @Get('reports/budget-variance')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   budgetVariance(@Query('termId') termId?: string) {
     return this.finance.budgetVariance(termId);
   }

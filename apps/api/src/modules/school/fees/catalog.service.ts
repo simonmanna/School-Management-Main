@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertDiscountTargeted } from './discount-targeting';
 import type {
   Discount,
   FeeCategory,
@@ -329,6 +330,16 @@ export class DiscountService extends BaseCrudService<Discount, CreateDiscountDto
   protected readonly searchFields = ['code', 'name'];
   constructor(private readonly prisma: PrismaService) {
     super(prisma.client.discount as unknown as CrudDelegate);
+  }
+
+  override async create(data: CreateDiscountDto): Promise<Discount> {
+    assertDiscountTargeted(data.appliesTo);
+    return super.create(data);
+  }
+
+  override async update(id: string, data: UpdateDiscountDto): Promise<Discount> {
+    if (data.appliesTo !== undefined) assertDiscountTargeted(data.appliesTo);
+    return super.update(id, data);
   }
 }
 

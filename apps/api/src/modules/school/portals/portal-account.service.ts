@@ -161,7 +161,30 @@ export class PortalAccountService {
       where: { userId: row.userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    await this.audit.record({ entity: 'PortalIdentity', entityId: portalIdentityId, action: 'update', newValues: { revoked: true } });
+    // With no live identity left, the account keeps no reason to hold a family
+    // portal role. Removing it means a later sign-in carries no portal grant at
+    // all, rather than relying on every gate to spot a claimless parent.
+    const remaining = await this.prisma.client.portalIdentity.count({
+      where: { userId: row.userId, organizationId: this.org, revokedAt: null },
+    });
+    if (remaining === 0) {
+      const familyRoles = await this.prisma.client.role.findMany({
+        where: { organizationId: this.org, name: { in: Object.values(PORTAL_ROLE_BY_SUBJECT) } },
+        select: { id: true },
+      });
+      if (familyRoles.length > 0) {
+        await this.prisma.client.user.update({
+          where: { id: row.userId },
+          data: { roles: { disconnect: familyRoles.map((r) => ({ id: r.id })) } },
+        });
+      }
+    }
+    await this.audit.record({
+      entity: 'PortalIdentity',
+      entityId: portalIdentityId,
+      action: 'update',
+      newValues: { revoked: true, familyRolesRemoved: remaining === 0 },
+    });
     return { ok: true };
   }
 

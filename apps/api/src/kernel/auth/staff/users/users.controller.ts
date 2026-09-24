@@ -18,6 +18,7 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
 
 @ApiTags('staff')
 @Controller('users')
@@ -45,6 +46,12 @@ export class UsersController {
   @RequirePermissions(PERMISSIONS.user.create)
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
+  }
+
+  @Post('invite')
+  @RequirePermissions(PERMISSIONS.user.create)
+  invite(@Body() dto: InviteUserDto) {
+    return this.users.invite(dto);
   }
 
   @Patch(':id')

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
+import { PERMISSIONS, TERMINOLOGY_DEFAULTS, type Terminology } from '@erp/shared';
+import { useAuthStore } from '@/stores/auth.store';
 
 /* ───────────────────────── Types (mirror the backend contract) ───────────────────────── */
 
@@ -158,7 +159,8 @@ export interface SchoolAdminDashboard {
   campuses: number;
   classes: number;
   sections: number;
-  outstandingFees: number;
+  /** Null when the caller lacks `school:fees:read`. */
+  outstandingFees: number | null;
 }
 
 export function useSchoolAdminDashboard() {
@@ -230,6 +232,7 @@ export interface SchoolFinanceDashboard {
 export function useSchoolFinanceDashboard() {
   return useQuery({
     queryKey: ['school', 'reports', 'finance'],
+    enabled: canReadFees(),
     queryFn: async () => (await api.get<SchoolFinanceDashboard>(`${S}/reports/finance`)).data,
   });
 }
@@ -238,6 +241,7 @@ export interface OutstandingByClass { classId: string; className: string; outsta
 export function useSchoolOutstandingByClass() {
   return useQuery({
     queryKey: ['school', 'reports', 'outstanding-by-class'],
+    enabled: canReadFees(),
     queryFn: async () => (await api.get<OutstandingByClass[]>(`${S}/reports/outstanding-by-class`)).data,
   });
 }
@@ -246,6 +250,7 @@ export interface DailyCollection { date: string; total: number }
 export function useSchoolDailyCollections(days = 30) {
   return useQuery({
     queryKey: ['school', 'reports', 'daily-collections', days],
+    enabled: canReadFees(),
     queryFn: async () => (await api.get<DailyCollection[]>(`${S}/reports/daily-collections`, { params: { days } })).data,
   });
 }
@@ -1378,7 +1383,7 @@ export function useStudentEnrollments(studentProfileId: string | undefined) {
 export function useStudentStatement(id: string | undefined) {
   return useQuery({
     queryKey: ['school', 'statement', id],
-    enabled: !!id,
+    enabled: !!id && canReadFees(),
     queryFn: async () => (await api.get<FeeStatement>(`${S}/students/${id}/statement`)).data,
   });
 }
@@ -2526,6 +2531,15 @@ export interface Discount {
   type: 'percentage' | 'fixed_amount';
   value: number;
   isActive?: boolean;
+  appliesTo?: DiscountAppliesTo | null;
+}
+/** Who a discount reaches. Empty means no one; the whole school must be chosen explicitly. */
+export interface DiscountAppliesTo {
+  allStudents?: boolean;
+  studentProfileIds?: string[];
+  classIds?: string[];
+  gradeLevelIds?: string[];
+  feeCodes?: string[];
 }
 export function useDiscounts() {
   return useQuery({
@@ -2536,7 +2550,7 @@ export function useDiscounts() {
 export function useCreateDiscount() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { code: string; name: string; type: 'percentage' | 'fixed_amount'; value: number }) =>
+    mutationFn: async (dto: { code: string; name: string; type: 'percentage' | 'fixed_amount'; value: number; appliesTo: DiscountAppliesTo }) =>
       (await api.post<Discount>(`${S}/discounts`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'discounts'] }),
   });
@@ -7378,4 +7392,9 @@ export function useCachedProjectionReconciliation() {
     queryFn: async () =>
       (await api.get<CachedProjectionReconciliation>(`${S}/finance/reconciliation/cached-projections`)).data,
   });
+}
+
+/** Finance reads need `school:fees:read`; skip the request instead of eating a 403. */
+function canReadFees(): boolean {
+  return useAuthStore.getState().hasPermission(PERMISSIONS.school.readFees);
 }

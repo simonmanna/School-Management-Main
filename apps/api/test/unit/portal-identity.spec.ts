@@ -1,5 +1,10 @@
 import { PortalIdentityService } from '../../src/kernel/auth/portal-identity.service';
 import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
+import { ForbiddenException } from '@nestjs/common';
+
+const PARENT = ['school:portal:parent', 'school:portal:student', 'school:portal:self', 'school:lms:read'];
+const STUDENT = ['school:portal:student', 'school:portal:self'];
+const ADMIN = ['school:read', 'school:portal:parent', 'school:portal:student'];
 
 /**
  * L0.1/L0.6 — portal identity regression suite.
@@ -15,7 +20,11 @@ import type { PortalClaim } from '../../src/kernel/auth/portal-identity.types';
  */
 
 /** Guardianship rows the fake StudentGuardian table will answer from. */
-function makeService(claim: PortalClaim | undefined, guardianships: Array<{ studentProfileId: string; guardianContactId: string }> = []) {
+function makeService(
+  claim: PortalClaim | undefined,
+  guardianships: Array<{ studentProfileId: string; guardianContactId: string }> = [],
+  permissions: string[] = [],
+) {
   const studentGuardian = {
     findFirst: jest.fn(async (args: any) => {
       const w = args.where;
@@ -36,7 +45,7 @@ function makeService(claim: PortalClaim | undefined, guardianships: Array<{ stud
     }),
   };
   const prisma = { client: { studentGuardian }, raw: { portalIdentity: { findMany: jest.fn(async () => []) } } } as any;
-  const tenant = { organizationId: 'org_1', userId: 'user_1', portal: claim } as any;
+  const tenant = { organizationId: 'org_1', userId: 'user_1', portal: claim, permissions } as any;
   return new PortalIdentityService(prisma, tenant);
 }
 
@@ -61,6 +70,31 @@ describe('PortalIdentityService', () => {
       // become "some student" — it degrades to staff, which is gated separately.
       expect(makeService({ kind: 'student' } as PortalClaim).principal().kind).toBe('staff');
       expect(makeService({ kind: 'guardian', guardianContactIds: [] }).principal().kind).toBe('staff');
+    });
+  });
+
+  describe('principal() — revoked family accounts', () => {
+    // Revoking a PortalIdentity left the Parent role in place. The next login
+    // carried no claim, principal() said "staff", and staff pass every
+    // per-student gate: the revoked parent could read every pupil.
+    it('refuses a parent account with no live claim instead of treating it as staff', async () => {
+      const svc = makeService(undefined, [], PARENT);
+      expect(() => svc.principal()).toThrow(ForbiddenException);
+      await expect(svc.canAccessStudent('sp_anyone')).rejects.toThrow(ForbiddenException);
+      await expect(svc.filterAccessibleStudents(['sp_a', 'sp_b'])).rejects.toThrow(ForbiddenException);
+    });
+
+    it('refuses a student account with no live claim', () => {
+      expect(() => makeService(undefined, [], STUDENT).principal()).toThrow(ForbiddenException);
+    });
+
+    it('refuses a parent account whose claim is malformed', () => {
+      expect(() => makeService({ kind: 'guardian', guardianContactIds: [] }, [], PARENT).principal()).toThrow(ForbiddenException);
+    });
+
+    it('still treats an administrator (who holds every grant) as staff', () => {
+      expect(makeService(undefined, [], ADMIN).principal().kind).toBe('staff');
+      expect(makeService(undefined, [], ['*']).principal().kind).toBe('staff');
     });
   });
 

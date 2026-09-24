@@ -65,13 +65,22 @@ export class PaymentAllocationReversalService {
    *
    * Restores the invoice's receivable, decrements the document's cached
    * `amountPaid`, and returns the value to the payment's unallocated balance so
-   * it can be re-allocated or refunded. Posts the compensating GL leg
-   * (Dr AR / Cr Cash-or-Bank) — the mirror of the original settlement.
+   * it can be re-allocated or refunded.
+   *
+   * Posts NO journal entry. The receipt already credited AR for its whole
+   * amount when it was taken, and allocating it to an invoice posted nothing —
+   * so un-allocating it has nothing to compensate. The ledger identity
+   * `GL AR = open residual − unallocated receipts` holds on both sides: the
+   * residual and the unallocated pot rise by the same amount. Money leaving the
+   * school is a refund (its own outbound payment and journal); a receipt that
+   * never should have existed is `reversePayment`. This used to post
+   * Dr AR / Cr Cash here, which double-counted a payment reversal and moved
+   * cash in the GL on every reallocation although none left the drawer.
    *
    * The original `PaymentAllocation` row is never touched except to update its
-   * cached `status`; the reversal row carries the reason, actor and journal.
+   * cached `status`; the reversal row carries the reason and actor.
    */
-  async reverseAllocation(allocationId: string, reason: string, tx?: any, returnCash = true) {
+  async reverseAllocation(allocationId: string, reason: string, tx?: any) {
     if (!reason?.trim()) {
       throw new BadRequestException('A reversal must carry a reason — it is the audit trail.');
     }
@@ -131,38 +140,9 @@ export class PaymentAllocationReversalService {
         where: { id: alloc.paymentId },
         data: {
           allocatedAmount: dec(alloc.payment.allocatedAmount).minus(amount),
-          // A standalone reversal returns the cash to the payer (the GL posts
-          // Dr AR / Cr Cash), so the money leaves the till and must NOT be added
-          // back to unallocatedAmount — otherwise the audit gate sees the same
-          // cash as both "returned" and "still in the till, available". A
-          // reallocation keeps the value with the school (no cash leg), so it
-          // DOES return the amount to the unallocated pot to be re-applied.
-          ...(returnCash
-            ? {}
-            : { unallocatedAmount: dec(alloc.payment.unallocatedAmount).plus(amount) }),
+          unallocatedAmount: dec(alloc.payment.unallocatedAmount).plus(amount),
         },
       });
-
-      // GL: the mirror of settlement — Dr AR / Cr Cash|Bank. Posted as its own
-      // entry rather than by editing the original, per §Immutability.
-      const arAccount = await this.accounts.receivableAccount(null, db);
-      const cashAccount =
-        alloc.payment.accountId ??
-        (await this.accounts.mapped(alloc.payment.paymentMethod === 'bank' ? 'default_bank' : 'default_cash', db));
-      const entry = await this.posting.post(
-        {
-          journalCode: 'GEN',
-          date: new Date(),
-          description: `Allocation reversed · ${doc.documentNumber} · ${reason}`,
-          sourceType: 'school_allocation_reversal',
-          sourceId: alloc.id,
-          lines: [
-            { accountId: arAccount, debit: amount.toString(), partnerId: doc.partnerId, description: 'AR restored' },
-            { accountId: cashAccount, credit: amount.toString(), description: 'Settlement reversed' },
-          ],
-        },
-        db,
-      );
 
       const reversal = await db.paymentAllocationReversal.create({
         data: {
@@ -170,7 +150,7 @@ export class PaymentAllocationReversalService {
           paymentAllocationId: alloc.id,
           amount,
           reason: reason.trim(),
-          journalEntryId: entry.id,
+          journalEntryId: null,
           reversedById: this.tenant.userId ?? null,
         },
       });
@@ -181,7 +161,7 @@ export class PaymentAllocationReversalService {
         entity: 'PaymentAllocation',
         entityId: alloc.id,
         action: 'reverse',
-        newValues: { amount: amount.toString(), reason, journalEntryId: entry.id },
+        newValues: { amount: amount.toString(), reason },
       });
       this.events.publish('school.fee.allocation.reversed', {
         organizationId,
@@ -220,7 +200,7 @@ export class PaymentAllocationReversalService {
         where: { organizationId, paymentId, status: 'posted' },
       });
       for (const alloc of posted) {
-        await this.reverseAllocation(alloc.id, `Reallocation: ${reason}`, tx, false);
+        await this.reverseAllocation(alloc.id, `Reallocation: ${reason}`, tx);
       }
 
       // Re-read: the reversals above returned value to the unallocated pot.
@@ -283,7 +263,10 @@ export class PaymentAllocationReversalService {
       }
 
       // The receipt's own journal entry is reversed by the posting engine, which
-      // writes a compensating entry rather than deleting the original.
+      // writes a compensating entry rather than deleting the original. This is
+      // the ONLY ledger movement of a payment reversal: the allocation reversals
+      // above post nothing, so the receipt's Dr Cash / Cr AR is undone exactly
+      // once.
       if (payment.journalEntryId) {
         await this.posting.reverse(
           payment.journalEntryId,

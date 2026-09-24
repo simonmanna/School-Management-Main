@@ -99,7 +99,7 @@ export class SchoolFinanceQueryService {
     const [collectedAgg, creditedAgg] = await Promise.all([
       docIds.length
         ? this.prisma.client.paymentAllocation.aggregate({
-            where: { organizationId, documentId: { in: docIds } },
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
             _sum: { amount: true },
           })
         : Promise.resolve({ _sum: { amount: null } }),
@@ -198,7 +198,7 @@ export class SchoolFinanceQueryService {
       docIds.length
         ? this.prisma.client.paymentAllocation.groupBy({
             by: ['documentId'],
-            where: { organizationId, documentId: { in: docIds } },
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
             _sum: { amount: true },
           })
         : Promise.resolve([] as Array<{ documentId: string; _sum: { amount: unknown } }>),
@@ -330,7 +330,7 @@ export class SchoolFinanceQueryService {
     const [allocations, credits, waivers, adjustments] = await Promise.all([
       docIds.length
         ? this.prisma.client.paymentAllocation.findMany({
-            where: { organizationId, documentId: { in: docIds } },
+            where: { organizationId, documentId: { in: docIds }, status: 'posted' },
             include: { payment: { select: { paymentNumber: true, paymentDate: true, paymentMethod: true } } },
           })
         : Promise.resolve([] as any[]),
@@ -932,6 +932,8 @@ export class SchoolFinanceQueryService {
   async refundableBreakdown(
     partnerId: string,
     studentProfileId: string,
+    /** Pass the caller's transaction so uncommitted reversals and locks are seen. */
+    db: any = this.prisma.client,
   ): Promise<{
     fromPayments: number;
     fromCredits: number;
@@ -939,25 +941,23 @@ export class SchoolFinanceQueryService {
     credits: Array<{ id: string; code: string; source: string; remaining: number }>;
   }> {
     const organizationId = this.tenant.organizationId;
-    const [inboundAgg, refundedAgg, convertedAgg, credits] = await Promise.all([
-      this.prisma.client.payment.aggregate({
-        where: { organizationId, partnerId, direction: 'inbound' },
+    const [inboundAgg, convertedAgg, credits]: [
+      { _sum: { unallocatedAmount: unknown } },
+      { _sum: { amount: unknown } },
+      Array<{ id: string; code: string; source: string; remaining: unknown }>,
+    ] = await Promise.all([
+      // Unallocated value on live receipts. A refund draws this down on the
+      // source receipt itself (SchoolPaymentService.refundFee), so what is left
+      // here is what is still refundable — there is no separate "already
+      // refunded" figure to subtract. The old subtraction matched outbound
+      // payments allocated to fee documents, which a fee refund never is, so it
+      // was always zero and the same cash could be refunded again and again.
+      db.payment.aggregate({
+        where: { organizationId, partnerId, direction: 'inbound', status: { not: 'cancelled' } },
         _sum: { unallocatedAmount: true },
       }),
-      // Outbound refunds already paid. Scoped to fee-sourced refunds (P2-F):
-      // an unrelated outbound payment on this partner is not a fee refund and
-      // must not shrink the student's fee entitlement.
-      this.prisma.client.payment.aggregate({
-        where: {
-          organizationId,
-          partnerId,
-          direction: 'outbound',
-          allocations: { some: { document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } } } },
-        },
-        _sum: { amount: true },
-      }),
       // overpayment already converted into a credit (counted once — P1-3)
-      this.prisma.client.feeCredit.aggregate({
+      db.feeCredit.aggregate({
         where: { organizationId, studentProfileId, source: 'overpayment' },
         _sum: { amount: true },
       }),
@@ -967,7 +967,7 @@ export class SchoolFinanceQueryService {
       // artifact representing a balance the school carried forward, not money
       // a payer ever handed over, so it must never be paid out as cash however
       // its isRefundable flag happens to be set.
-      this.prisma.client.feeCredit.findMany({
+      db.feeCredit.findMany({
         where: {
           organizationId,
           studentProfileId,
@@ -982,14 +982,12 @@ export class SchoolFinanceQueryService {
     ]);
 
     const unallocated = Number(inboundAgg._sum.unallocatedAmount ?? 0);
-    const alreadyRefunded = Number(refundedAgg._sum.amount ?? 0);
     const converted = Number(convertedAgg._sum.amount ?? 0);
     const fromCredits = credits.reduce((s, c) => s + Number(c.remaining), 0);
 
-    // Unallocated payment value, minus what has already left as refunds, minus
-    // the portion already re-represented as a FeeCredit (entitlement
-    // uniqueness), PLUS refundable outstanding credits.
-    const fromPayments = Math.max(0, unallocated - alreadyRefunded - converted);
+    // Unallocated payment value minus the portion already re-represented as a
+    // FeeCredit (entitlement uniqueness), PLUS refundable outstanding credits.
+    const fromPayments = Math.max(0, unallocated - converted);
 
     return {
       fromPayments: Number(dec(fromPayments).toFixed(6)),

@@ -385,10 +385,9 @@ export class PaymentService {
    *
    * Deliberately does NOT post a journal entry: the cash and its GL leg were
    * recorded when the payment was created and are unchanged by moving value
-   * between invoices. The caller's reversal already posted the compensating
-   * AR leg; this re-settles it against a different document. Callers that need
-   * the AR leg re-posted supply it themselves (see
-   * PaymentAllocationReversalService).
+   * between invoices. The allocation reversal that freed the value posted
+   * nothing either (see PaymentAllocationReversalService), so moving it to a
+   * different document is ledger-neutral end to end.
    */
   async allocateExisting(
     dto: { paymentId: string; allocations: Array<{ documentId: string; amount: number }> },

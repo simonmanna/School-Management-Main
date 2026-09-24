@@ -31,7 +31,7 @@ export class StudentController {
   }
 
   @Get(':id/statement')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   statement(@Param('id') id: string) {
     return this.students.statement(id);
   }

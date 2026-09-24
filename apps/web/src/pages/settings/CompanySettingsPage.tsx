@@ -493,7 +493,7 @@ export function CompanySettingsPage() {
 
   const users = useQuery<OrgUser[]>({
     queryKey: ['organization-users'],
-    queryFn: async () => (await api.get<OrgUser[]>('/organizations/users')).data,
+    queryFn: async () => (await api.get<{ data: OrgUser[] }>('/users', { params: { pageSize: 100 } })).data.data,
   });
 
   const invDefaults = useQuery<InventoryDefaults>({
@@ -588,11 +588,11 @@ export function CompanySettingsPage() {
   });
 
   const invite = useMutation({
-    mutationFn: async () => (await api.post('/organizations/users/invite', {
+    mutationFn: async () => (await api.post('/users/invite', {
       email: inviteEmail, firstName: inviteFirst, lastName: inviteLast || undefined,
     })).data,
-    onSuccess: (data: any) => {
-      notify.success('Invited', `Token: ${data.inviteToken?.slice(0, 12)}…`);
+    onSuccess: () => {
+      notify.success('Invitation sent', `${inviteEmail} will receive a link to set their password.`);
       setInviteOpen(false);
       setInviteEmail('');
       setInviteFirst('');
@@ -603,8 +603,9 @@ export function CompanySettingsPage() {
   });
 
   const deactivate = useMutation({
-    mutationFn: async (id: string) => await api.patch(`/organizations/users/${id}/deactivate`),
+    mutationFn: async (id: string) => await api.patch(`/users/${id}`, { isActive: false }),
     onSuccess: () => { notify.success('Deactivated'); qc.invalidateQueries({ queryKey: ['organization-users'] }); },
+    onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
   });
 
   const changePwd = useMutation({

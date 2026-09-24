@@ -1,4 +1,17 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  CanActivate,
+  Controller,
+  ExecutionContext,
+  ForbiddenException,
+  Get,
+  Injectable,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { timingSafeEqual } from 'node:crypto';
 import { ApiTags, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import { Public } from '../../kernel/auth/decorators/public.decorator';
@@ -33,11 +46,18 @@ class UpdateSettingsDto {
   @IsOptional() @IsObject() settings?: Record<string, unknown>;
 }
 
-class InviteUserDto {
-  @ApiProperty() @IsEmail() email!: string;
-  @ApiProperty() @IsString() firstName!: string;
-  @ApiProperty({ required: false }) @IsOptional() @IsString() lastName?: string;
-  @ApiProperty({ required: false }) @IsOptional() @IsString() roleId?: string;
+/**
+ * Guards run before pipes, so an anonymous caller gets 403 before the body is
+ * validated — a 400 listing the required fields would document the endpoint
+ * for them (E2E audit S1).
+ */
+@Injectable()
+export class ProvisioningSecretGuard implements CanActivate {
+  canActivate(ctx: ExecutionContext): boolean {
+    const header = ctx.switchToHttp().getRequest().headers?.['x-provisioning-secret'];
+    assertProvisioningSecret(Array.isArray(header) ? header[0] : header);
+    return true;
+  }
 }
 
 @ApiTags('organizations')
@@ -48,8 +68,15 @@ export class OrganizationsController {
     private readonly prisma: PrismaService,
   ) {}
 
-  /** Public — create a new tenant. In a real SaaS this sits behind billing. */
+  /**
+   * Create a new tenant. Not reachable by an ordinary caller: the request must
+   * carry `X-Provisioning-Secret` matching the `PROVISIONING_SECRET` env var.
+   * With the env var unset the endpoint is closed — tenant creation is an
+   * operator action, never a self-service one.
+   */
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60 * 60 * 1000 } })
+  @UseGuards(ProvisioningSecretGuard)
   @Post('bootstrap')
   bootstrap(@Body() dto: BootstrapDto) {
     return this.svc.bootstrap(dto);
@@ -95,29 +122,17 @@ export class OrganizationsController {
     return { ok: true, defaultBranchId: dto.defaultBranchId ?? null };
   }
 
+  // User listing, invitation and deactivation live on `/users` (UsersService),
+  // which enforces the role-assignment and manage-target escalation guards.
+}
 
-  @RequirePermissions('user:read')
-  @Get('users')
-  async listUsers() {
-    return this.prisma.client.user.findMany({
-      where: { deletedAt: null },
-      include: { roles: true },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  @ApiBearerAuth()
-  @RequirePermissions('user:create')
-  @Post('users/invite')
-  invite(@Body() dto: InviteUserDto) {
-    return this.svc.inviteUser(dto);
-  }
-
-  @ApiBearerAuth()
-  @RequirePermissions('user:update')
-  @Patch('users/:id/deactivate')
-  async deactivate(@Param('id') id: string) {
-    await this.prisma.client.user.update({ where: { id }, data: { isActive: false } });
-    return { ok: true };
+/** Constant-time check of the operator provisioning secret. Fails closed when unset. */
+export function assertProvisioningSecret(provided: string | undefined): void {
+  const expected = process.env.PROVISIONING_SECRET;
+  if (!expected || !provided) throw new ForbiddenException('Tenant provisioning is not permitted');
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    throw new ForbiddenException('Tenant provisioning is not permitted');
   }
 }

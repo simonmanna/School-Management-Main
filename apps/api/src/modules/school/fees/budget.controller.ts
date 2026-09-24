@@ -9,13 +9,13 @@ export class BudgetController {
   constructor(private readonly service: BudgetService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list() {
     return this.service.list();
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }

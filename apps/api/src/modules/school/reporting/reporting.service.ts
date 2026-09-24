@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
@@ -40,7 +41,10 @@ export class ReportingService {
       this.prisma.client.schoolClass.count(),
       this.prisma.client.section.count(),
     ]);
-    const outstanding = await this.outstandingFeesTotal();
+    // The admin dashboard is open to every staff role; the fee total is not.
+    const perms = this.tenant.permissions;
+    const mayReadFees = perms.includes('*') || perms.includes(PERMISSIONS.school.readFees);
+    const outstanding = mayReadFees ? await this.outstandingFeesTotal() : null;
     return { students, staff, teachers, campuses, classes, sections, outstandingFees: outstanding };
   }
 

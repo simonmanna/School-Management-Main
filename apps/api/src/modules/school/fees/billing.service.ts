@@ -20,6 +20,7 @@ import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { FinanceControlsService } from './finance-controls.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { PaymentAllocationReversalService } from './allocation-reversal.service';
+import { discountApplies } from './discount-targeting';
 import { AdvancedFinanceService } from './advanced.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 import { SCHOOL_ACCOUNTS } from './school-accounts';
@@ -482,6 +483,21 @@ export class BillingService {
     });
     const baseTotal = bases.reduce((s, b) => s + b, 0);
 
+    // A fixed discount is one amount per pupil. It used to be added to EVERY
+    // matching line, so 50,000 off a five-line structure took 250,000. Spread
+    // each fixed discount over the lines it matches, pro-rata by base.
+    const target = { studentProfileId: student.id ?? '', classId, gradeLevelId };
+    const fixedDiscountShare = billable.map(() => 0);
+    for (const d of discounts) {
+      if (d.type === 'percentage') continue; // fixed_amount
+      const matching = billable
+        .map((c, i) => i)
+        .filter((i) => bases[i] > 0 && discountApplies(d.appliesTo, target, billable[i].code));
+      const matchedBase = matching.reduce((t, i) => t + bases[i], 0);
+      if (matchedBase <= 0) continue;
+      for (const i of matching) fixedDiscountShare[i] += (Number(d.value) * bases[i]) / matchedBase;
+    }
+
     // Fixed scholarship pool, distributed pro-rata by base.
     const fixedScholarshipPool = scholarships
       .filter((sc) => sc.type === 'fixed')
@@ -498,14 +514,16 @@ export class BillingService {
         return { productId: c.productId, description, quantity: 1, unitPrice: base, discountPercent: 0 };
       }
 
-      // Matching discounts for this component.
+      // Matching discounts for this component. A percentage applies per line;
+      // a fixed amount is ONE amount per pupil, spread over the lines it
+      // matches by their share of the base (see fixedDiscountShare above).
       let percentDiscount = 0;
-      let fixedDiscount = 0;
       for (const d of discounts) {
-        if (!this.discountApplies(d.appliesTo, classId, gradeLevelId, c.code)) continue;
-        if (d.type === 'percentage') percentDiscount += Number(d.value);
-        else fixedDiscount += Number(d.value); // fixed_amount
+        if (d.type !== 'percentage') continue;
+        if (!discountApplies(d.appliesTo, target, c.code)) continue;
+        percentDiscount += Number(d.value);
       }
+      const fixedDiscount = fixedDiscountShare[i];
 
       const proRataFixedScholarship = baseTotal > 0 ? (fixedScholarshipPool * base) / baseTotal : 0;
       const lineDiscountAmount =
@@ -747,18 +765,6 @@ export class BillingService {
 
           return { _skipped: false, doc: postedDoc, sfi };
     });
-  }
-
-  /** True when a Discount.appliesTo JSON filter matches this student + fee code. */
-  private discountApplies(appliesTo: any, classId: string, gradeLevelId: string, feeCode: string): boolean {
-    if (!appliesTo || typeof appliesTo !== 'object') return true;
-    const classIds: string[] = Array.isArray(appliesTo.classIds) ? appliesTo.classIds : [];
-    const gradeLevelIds: string[] = Array.isArray(appliesTo.gradeLevelIds) ? appliesTo.gradeLevelIds : [];
-    const feeCodes: string[] = Array.isArray(appliesTo.feeCodes) ? appliesTo.feeCodes : [];
-    if (classIds.length && !classIds.includes(classId)) return false;
-    if (gradeLevelIds.length && !gradeLevelIds.includes(gradeLevelId)) return false;
-    if (feeCodes.length && !feeCodes.includes(feeCode)) return false;
-    return true;
   }
 
   /**
@@ -1430,6 +1436,18 @@ export class SchoolPaymentService {
       });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
 
+      // Serialize refunds for one payer. Two refunds of the same overpayment
+      // used to read the same entitlement in parallel and both pay out. Locking
+      // the payer's receipts makes the second wait, then read the first's
+      // committed draw-down below.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "Payment"
+          WHERE "organizationId" = $1 AND "partnerId" = $2 AND direction::text = 'inbound'
+          FOR UPDATE`,
+        organizationId,
+        student.partnerId,
+      );
+
       // Replay guard: a prior refund carrying the same machine-issued key
       // returns as-is. Keys on externalReference for the same reason collect
       // does (P0-B) — narration is not an idempotency key.
@@ -1493,7 +1511,10 @@ export class SchoolPaymentService {
         }
       }
 
-      const breakdown = await this.finance.refundableBreakdown(student.partnerId, student.id);
+      // Read inside the transaction: the allocation reversals above are not yet
+      // committed, and the value they returned to the payment is what funds a
+      // refund of an allocated payment.
+      const breakdown = await this.finance.refundableBreakdown(student.partnerId, student.id, tx);
       const refundable = round(dec(breakdown.total), 6);
       const overpaymentCredit = breakdown.total;
 
@@ -1517,6 +1538,46 @@ export class SchoolPaymentService {
       // (FINANCIAL_INVARIANTS §Economic-entitlement uniqueness).
       const fromPayments = round(dec(breakdown.fromPayments), 6);
       let creditPortion = wanted.greaterThan(fromPayments) ? wanted.minus(fromPayments) : ZERO;
+
+      // Draw the cash portion down on the receipts that hold it, oldest first.
+      // Nothing used to reduce a receipt's unallocated value when it was paid
+      // back, so the entitlement never shrank: the same overpayment could be
+      // refunded again and again. The decrement is conditional, so a racing
+      // writer that got there first makes this abort instead of over-drawing.
+      let cashPortion = wanted.minus(creditPortion);
+      if (cashPortion.greaterThan(ZERO)) {
+        const sources = await tx.payment.findMany({
+          where: {
+            organizationId,
+            partnerId: student.partnerId,
+            direction: 'inbound',
+            status: { not: 'cancelled' },
+            unallocatedAmount: { gt: 0 },
+          },
+          select: { id: true, unallocatedAmount: true },
+          orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+        });
+        for (const src of sources) {
+          if (cashPortion.lessThanOrEqualTo(ZERO)) break;
+          const take = Prisma.Decimal.min(cashPortion, dec(src.unallocatedAmount));
+          const claimed = await tx.payment.updateMany({
+            where: { id: src.id, unallocatedAmount: { gte: take } },
+            data: { unallocatedAmount: { decrement: take } },
+          });
+          if (claimed.count !== 1) {
+            throw new BadRequestException(
+              'The receipt funding this refund changed while it was being prepared. No money has left the drawer — retry.',
+            );
+          }
+          cashPortion = cashPortion.minus(take);
+        }
+        if (cashPortion.greaterThan(ZERO)) {
+          throw new BadRequestException(
+            `Refund of ${wanted.toString()} is short by ${cashPortion.toString()}: the unallocated receipts ` +
+              'funding it are no longer available. Retry.',
+          );
+        }
+      }
       const creditsSpent: Array<{ id: string; code: string; amount: string }> = [];
 
       if (creditPortion.greaterThan(ZERO)) {

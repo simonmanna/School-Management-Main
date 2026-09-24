@@ -8,13 +8,13 @@ export class PaymentReconciliationController {
   constructor(private readonly recon: PaymentReconciliationService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   list() {
     return this.recon.list();
   }
 
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readFees)
   getBatch(@Param('id') id: string) {
     return this.recon.getBatch(id);
   }
