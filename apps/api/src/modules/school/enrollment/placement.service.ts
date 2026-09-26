@@ -50,6 +50,22 @@ export interface ResolvedTarget {
 
 export type CapacityPolicyValue = 'ENFORCE' | 'WARN' | 'OFF';
 
+/** Whole months from `from` to `at`, the way an intake cutoff is counted. */
+function monthsBetween(from: Date, at: Date): number {
+  let months = (at.getUTCFullYear() - from.getUTCFullYear()) * 12 + (at.getUTCMonth() - from.getUTCMonth());
+  if (at.getUTCDate() < from.getUTCDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+/** "3 years 2 months" — how a parent and a head teacher both say it. */
+function describeMonths(months: number): string {
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  if (years === 0) return `${rest} month${rest === 1 ? '' : 's'}`;
+  if (rest === 0) return `${years} year${years === 1 ? '' : 's'}`;
+  return `${years} year${years === 1 ? '' : 's'} ${rest} month${rest === 1 ? '' : 's'}`;
+}
+
 type PlacementInput = PlacementInputDto & {
   movementReason?: MovementReasonValue;
   overrideCapacity?: boolean;
@@ -500,8 +516,88 @@ export class PlacementService {
     const warnings = [
       ...(override ? target.warnings.map((w) => `${w} Seated under a capacity override.`) : target.warnings),
       ...dateWarnings,
+      ...(await this.earlyYearsWarnings(tx, enrollment, target)),
     ];
     return { placement: created, closed, warnings };
+  }
+
+  /**
+   * Nursery placement warnings: age band, and staff-to-child ratio.
+   *
+   * Warnings rather than refusals, deliberately. A school admits a child a month
+   * short of the cutoff as a decision, and its staffing changes faster than its
+   * enrolment does — so refusing would mean the software overruling the head
+   * teacher on facts it does not have. What it can do is never let either go
+   * unnoticed, which is what a seat count alone did: capacity says nothing about
+   * whether a room of thirty two-year-olds is safe or legal.
+   */
+  private async earlyYearsWarnings(tx: any, enrollment: any, target: ResolvedTarget): Promise<string[]> {
+    const out: string[] = [];
+    const klass = await tx.schoolClass.findFirst({
+      where: { id: target.classId },
+      select: {
+        name: true,
+        homeroomTeacherId: true,
+        gradeLevel: {
+          select: {
+            name: true,
+            minAgeMonths: true,
+            maxAgeMonths: true,
+            academicLevel: { select: { staffChildRatio: true, name: true } },
+          },
+        },
+      },
+    });
+    const grade = klass?.gradeLevel;
+    if (!grade) return out;
+
+    // ── Age band, measured at the term's start: "three by the first day". ──
+    if (grade.minAgeMonths != null || grade.maxAgeMonths != null) {
+      const profile = await tx.studentProfile.findFirst({
+        where: { id: enrollment.studentProfileId },
+        select: { dateOfBirth: true },
+      });
+      if (!profile?.dateOfBirth) {
+        out.push(`${grade.name} has an age rule but this learner has no date of birth on record.`);
+      } else {
+        const months = monthsBetween(new Date(profile.dateOfBirth), target.termStartDate);
+        if (grade.minAgeMonths != null && months < grade.minAgeMonths) {
+          out.push(
+            `Younger than ${grade.name} admits: ${describeMonths(months)} at the start of term, against a minimum of ${describeMonths(grade.minAgeMonths)}.`,
+          );
+        }
+        if (grade.maxAgeMonths != null && months > grade.maxAgeMonths) {
+          out.push(
+            `Older than ${grade.name} admits: ${describeMonths(months)} at the start of term, against a maximum of ${describeMonths(grade.maxAgeMonths)}.`,
+          );
+        }
+      }
+    }
+
+    // ── Staff-to-child ratio for the band. ──
+    const ratio = grade.academicLevel?.staffChildRatio ?? null;
+    if (ratio && ratio > 0) {
+      const children = await tx.enrollmentPlacement.count({
+        where: {
+          classCohortId: target.cohortId,
+          termId: target.termId,
+          ...(target.sectionId ? { sectionId: target.sectionId } : {}),
+          effectiveTo: null,
+        },
+      });
+      const sectionTeachers = await tx.section.count({
+        where: { classId: target.classId, classTeacherId: { not: null } },
+      });
+      const staff = Math.max(1, sectionTeachers + (klass?.homeroomTeacherId ? 1 : 0));
+      const allowed = ratio * staff;
+      if (children > allowed) {
+        out.push(
+          `${children} children to ${staff} member(s) of staff in ${klass?.name ?? 'this class'}, over the ${grade.academicLevel?.name ?? 'band'} ratio of 1:${ratio}. Assign another adult to the room.`,
+        );
+      }
+    }
+
+    return out;
   }
 
   /* ───────────────────────────── Commands ─────────────────────────────── */

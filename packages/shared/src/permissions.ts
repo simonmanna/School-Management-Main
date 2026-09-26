@@ -459,6 +459,25 @@ export const PERMISSIONS = {
     // board. The Phase 6 migration backfills these onto the roles that already
     // hold `exams:operate` / `results:publish`, because PermissionsGuard ANDs
     // its requirements and an ungranted new grant 403s the exam office.
+    // ── Early years (nursery). Separate grants because the acts are separate
+    // people's: a class teacher writes the day's care notes, the front desk
+    // releases a child at the gate, and a head teacher signs off an incident.
+    // Reads stay on `school:read` except the incident log, which is a
+    // safeguarding record and not a class list.
+    /** Write and share the daily care log. Held by whoever is with the children. */
+    manageCareLogs: 'school:carelog:write',
+    /** Add, revoke and view pick-up authorizations. */
+    managePickup: 'school:pickup:write',
+    /** Record that a child was handed over — the gate action, not the list. */
+    releaseChild: 'school:pickup:release',
+    /** Read the incident log. A safeguarding record, not a class list. */
+    readIncidents: 'school:incidents:read',
+    /** Record an incident. Any adult who was there must be able to. */
+    recordIncidents: 'school:incidents:write',
+    /** Sign off a serious incident. Deliberately not the recorder's grant. */
+    reviewIncidents: 'school:incidents:review',
+    /** Immunisation rows and their due dates. */
+    manageImmunisations: 'school:immunisation:write',
     readStatutory: 'school:statutory:read',
     manageStatutoryTemplates: 'school:statutory:write',
     runStatutoryExports: 'school:statutory:export',
@@ -1178,6 +1197,11 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // Re-audit P1-1: closing and archiving a year is the head's decision.
       'school:academicyear:lifecycle',
       'school:medical:read',
+      // Early years: a serious incident is signed off by the head, deliberately
+      // not by whoever recorded it.
+      'school:incidents:read',
+      'school:incidents:review',
+      'school:pickup:write',
       'school:statutory:read',
       'school:statutory:export',
       'school:lessonplans:review',
@@ -1356,6 +1380,11 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
       'school:reports:read',
       'school:reports:export',
+      // Early years: the adult in the room writes the day's care log and the
+      // first record of an incident. Not the sign-off, and not the pick-up list.
+      'school:carelog:write',
+      'school:incidents:write',
+      'school:incidents:read',
     ],
   },
 
@@ -1457,11 +1486,14 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
   },
   {
     name: 'Nurse',
-    description: 'Medical records and emergency contacts for pupils.',
+    description: 'Medical records, immunisation and emergency contacts for pupils.',
     dataScope: 'school',
     permissions: [
       'school:read',
       'school:medical:read',
+      'school:immunisation:write',
+      'school:incidents:read',
+      'school:incidents:write',
       'school:students:write',
       'school:documents:read',
       'school:documents:write',
@@ -1511,7 +1543,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
   },
   {
     name: 'Front Desk',
-    description: 'Visitors, applications intake and communication.',
+    description: 'Visitors, applications intake, communication and the nursery gate.',
     dataScope: 'school',
     permissions: [
       'school:read',
@@ -1519,6 +1551,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:communicate',
       'partner:read',
       'hr:self',
+      // The gate: who may collect a child, and the record that they did.
+      'school:pickup:write',
+      'school:pickup:release',
+      'school:incidents:write',
       // Report centre (ADR-017). New grants do not reach existing tenants by
       // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
       'school:reports:read',

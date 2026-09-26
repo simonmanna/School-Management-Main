@@ -9,6 +9,7 @@ import { PortalDocumentsService } from './portal-documents.service';
 import { MobileMoneyService } from '../fees/mobile-money.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { CareLogService } from '../early-years/care-log.service';
 
 @Controller('school/portals')
 export class PortalsController {
@@ -20,6 +21,7 @@ export class PortalsController {
     private readonly finance: SchoolFinanceQueryService,
     private readonly documents: PortalDocumentsService,
     private readonly employeeIdentity: EmployeeIdentityService,
+    private readonly careLogs: CareLogService,
   ) {}
 
   /**
@@ -87,6 +89,26 @@ export class PortalsController {
   @ScopedToStudent('studentProfileIds')
   parentDashboard(@Param('studentProfileIds') ids: string) {
     return this.portals.parentDashboard(ids.split(',').filter(Boolean));
+  }
+
+  /**
+   * The nursery day, for the family.
+   *
+   * Only logs the room has shared: a half-finished note about a child being
+   * unsettled is not something a parent should read at lunchtime, so the draft
+   * stays inside the school until the class teacher releases it (see
+   * `CareLogService.setShared`). `@ScopedToStudent` means a parent can only ask
+   * about their own child, whatever id they put in the URL.
+   */
+  @Get('parent/:studentProfileId/care-log')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  parentCareLog(
+    @Param('studentProfileId') studentProfileId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.careLogs.forStudent(studentProfileId, { from, to, sharedOnly: true });
   }
 
   /* ── Parent self-service payment ── */

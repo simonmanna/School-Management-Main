@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   Ticket,
   BadgeDollarSign,
+  Baby,
   BarChart3,
   FileBarChart,
   UserCog,
@@ -215,6 +216,10 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      // Nursery. One screen for the four things a nursery does that a primary
+      // school does not: account for the day, control who collects a child,
+      // write down what happened, and chase immunisation.
+      { to: '/school/early-years', label: 'Nursery Day', icon: Baby, permission: PERMISSIONS.school.read },
       { to: '/school/management/student-categories', label: 'Student Categories', icon: Tag, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/promotion', label: 'Promote & Roll Over', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/portals', label: 'Parent & Pupil Portals', icon: GraduationCap, permission: PERMISSIONS.school.read },

@@ -73,6 +73,7 @@ import { SchoolTripsPage } from '@/pages/school/trips';
 import { SchoolTransportPage } from '@/pages/school/transport';
 import { SchoolLibraryPage } from '@/pages/school/library';
 import { FrontDeskPage } from '@/pages/school/front-desk';
+import { SchoolEarlyYearsPage } from '@/pages/school/early-years';
 import { PhoneCallsPage } from '@/pages/school/phone-calls';
 import { ComplaintsPage } from '@/pages/school/complaints';
 import { SchoolStaff360Page } from '@/pages/school/staff-360';
@@ -616,6 +617,7 @@ export function App() {
           <Route path="/school/library/reports" element={<SchoolLibraryPage />} />
           <Route path="/school/class-teacher" element={<SchoolClassTeacherPage />} />
           <Route path="/school/front-desk" element={<FrontDeskPage />} />
+          <Route path="/school/early-years" element={<SchoolEarlyYearsPage />} />
           <Route path="/school/phone-calls" element={<PhoneCallsPage />} />
           <Route path="/school/complaints" element={<ComplaintsPage />} />
           <Route path="/school/staff/:id" element={<SchoolStaff360Page />} />

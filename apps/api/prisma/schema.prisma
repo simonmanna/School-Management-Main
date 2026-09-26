@@ -747,6 +747,8 @@ model Contact {
   partner       Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   // H3: school guardianships that point at this Contact (see StudentGuardian).
   guardianships StudentGuardian[] @relation("GuardianContact")
+  /// Nursery pick-up authorizations naming this contact as the collector.
+  pickupAuthorizations PickupAuthorization[] @relation("PickupContact")
   admissionApplicationsAsParent AdmissionApplication[] @relation("AdmissionParentContact")
 
   @@index([organizationId])
@@ -10959,6 +10961,13 @@ model GradeLevel {
   /// instead. Replaces deriving the ladder from `order` plus alphabetical class
   /// name, which silently guessed the destination.
   nextGradeLevelId String?
+  /// Youngest and oldest a learner may be, in MONTHS, to be placed in this
+  /// grade — evaluated against the target term's start date, the way a school
+  /// states an intake cutoff ("three by the first day of term"). Months, not
+  /// years, because nursery bands are nine to eighteen months wide. Null means
+  /// no rule, which is the honest default for primary and secondary.
+  minAgeMonths     Int?
+  maxAgeMonths     Int?
   /// True where the grade ends this school ladder (P7, S6, or Top in a nursery
   /// that does not continue into primary). Kept separate from a null
   /// `nextGradeLevelId` so not-configured-yet and deliberately-terminal stay
@@ -11252,6 +11261,14 @@ model StudentProfile {
   /// history under these enrollments, never from a column on the profile.
   academicEnrollments StudentEnrollment[]
   mobileMoneyRequests MobileMoneyRequest[]
+
+  /// ── Early years (nursery). See `ChildCareLog` for why these are their own
+  /// tables rather than fields on the profile.
+  careLogs             ChildCareLog[]
+  pickupAuthorizations PickupAuthorization[]
+  pickupEvents         PickupEvent[]
+  incidents            ChildIncident[]
+  immunisations        ImmunisationRecord[]
 
   @@unique([organizationId, admissionNo])
   @@index([organizationId])
@@ -12338,6 +12355,12 @@ model AcademicLevel {
   /// Behavioural band. Drives assessment defaults; the rules themselves live in
   /// versioned programme configuration, never in a code branch on this value.
   stage              ProgrammeStage @default(OTHER)
+  /// The most children one member of staff may be responsible for in this band.
+  /// Nursery is the reason it exists: a seat count says nothing about whether a
+  /// class of thirty two-year-olds is legal or safe. Null means the school has
+  /// no ratio rule for this band. Advisory — placement warns, it does not refuse,
+  /// because staffing changes faster than enrolment.
+  staffChildRatio    Int?
   /// The programme a learner entering this band is enrolled under: a grade
   /// level has one level and a level has one default programme, so
   /// gradeLevel -> programme is deterministic.
@@ -20038,4 +20061,238 @@ model AcademicReminderLog {
 
   @@unique([organizationId, kind, subjectId, milestone, userId])
   @@index([organizationId, kind, sentAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Early years (nursery)
+//
+// Everything below exists because a nursery is not a small primary school. A
+// parent leaving a two-year-old is owed a description of the day, a guarantee
+// about who may collect them, and a written record when something happens. None
+// of it is derivable from attendance, marks or fees, which is what the rest of
+// the school module records.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// How a child was when they arrived, and when they left.
+enum CareMood {
+  happy
+  settled
+  tired
+  tearful
+  unsettled
+  unwell
+}
+
+/// How much of a meal a child actually ate. Portions, not grams: it is what a
+/// nursery teacher can honestly observe and what a parent wants to know.
+enum CareMealPortion {
+  all
+  most
+  some
+  none
+}
+
+enum PickupAuthorizationKind {
+  /// On the standing list: a parent, a named relative, the regular driver.
+  STANDING
+  /// For one named day — an aunt collecting on Friday because the mother travels.
+  ONE_OFF
+}
+
+enum ChildIncidentKind {
+  INJURY
+  ILLNESS
+  BEHAVIOUR
+  SAFEGUARDING
+  NEAR_MISS
+  OTHER
+}
+
+enum ChildIncidentSeverity {
+  MINOR
+  MODERATE
+  SERIOUS
+}
+
+/// One child, one day, one record of it.
+///
+/// A nursery's daily feedback — what was eaten, whether they slept, how they
+/// were — is the thing families pay for and the thing this system had no place
+/// to put. It is its own table rather than fields on StudentProfile because
+/// there is one per child per DAY and it is read historically: "has she stopped
+/// sleeping in the afternoons?" is a question about a series.
+///
+/// A log is a draft until `sharedAt`. Until then the class teacher can still
+/// correct it; afterwards it is what a parent has read.
+model ChildCareLog {
+  id               String    @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  /// The care day, date-only: a log belongs to Tuesday, not to 14:07 on Tuesday.
+  onDate           DateTime  @db.Date
+  arrivalMood      CareMood?
+  departureMood    CareMood?
+  /// `[{ meal: 'breakfast'|'lunch'|'snack', portion: CareMealPortion, note? }]`
+  meals            Json      @default("[]")
+  /// `[{ from: '12:30', to: '13:45' }]` — local clock times, as observed.
+  naps             Json      @default("[]")
+  /// Nappy changes for the youngest, and whether an older child managed alone.
+  nappyChanges     Int?
+  usedToiletAlone  Boolean?
+  activities       String?
+  /// What the teacher wants this parent to read today.
+  teacherNote      String?
+  /// Released to the guardians' portal. Null means it is still a draft.
+  sharedAt         DateTime?
+  sharedById       String?
+  recordedById     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, studentProfileId, onDate])
+  @@index([organizationId])
+  @@index([organizationId, onDate])
+  @@index([studentProfileId, onDate])
+}
+
+/// Who may collect this child.
+///
+/// `StudentGuardian.canPickup` already says which GUARDIANS may, which is the
+/// common case and stays the source of truth for them. This covers what it
+/// cannot: a named person who is not a guardian, and permission that is only
+/// good for one day. Both are what actually happens at a nursery gate, and
+/// releasing a child to the wrong adult is the one mistake a nursery cannot
+/// undo.
+model PickupAuthorization {
+  id               String                  @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  kind             PickupAuthorizationKind  @default(STANDING)
+  /// The Contact, where the collector is already on record.
+  contactId        String?
+  /// A collector who is not a contact. One of `contactId` or `personName` is
+  /// always set; the service enforces it.
+  personName       String?
+  personPhone      String?
+  relationship     String?
+  /// What the office checks at the gate.
+  idType           String?
+  idNumber         String?
+  photoDocumentId  String?
+  validFrom        DateTime
+  /// Null on a standing authorization; the single day on a one-off.
+  validTo          DateTime?
+  authorizedById   String?
+  /// Withdrawn rather than deleted: who was allowed to collect a child last term
+  /// is part of the record, especially after a custody change.
+  revokedAt        DateTime?
+  revokedById      String?
+  revokeReason     String?
+  notes            String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  contact        Contact?       @relation("PickupContact", fields: [contactId], references: [id])
+  events         PickupEvent[]
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([organizationId, validFrom])
+}
+
+/// The child was handed over, to this adult, at this time, by this member of
+/// staff. An `overrideReason` records a release made without a valid
+/// authorization — which must be possible, and must never be silent.
+model PickupEvent {
+  id               String   @id @default(uuid())
+  organizationId   String
+  studentProfileId String
+  authorizationId  String?
+  collectedByName  String
+  collectedAt      DateTime @default(now())
+  releasedById     String?
+  overrideReason   String?
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  studentProfile StudentProfile       @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  authorization  PickupAuthorization? @relation(fields: [authorizationId], references: [id])
+
+  @@index([organizationId])
+  @@index([studentProfileId, collectedAt])
+  @@index([organizationId, collectedAt])
+}
+
+/// A bumped head, a fever, a bite, a child briefly unaccounted for.
+///
+/// Recording these is a licensing requirement in most places and the school's
+/// only defence when a parent asks six weeks later. Notification is part of the
+/// record, not a side effect: `guardianNotifiedAt` being null on a serious
+/// incident is itself the thing a head teacher needs to see.
+model ChildIncident {
+  id                   String                @id @default(uuid())
+  organizationId       String
+  studentProfileId     String
+  kind                 ChildIncidentKind
+  severity             ChildIncidentSeverity @default(MINOR)
+  occurredAt           DateTime
+  location             String?
+  description          String
+  actionTaken          String?
+  /// Where on the body, for an injury — free text or a body-map key.
+  bodyPart             String?
+  firstAidById         String?
+  guardianNotifiedAt   DateTime?
+  guardianNotifiedById String?
+  /// 'in_person' | 'phone' | 'sms' | 'whatsapp' | 'portal'.
+  guardianNotifiedHow  String?
+  recordedById         String?
+  /// A serious incident is signed off by the head before it closes.
+  reviewedAt           DateTime?
+  reviewedById         String?
+  reviewNotes          String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  deletedAt            DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId, occurredAt])
+  @@index([organizationId, severity, occurredAt])
+}
+
+/// Immunisation as rows, not a tick on a document checklist.
+///
+/// The admissions checklist already asks for an immunisation card and files the
+/// scan. That answers "did they hand something in", which is not the question a
+/// nursery has to answer: which dose, when is the next one due, and who has no
+/// record at all. An exemption is recorded in place of a dose so "not
+/// vaccinated" and "we never asked" stay distinguishable.
+model ImmunisationRecord {
+  id                    String    @id @default(uuid())
+  organizationId        String
+  studentProfileId      String
+  vaccine               String
+  /// 'dose 1', 'booster', 'annual' — free text, because schedules differ.
+  doseLabel             String?
+  administeredOn        DateTime? @db.Date
+  nextDueOn             DateTime? @db.Date
+  certificateDocumentId String?
+  exemptionReason       String?
+  notes                 String?
+  recordedById          String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([studentProfileId])
+  @@index([organizationId, nextDueOn])
 }

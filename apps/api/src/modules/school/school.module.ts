@@ -31,6 +31,7 @@ import { ReportingModule } from './reporting/reporting.module';
 import { SchoolReportsModule } from './reporting/school-reports.module';
 import { SchoolDocumentsModule } from './documents/school-documents.module';
 import { FrontDeskModule } from './front-desk/front-desk.module';
+import { EarlyYearsModule } from './early-years/early-years.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
 import { SetupStatusService } from './setup-status.service';
@@ -51,6 +52,10 @@ const advancedLmsImports = process.env.ENABLE_ADVANCED_LMS === 'true' ? [LmsMood
  */
 @Module({
   imports: [
+    // Nursery: the daily care log, pick-up authorization, the incident log and
+    // immunisation rows. Its own module because a school with no nursery needs
+    // none of it.
+    EarlyYearsModule,
     FoundationModule,
     PeopleModule,
     SchoolEnrollmentModule,

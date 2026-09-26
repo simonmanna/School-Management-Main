@@ -621,6 +621,15 @@ export const ORG_SCOPED = new Set<string>([
   'FrontDeskLog',
   'SchoolDashboardCache',
 
+  // Early years (nursery). A care note, who may collect a child and an incident
+  // log are among the most sensitive rows in the system; they are scoped from
+  // the day the tables exist, not registered later by the ratchet.
+  'ChildCareLog',
+  'PickupAuthorization',
+  'PickupEvent',
+  'ChildIncident',
+  'ImmunisationRecord',
+
   // ── Registered by the tenancy-registration ratchet (was: unscoped) ──────
   // These models all carry a non-null organizationId but were never added to
   // ORG_SCOPED, so nothing injected the org on write and nothing filtered it
@@ -711,6 +720,14 @@ export const SOFT_DELETE = new Set<string>([
   // Academic structure configuration (ADR-028). A level that has carried grades
   // is deactivated, never deleted, so historical reports keep resolving it.
   'AcademicLevel',
+
+  // Early years. A care log a parent has read, and an incident record, are
+  // evidence: they are withdrawn from view, never removed. (A pick-up
+  // authorization is withdrawn through `revokedAt` instead, because who was
+  // allowed to collect a child last term stays part of the record.)
+  'ChildCareLog',
+  'ChildIncident',
+  'ImmunisationRecord',
 
   // Phase 1 — enrollment and grouping integrity (ADR-018 / ADR-019).
   'AcademicProgramme',

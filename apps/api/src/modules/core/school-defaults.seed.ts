@@ -14,9 +14,14 @@
 type Db = any; // Prisma transaction client
 
 const LEVELS = [
-  { code: 'PRE', name: 'Nursery', stage: 'PRE_PRIMARY', order: 1, programme: 'Nursery (ECD)' },
-  { code: 'PL', name: 'Lower Primary', stage: 'PRIMARY_LOWER', order: 2, programme: 'Lower Primary' },
-  { code: 'PU', name: 'Upper Primary', stage: 'PRIMARY_UPPER', order: 3, programme: 'Upper Primary' },
+  // `ratio` is the most children one adult may be responsible for in the band.
+  // Nursery is why it exists: a seat count says nothing about whether a room of
+  // thirty two-year-olds is safe. Advisory — placement warns, never refuses,
+  // because staffing changes faster than enrolment. Null for primary, where a
+  // school's own rules and the class capacity are the constraint.
+  { code: 'PRE', name: 'Nursery', stage: 'PRE_PRIMARY', order: 1, programme: 'Nursery (ECD)', ratio: 12 },
+  { code: 'PL', name: 'Lower Primary', stage: 'PRIMARY_LOWER', order: 2, programme: 'Lower Primary', ratio: null },
+  { code: 'PU', name: 'Upper Primary', stage: 'PRIMARY_UPPER', order: 3, programme: 'Upper Primary', ratio: null },
 ] as const;
 
 /**
@@ -47,11 +52,24 @@ const ECD_BANDS = [
   { min: 0, max: 39, grade: 'Support', gpa: 0, remark: 'Needs more time and practice' },
 ];
 
-/** Grade ladder, youngest first. The last grade graduates (PLE). */
-const GRADES: Array<{ name: string; code: string; level: (typeof LEVELS)[number]['code'] }> = [
-  { name: 'Baby Class', code: 'BABY', level: 'PRE' },
-  { name: 'Middle Class', code: 'MIDDLE', level: 'PRE' },
-  { name: 'Top Class', code: 'TOP', level: 'PRE' },
+/**
+ * Grade ladder, youngest first. The last grade graduates (PLE).
+ *
+ * `minAge`/`maxAge` are in MONTHS and are measured at the start of the term
+ * being placed into — the way a school states an intake cutoff ("three by the
+ * first day"). Only the nursery grades carry one, because only nursery bands are
+ * narrow enough for age to be the rule; a school edits or clears them.
+ */
+const GRADES: Array<{
+  name: string;
+  code: string;
+  level: (typeof LEVELS)[number]['code'];
+  minAge?: number;
+  maxAge?: number;
+}> = [
+  { name: 'Baby Class', code: 'BABY', level: 'PRE', minAge: 30, maxAge: 47 },
+  { name: 'Middle Class', code: 'MIDDLE', level: 'PRE', minAge: 36, maxAge: 59 },
+  { name: 'Top Class', code: 'TOP', level: 'PRE', minAge: 48, maxAge: 71 },
   { name: 'P1', code: 'P1', level: 'PL' },
   { name: 'P2', code: 'P2', level: 'PL' },
   { name: 'P3', code: 'P3', level: 'PL' },
@@ -105,6 +123,7 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
         name: l.name,
         stage: l.stage,
         displayOrder: l.order,
+        staffChildRatio: l.ratio ?? null,
         defaultProgrammeId: programme.id,
       },
     });
@@ -122,6 +141,8 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
         code: g.code,
         order: i + 1,
         academicLevelId: levelIds.get(g.level),
+        minAgeMonths: g.minAge ?? null,
+        maxAgeMonths: g.maxAge ?? null,
         nextGradeLevelId: next,
         isTerminal: next === null,
       },

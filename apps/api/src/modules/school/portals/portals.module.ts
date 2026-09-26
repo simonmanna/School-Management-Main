@@ -8,6 +8,7 @@ import { AttendanceModule } from '../attendance/attendance.module';
 import { ExaminationsModule } from '../examinations/examinations.module';
 import { FeesModule } from '../fees/fees.module';
 import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
+import { EarlyYearsModule } from '../early-years/early-years.module';
 
 @Module({
 // D1: the fee statement and the parent portal must read the ONE canonical
@@ -17,7 +18,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
   // ExaminationsModule for ReportCardPdfService: the portal serves the SAME
   // generator the office prints from, so a family's copy cannot drift from
   // the school's.
-  imports: [PlacementLookupModule, AttendanceModule, FeesModule, ExaminationsModule],
+  imports: [PlacementLookupModule, AttendanceModule, FeesModule, ExaminationsModule, EarlyYearsModule],
   controllers: [PortalsController, PortalAccountController],
   providers: [PortalsService, PortalAccountService, PortalDocumentsService],
   exports: [PortalsService, PortalAccountService, PortalDocumentsService],
