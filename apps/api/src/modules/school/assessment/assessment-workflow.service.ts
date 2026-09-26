@@ -5,6 +5,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { MarkingService } from './marking.service';
+import { reconcileCompulsoryRostersInTx } from '../course-offerings/course-roster-reconcile';
 import type { AssessmentLifecycleDto, BulkBoardMarksDto, CreateUnifiedAssessmentDto, ReconcileAssessmentContextDto, ReconcileHomeworkDto } from './assessment-board.dto';
 
 export const RESOLVED_WITHOUT_SCORE = ['absent', 'exempt', 'excused', 'malpractice', 'withdrawn', 'not_enrolled'];
@@ -42,11 +43,25 @@ export class AssessmentWorkflowService {
     return this.db.$transaction(async (tx: any) => {
       const offering = await this.offering(tx, courseOfferingId);
       const now = new Date();
-      const enrollments = await tx.courseEnrollment.findMany({
+      const active = {
         where: { courseOfferingId, status: 'ENROLLED', startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] },
-        include: { studentEnrollment: { include: { placements: { where: { termId: offering.termId, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] }, include: { classCohort: true }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } } },
-      });
-      if (!enrollments.length) throw new BadRequestException('This course has no active learners. Prepare its course roster first.');
+        include: { studentEnrollment: { include: { placements: { where: { termId: offering.termId, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] }, include: { classCohort: true }, orderBy: { effectiveFrom: 'desc' as const }, take: 1 } } } },
+      };
+      let enrollments = await tx.courseEnrollment.findMany(active);
+      if (!enrollments.length) {
+        // Self-heal before refusing. Placement reconciles compulsory rosters now,
+        // but offerings created after the class was filled — and every offering
+        // that predates that reconciliation — still start empty, and a teacher
+        // cannot be expected to diagnose that from a blank mark sheet.
+        await this.reconcileFromPlacements(tx, offering);
+        enrollments = await tx.courseEnrollment.findMany(active);
+      }
+      if (!enrollments.length) {
+        throw new BadRequestException(
+          'No learner is placed in this course\'s class for this term, so there is no roster to capture. ' +
+            'Check the class placement, or enrol learners explicitly if this is an elective.',
+        );
+      }
       const roster = await tx.academicRoster.create({ data: {
         organizationId: this.org, termId: offering.termId, classId: offering.classId,
         sectionId: offering.sectionId, subjectId: offering.subjectId, scopeType: 'subject', source: 'enrollment',
@@ -62,6 +77,35 @@ export class AssessmentWorkflowService {
       await this.audit.recordInTx(tx, { entity: 'AcademicRoster', entityId: roster.id, action: 'create', newValues: { courseOfferingId, members: enrollments.length, frozen: true } });
       return { ...roster, frozenAt: now, memberCount: enrollments.length };
     });
+  }
+
+  /**
+   * Fill an empty compulsory course roster from the term's placements.
+   *
+   * The placement is the school's record of who sits in the class; course
+   * membership is derived from it. One learner at a time keeps the opt-out and
+   * late-arrival rules in a single place (`course-roster-reconcile`).
+   */
+  private async reconcileFromPlacements(tx: any, offering: any) {
+    if (offering.audienceScope === 'CUSTOM') return;
+    const where: any = { termId: offering.termId, effectiveTo: null };
+    if (offering.audienceScope !== 'SCHOOL') where.classCohortId = offering.classCohortId;
+    if (offering.audienceScope === 'SECTION') where.sectionId = offering.sectionId;
+    const placements = await tx.enrollmentPlacement.findMany({
+      where,
+      select: { enrollmentId: true, classCohortId: true, sectionId: true, effectiveFrom: true },
+    });
+    for (const placement of placements) {
+      await reconcileCompulsoryRostersInTx(tx, {
+        organizationId: this.org,
+        enrollmentId: placement.enrollmentId,
+        termId: offering.termId,
+        classCohortId: placement.classCohortId,
+        sectionId: placement.sectionId,
+        effectiveFrom: placement.effectiveFrom,
+        actorId: this.tenant.userId ?? null,
+      });
+    }
   }
 
   private async validateRoster(tx: any, rosterId: string, offering: any) {

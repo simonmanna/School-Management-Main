@@ -17,6 +17,7 @@ import type {
   UpdateCourseOfferingDto,
 } from './course-offering.dto';
 import { OFFERING_TYPES } from './course-offering.dto';
+import { countRosterDrift, isCompulsoryOffering } from './course-roster-reconcile';
 
 const TRANSITIONS: Record<string, string[]> = {
   DRAFT: ['STAFFED', 'ARCHIVED'],
@@ -83,13 +84,27 @@ export class CourseOfferingService {
       include: this.include,
       orderBy: [{ status: 'asc' }, { name: 'asc' }],
     });
-    return rows.map((row: any) => ({ ...row, readiness: this.readiness(row) }));
+    return Promise.all(
+      rows.map(async (row: any) => ({
+        ...row,
+        readiness: this.readiness(row),
+        rosterDrift: await countRosterDrift(this.prisma.client, row),
+      })),
+    );
   }
 
   async get(id: string) {
     const row = await this.prisma.client.courseOffering.findFirst({ where: { id }, include: this.include });
     if (!row) throw new NotFoundException(`Course offering ${id} not found`);
-    return { ...row, readiness: this.readiness(row as any) };
+    return {
+      ...row,
+      readiness: this.readiness(row as any),
+      // How many learners hold a seat in this offering's audience but are not on
+      // its course roster. Placement now reconciles compulsory rosters
+      // automatically, so a non-zero count means either an elective, an offering
+      // created after the learners were placed, or a deliberate opt-out.
+      rosterDrift: await countRosterDrift(this.prisma.client, row as any),
+    };
   }
 
   private readiness(row: any) {
@@ -286,7 +301,7 @@ export class CourseOfferingService {
     if (offering.audienceScope === 'CUSTOM') return { created: 0, retained: offering._count.courseEnrollments, skipped: 'CUSTOM rosters are explicitly managed.' };
     const curriculumSubject = offering.curriculumId && offering.subjectId
       ? await this.prisma.client.curriculumSubject.findFirst({ where: { curriculumId: offering.curriculumId, subjectId: offering.subjectId } }) : null;
-    const isCompulsory = offering.offeringType === 'REMEDIAL' ? false : (curriculumSubject?.isCore ?? offering.offeringType !== 'SUBJECT');
+    const isCompulsory = isCompulsoryOffering(offering, curriculumSubject);
     if (!isCompulsory && !dto.includeElectives) return { created: 0, retained: offering._count.courseEnrollments, skipped: 'Elective offering; enroll learners explicitly.' };
     const placements = await this.prisma.client.enrollmentPlacement.findMany({ where: this.placementWhere(offering), select: { enrollmentId: true } });
     let created = 0;

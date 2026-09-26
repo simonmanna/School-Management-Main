@@ -8,6 +8,15 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { StudentEnrollmentService } from '../enrollment/student-enrollment.service';
 
+/**
+ * Last nine digits, so `+256 790 600 100`, `0790600100` and `790600100` are one
+ * parent. Ugandan subscriber numbers are nine digits after the country code.
+ */
+function normalizePhone(raw?: string | null): string | null {
+  const digits = (raw ?? '').replace(/\D/g, '');
+  return digits.length >= 9 ? digits.slice(-9) : digits || null;
+}
+
 const RESIDENCE = ['day', 'boarder'] as const;
 const GENDERS = ['male', 'female', 'other'] as const;
 
@@ -17,6 +26,14 @@ export class GuardianInput {
   isPrimary?: boolean;
   canPickup?: boolean;
   receivesStatements?: boolean;
+}
+
+/** A guardian named on the registration screen rather than picked from Contacts. */
+export interface InlineGuardianInput {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  relationship?: string | null;
 }
 
 /**
@@ -54,6 +71,12 @@ export class AdmitStudentInput {
   admissionNo?: string | null;
   enrollmentDate?: string | null;
   guardians?: GuardianInput[];
+  /**
+   * A guardian typed inline on the front desk. Resolved to a Contact INSIDE the
+   * admission transaction (see `resolveGuardianInTx`) so a later capacity or
+   * duplicate failure cannot leave an orphaned contact behind.
+   */
+  inlineGuardian?: InlineGuardianInput | null;
   customFields?: Record<string, unknown>;
   partnerCustomFields?: Record<string, unknown>;
   placement?: AdmissionPlacement | null;
@@ -129,6 +152,10 @@ export class StudentAdmissionService {
         }
       }
 
+      // Before the Partner, the StudentProfile or the sequence number: a term
+      // from the wrong academic year must cost nothing and leave nothing behind.
+      if (input.placement) await this.resolveTermInTx(tx, input);
+
       if (input.existingStudentProfileId) {
         return this.enrolExisting(tx, input);
       }
@@ -186,7 +213,8 @@ export class StudentAdmissionService {
         },
       });
 
-      for (const g of input.guardians ?? []) {
+      const guardians = await this.collectGuardians(tx, organizationId, input);
+      for (const g of guardians) {
         await tx.studentGuardian.create({
           data: {
             organizationId,
@@ -204,11 +232,7 @@ export class StudentAdmissionService {
       let placement: any = null;
       let warnings: string[] = [];
       if (input.placement) {
-        const term = await tx.term.findFirst({
-          where: { id: input.placement.termId },
-          select: { id: true, academicYearId: true },
-        });
-        if (!term) throw new BadRequestException(`Term ${input.placement.termId} not found.`);
+        const term = await this.resolveTermInTx(tx, input);
         const admissionDate = input.placement.effectiveFrom ?? input.enrollmentDate ?? new Date().toISOString();
         const created = await this.enrollments.createInTx(tx, {
           studentProfileId: profile.id,
@@ -278,8 +302,7 @@ export class StudentAdmissionService {
     let placement: any = null;
     let warnings: string[] = [];
     if (input.placement) {
-      const term = await tx.term.findFirst({ where: { id: input.placement.termId }, select: { id: true, academicYearId: true } });
-      if (!term) throw new BadRequestException(`Term ${input.placement.termId} not found.`);
+      const term = await this.resolveTermInTx(tx, input);
       const admissionDate = input.placement.effectiveFrom ?? input.enrollmentDate ?? new Date().toISOString();
       const created = await this.enrollments.createInTx(tx, {
         studentProfileId: profile.id,
@@ -301,7 +324,8 @@ export class StudentAdmissionService {
       placement = created.placement;
       warnings = created.warnings;
     }
-    for (const g of input.guardians ?? []) {
+    const guardians = await this.collectGuardians(tx, profile.organizationId, input);
+    for (const g of guardians) {
       const exists = await tx.studentGuardian.findFirst({
         where: { studentProfileId: profile.id, guardianContactId: g.guardianContactId },
       });
@@ -334,7 +358,6 @@ export class StudentAdmissionService {
    */
   async register(dto: RegisterStudentDto) {
     const organizationId = this.tenant.organizationId;
-    const guardians = await this.resolveGuardian(dto, organizationId);
     return this.admit({
       organizationId,
       name: dto.name,
@@ -346,7 +369,13 @@ export class StudentAdmissionService {
       house: dto.house ?? null,
       residenceType: dto.residenceType ?? null,
       studentCategoryId: dto.studentCategoryId ?? null,
-      guardians,
+      inlineGuardian: dto.guardianName?.trim()
+        ? {
+            name: dto.guardianName.trim(),
+            phone: dto.guardianPhone ?? null,
+            relationship: dto.guardianRelationship ?? null,
+          }
+        : null,
       placement: {
         termId: dto.termId,
         classId: dto.classId,
@@ -356,27 +385,108 @@ export class StudentAdmissionService {
     });
   }
 
-  private async resolveGuardian(dto: RegisterStudentDto, organizationId: string): Promise<GuardianInput[]> {
-    if (!dto.guardianName?.trim()) return [];
-    const org = await this.prisma.client.organization.findFirst({ where: { id: organizationId } });
-    const owner = org ? await this.prisma.client.partner.findFirst({ where: { code: org.code } }) : null;
-    const contact = await this.prisma.client.contact.create({
+  /**
+   * The term the learner is being seated in, guarded against the year the family
+   * applied for.
+   *
+   * `AdmissionsService.enroll` already rejects a mismatched term before any
+   * record is written, but it is not the only caller: the student form, the CSV
+   * import and the front desk all reach `admit` directly. Without the guard here
+   * a 2027 applicant could be given a 2026 enrollment and placement, because the
+   * enrollment's academic year is derived from the term (ADR-028) while the
+   * admission seat was counted against the application's year.
+   */
+  private async resolveTermInTx(tx: any, input: AdmitStudentInput) {
+    const term = await tx.term.findFirst({
+      where: { id: input.placement!.termId },
+      select: { id: true, name: true, academicYearId: true },
+    });
+    if (!term) throw new BadRequestException(`Term ${input.placement!.termId} not found.`);
+    if (input.applicationId) {
+      const app = await tx.admissionApplication.findFirst({
+        where: { id: input.applicationId },
+        select: { academicYearId: true, applicationNumber: true },
+      });
+      if (app?.academicYearId && app.academicYearId !== term.academicYearId) {
+        throw new BadRequestException(
+          `${term.name} is not in the academic year application ${app.applicationNumber ?? input.applicationId} is for. ` +
+            'Choose a term of that year.',
+        );
+      }
+    }
+    return term as { id: string; name: string; academicYearId: string };
+  }
+
+  /** Explicitly linked guardians, plus the inline one once it has a Contact. */
+  private async collectGuardians(
+    tx: any,
+    organizationId: string,
+    input: AdmitStudentInput,
+  ): Promise<GuardianInput[]> {
+    const guardians = [...(input.guardians ?? [])];
+    if (input.inlineGuardian?.name?.trim()) {
+      guardians.push(await this.resolveGuardianInTx(tx, organizationId, input.inlineGuardian));
+    }
+    return guardians;
+  }
+
+  /**
+   * Find or create the Contact for a guardian typed inline.
+   *
+   * Runs in the admission transaction, so a failed admission takes the contact
+   * with it — the front desk used to create it first and leave it orphaned when
+   * the placement then failed on capacity or a duplicate constraint. Reuses an
+   * existing contact matched on normalized phone or email: a parent registering a
+   * second child should not become a second contact, and then a second fee payer.
+   */
+  private async resolveGuardianInTx(
+    tx: any,
+    organizationId: string,
+    guardian: InlineGuardianInput,
+  ): Promise<GuardianInput> {
+    const link = {
+      relationship: guardian.relationship?.trim() || 'guardian',
+      isPrimary: true,
+      canPickup: true,
+      receivesStatements: true,
+    };
+
+    const phone = normalizePhone(guardian.phone);
+    const email = guardian.email?.trim().toLowerCase() || null;
+    if (phone || email) {
+      const candidates = await tx.contact.findMany({
+        where: { organizationId, deletedAt: null, OR: [{ phone: { not: null } }, { email: { not: null } }] },
+        select: { id: true, phone: true, email: true },
+      });
+      const hit = candidates.find(
+        (c: any) =>
+          (phone && normalizePhone(c.phone) === phone) ||
+          (email && (c.email ?? '').trim().toLowerCase() === email),
+      );
+      if (hit) return { guardianContactId: hit.id, ...link };
+    }
+
+    // `Contact.partnerId` is a required FK to the Partner the contact belongs to
+    // — here the school itself. This used to pass `''` when that Partner was
+    // missing, which failed the FK and took the whole admission down with it.
+    const org = await tx.organization.findFirst({ where: { id: organizationId }, select: { code: true, name: true } });
+    if (!org) throw new BadRequestException(`Organization ${organizationId} not found.`);
+    const owner =
+      (await tx.partner.findFirst({ where: { organizationId, code: org.code }, select: { id: true } })) ??
+      (await tx.partner.create({
+        data: { organizationId, code: org.code, name: org.name, isCompany: true },
+        select: { id: true },
+      }));
+    const contact = await tx.contact.create({
       data: {
         organizationId,
-        partnerId: owner?.id ?? '',
-        firstName: dto.guardianName.trim(),
+        partnerId: owner.id,
+        firstName: guardian.name.trim(),
         lastName: '',
-        phone: dto.guardianPhone ?? null,
+        phone: guardian.phone ?? null,
+        email: guardian.email ?? null,
       },
     });
-    return [
-      {
-        guardianContactId: contact.id,
-        relationship: dto.guardianRelationship?.trim() || 'guardian',
-        isPrimary: true,
-        canPickup: true,
-        receivesStatements: true,
-      },
-    ];
+    return { guardianContactId: contact.id, ...link };
   }
 }

@@ -154,11 +154,13 @@ export function SchoolAdmissionsPage() {
   };
 
   const openEnroll = (app: AdmissionApplication) => {
-    // The CURRENT term, not whichever the API listed first. Enrollment is unique
-    // per (student, term), so enrolling into the wrong term silently consumes
-    // the pupil's only placement slot for it and the correct one then fails.
-    const all = terms?.data ?? [];
-    const firstTerm = (all.find((t: any) => t.isCurrent) ?? all[0])?.id ?? '';
+    // Only terms of the year the family applied for. The enrollment's academic
+    // year is derived from the term, while the admission seat is counted against
+    // the application's year, so a 2027 applicant seated in a 2026 term consumed
+    // a 2027 seat and got a 2026 placement. The API refuses this; the selector
+    // should never offer it. Within that year, prefer the current term.
+    const all = (terms?.data ?? []).filter((t) => t.academicYearId === app.academicYearId);
+    const firstTerm = (all.find((t) => t.isCurrent) ?? all[0])?.id ?? '';
     setEnrollFor(app);
     // Seeded from the APPLICATION being enrolled. This used to read the
     // new-application dialog's state (`form.applicantGender` / `form.applicantDob`),
@@ -215,6 +217,13 @@ export function SchoolAdmissionsPage() {
       notify.error(e?.response?.data?.message ?? 'Enrollment failed');
     }
   };
+
+  // Enrollment is only ever offered terms of the applicant's own academic year.
+  const enrollTerms = useMemo(
+    () => (terms?.data ?? []).filter((t) => t.academicYearId === enrollFor?.academicYearId),
+    [terms?.data, enrollFor?.academicYearId],
+  );
+  const enrollYearName = enrollFor ? (yearNameById[enrollFor.academicYearId] ?? 'that academic year') : '';
 
   const busy = act.isPending || issueOffer.isPending || acceptOffer.isPending || declineOffer.isPending;
 
@@ -476,10 +485,20 @@ export function SchoolAdmissionsPage() {
               </select>
             </Field>
             <Field label="Term" required>
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.termId ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, termId: e.target.value })}>
-                <option value="">—</option>
-                {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
+              <select
+                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
+                value={enrollForm.termId ?? ''}
+                disabled={enrollTerms.length === 0}
+                onChange={(e) => setEnrollForm({ ...enrollForm, termId: e.target.value })}
+              >
+                <option value="">{enrollTerms.length ? '—' : `No terms defined for ${enrollYearName}`}</option>
+                {enrollTerms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
               </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {enrollTerms.length
+                  ? `Terms of ${enrollYearName}, the year this application is for.`
+                  : `Create the terms for ${enrollYearName} before enrolling this applicant.`}
+              </p>
             </Field>
             <Field label="Student name" required>
               <Input value={enrollForm.name ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, name: e.target.value })} />

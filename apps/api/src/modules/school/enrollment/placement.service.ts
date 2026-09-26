@@ -21,6 +21,7 @@ import {
   type CapacityViolation,
 } from './capacity';
 import { assertYearWritable } from '../foundation/academic-year-guard';
+import { reconcileCompulsoryRostersInTx } from '../course-offerings/course-roster-reconcile';
 import { holdsPlacement, type EnrollmentStatusValue, type MovementReasonValue } from './enrollment-fsm';
 import type {
   BulkPlacementDto,
@@ -472,6 +473,29 @@ export class PlacementService {
       actorId: this.tenant.userId ?? null,
       requestId: this.tenant.requestId ?? null,
     });
+
+    // The handoff the E2E audit found broken: course membership is what
+    // assessment rosters are built from, and it used to be a separate manual
+    // action per offering. Reconciling here — in the placement's own transaction
+    // — means a learner who has a seat is on the compulsory registers for it,
+    // whether they arrived by admission, transfer, promotion or a mid-term move.
+    const roster = await reconcileCompulsoryRostersInTx(tx, {
+      organizationId: enrollment.organizationId,
+      enrollmentId: enrollment.id,
+      termId: target.termId,
+      classCohortId: target.cohortId,
+      sectionId: target.sectionId,
+      effectiveFrom,
+      actorId: this.tenant.userId ?? null,
+    });
+    if (roster.enrolled > 0) {
+      await this.audit.recordInTx(tx, {
+        entity: 'EnrollmentPlacement',
+        entityId: created.id,
+        action: 'update',
+        newValues: { compulsoryCoursesEnrolled: roster.enrolled, offeringIds: roster.offeringIds },
+      });
+    }
 
     const warnings = [
       ...(override ? target.warnings.map((w) => `${w} Seated under a capacity override.`) : target.warnings),

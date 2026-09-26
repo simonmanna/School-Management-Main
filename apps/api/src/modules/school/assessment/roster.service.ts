@@ -74,7 +74,10 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
             }),
           },
         });
-        const students = await this.placements.attach(found);
+        // On `tx`: the placements this roster is derived from may have been
+        // written in this same transaction, and the lookup must not go looking
+        // for a second connection while this one holds it.
+        const students = await this.placements.attach(found, { tx });
         if (students.length > 0) {
           await tx.academicRosterMember.createMany({
             data: students.map((s: any) => ({

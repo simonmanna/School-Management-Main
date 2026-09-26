@@ -550,11 +550,49 @@ export class ReportCardService {
     return this.setPublished(id, false);
   }
 
+  /**
+   * A family-visible report card must be pinned to a published ResultSet revision.
+   *
+   * There were two ways a card could reach a parent: the results workflow, which
+   * publishes an immutable ResultSet revision and issues documents from it, and
+   * this one, which only stamped `publishedAt` on whatever `generate` last built
+   * — including a card assembled from live approved marks. The second path had
+   * none of the first's guarantees: no frozen cohort (so no position), no
+   * calculation version, no reproducibility, and marks that could still be
+   * amended after the parent had read them. One authority, not two.
+   */
+  private async assertPinnedToPublishedResult(tx: any, card: any) {
+    const provenance = (card.payload as any)?.provenance ?? null;
+    if (provenance?.source !== 'result_spine' || !provenance.resultSetId) {
+      throw new BadRequestException(
+        'This report card was built from live marks, so it is a staff preview only. ' +
+          'Compute and publish the results for this term, regenerate the card, then release it.',
+      );
+    }
+    const resultSet = await tx.resultSet.findFirst({
+      where: { id: provenance.resultSetId, organizationId: this.tenant.organizationId, deletedAt: null },
+      select: { revision: true, status: true, publishedAt: true },
+    });
+    if (!resultSet || resultSet.status !== 'published' || !resultSet.publishedAt) {
+      throw new BadRequestException(
+        'The published results this card was built from are no longer published. Regenerate the card from the current revision.',
+      );
+    }
+    // An amendment creates a new revision; the card must not be released against
+    // a superseded one, because the numbers a parent sees would already be stale.
+    if (provenance.resultSetRevision != null && resultSet.revision !== provenance.resultSetRevision) {
+      throw new BadRequestException(
+        `This card was built from revision ${provenance.resultSetRevision}; revision ${resultSet.revision} is now published. Regenerate it first.`,
+      );
+    }
+  }
+
   private async setPublished(id: string, publish: boolean) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
       const card = await tx.reportCard.findFirst({ where: { id } });
       if (!card) throw new NotFoundException(`ReportCard ${id} not found`);
+      if (publish) await this.assertPinnedToPublishedResult(tx, card);
       await tx.reportCard.updateMany({
         where: { id },
         data: { publishedAt: publish ? new Date() : null },
@@ -773,7 +811,15 @@ export class ReportCardService {
             resultSetRevision: spine.resultSet.revision,
             calculationVersion: spine.resultSet.calculationVersion,
           }
-        : { source: 'live_spine' as const, layoutSource };
+        : {
+            source: 'live_spine' as const,
+            layoutSource,
+            // Not publishable. A card built from live approved marks is a preview
+            // for staff: the marks behind it can still change, it carries no
+            // position, and nothing about it is reproducible later. Publication
+            // requires a ResultSet revision — see `setPublished`.
+            isDraft: true as const,
+          };
 
       // P0-2: the headline comes from the same subject rows the body prints.
       //

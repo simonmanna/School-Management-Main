@@ -53,6 +53,17 @@ export interface PlacementAt {
    * cron — where the tenant-scoped client would throw "no tenant context".
    */
   organizationId?: string;
+  /**
+   * The caller's open interactive transaction.
+   *
+   * A lookup made from inside a transaction must run ON that transaction. Using
+   * the ambient client instead needs a second connection, which the transaction
+   * is already holding on a small pool — the query then waits for a connection
+   * that cannot be freed until the transaction ends, and the transaction ends by
+   * timing out. It also read outside the transaction's snapshot, so a roster
+   * captured in the same transaction that created its placements could miss them.
+   */
+  tx?: any;
 }
 
 @Injectable()
@@ -62,6 +73,7 @@ export class PlacementLookupService {
   /** Tenant-scoped client normally; the raw client plus an explicit org filter when asked. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private db(at: PlacementAt): any {
+    if (at.tx) return at.tx;
     return at.organizationId ? this.prisma.raw : this.prisma.client;
   }
 

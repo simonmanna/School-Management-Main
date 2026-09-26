@@ -110,12 +110,19 @@ export class SequenceService implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     try {
       const orgs = await this.prisma.raw.organization.findMany({ select: { id: true } });
+      // Admission numbers are keyed by calendar year, so the key is not a
+      // constant and cannot live in KNOWN_KEYS. Warming this year's (and next
+      // year's, for an intake admitted in December) keeps `CREATE SEQUENCE` out
+      // of the first admission's interactive transaction, where it has to open a
+      // second connection and can exhaust a small pool before the 5s budget.
+      const thisYear = new Date().getUTCFullYear();
+      const keys = [...SequenceService.KNOWN_KEYS, `student:${thisYear}`, `student:${thisYear + 1}`];
       for (const org of orgs) {
-        for (const key of SequenceService.KNOWN_KEYS) {
+        for (const key of keys) {
           await this.ensure(org.id, key);
         }
       }
-      this.logger.log(`Warmed up ${orgs.length * SequenceService.KNOWN_KEYS.length} sequences`);
+      this.logger.log(`Warmed up ${orgs.length * keys.length} sequences`);
     } catch (err) {
       this.logger.warn(`Sequence warm-up failed (will lazy-create on first use): ${String(err)}`);
     }
