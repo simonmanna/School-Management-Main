@@ -20,7 +20,7 @@ test('login → place pupil → collect fee → statement', async ({ page }) => 
 
   // 1. Sign in.
   await page.goto('/login');
-  await page.getByPlaceholder('DEMO').fill(ORG);
+  await page.getByPlaceholder('e.g. GVPS').fill(ORG);
   await page.getByPlaceholder('your@email.com').fill(EMAIL);
   await page.getByPlaceholder('••••••••').fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();

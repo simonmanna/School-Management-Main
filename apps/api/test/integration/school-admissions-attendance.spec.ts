@@ -201,9 +201,12 @@ describeDb('integration: school admissions → enrollment → attendance (H4)', 
     // (StudentAttendanceService writes `earlyDepartureMinutes`, a column absent
     // from StudentAttendance). Tolerate that specific failure so this admissions
     // test is not blocked by a broken sibling module; any other error still fails.
+    // The register is for a day the pupil was in the class — the day they were
+    // placed. A day before admission is refused (F10).
+    const registerDate = placement!.effectiveFrom.toISOString().slice(0, 10);
     try {
       await asTenant(() =>
-        attendance.mark({ date: '2026-02-03', classId, entries: [{ studentProfileId, status: 'present' }] }),
+        attendance.mark({ date: registerDate, classId, entries: [{ studentProfileId, status: 'present' }] }),
       );
       const rows = await raw.studentAttendance.findMany({ where: { studentProfileId } });
       expect(rows).toHaveLength(1);

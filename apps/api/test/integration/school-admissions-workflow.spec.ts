@@ -96,14 +96,14 @@ describeDb('integration: configurable admission workflow', () => {
     });
   }
 
-  const enroll = (applicationId: string, name = 'Enrolled Student') =>
+  // The pupil's details come from the application (F13); `_label` only names the case.
+  const enroll = (applicationId: string, _label = 'Enrolled Student') =>
     asTenant(() =>
       admissions.enroll({
         applicationId,
         classId,
         termId,
         rollNumber: String(seq),
-        student: { name },
       } as any),
     );
 

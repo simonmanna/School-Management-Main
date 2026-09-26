@@ -147,7 +147,7 @@ export function SchoolApplicationsPage() {
                       >
                         <Pencil className="h-3.5 w-3.5" /> Edit
                       </Button>
-                      <DropdownMenu>
+                      <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm">
                             Actions <ChevronDown className="h-3.5 w-3.5" />

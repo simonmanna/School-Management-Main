@@ -55,9 +55,10 @@ export class AssessmentWorkflowService {
       // Only learners whose seat today is in this course's audience. A course
       // membership alone is not enough — it can outlive a move (F11).
       const fits = (e: any) => {
+        // A school-wide or hand-picked audience is not defined by a seat.
+        if (offering.audienceScope === 'SCHOOL' || offering.audienceScope === 'CUSTOM') return true;
         const p = e.studentEnrollment.placements[0];
         if (!p) return false;
-        if (offering.audienceScope === 'SCHOOL' || offering.audienceScope === 'CUSTOM') return true;
         if (offering.classCohortId ? p.classCohortId !== offering.classCohortId : p.classCohort?.classId !== offering.classId) return false;
         if (offering.audienceScope === 'SECTION' && p.sectionId !== offering.sectionId) return false;
         return true;
@@ -77,7 +78,7 @@ export class AssessmentWorkflowService {
       await tx.academicRosterMember.createMany({ data: enrollments.map((e: any) => {
         const placement = e.studentEnrollment.placements[0];
         return { organizationId: this.org, rosterId: roster.id, studentProfileId: e.studentEnrollment.studentProfileId,
-          classId: placement.classCohort?.classId ?? null, sectionId: placement.sectionId ?? null,
+          classId: placement?.classCohort?.classId ?? null, sectionId: placement?.sectionId ?? null,
           gradeLevelId: e.studentEnrollment.gradeLevelId, effectiveFrom: now, joinReason: `course:${courseOfferingId}` };
       }) });
       await tx.academicRoster.updateMany({ where: { id: roster.id }, data: { frozenAt: now, frozenById: this.tenant.userId, version: { increment: 1 } } });

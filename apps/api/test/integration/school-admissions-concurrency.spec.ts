@@ -86,7 +86,6 @@ describeDb('integration: admissions capacity, atomicity and portal isolation', (
         sectionId: sectionId ?? sectionAId,
         termId,
         rollNumber: applicationId.slice(0, 8),
-        student: { name: `Student ${applicationId.slice(0, 6)}` },
       } as any),
     );
 

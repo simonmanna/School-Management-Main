@@ -48,7 +48,7 @@ test.describe.configure({ mode: 'serial' });
 
 async function signIn(page: Page, email: string, password: string) {
   await page.goto('/login');
-  await page.getByPlaceholder('DEMO').fill(ORG);
+  await page.getByPlaceholder('e.g. GVPS').fill(ORG);
   await page.getByPlaceholder('your@email.com').fill(email);
   await page.getByPlaceholder('••••••••').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -58,18 +58,21 @@ async function signIn(page: Page, email: string, password: string) {
 /** Pick the first real option of a `select`, or the one whose label matches. */
 async function choose(select: ReturnType<Page['locator']>, label?: string) {
   if (label) {
+    await expect(select.locator('option', { hasText: label }).first()).toBeAttached();
     await select.selectOption({ label });
     return label;
   }
   const options = select.locator('option');
-  const count = await options.count();
-  expect(count, 'the selector had no options to choose from').toBeGreaterThan(1);
+  // Options arrive with their query; wait for them rather than racing it.
+  await expect.poll(() => options.count(), { message: 'the selector had no options to choose from' }).toBeGreaterThan(1);
   const text = (await options.nth(1).textContent())!.trim();
   await select.selectOption({ index: 1 });
   return text;
 }
 
 test('application → enrolment → assessment → marks → results → published report', async ({ browser }) => {
+  // One test for the whole year: it needs far more than the default budget.
+  test.setTimeout(600_000);
   const stamp = Date.now();
   const applicant = `Journey Pupil ${stamp}`;
   const assessmentTitle = `Journey Check ${stamp}`;
@@ -79,10 +82,25 @@ test('application → enrolment → assessment → marks → results → publish
 
   /* ── 1. The application arrives ───────────────────────────────────────── */
   await registrar.goto('/school/applications/new');
-  // Academic year first: the terms offered at enrolment are filtered by it.
-  await choose(registrar.locator('select').first());
-  await registrar.getByLabel(/^surname/i).fill(`Pupil${stamp}`);
-  await registrar.getByLabel(/^other names/i).fill('Journey');
+  const form = registrar.getByRole('main');
+  // Academic year first: the terms (and classes) offered depend on it.
+  await choose(form.locator('select').first());
+  await form.getByPlaceholder('E.g. Atimango').fill(`Pupil${stamp}`);
+  await form.getByPlaceholder('E.g. Isabelle Atweoki').fill('Journey');
+  await form.getByPlaceholder('E.g. Okello').fill('Guardian');
+  await form.getByPlaceholder('E.g. James Paul').fill(`Journey ${stamp}`);
+  await form.getByPlaceholder('E.g. 0700123456').fill('0700123456');
+  // Admission date, then date of birth (the two date inputs, in form order).
+  const dates = form.locator('input[type="date"]');
+  await dates.nth(0).fill(new Date().toISOString().slice(0, 10));
+  await dates.nth(1).fill('2019-03-04');
+  // Every other required choice (gender, nationality, entry, residence, class,
+  // relationship): take the first real option of any still-unset selector.
+  const selects = form.locator('select');
+  for (let i = 0; i < (await selects.count()); i += 1) {
+    const sel = selects.nth(i);
+    if ((await sel.inputValue()) === '' && (await sel.locator('option').count()) > 1) await sel.selectOption({ index: 1 });
+  }
   await registrar.getByRole('button', { name: /^next/i }).click();
   await registrar.getByRole('button', { name: /^submit/i }).click();
   await registrar.goto('/school/applications');
@@ -90,31 +108,39 @@ test('application → enrolment → assessment → marks → results → publish
 
   /* ── 2. Decision and offer, whatever this school's workflow requires ──── */
   await registrar.goto('/school/admissions');
-  const row = registrar.getByRole('row', { hasText: `Pupil${stamp}` });
+  const row = registrar.locator('tr', { hasText: `Pupil${stamp}` }).first();
   await expect(row).toBeVisible();
 
-  // The server resolves which actions are available; walk them until the
-  // application is enrollable rather than assuming a particular workflow.
-  for (let i = 0; i < 6; i += 1) {
-    const enroll = row.getByRole('button', { name: /^enrol/i });
-    if (await enroll.isVisible().catch(() => false)) break;
-    const next = row.getByRole('button').filter({ hasNotText: /view|open/i }).first();
-    if (!(await next.isVisible().catch(() => false))) break;
+  // The server resolves which actions are available (the row's Actions menu);
+  // walk the forward ones until Enroll is offered, whatever this school's
+  // workflow requires.
+  const FORWARD = /^(enroll|start review|documents received|screen|record interview|exam complete|score|accept|issue offer|offer accepted)/i;
+  for (let i = 0; i < 10; i += 1) {
+    await row.getByRole('button', { name: /actions/i }).click();
+    const items = registrar.getByRole('menuitem');
+    const enrollItem = items.filter({ hasText: /^enroll/i });
+    if (await enrollItem.count()) {
+      await enrollItem.first().click();
+      break;
+    }
+    const next = items.filter({ hasText: FORWARD }).first();
+    if (!(await next.count())) throw new Error('No forward admission action is offered for this application');
     await next.click();
-    // A decision or offer may ask for a reason; accept the dialog's default.
+    // A decision or offer may ask for a reason or a date.
     const dialog = registrar.getByRole('dialog');
     if (await dialog.isVisible().catch(() => false)) {
-      await dialog.getByRole('button', { name: /^(save|confirm|record|issue|accept|ok)/i }).first().click();
+      const reason = dialog.locator('textarea').first();
+      if (await reason.isVisible().catch(() => false)) await reason.fill('Journey test decision');
+      await dialog.getByRole('button', { name: /^(save|confirm|record|issue|accept|ok|submit)/i }).first().click();
     }
-    await registrar.waitForTimeout(500);
+    await registrar.waitForTimeout(800);
   }
 
   /* ── 3. Enrol: the term offered must belong to the application's year ── */
-  await row.getByRole('button', { name: /^enrol/i }).click();
   const enrollDialog = registrar.getByRole('dialog');
   // One shared dialog: the details come from the application, not re-typed.
   await expect(enrollDialog.getByText(/the year applied for|No terms for/)).toBeVisible();
-  await expect(enrollDialog.getByText(`Pupil${stamp}`, { exact: false })).toBeVisible();
+  await expect(enrollDialog.getByText(`Pupil${stamp}`, { exact: false }).first()).toBeVisible();
   await choose(enrollDialog.getByLabel(/^term/i), TERM || undefined);
   await choose(enrollDialog.getByLabel(/^class/i));
   await enrollDialog.getByLabel(/roll number/i).fill(String(stamp % 100000));

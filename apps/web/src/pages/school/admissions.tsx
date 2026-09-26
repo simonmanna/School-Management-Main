@@ -278,8 +278,10 @@ export function SchoolAdmissionsPage() {
                             .filter((action) => action !== 'request_documents' && isSpecialAction(action));
                           const specialActionsList = [...specialRequired, ...specialOptional, ...specialTerminal];
 
+                          // Non-modal: its items open dialogs, and a modal menu closing under a
+                          // dialog left the whole page inert.
                           return (
-                            <DropdownMenu>
+                            <DropdownMenu modal={false}>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="outline" size="sm" disabled={busy}>
                                   <MoreHorizontal className="h-3.5 w-3.5 mr-1" /> Actions
