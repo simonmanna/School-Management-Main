@@ -1,9 +1,20 @@
+import { Link } from 'react-router-dom';
 import { SimpleCrud } from './_components/simple-crud';
 import { api } from '@/lib/api';
 
 export function SchoolSubjectsAdminPage() {
   return (
-    <SimpleCrud
+    <div>
+      {/*
+        There used to be two Subjects entries in the sidebar: this editor and a
+        read-only overview of subjects, periods and the calendar. The overview is
+        no longer a competing menu destination, so this is how it is reached.
+      */}
+      <div className="px-6 pt-6 text-sm text-muted-foreground">
+        Looking for periods and the academic calendar alongside these subjects?{' '}
+        <Link className="underline" to="/school/subjects">Open the subjects &amp; calendar overview</Link>.
+      </div>
+      <SimpleCrud
       title="Subjects"
       subtitle="Subjects offered, optionally grouped by department."
       endpoint="subjects"
@@ -27,6 +38,7 @@ export function SchoolSubjectsAdminPage() {
         { key: 'departmentId', label: 'Department', render: (r) => r.department?.name ?? '' },
         { key: 'isCore', label: 'Core', render: (r) => (r.isCore ? '✓' : '') },
       ]}
-    />
+      />
+    </div>
   );
 }

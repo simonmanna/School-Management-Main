@@ -202,7 +202,9 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/front-desk', label: 'Visitors', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/phone-calls', label: 'Phone Calls', icon: Phone, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/complaints', label: 'Complaints', icon: AlertTriangle, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/applications', label: 'Applications', icon: ClipboardList, permission: PERMISSIONS.school.manageFoundation },
+      // "Applications" used to appear here AND under Admissions, so the starting
+      // point of the school's single most important workflow was ambiguous.
+      // Admissions owns it; the front desk reaches it from there.
       { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
       { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
     ],
@@ -229,21 +231,24 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Admissions & Enrollment',
+    title: 'Admissions',
     icon: FilePlus2,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/admissions', label: 'Admissions', icon: FilePlus2, permission: PERMISSIONS.school.read },
+      // The journey in the order a school walks it: applications arrive,
+      // somebody decides, the applicant is enrolled and seated. Configuration
+      // and analytics sit below it rather than beside it.
       { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
-      { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
-      { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
-      { to: '/school/admissions/workflow', label: 'Admission Workflow', icon: Workflow, permission: PERMISSIONS.school.manageAdmissions },
-      { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3 },
+      { to: '/school/admissions', label: 'Review & Enrol', icon: FilePlus2, permission: PERMISSIONS.school.read },
       // Phase 1 canonical enrollment spine (ADR-018 / ADR-019). Separate from the
       // admissions funnel above: admissions decides who joins, this decides where
       // they sit and keeps the history of every move.
       { to: '/school/enrollment', label: 'Enrollment & Placement', icon: Users, permission: PERMISSIONS.school.read },
-      { to: '/school/enrollment/programmes', label: 'Programmes & Classes', icon: Layers, permission: PERMISSIONS.school.manageProgrammes },
+      { to: '/school/enrollment/programmes', label: 'Programmes & Classes', icon: Layers, permission: PERMISSIONS.school.manageProgrammes, group: 'Setup' },
+      { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions, group: 'Setup' },
+      { to: '/school/admissions/workflow', label: 'Admission Workflow', icon: Workflow, permission: PERMISSIONS.school.manageAdmissions, group: 'Setup' },
+      { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Reports' },
+      { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3, group: 'Reports' },
     ],
   },
   {
@@ -261,7 +266,11 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/settings', label: 'School Settings', icon: SettingsIcon, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/campuses', label: 'Campuses', icon: Building2, permission: PERMISSIONS.school.read },
       // Remaining academic-management tools.
-      { to: '/school/subjects', label: 'Subjects & Terms', icon: BookOpen, permission: PERMISSIONS.school.read },
+      //
+      // One Subjects destination. `/school/subjects` is a read-only overview of
+      // subjects, periods and the calendar, which repeated Academic Years, Terms
+      // and Subjects right above it; the route still works and is linked from the
+      // subjects screen, but it is no longer a competing menu entry.
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/class-teacher', label: 'Class Teachers', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/course-offerings', label: 'Teaching Allocation', icon: Users, permission: PERMISSIONS.school.manageCourses },
@@ -287,13 +296,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/homework', label: 'Homework Submissions', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Tools' },
       { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
 
-      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Reports' },
-      { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
-      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Reports' },
-      { to: '/school/results', label: 'Results & Reports', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Reports' },
-      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Reports' },
-      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Reports' },
-
       { to: '/school/assessment', label: 'Assessment Structure', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
       { to: '/school/grading-scales', label: 'Grading Scales', icon: Calculator, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
       { to: '/school/assessment-ops', label: 'Cohorts & Rubrics', icon: ClipboardList, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
@@ -302,13 +304,32 @@ const NAV_SECTIONS: NavSection[] = [
       // venues and seating are real exams-office work. It is no longer where
       // marking begins, which is why it sits below Assessments rather than
       // above it as a numbered wizard.
+      // Marking has ONE owner in the sidebar: the Gradebook above. Exam mark
+      // entry is the same job reached from a scheduled paper, so it is linked
+      // from Exam Scheduling rather than presented as a rival destination.
       { to: '/school/exam-workspace', label: 'Exam Scheduling', icon: CalendarDays, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
-      { to: '/school/enter-marks', label: 'Exam Mark Entry', icon: ClipboardList, permission: PERMISSIONS.school.enterGrades, group: 'Examinations' },
-      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Examinations' },
       { to: '/school/exam-operations', label: 'Run an Examination', icon: ShieldCheck, permission: PERMISSIONS.school.runExamOperations, group: 'Examinations' },
       { to: '/school/exam-ops', label: 'Venues, Seating & Papers', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
       // Phase 6 — what the school sends to UNEB, and whether it can yet.
       { to: '/school/statutory', label: 'National Submissions', icon: FileSpreadsheet, permission: PERMISSIONS.school.readStatutory, group: 'Examinations' },
+    ],
+  },
+  {
+    // Release has ONE owner. "Report Cards" and "Results & Reports" both looked
+    // like the place a term is published from, and only one of them goes through
+    // the immutable ResultSet the portal is served from. Computing and publishing
+    // leads; the documents that fall out of it follow.
+    title: 'Results',
+    icon: GitBranch,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/results', label: 'Compute & Publish Results', icon: GitBranch, permission: PERMISSIONS.school.computeResults },
+      { to: '/school/report-cards', label: 'Report Documents', icon: FileText, permission: PERMISSIONS.school.manageExams },
+      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read },
+      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Reports' },
+      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Setup' },
     ],
   },
   {

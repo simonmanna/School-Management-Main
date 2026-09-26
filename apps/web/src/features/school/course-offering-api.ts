@@ -24,6 +24,14 @@ export interface CourseOffering {
   teachers: Array<{ id: string; teacherPartnerId: string; role: string; isResponsible: boolean; effectiveTo: string | null; teacher?: { partner?: { name?: string } } }>;
   _count: { courseEnrollments: number; timetableSlots: number };
   readiness: { checks: Record<string, boolean>; readyToPublish: boolean };
+  /**
+   * Learners who hold a seat in this offering's audience but are not on its
+   * course roster. Placement reconciles compulsory rosters automatically, so a
+   * non-zero count means an elective, an offering created after the class was
+   * filled, or a deliberate opt-out — either way, something to see before
+   * capturing an assessment roster from it.
+   */
+  rosterDrift?: number;
 }
 
 export interface OfferingInput {
