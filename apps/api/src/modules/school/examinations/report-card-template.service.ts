@@ -108,6 +108,14 @@ export class ReportCardTemplateService {
     studentProfileId: string,
     termId: string,
     spine?: { subjects: any[] } | null,
+    /**
+     * The grading system to report under, when the caller knows it better than
+     * the school profile does — a published ResultSet records the system its
+     * numbers were computed under, and a nursery card must be read off that
+     * rather than off the school-wide setting (a nursery-and-primary school has
+     * one SchoolProfile, so its setting cannot be right for both).
+     */
+    systemOverride?: string | null,
   ): Promise<{
     layout: ReportCardLayout;
     layoutSource: 'result_spine' | 'spine_live';
@@ -124,7 +132,7 @@ export class ReportCardTemplateService {
     const school = await this.prisma.client.schoolProfile.findFirst({
       where: { organizationId: this.tenant.organizationId },
     });
-    const system = (school?.gradingSystem ?? 'UCE') as GradingSystem;
+    const system = (systemOverride ?? school?.gradingSystem ?? 'UCE') as GradingSystem;
 
     const spineSubjects = spine?.subjects ?? [];
 
@@ -169,6 +177,7 @@ export class ReportCardTemplateService {
       case 'UCE': return this.buildUCELayout(subjects);
       case 'UACE': return this.buildUACELayout(subjects);
       case 'CBC': return this.buildCBCLayout(subjects);
+      case 'ECD': return this.buildECDLayout(subjects);
       default: return this.buildGenericLayout(subjects);
     }
   }
@@ -345,7 +354,10 @@ export class ReportCardTemplateService {
 
     const round2 = (n: number) => Math.round(n * 100) / 100;
     const meanPercent = round2(scored.reduce((t, s) => t + s.totalPercent, 0) / scored.length);
-    const withGpa = scored.filter((s) => s.finalGpa != null);
+    // A descriptor system's bands carry gpa 0 so the arithmetic elsewhere stays
+    // total; averaging them would print "GPA 0.00" on a nursery card, which is
+    // worse than printing nothing. There is no GPA here to report.
+    const withGpa = system === 'ECD' ? [] : scored.filter((s) => s.finalGpa != null);
     const gpa = withGpa.length ? round2(withGpa.reduce((t, s) => t + (s.finalGpa as number), 0) / withGpa.length) : null;
 
     let aggregate: number | null = null;
@@ -479,6 +491,25 @@ export class ReportCardTemplateService {
       ],
       footer: [
         'Issued under the Competency-Based Curriculum (CBC) assessment framework.',
+        'Class teacher: ____________________   Head teacher: ____________________',
+      ],
+    };
+  }
+
+  /**
+   * Nursery. A learning area, the level the child is working at, and what the
+   * teacher saw — no marks column, no points, no aggregate, no division and no
+   * position. What a parent of a four-year-old is owed is a description, and
+   * the fields that would invite a comparison are simply not on the card.
+   */
+  private buildECDLayout(subjects: SubjectResult[]): ReportCardLayout {
+    return {
+      system: 'ECD',
+      columnHeaders: ['Learning area', 'Level', 'What we saw'],
+      sections: [{ title: 'Learning areas', subjects }],
+      summary: [{ label: 'Learning areas reported', value: `${subjects.length}` }],
+      footer: [
+        'Nursery reports describe how a child is developing. They carry no marks, no position in class and no division.',
         'Class teacher: ____________________   Head teacher: ____________________',
       ],
     };

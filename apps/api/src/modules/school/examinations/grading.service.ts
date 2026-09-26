@@ -25,6 +25,7 @@ export function percent(marks: Prisma.Decimal.Value, maxMarks: Prisma.Decimal.Va
  *   - UCE (Uganda Certificate of Education, Senior 4) — D1..F9, 9-point
  *   - UACE (Uganda Advanced Certificate of Education, Senior 6) — A..O, 6-point
  *   - CBC (Competency-Based Curriculum) — generic 4-level rubric
+ *   - ECD (nursery / early childhood) — descriptor levels, no points or division
  *
  * Plus a legacy 9-point default used by schools that haven't customised.
  */
@@ -38,7 +39,7 @@ export interface GradeBand {
   remark?: string;
 }
 
-export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'generic';
+export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'ECD' | 'generic';
 
 /**
  * The four subjects a PLE aggregate is built from. Matched by name (and code)

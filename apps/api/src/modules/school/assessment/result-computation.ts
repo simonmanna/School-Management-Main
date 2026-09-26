@@ -19,9 +19,25 @@ import { Prisma } from '@prisma/client';
 const D = Prisma.Decimal;
 type Dec = Prisma.Decimal;
 
-export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'generic';
+/**
+ * `ECD` is early childhood development — nursery. It is a descriptor system: a
+ * learning area is reported as "Doing very well" or "Beginning", never as a
+ * grade point, an aggregate or a division, because a four-year-old is not
+ * graded against a national scale and there is nothing for a GPA to mean.
+ */
+export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'ECD' | 'generic';
+
+/** Systems that report a descriptor per learning area and nothing aggregated. */
+export const DESCRIPTOR_SYSTEMS: GradingSystem[] = ['ECD'];
+export const isDescriptorSystem = (system: string): boolean =>
+  DESCRIPTOR_SYSTEMS.includes(system as GradingSystem);
 export type RoundingModeName = 'half_up' | 'half_even' | 'floor' | 'ceil';
-export type RankOn = 'gpa' | 'aggregate' | 'meanPercent';
+/**
+ * `none` means this cohort is not ranked at all. Nursery classes are the reason:
+ * a position in class is a comparison between small children, and printing one
+ * is a decision a school makes, not a default the software imposes.
+ */
+export type RankOn = 'gpa' | 'aggregate' | 'meanPercent' | 'none';
 
 export interface BandConfig {
   min: number;
@@ -367,11 +383,15 @@ export function computeTerm(subjectResults: SubjectResult[], subjects: SubjectIn
     input.roundingMode,
     input.decimalPlaces,
   );
-  const gpa = roundDec(
-    scored.reduce((acc, s) => acc.add(s.gradePoint ?? new D(0)), new D(0)).div(scored.length),
-    input.roundingMode,
-    2,
-  );
+  // A descriptor system has no grade points to average, so it has no GPA. The
+  // mean percent is still computed: it is what the descriptor band is read off.
+  const gpa = isDescriptorSystem(input.gradingSystem)
+    ? null
+    : roundDec(
+        scored.reduce((acc, s) => acc.add(s.gradePoint ?? new D(0)), new D(0)).div(scored.length),
+        input.roundingMode,
+        2,
+      );
 
   let aggregate: number | null = null;
   let division: string | null = null;
@@ -398,6 +418,21 @@ export function computeTerm(subjectResults: SubjectResult[], subjects: SubjectIn
   }
 
   // Promotion recommendation from pass coverage against each subject's pass mark.
+  // Nursery promotes on age and readiness, not on a pass count, so the
+  // recommendation is left for the class teacher to state in words.
+  if (isDescriptorSystem(input.gradingSystem)) {
+    return {
+      gpa: null,
+      aggregate: null,
+      division: null,
+      meanPercent,
+      subjectsCount: scored.length,
+      eligible: true,
+      promotionRecommendation: 'review',
+      classRank: null,
+    };
+  }
+
   let passed = 0;
   for (const r of scored) {
     const meta = subjects.find((s) => s.subjectId === r.subjectId);
@@ -436,6 +471,10 @@ export function computeResultSet(input: ResultInput): ResultOutput {
     const term = computeTerm(subjects, st.subjects, input);
     return { studentProfileId: st.studentProfileId, subjects, term };
   });
+
+  // An unranked cohort keeps every rank null — no class position, no subject
+  // position. Nursery report cards are the reason this exists.
+  if (input.rankOn === 'none') return { students };
 
   // Class rank across students on the configured value.
   const rankOrder: 'asc' | 'desc' = input.rankOn === 'aggregate' ? 'asc' : 'desc';

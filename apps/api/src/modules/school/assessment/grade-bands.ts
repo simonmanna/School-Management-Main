@@ -10,6 +10,17 @@ import type { BandConfig } from './result-computation';
 
 export function defaultBands(system: string): BandConfig[] {
   switch ((system ?? '').toUpperCase()) {
+    // Nursery. Descriptors a parent can read, in the words a nursery teacher
+    // uses; `gpa` is zero throughout and never printed, because a descriptor
+    // system reports no GPA, aggregate, division or position (see
+    // `isDescriptorSystem` in result-computation.ts).
+    case 'ECD':
+      return [
+        { min: 80, max: 100, grade: 'Confident', gpa: 0, remark: 'Doing this confidently and on their own' },
+        { min: 60, max: 79, grade: 'Developing', gpa: 0, remark: 'Doing this well, with a little help' },
+        { min: 40, max: 59, grade: 'Beginning', gpa: 0, remark: 'Beginning to do this with help' },
+        { min: 0, max: 39, grade: 'Support', gpa: 0, remark: 'Needs more time and practice' },
+      ];
     case 'UACE':
       return [
         { min: 80, max: 100, grade: 'A', gpa: 4.0, points: 5, remark: 'Distinction' },
@@ -50,9 +61,13 @@ export function defaultBands(system: string): BandConfig[] {
  * otherwise the built-in default. `prismaClient` is the tenant-scoped client.
  */
 export async function resolveBands(prismaClient: any, system: string): Promise<BandConfig[]> {
+  // A scale registered FOR THIS SYSTEM wins over the school's default one.
+  // The other order meant a primary school's default PLE scale was used for its
+  // nursery classes too, so Top Class was graded D1–F9.
   const scale =
-    (await prismaClient.gradingScale.findFirst({ where: { isDefault: true } })) ??
-    (await prismaClient.gradingScale.findFirst({ where: { name: { contains: system } } }));
+    (await prismaClient.gradingScale.findFirst({
+      where: { name: { contains: system, mode: 'insensitive' } },
+    })) ?? (await prismaClient.gradingScale.findFirst({ where: { isDefault: true } }));
   if (scale?.bands) return scale.bands as unknown as BandConfig[];
   return defaultBands(system);
 }

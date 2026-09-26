@@ -19,6 +19,34 @@ const LEVELS = [
   { code: 'PU', name: 'Upper Primary', stage: 'PRIMARY_UPPER', order: 3, programme: 'Upper Primary' },
 ] as const;
 
+/**
+ * Nursery reporting, written into the Nursery programme's versioned config.
+ *
+ * A nursery-and-primary school has one SchoolProfile and therefore one
+ * school-wide grading system, which used to be applied to Baby Class as readily
+ * as to P7 — so Top Class was reported in D1–F9 with a GPA and a position in
+ * class. The programme is where assessment and ranking rules belong, and this is
+ * an ordinary editable row: a school that wants its nursery ranked sets
+ * `rankOn` back.
+ */
+const NURSERY_CONFIG = {
+  gradingSystem: 'ECD',
+  rankOn: 'none',
+};
+
+/**
+ * Nursery descriptors. The levels a nursery teacher actually reports in, held as
+ * an ordinary GradingScale so the school can reword them. Not `isDefault`: the
+ * primary scale stays the school default, and `resolveBands` prefers the scale
+ * registered for the system being reported.
+ */
+const ECD_BANDS = [
+  { min: 80, max: 100, grade: 'Confident', gpa: 0, remark: 'Doing this confidently and on their own' },
+  { min: 60, max: 79, grade: 'Developing', gpa: 0, remark: 'Doing this well, with a little help' },
+  { min: 40, max: 59, grade: 'Beginning', gpa: 0, remark: 'Beginning to do this with help' },
+  { min: 0, max: 39, grade: 'Support', gpa: 0, remark: 'Needs more time and practice' },
+];
+
 /** Grade ladder, youngest first. The last grade graduates (PLE). */
 const GRADES: Array<{ name: string; code: string; level: (typeof LEVELS)[number]['code'] }> = [
   { name: 'Baby Class', code: 'BABY', level: 'PRE' },
@@ -67,6 +95,7 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
         stage: l.stage,
         isActive: true,
         effectiveFrom: new Date('2000-01-01'),
+        config: l.stage === 'PRE_PRIMARY' ? NURSERY_CONFIG : {},
       },
     });
     const level = await db.academicLevel.create({
@@ -110,5 +139,9 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
   });
   await db.gradingScale.create({
     data: { organizationId, name: 'PLE (UNEB)', bands: PLE_BANDS, isDefault: true },
+  });
+  // The name must contain the system code so `resolveBands('ECD')` finds it.
+  await db.gradingScale.create({
+    data: { organizationId, name: 'ECD nursery descriptors', bands: ECD_BANDS, isDefault: false },
   });
 }

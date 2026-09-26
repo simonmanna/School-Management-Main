@@ -71,8 +71,11 @@ export class ResultRunService {
     if (!roster) throw new NotFoundException(`Roster ${dto.rosterId} not found`);
     if (!roster.frozenAt) throw new BadRequestException('Roster must be frozen before results can be computed');
 
-    const profile = await this.prisma.client.schoolProfile.findFirst({ where: {} });
-    const gradingSystem = (profile?.gradingSystem ?? 'UCE') as string;
+    // A nursery-and-primary school has ONE SchoolProfile and therefore one
+    // configured grading system, which was applied to Baby Class as readily as
+    // to P7. The programme this cohort is enrolled under decides instead.
+    const reporting = await this.resolveReporting(roster, dto.termId);
+    const gradingSystem = reporting.gradingSystem;
     const bands = await resolveBands(this.prisma.client, gradingSystem);
 
     const scopeType = dto.scopeType ?? 'class';
@@ -85,7 +88,7 @@ export class ResultRunService {
       bands,
       roundingMode: 'half_up',
       decimalPlaces: 2,
-      rankOn: ['PLE', 'UCE', 'UACE'].includes(gradingSystem) ? 'aggregate' : 'gpa',
+      rankOn: reporting.rankOn,
       students,
     };
     const inputChecksum = sha(input);
@@ -562,6 +565,74 @@ export class ResultRunService {
   }
 
   // ── data loading (StudentAssessment → pure input) ───────────────────────────
+  /**
+   * How this cohort is reported: which grading system, and whether it is ranked.
+   *
+   * The authority is the programme's versioned `config` (ADR: assessment kinds,
+   * ranking, report templates and promotion rules live there, never in a code
+   * branch on a stage). Where a school has not configured it, the programme's
+   * stage supplies a default — pre-primary is reported in descriptors and is not
+   * ranked, because a nursery learning area is "Doing this well", not a D2, and a
+   * position in class is a comparison between four-year-olds. A school that
+   * disagrees sets `config.gradingSystem` or `config.rankOn` and is obeyed.
+   *
+   * Everything else falls back to the school profile, exactly as before.
+   */
+  private async resolveReporting(
+    roster: any,
+    termId: string,
+  ): Promise<{ gradingSystem: string; rankOn: ResultInput['rankOn'] }> {
+    const profile = await this.prisma.client.schoolProfile.findFirst({ where: {} });
+    const schoolSystem = (profile?.gradingSystem ?? 'UCE') as string;
+    const byAggregate = (system: string): ResultInput['rankOn'] =>
+      ['PLE', 'UCE', 'UACE'].includes(system) ? 'aggregate' : 'gpa';
+
+    const programme = await this.programmeFor(roster, termId);
+    const config = (programme?.config ?? {}) as { gradingSystem?: string; rankOn?: string };
+
+    const stageDefault = programme?.stage === 'PRE_PRIMARY';
+    const gradingSystem = config.gradingSystem ?? (stageDefault ? 'ECD' : schoolSystem);
+    const rankOn = (config.rankOn as ResultInput['rankOn'] | undefined)
+      ?? (stageDefault ? 'none' : byAggregate(gradingSystem));
+    return { gradingSystem, rankOn };
+  }
+
+  /**
+   * The programme this roster's learners are enrolled under.
+   *
+   * From the year's cohort for the roster's class where there is one; otherwise
+   * from the members' own enrollments, which a school-wide or subject roster
+   * still has. More than one programme means no single answer, and the caller
+   * then falls back to the school's configuration rather than guessing.
+   */
+  private async programmeFor(roster: any, termId: string): Promise<any | null> {
+    if (roster.classId) {
+      const term = await this.prisma.client.term.findFirst({
+        where: { id: termId },
+        select: { academicYearId: true },
+      });
+      const cohort = term
+        ? await this.prisma.client.classCohort.findFirst({
+            where: { classId: roster.classId, academicYearId: term.academicYearId, deletedAt: null },
+            select: { programme: { select: { id: true, stage: true, config: true } } },
+          })
+        : null;
+      if (cohort?.programme) return cohort.programme;
+    }
+
+    const studentProfileIds = [
+      ...new Set((roster.members ?? []).map((m: any) => m.studentProfileId).filter(Boolean)),
+    ] as string[];
+    if (!studentProfileIds.length) return null;
+    const enrollments = await this.prisma.client.studentEnrollment.findMany({
+      where: { studentProfileId: { in: studentProfileIds } },
+      select: { programme: { select: { id: true, stage: true, config: true } } },
+      distinct: ['programmeId'],
+    });
+    const programmes = enrollments.map((e: any) => e.programme).filter(Boolean);
+    return programmes.length === 1 ? programmes[0] : null;
+  }
+
   private async buildInput(roster: any, termId: string): Promise<{ students: StudentInput[]; contributing: any[] }> {
     const studentIds = roster.members.map((m: any) => m.studentProfileId);
     const rows = await this.prisma.client.studentAssessment.findMany({

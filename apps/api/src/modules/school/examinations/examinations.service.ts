@@ -13,6 +13,7 @@ import { ReportCardTemplateService } from './report-card-template.service';
 import { MarkingService } from '../assessment/marking.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { ResultRunService } from '../assessment/result-run.service';
+import { isDescriptorSystem } from '../assessment/result-computation';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   BulkGradeEntryDto,
@@ -784,6 +785,29 @@ export class ReportCardService {
     );
   }
 
+  /**
+   * The grading system to report a learner under when no published ResultSet
+   * says.
+   *
+   * Their newest enrollment's programme is the authority — its versioned
+   * `config.gradingSystem` where the school has set one, otherwise a
+   * pre-primary programme defaults to descriptors. This mirrors
+   * `ResultRunService.resolveReporting`, so a card built from live marks agrees
+   * with the one published later.
+   */
+  private async reportingSystemFor(tx: any, studentProfileId: string): Promise<string | null> {
+    const enrollment = await tx.studentEnrollment.findFirst({
+      where: { studentProfileId },
+      orderBy: { admissionDate: 'desc' },
+      select: { programme: { select: { stage: true, config: true } } },
+    });
+    const programme = enrollment?.programme;
+    if (!programme) return null;
+    const configured = (programme.config as { gradingSystem?: string } | null)?.gradingSystem;
+    if (configured) return configured;
+    return programme.stage === 'PRE_PRIMARY' ? 'ECD' : null;
+  }
+
   async generate(dto: GenerateReportCardDto) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
@@ -801,7 +825,13 @@ export class ReportCardService {
       // Build the templated layout (sections + summary + eligibility). Pass the
       // spine so the subject table is sourced from it too (P3), not just the
       // headline numbers — otherwise the body and header of one card disagree.
-      const { layout, layoutSource, stats } = await this.templates.buildLayout(dto.studentProfileId, dto.termId, spine);
+      // The system the numbers were computed under, not the school-wide
+      // setting: a nursery-and-primary school has one SchoolProfile, and Baby
+      // Class must not be reported on P7's scale. A published ResultSet records
+      // it; without one, the learner's programme decides.
+      const system = spine?.resultSet.gradingSystem ?? (await this.reportingSystemFor(tx, dto.studentProfileId));
+      const { layout, layoutSource, stats } = await this.templates.buildLayout(dto.studentProfileId, dto.termId, spine, system);
+      const descriptorOnly = isDescriptorSystem(String(system ?? ''));
 
       const provenance = spine
         ? {
@@ -832,8 +862,13 @@ export class ReportCardService {
       // `rank` is the exception and stays null off the spine: a position is only
       // meaningful against a frozen cohort, so it comes from a published
       // ResultSet or not at all. The PDF already omits a null position.
-      const gpa = spine?.term.gpa != null ? Number(spine.term.gpa) : stats.gpa;
-      const rank = spine?.term.classRank ?? null;
+      //
+      // A descriptor system reports none of the comparative figures at all: no
+      // GPA, no position, no aggregate, no division. Falling through to the live
+      // `stats` would have printed a GPA on a nursery card even though the
+      // published nursery result deliberately carries none.
+      const gpa = descriptorOnly ? null : spine?.term.gpa != null ? Number(spine.term.gpa) : stats.gpa;
+      const rank = descriptorOnly ? null : (spine?.term.classRank ?? null);
       const meanPercent = spine?.term.meanPercent != null ? Number(spine.term.meanPercent) : stats.meanPercent;
       const totalMarks = spine ? spine.term.subjectsCount : stats.subjectsCount;
 
@@ -860,8 +895,11 @@ export class ReportCardService {
         rank,
         meanPercent,
         totalMarks,
-        division: spine?.term.division ?? stats.division,
-        aggregate: spine?.term.aggregate ?? stats.aggregate,
+        division: descriptorOnly ? null : (spine?.term.division ?? stats.division),
+        aggregate: descriptorOnly ? null : (spine?.term.aggregate ?? stats.aggregate),
+        /** Declared on the payload so the PDF and the portal need no second lookup. */
+        gradingSystem: system ?? null,
+        descriptorOnly,
         promotionRecommendation: spine?.term.promotionRecommendation ?? null,
         sections: layout.sections,
         summary: layout.summary,
