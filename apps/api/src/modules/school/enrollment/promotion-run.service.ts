@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { releasedResultSetWhere } from '../assessment/result-status';
 import { EVENTS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -327,7 +328,7 @@ export class PromotionRunService {
   /** The recommendation on the latest PUBLISHED result set for the term, if any. */
   private async latestRecommendation(client: any, studentProfileId: string, termId: string): Promise<string | null> {
     const t = await client.studentTermResult.findFirst({
-      where: { studentProfileId, termId, resultSet: { status: 'published' } },
+      where: { studentProfileId, termId, resultSet: releasedResultSetWhere() },
       orderBy: { resultSet: { revision: 'desc' } },
       select: { promotionRecommendation: true },
     });

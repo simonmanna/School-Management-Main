@@ -1,19 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, ChevronDown, Mail, MoreHorizontal, Plus } from 'lucide-react';
+import { ChevronDown, Mail, MoreHorizontal, Plus } from 'lucide-react';
 import {
   useAdmissions,
   useAdmissionAction,
-  useEnrollAdmission, useSections,
   useIssueAdmissionOffer,
   useAcceptAdmissionOffer,
   useDeclineAdmissionOffer,
-  useAdmissionEligibility,
   useAcademicYears,
   useClasses,
-  useTerms,
   type AdmissionApplication,
-  type AdmissionAction, useTerminology } from '@/features/school/api';
+  type AdmissionAction } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,14 +26,13 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { notify } from '@/lib/notify';
-import { ACTION_LABELS, NEEDS_REASON, STAGE_LABELS, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, statusMeta } from './_components/admission-status';
+import { EnrollApplicationDialog } from './_components/enroll-application-dialog';
 import { DecisionDialog } from './_components/DecisionDialog';
 import { ApplicationFeeDialog, applicationFeeBadge } from './fees-integrity';
 
 export function SchoolAdmissionsPage() {
-  const labels = useTerminology();
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
-  const [enrollForm, setEnrollForm] = useState<Record<string, string>>({});
   const [offerFor, setOfferFor] = useState<AdmissionApplication | null>(null);
   const [offerForm, setOfferForm] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -48,16 +44,10 @@ export function SchoolAdmissionsPage() {
   const { data, isLoading } = useAdmissions({ pageSize: 50 });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
-  const { data: terms } = useTerms();
   const act = useAdmissionAction();
-  const enroll = useEnrollAdmission();
-  const { data: allSections } = useSections();
   const issueOffer = useIssueAdmissionOffer();
   const acceptOffer = useAcceptAdmissionOffer();
   const declineOffer = useDeclineAdmissionOffer();
-  // Surfaces exactly why an applicant cannot be enrolled yet (documents, fee,
-  // capacity) instead of letting the operator discover it from a failed POST.
-  const { data: eligibility } = useAdmissionEligibility(enrollFor?.id);
 
   const allRows = useMemo(() => data?.data ?? [], [data]);
   const rows = useMemo(
@@ -120,9 +110,6 @@ export function SchoolAdmissionsPage() {
     });
   };
 
-  // Streams of the class being enrolled into. Section is unique per class, so
-  // this list has to follow the class picker rather than being global.
-  const enrollSections = (allSections?.data ?? []).filter((x: any) => x.classId === enrollForm.classId);
 
   const submitOffer = async () => {
     if (!offerFor) return;
@@ -153,77 +140,8 @@ export function SchoolAdmissionsPage() {
     }
   };
 
-  const openEnroll = (app: AdmissionApplication) => {
-    // Only terms of the year the family applied for. The enrollment's academic
-    // year is derived from the term, while the admission seat is counted against
-    // the application's year, so a 2027 applicant seated in a 2026 term consumed
-    // a 2027 seat and got a 2026 placement. The API refuses this; the selector
-    // should never offer it. Within that year, prefer the current term.
-    const all = (terms?.data ?? []).filter((t) => t.academicYearId === app.academicYearId);
-    const firstTerm = (all.find((t) => t.isCurrent) ?? all[0])?.id ?? '';
-    setEnrollFor(app);
-    // Seeded from the APPLICATION being enrolled. This used to read the
-    // new-application dialog's state (`form.applicantGender` / `form.applicantDob`),
-    // so students were created with whatever was left over in that form.
-    setEnrollForm({
-      classId: app.applyingForClassId ?? (classes?.data ?? [])[0]?.id ?? '',
-      sectionId: '',
-      termId: firstTerm,
-      rollNumber: '',
-      name: `${app.applicantFirstName} ${app.applicantLastName}`,
-      gender: app.applicantGender ?? '',
-      dateOfBirth: app.applicantDob ? String(app.applicantDob).slice(0, 10) : '',
-    });
-  };
-
-  const submitEnroll = async () => {
-    if (!enrollFor || !enrollForm.classId || !enrollForm.termId || !enrollForm.rollNumber || !enrollForm.name) {
-      notify.error('Class, term, roll number and name are required');
-      return;
-    }
-    try {
-      const res = await enroll.mutateAsync({
-        applicationId: enrollFor.id,
-        classId: enrollForm.classId,
-        // The subdivision the school actually teaches in. The API has accepted
-        // this since the module was built; the dialog never sent it, so every
-        // pupil admitted through the pipeline landed with no stream.
-        sectionId: enrollForm.sectionId || undefined,
-        termId: enrollForm.termId,
-        rollNumber: enrollForm.rollNumber,
-        student: {
-          name: enrollForm.name,
-          gender: (enrollForm.gender || undefined) as 'male' | 'female' | 'other' | undefined,
-          dateOfBirth: enrollForm.dateOfBirth || undefined,
-        },
-      });
-      // Say where the pupil landed and offer the next step. The dialog used to
-      // close on a bare "enrolled" toast, leaving the operator to find the new
-      // pupil themselves through the students list.
-      const placed = [
-        (classes?.data ?? []).find((c) => c.id === enrollForm.classId)?.name,
-        enrollSections.find((x: any) => x.id === enrollForm.sectionId)?.name,
-      ].filter(Boolean).join(' — ');
-      const termName = (terms?.data ?? []).find((t) => t.id === enrollForm.termId)?.name ?? '';
-      const profileId = (res as any)?.profile?.id ?? (res as any)?.studentProfileId ?? null;
-      notify.success(
-        `${enrollForm.name} enrolled into ${placed || 'the selected class'}${termName ? ` for ${termName}` : ''}`,
-        profileId
-          ? { action: { label: 'Open pupil', onClick: () => navigate(`/school/students/${profileId}`) } }
-          : undefined,
-      );
-      setEnrollFor(null);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Enrollment failed');
-    }
-  };
-
-  // Enrollment is only ever offered terms of the applicant's own academic year.
-  const enrollTerms = useMemo(
-    () => (terms?.data ?? []).filter((t) => t.academicYearId === enrollFor?.academicYearId),
-    [terms?.data, enrollFor?.academicYearId],
-  );
-  const enrollYearName = enrollFor ? (yearNameById[enrollFor.academicYearId] ?? 'that academic year') : '';
+  // One enrollment dialog for every entry point (F18); details come from the application (F13).
+  const openEnroll = (app: AdmissionApplication) => setEnrollFor(app);
 
   const busy = act.isPending || issueOffer.isPending || acceptOffer.isPending || declineOffer.isPending;
 
@@ -302,7 +220,7 @@ export function SchoolAdmissionsPage() {
                     return (
                       <DropdownMenuItem
                         key={kind + '-' + action}
-                        disabled={busy || (action === 'enroll' && enroll.isPending)}
+                        disabled={busy}
                         onSelect={onSelect}
                         className={kind === 'optional' ? 'opacity-80' : ''}
                       >
@@ -433,99 +351,7 @@ export function SchoolAdmissionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Enroll dialog */}
-      <Dialog open={!!enrollFor} onOpenChange={(v) => { if (!v) setEnrollFor(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Enroll {enrollFor?.applicantFirstName} {enrollFor?.applicantLastName}</DialogTitle>
-          </DialogHeader>
-          {!!enrollFor?.workflow?.skippedStages?.length && (
-            <div className="rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200">
-              This admission workflow enrols directly. No offer or acceptance record will be
-              created for{' '}
-              <strong>
-                {enrollFor.workflow.skippedStages
-                  .map((s) => STAGE_LABELS[s] ?? s)
-                  .join(', ')}
-              </strong>
-              , and the applicant&apos;s timeline will record them as skipped.
-            </div>
-          )}
-          {eligibility && eligibility.status === 'BLOCKED' && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-              <p className="font-medium">This applicant cannot be enrolled yet:</p>
-              <ul className="mt-1 list-disc pl-5">
-                {eligibility.missing.map((m) => <li key={m}>{m}</li>)}
-              </ul>
-              {eligibility.missing.some((m) => m.includes('application fee')) && enrollFor && (
-                <Button size="sm" variant="outline" className="mt-2" onClick={() => setFeeFor(enrollFor)}>
-                  Take fee payment
-                </Button>
-              )}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Class" required>
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.classId ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, classId: e.target.value })}>
-                <option value="">—</option>
-                {(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </Field>
-            <Field label={labels.section}>
-              <select
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                value={enrollForm.sectionId ?? ''}
-                disabled={!enrollForm.classId || enrollSections.length === 0}
-                onChange={(e) => setEnrollForm({ ...enrollForm, sectionId: e.target.value })}
-              >
-                <option value="">
-                  {!enrollForm.classId ? 'Choose a class first' : enrollSections.length ? 'No stream' : 'This class has no streams'}
-                </option>
-                {enrollSections.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Term" required>
-              <select
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                value={enrollForm.termId ?? ''}
-                disabled={enrollTerms.length === 0}
-                onChange={(e) => setEnrollForm({ ...enrollForm, termId: e.target.value })}
-              >
-                <option value="">{enrollTerms.length ? '—' : `No terms defined for ${enrollYearName}`}</option>
-                {enrollTerms.map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {enrollTerms.length
-                  ? `Terms of ${enrollYearName}, the year this application is for.`
-                  : `Create the terms for ${enrollYearName} before enrolling this applicant.`}
-              </p>
-            </Field>
-            <Field label="Student name" required>
-              <Input value={enrollForm.name ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, name: e.target.value })} />
-            </Field>
-            <Field label="Roll number" required>
-              <Input value={enrollForm.rollNumber ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, rollNumber: e.target.value })} />
-            </Field>
-            <Field label="Date of birth">
-              <Input type="date" value={enrollForm.dateOfBirth ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, dateOfBirth: e.target.value })} />
-            </Field>
-            <Field label="Gender">
-              <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={enrollForm.gender ?? ''} onChange={(e) => setEnrollForm({ ...enrollForm, gender: e.target.value })}>
-                <option value="">—</option>
-                <option value="male">Male</option>
-                <option value="female">Female</option>
-                <option value="other">Other</option>
-              </select>
-            </Field>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setEnrollFor(null)}>Cancel</Button>
-            <Button onClick={submitEnroll} disabled={enroll.isPending || eligibility?.status === 'BLOCKED'}>
-              <CheckCircle2 className="h-4 w-4" /> Enroll student
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EnrollApplicationDialog app={enrollFor} onClose={() => setEnrollFor(null)} />
 
       <ApplicationFeeDialog application={feeFor} onClose={() => setFeeFor(null)} />
 

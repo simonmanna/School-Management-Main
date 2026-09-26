@@ -1,4 +1,5 @@
 import { PERMISSIONS } from '@erp/shared';
+import { isReleasedStatus } from '../../assessment/result-status';
 import type { ReportColumn, ReportDefinition } from '../../../core/reporting/report.types';
 import type { SchoolReportDeps } from '../school-report-deps';
 
@@ -89,7 +90,7 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
           rows,
           columns,
           caption: `Result set revision ${rs.revision} · status ${rs.status}`,
-          notes: rs.status !== 'published'
+          notes: !isReleasedStatus(rs.status)
             ? [`This result set is "${rs.status}", not published. Figures may still change.`]
             : [],
         };
@@ -246,7 +247,7 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
           rows,
           caption: `Report cards for result set revision ${rs.revision} · ${readyCount}/${rows.length} ready`,
           notes: [
-            ...(rs.status !== 'published'
+            ...(!isReleasedStatus(rs.status)
               ? [`This result set is "${rs.status}", not published. Figures may still change.`]
               : []),
             ...(readyCount < rows.length

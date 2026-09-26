@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { EVENTS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -20,6 +21,7 @@ export class ResultIntegrityService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly events: EventBus,
+    @Optional() private readonly dataScope?: DataScopeService,
   ) {}
 
   private get db(): any { return this.prisma.client; }
@@ -31,8 +33,18 @@ export class ResultIntegrityService {
    * choose between them. This is the list `results.tsx` has always asked for.
    */
   async byTerm(termId: string, scopeId?: string) {
+    // F09: a teacher sees the result sets of the classes/streams they teach.
+    const seats = this.dataScope ? await this.dataScope.readableSeats() : 'all';
+    const visibleScopes =
+      seats === 'all' ? null : [...new Set(seats.flatMap((s) => [s.classId, ...(s.sectionId ? [s.sectionId] : [])]))];
     const sets = await this.db.resultSet.findMany({
-      where: { termId, ...(scopeId ? { scopeId } : {}) },
+      where: {
+        termId,
+        ...(scopeId ? { scopeId } : {}),
+        ...(visibleScopes
+          ? { scopeId: scopeId ? (visibleScopes.includes(scopeId) ? scopeId : '__none__') : { in: visibleScopes } }
+          : {}),
+      },
       orderBy: [{ revision: 'desc' }, { createdAt: 'desc' }],
       include: { run: true, _count: { select: { termResults: true, amendments: true } } },
     });
@@ -70,6 +82,20 @@ export class ResultIntegrityService {
       include: { termResults: true, subjectResults: true, run: true },
     });
     if (!rs) throw new NotFoundException(`ResultSet ${id} not found`);
+
+    // F09: narrow to the pupils this caller may read, and to the one asked for.
+    // Filtering only the subject rows used to hand back every pupil's term result.
+    const allIds = [...new Set(rs.termResults.map((t: any) => t.studentProfileId))] as string[];
+    const visible = this.dataScope ? await this.dataScope.visibleStudentIds(allIds) : 'all';
+    const canSee = (sid: string) => (visible === 'all' || visible.has(sid)) && (!studentProfileId || sid === studentProfileId);
+    if (studentProfileId && !canSee(studentProfileId)) {
+      throw new ForbiddenException('You may only view the results of pupils you teach');
+    }
+    if (visible !== 'all' && !rs.termResults.some((t: any) => canSee(t.studentProfileId))) {
+      throw new ForbiddenException('You may only view the results of pupils you teach');
+    }
+    rs.termResults = rs.termResults.filter((t: any) => canSee(t.studentProfileId));
+    rs.subjectResults = rs.subjectResults.filter((r: any) => canSee(r.studentProfileId));
 
     const studentIds = [...new Set(rs.termResults.map((t: any) => t.studentProfileId))] as string[];
     const subjectIds = [...new Set(rs.subjectResults.map((s: any) => s.subjectId))] as string[];
@@ -125,6 +151,7 @@ export class ResultIntegrityService {
    * calculation that might disagree with it.
    */
   async explain(resultSetId: string, studentProfileId: string) {
+    await this.dataScope?.assertMayReadStudent(studentProfileId);
     const rs = await this.db.resultSet.findFirst({ where: { id: resultSetId } });
     if (!rs) throw new NotFoundException(`ResultSet ${resultSetId} not found`);
 

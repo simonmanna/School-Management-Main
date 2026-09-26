@@ -4,20 +4,14 @@ import { Plus, Send, CheckCircle2, XCircle, CalendarClock, Eye, Pencil, ChevronD
 import {
   useAdmissions,
   useAdmissionAction,
-  useEnrollAdmission,
   useAcademicYears,
   useClasses,
-  useTerms,
   type AdmissionApplication,
   type AdmissionAction,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { notify } from '@/lib/notify';
 import {
   DropdownMenu,
@@ -29,6 +23,7 @@ import {
 // copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
 // 7 of the 15 backend states.
 import { ACTION_LABELS, NEEDS_REASON, statusMeta } from './_components/admission-status';
+import { EnrollApplicationDialog } from './_components/enroll-application-dialog';
 
 /** Handled by the admissions pipeline page, which owns the offer dialogs.
  *  `enroll` is intentionally NOT here — once a student is accepted we want a
@@ -54,11 +49,8 @@ export function SchoolApplicationsPage() {
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
-  const enroll = useEnrollAdmission();
-  const { data: terms } = useTerms();
   const [decision, setDecision] = useState<{ app: AdmissionApplication; action: AdmissionAction } | null>(null);
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
-  const [enrollForm, setEnrollForm] = useState<{ classId: string; sectionId: string; termId: string; rollNumber: string }>({ classId: '', sectionId: '', termId: '', rollNumber: '' });
 
   const rows = useMemo(() => data?.data ?? [], [data]);
   const yearNameById = useMemo(() => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])), [years]);
@@ -92,45 +84,8 @@ export function SchoolApplicationsPage() {
     }
   };
 
-  // Direct, short enroll path for an accepted applicant: pre-fill from the
-  // application and ask only for the essentials (term + roll number). Skips the
-  // full offer/details flow.
-  const openEnroll = (app: AdmissionApplication) => {
-    const allTerms = terms?.data ?? [];
-    const firstTerm = (allTerms.find((t: any) => t.isCurrent) ?? allTerms[0])?.id ?? '';
-    setEnrollFor(app);
-    setEnrollForm({
-      classId: app.applyingForClassId ?? (classes?.data ?? [])[0]?.id ?? '',
-      sectionId: '',
-      termId: firstTerm,
-      rollNumber: '',
-    });
-  };
-
-  const submitEnroll = async () => {
-    if (!enrollFor || !enrollForm.classId || !enrollForm.termId || !enrollForm.rollNumber) {
-      notify.error('Class, term and roll number are required');
-      return;
-    }
-    try {
-      await enroll.mutateAsync({
-        applicationId: enrollFor.id,
-        classId: enrollForm.classId,
-        sectionId: enrollForm.sectionId || undefined,
-        termId: enrollForm.termId,
-        rollNumber: enrollForm.rollNumber,
-        student: {
-          name: `${enrollFor.applicantFirstName} ${enrollFor.applicantLastName}`,
-          gender: (enrollFor.applicantGender || undefined) as 'male' | 'female' | 'other' | undefined,
-          dateOfBirth: enrollFor.applicantDob ? String(enrollFor.applicantDob).slice(0, 10) : undefined,
-        },
-      });
-      notify.success(`${enrollFor.applicantFirstName} ${enrollFor.applicantLastName} enrolled`);
-      setEnrollFor(null);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Enrollment failed');
-    }
-  };
+  // One enrollment dialog for every entry point (F18).
+  const openEnroll = (app: AdmissionApplication) => setEnrollFor(app);
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
@@ -260,66 +215,7 @@ export function SchoolApplicationsPage() {
         onConfirm={confirmDecision}
       />
 
-      {/* Direct enroll dialog — short path for accepted applicants. */}
-      <Dialog open={!!enrollFor} onOpenChange={(o) => { if (!o) setEnrollFor(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Enroll student</DialogTitle>
-            <DialogDescription>
-              {enrollFor ? `Enroll ${enrollFor.applicantFirstName} ${enrollFor.applicantLastName} directly. Details are carried over from the application.` : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-3 py-2">
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Class</span>
-              <select
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                value={enrollForm.classId}
-                onChange={(e) => setEnrollForm({ ...enrollForm, classId: e.target.value })}
-              >
-                <option value="">Select a class</option>
-                {(classes?.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Section (optional)</span>
-              <select
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                value={enrollForm.sectionId}
-                onChange={(e) => setEnrollForm({ ...enrollForm, sectionId: e.target.value })}
-              >
-                <option value="">No section</option>
-                {(classes?.data ?? []).flatMap((c: any) => (c.sections ?? [])).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Term</span>
-              <select
-                className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                value={enrollForm.termId}
-                onChange={(e) => setEnrollForm({ ...enrollForm, termId: e.target.value })}
-              >
-                <option value="">Select a term</option>
-                {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Roll number</span>
-              <Input
-                value={enrollForm.rollNumber}
-                onChange={(e) => setEnrollForm({ ...enrollForm, rollNumber: e.target.value })}
-                placeholder="E.g. 001"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setEnrollFor(null)}>Cancel</Button>
-            <Button onClick={submitEnroll} disabled={enroll.isPending}>
-              {enroll.isPending ? 'Enrolling…' : 'Enroll'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EnrollApplicationDialog app={enrollFor} onClose={() => setEnrollFor(null)} />
     </div>
   );
 }

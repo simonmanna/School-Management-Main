@@ -268,7 +268,9 @@ describe('P1-15 · a class teacher reads the class they are homeroom teacher of'
       teacherAssignment: { findMany: jest.fn(async () => []) },
       timetableSlot: { findMany: jest.fn(async () => []) },
       schoolClass: { findMany: jest.fn(async () => homeroomClassIds.map((id) => ({ id }))) },
-      section: { findMany: jest.fn(async () => sectionClassIds.map((classId) => ({ classId }))) },
+      section: { findMany: jest.fn(async () => sectionClassIds.map((classId) => ({ id: `${classId}-north`, classId }))) },
+      schoolProfile: { findFirst: jest.fn(async () => ({ classTeacherScope: 'STREAM' })) },
+      courseOfferingTeacher: { findMany: jest.fn(async () => []) },
     };
     return new DataScopeService(
       { client: db } as any,

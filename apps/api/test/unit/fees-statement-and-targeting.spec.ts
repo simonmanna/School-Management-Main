@@ -133,6 +133,7 @@ describe('D1 · the bursar statement agrees with the receipts printed beside it'
       finance as any,
       { describe: jest.fn(async () => new Map()), studentWhere: jest.fn(() => ({})) } as any,
       { admit: jest.fn(), findLikelyDuplicates: jest.fn(async () => []) } as any,
+      { encrypt: jest.fn(), decrypt: jest.fn() } as any,
     );
   }
 

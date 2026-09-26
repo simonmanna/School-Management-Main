@@ -5,6 +5,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -31,6 +32,8 @@ export class CreateAssessmentPolicyDto {
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() subjectId?: string;
   @IsOptional() @IsString() termId?: string;
+  /** ADR-031 D5: a programme-wide weighting (e.g. lower primary learning areas). */
+  @IsOptional() @IsString() programmeId?: string;
   @IsOptional() @IsNumber() @Min(0) passMark?: number;
   @IsOptional() @IsNumber() @Min(0) caCap?: number;
   @IsOptional() @IsIn([...ROUNDING]) roundingMode?: (typeof ROUNDING)[number];
@@ -86,10 +89,13 @@ export class CreateAssessmentDto {
   @IsOptional() @IsString() dueAt?: string;
   /** What it IS. Defaults to the component's kind, else `cat`. */
   @IsOptional() @IsIn([...ASSESSMENT_KIND]) kind?: (typeof ASSESSMENT_KIND)[number];
+  /** F03. Defaults: bound to a component or fed by an adapter → summative; else formative. */
+  @IsOptional() @IsIn(['formative', 'summative']) contribution?: 'formative' | 'summative';
 }
 
 export class UpdateAssessmentDto {
   @IsOptional() @IsString() componentId?: string;
+  @IsOptional() @IsIn(['formative', 'summative']) contribution?: 'formative' | 'summative';
   @IsOptional() @IsString() @IsNotEmpty() title?: string;
   @IsOptional() @IsNumber() @Min(0) maxScore?: number;
   @IsOptional() @IsNumber() @Min(0) weightInComponent?: number;
@@ -160,6 +166,8 @@ export class CaptureRosterDto {
   @IsOptional() @IsString() subjectId?: string;
   @IsOptional() @IsString() name?: string;
   @IsOptional() @IsIn([...ROSTER_SOURCE]) source?: (typeof ROSTER_SOURCE)[number];
+  /** F12: whose class list — the day it is read on. Defaults to the term's last day, or today in the current term. */
+  @IsOptional() @IsDateString() asOf?: string;
 }
 
 export class RosterMemberDto {

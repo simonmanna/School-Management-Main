@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useWorkingTerm } from '@/features/school/working-term';
 import { Plus, Lock } from 'lucide-react';
 import {
   useTerms, useClasses, useStudents,
@@ -44,7 +45,7 @@ function RostersTab() {
   const { data: classes } = useClasses();
   const { data: rosters } = useRosters();
   const capture = useCaptureRoster();
-  const [termId, setTermId] = useState('');
+  const [termId, setTermId] = useWorkingTerm();
   const [classId, setClassId] = useState('');
   const [name, setName] = useState('');
   const [rosterId, setRosterId] = useState('');

@@ -8,11 +8,11 @@
   ],
   "counts": {
     "models": 86,
-    "endpoints": 619,
-    "markWrites": 54,
-    "currentClassFiles": 19,
-    "reportPaths": 89,
-    "jobs": 15,
+    "endpoints": 620,
+    "markWrites": 56,
+    "currentClassFiles": 16,
+    "reportPaths": 94,
+    "jobs": 17,
     "pages": 64
   },
   "models": [
@@ -474,283 +474,289 @@
       "method": "GET",
       "route": "/school/admissions",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#list",
-      "line": 40
+      "line": 41
     },
     {
       "method": "GET",
       "route": "/school/admissions/by-status/:status",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#byStatus",
-      "line": 46
+      "line": 47
     },
     {
       "method": "POST",
       "route": "/school/admissions",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#create",
-      "line": 52
+      "line": 53
     },
     {
       "method": "POST",
       "route": "/school/admissions/identity-matches/:id/review",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#reviewIdentityMatch",
-      "line": 58
+      "line": 59
+    },
+    {
+      "method": "GET",
+      "route": "/school/admissions/:id/identity-matches",
+      "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#identityMatches",
+      "line": 65
     },
     {
       "method": "PATCH",
       "route": "/school/admissions/:id",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#update",
-      "line": 64
+      "line": 71
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/review",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#review",
-      "line": 76
+      "line": 83
     },
     {
       "method": "GET",
       "route": "/school/admissions/nationalities",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#listNationalities",
-      "line": 83
+      "line": 90
     },
     {
       "method": "POST",
       "route": "/school/admissions/nationalities",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createNationality",
-      "line": 89
+      "line": 96
     },
     {
       "method": "PATCH",
       "route": "/school/admissions/nationalities/:id",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#updateNationality",
-      "line": 95
+      "line": 102
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/submit",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#submit",
-      "line": 102
+      "line": 109
     },
     {
       "method": "GET",
       "route": "/school/admissions/:id/history",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#history",
-      "line": 109
+      "line": 116
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/reveal-nin",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#revealNin",
-      "line": 116
+      "line": 123
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/exam-score",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#addExamScore",
-      "line": 122
+      "line": 129
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/documents",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#addDocument",
-      "line": 128
+      "line": 135
     },
     {
       "method": "POST",
       "route": "/school/admissions/documents/:documentId/verify",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#verifyDocument",
-      "line": 139
+      "line": 146
     },
     {
       "method": "POST",
       "route": "/school/admissions/enroll",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enroll",
-      "line": 149
+      "line": 156
     },
     {
       "method": "POST",
       "route": "/school/admissions/enroll/bulk",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#bulkEnroll",
-      "line": 155
+      "line": 162
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/screen",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#screen",
-      "line": 161
+      "line": 168
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/interview",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scheduleInterview",
-      "line": 167
+      "line": 174
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/interview/complete",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#completeInterview",
-      "line": 173
+      "line": 180
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/score",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scoreApplication",
-      "line": 179
+      "line": 186
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/offer",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#issueOffer",
-      "line": 185
+      "line": 192
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/offer/accept",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#acceptOffer",
-      "line": 191
+      "line": 198
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/offer/decline",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#declineOffer",
-      "line": 197
+      "line": 204
     },
     {
       "method": "GET",
       "route": "/school/admissions/:id/fee",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#applicationFeeStatus",
-      "line": 204
+      "line": 211
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/fee",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#chargeApplicationFee",
-      "line": 211
+      "line": 218
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/fee/pay",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#payApplicationFee",
-      "line": 218
+      "line": 227
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/fee/waive",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#waiveApplicationFee",
-      "line": 227
+      "line": 237
     },
     {
       "method": "POST",
       "route": "/school/admissions/offers/expire-lapsed",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#expireLapsedOffers",
-      "line": 234
+      "line": 244
     },
     {
       "method": "POST",
       "route": "/school/admissions/students/transfer-in",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#transferIn",
-      "line": 240
+      "line": 250
     },
     {
       "method": "POST",
       "route": "/school/admissions/students/:id/withdraw",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#withdrawStudent",
-      "line": 246
+      "line": 256
     },
     {
       "method": "POST",
       "route": "/school/admissions/students/:id/re-enroll",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#reEnroll",
-      "line": 252
+      "line": 262
     },
     {
       "method": "POST",
       "route": "/school/admissions/cycles",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createCycle",
-      "line": 259
+      "line": 269
     },
     {
       "method": "GET",
       "route": "/school/admissions/cycles",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#listCycles",
-      "line": 265
+      "line": 275
     },
     {
       "method": "POST",
       "route": "/school/admissions/capacity",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#setCapacity",
-      "line": 271
+      "line": 281
     },
     {
       "method": "GET",
       "route": "/school/admissions/capacity/:cycleId/status",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#capacityStatus",
-      "line": 277
+      "line": 287
     },
     {
       "method": "POST",
       "route": "/school/admissions/criteria-sets",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#createCriteriaSet",
-      "line": 283
+      "line": 293
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/score-weighted",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#scoreApplicationWeighted",
-      "line": 289
+      "line": 299
     },
     {
       "method": "POST",
       "route": "/school/admissions/:id/decision",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#recordDecision",
-      "line": 295
+      "line": 306
     },
     {
       "method": "GET",
       "route": "/school/admissions/:id/eligibility",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enrollmentEligibility",
-      "line": 301
+      "line": 312
     },
     {
       "method": "GET",
       "route": "/school/admissions/:id/workflow",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#applicationWorkflow",
-      "line": 314
+      "line": 325
     },
     {
       "method": "POST",
       "route": "/school/admissions/waitlist/:classId/rank",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#rankWaitlist",
-      "line": 320
+      "line": 331
     },
     {
       "method": "POST",
       "route": "/school/admissions/enroll/bulk/preview",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#bulkEnrollPreview",
-      "line": 326
+      "line": 337
     },
     {
       "method": "GET",
       "route": "/school/admissions/metrics/pipeline",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#pipelineMetrics",
-      "line": 332
+      "line": 343
     },
     {
       "method": "GET",
       "route": "/school/admissions/reports/enrollment-summary",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#enrollmentSummary",
-      "line": 338
+      "line": 349
     },
     {
       "method": "DELETE",
       "route": "/school/admissions/:id",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#remove",
-      "line": 344
+      "line": 355
     },
     {
       "method": "GET",
       "route": "/school/admissions/:id",
       "handler": "apps/api/src/modules/school/admissions/admissions.controller.ts#findOne",
-      "line": 353
+      "line": 364
     },
     {
       "method": "GET",
@@ -900,499 +906,499 @@
       "method": "POST",
       "route": "/school/assessment-policies/:id/publish",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#publish",
-      "line": 44
+      "line": 45
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/fork",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#fork",
-      "line": 48
+      "line": 49
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
-      "line": 52
+      "line": 53
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/resolve",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#resolve",
-      "line": 58
+      "line": 59
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
-      "line": 69
+      "line": 70
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
-      "line": 75
+      "line": 76
     },
     {
       "method": "PATCH",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
-      "line": 81
+      "line": 82
     },
     {
       "method": "DELETE",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
-      "line": 87
+      "line": 88
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
-      "line": 99
+      "line": 100
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-policy/:policyId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byPolicy",
-      "line": 105
+      "line": 106
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/validate/:policyId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#validate",
-      "line": 111
+      "line": 112
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
-      "line": 117
+      "line": 118
     },
     {
       "method": "PATCH",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
-      "line": 123
+      "line": 124
     },
     {
       "method": "DELETE",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
-      "line": 129
+      "line": 130
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
-      "line": 141
+      "line": 142
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-class/:classId/term/:termId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byClassTerm",
-      "line": 147
+      "line": 148
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
-      "line": 153
+      "line": 154
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
-      "line": 159
+      "line": 160
     },
     {
       "method": "PATCH",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#update",
-      "line": 165
+      "line": 166
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/transition",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#transition",
-      "line": 171
+      "line": 172
     },
     {
       "method": "DELETE",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
-      "line": 177
+      "line": 178
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-assessment/:assessmentId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byAssessment",
-      "line": 189
+      "line": 190
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-student/:studentProfileId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byStudent",
-      "line": 195
+      "line": 196
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/participation",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#participation",
-      "line": 201
+      "line": 202
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/mark",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#mark",
-      "line": 215
+      "line": 216
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/adjustment",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#adjustment",
-      "line": 221
+      "line": 222
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/submit",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#submit",
-      "line": 228
+      "line": 229
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/approval",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#approval",
-      "line": 235
+      "line": 236
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
-      "line": 246
+      "line": 250
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
-      "line": 252
+      "line": 256
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id/members",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#members",
-      "line": 258
+      "line": 262
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/capture",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#capture",
-      "line": 264
+      "line": 271
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/members",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#addMember",
-      "line": 270
+      "line": 277
     },
     {
       "method": "DELETE",
       "route": "/school/assessment-policies/:id/members/:studentProfileId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#removeMember",
-      "line": 276
+      "line": 283
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/freeze",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#freeze",
-      "line": 283
+      "line": 290
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#list",
-      "line": 294
+      "line": 301
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
-      "line": 300
+      "line": 307
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
-      "line": 306
+      "line": 313
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/fork",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#fork",
-      "line": 312
+      "line": 319
     },
     {
       "method": "DELETE",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#remove",
-      "line": 318
+      "line": 325
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byId",
-      "line": 330
+      "line": 337
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-class/:classId/term/:termId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byClassTerm",
-      "line": 336
+      "line": 343
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#create",
-      "line": 342
+      "line": 349
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/publish",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#publish",
-      "line": 349
+      "line": 356
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/submit",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#submit",
-      "line": 357
+      "line": 364
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/record-received",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#recordReceived",
-      "line": 363
+      "line": 370
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/grade",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#grade",
-      "line": 367
+      "line": 374
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/compute",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#compute",
-      "line": 381
+      "line": 389
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-term/:termId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byTerm",
-      "line": 393
+      "line": 401
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-student/:studentProfileId/term/:termId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#byStudent",
-      "line": 399
+      "line": 407
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/amendments/queue",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#amendmentQueue",
-      "line": 405
+      "line": 415
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/amendments/by-result-set/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#amendmentsByResultSet",
-      "line": 411
+      "line": 422
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id/readiness",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#readiness",
-      "line": 417
+      "line": 429
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id/explain/:studentProfileId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#explain",
-      "line": 424
+      "line": 437
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/:id",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#findOne",
-      "line": 430
+      "line": 443
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/publish",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#publish",
-      "line": 436
+      "line": 449
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/:id/lock",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#lock",
-      "line": 442
+      "line": 455
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/amendments",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#requestAmendment",
-      "line": 448
+      "line": 461
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/amendments/:id/approve",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#approveAmendment",
-      "line": 455
+      "line": 468
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/amendments/:id/reject",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#rejectAmendment",
-      "line": 461
+      "line": 474
     },
     {
       "method": "GET",
       "route": "/school/assessment-policies/by-result-set/:resultSetId",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#board",
-      "line": 478
+      "line": 491
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/propose",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#propose",
-      "line": 484
+      "line": 497
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/decide",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#decide",
-      "line": 490
+      "line": 503
     },
     {
       "method": "POST",
       "route": "/school/assessment-policies/apply",
       "handler": "apps/api/src/modules/school/assessment/assessment.controller.ts#apply",
-      "line": 496
+      "line": 509
     },
     {
       "method": "GET",
       "route": "/school/gradebook/sheet",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#sheet",
-      "line": 21
+      "line": 22
     },
     {
       "method": "GET",
       "route": "/school/gradebook/subjects",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#subjects",
-      "line": 32
+      "line": 34
     },
     {
       "method": "POST",
       "route": "/school/gradebook/cell",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#cell",
-      "line": 38
+      "line": 41
     },
     {
       "method": "POST",
       "route": "/school/gradebook/column",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#createColumn",
-      "line": 44
+      "line": 47
     },
     {
       "method": "PATCH",
       "route": "/school/gradebook/column/:id",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#updateColumn",
-      "line": 50
+      "line": 53
     },
     {
       "method": "DELETE",
       "route": "/school/gradebook/column/:id",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#deleteColumn",
-      "line": 56
+      "line": 59
     },
     {
       "method": "POST",
       "route": "/school/gradebook/column/:id/lock",
       "handler": "apps/api/src/modules/school/assessment/gradebook.controller.ts#lock",
-      "line": 62
+      "line": 65
     },
     {
       "method": "GET",
       "route": "/school/attendance/statuses",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#listStatuses",
-      "line": 25
+      "line": 26
     },
     {
       "method": "POST",
       "route": "/school/attendance/statuses",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#createStatus",
-      "line": 31
+      "line": 32
     },
     {
       "method": "PUT",
       "route": "/school/attendance/statuses/:id",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#updateStatus",
-      "line": 37
+      "line": 38
     },
     {
       "method": "DELETE",
       "route": "/school/attendance/statuses/:id",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#deleteStatus",
-      "line": 43
+      "line": 44
     },
     {
       "method": "POST",
       "route": "/school/attendance/mark",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#mark",
-      "line": 59
+      "line": 60
     },
     {
       "method": "GET",
       "route": "/school/attendance/register",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#register",
-      "line": 65
+      "line": 66
     },
     {
       "method": "GET",
       "route": "/school/attendance/weekly",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#weekly",
-      "line": 71
+      "line": 73
     },
     {
       "method": "GET",
       "route": "/school/attendance/by-student/:studentProfileId",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#byStudent",
-      "line": 77
+      "line": 80
     },
     {
       "method": "GET",
       "route": "/school/attendance/report",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#report",
-      "line": 89
+      "line": 92
     },
     {
       "method": "PATCH",
       "route": "/school/attendance/:id",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#correct",
-      "line": 100
+      "line": 104
     },
     {
       "method": "GET",
       "route": "/school/attendance/thresholds",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#thresholds",
-      "line": 107
+      "line": 111
     },
     {
       "method": "PUT",
       "route": "/school/attendance/thresholds",
       "handler": "apps/api/src/modules/school/attendance/student-attendance.controller.ts#upsertThresholds",
-      "line": 113
+      "line": 117
     },
     {
       "method": "GET",
@@ -1536,193 +1542,193 @@
       "method": "GET",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
-      "line": 38
+      "line": 40
     },
     {
       "method": "GET",
       "route": "/school/programmes/:id",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
-      "line": 44
+      "line": 46
     },
     {
       "method": "POST",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
-      "line": 50
+      "line": 52
     },
     {
       "method": "PATCH",
       "route": "/school/programmes/:id",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#update",
-      "line": 56
+      "line": 58
     },
     {
       "method": "POST",
       "route": "/school/programmes/seed-uganda",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#seedUganda",
-      "line": 63
+      "line": 65
     },
     {
       "method": "GET",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
-      "line": 76
+      "line": 78
     },
     {
       "method": "GET",
       "route": "/school/programmes/:id",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
-      "line": 86
+      "line": 88
     },
     {
       "method": "GET",
       "route": "/school/programmes/:id/grouping-options",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#groupingOptions",
-      "line": 93
+      "line": 95
     },
     {
       "method": "POST",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
-      "line": 99
+      "line": 101
     },
     {
       "method": "POST",
       "route": "/school/programmes/generate",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#generate",
-      "line": 105
+      "line": 107
     },
     {
       "method": "PATCH",
       "route": "/school/programmes/:id",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#update",
-      "line": 111
+      "line": 113
     },
     {
       "method": "GET",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#list",
-      "line": 130
+      "line": 147
     },
     {
       "method": "GET",
       "route": "/school/programmes/by-student/:studentProfileId",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#forStudent",
-      "line": 154
+      "line": 171
     },
     {
       "method": "GET",
       "route": "/school/programmes/placement-at/:studentProfileId",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#placementAt",
-      "line": 164
+      "line": 182
     },
     {
       "method": "GET",
       "route": "/school/programmes/:id",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#get",
-      "line": 170
+      "line": 189
     },
     {
       "method": "GET",
       "route": "/school/programmes/:id/placements",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#history",
-      "line": 176
+      "line": 196
     },
     {
       "method": "POST",
       "route": "/school/programmes",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#create",
-      "line": 182
+      "line": 203
     },
     {
       "method": "POST",
       "route": "/school/programmes/late-admission",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#lateAdmission",
-      "line": 188
+      "line": 209
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/status",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#changeStatus",
-      "line": 194
+      "line": 215
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/withdraw",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#withdraw",
-      "line": 200
+      "line": 221
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/transfer-out",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#transferOut",
-      "line": 206
+      "line": 227
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/suspend",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#suspend",
-      "line": 212
+      "line": 233
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/complete",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#complete",
-      "line": 218
+      "line": 239
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/repeat",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#repeat",
-      "line": 224
+      "line": 245
     },
     {
       "method": "POST",
       "route": "/school/programmes/:id/promote",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#promote",
-      "line": 230
+      "line": 251
     },
     {
       "method": "GET",
       "route": "/school/programmes/roster/:cohortId",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#roster",
-      "line": 247
+      "line": 272
     },
     {
       "method": "POST",
       "route": "/school/programmes/:enrollmentId/preview",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#preview",
-      "line": 259
+      "line": 287
     },
     {
       "method": "POST",
       "route": "/school/programmes/:enrollmentId/move",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#move",
-      "line": 265
+      "line": 293
     },
     {
       "method": "POST",
       "route": "/school/programmes/bulk",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#bulk",
-      "line": 271
+      "line": 299
     },
     {
       "method": "POST",
       "route": "/school/programmes/term-rollover",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#termRollover",
-      "line": 277
+      "line": 305
     },
     {
       "method": "POST",
       "route": "/school/programmes/promote",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#promote",
-      "line": 294
+      "line": 322
     },
     {
       "method": "POST",
       "route": "/school/programmes/rollover",
       "handler": "apps/api/src/modules/school/enrollment/enrollment.controller.ts#rollover",
-      "line": 301
+      "line": 329
     },
     {
       "method": "GET",
@@ -1956,433 +1962,433 @@
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 43
+      "line": 44
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
-      "line": 49
+      "line": 50
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 55
+      "line": 56
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 61
+      "line": 62
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 67
+      "line": 68
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 79
+      "line": 80
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
-      "line": 85
+      "line": 86
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 91
+      "line": 92
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 97
+      "line": 98
     },
     {
       "method": "POST",
       "route": "/school/exam-types/:id/publish",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publish",
-      "line": 103
+      "line": 104
     },
     {
       "method": "POST",
       "route": "/school/exam-types/:id/close",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#close",
-      "line": 109
+      "line": 110
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 115
+      "line": 116
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 127
+      "line": 128
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
-      "line": 133
+      "line": 134
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 139
+      "line": 140
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 145
+      "line": 146
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 151
+      "line": 152
     },
     {
       "method": "POST",
       "route": "/school/exam-types/bulk-upsert",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bulkUpsert",
-      "line": 166
+      "line": 167
     },
     {
       "method": "POST",
       "route": "/school/exam-types/submit/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#submit",
-      "line": 172
+      "line": 173
     },
     {
       "method": "POST",
       "route": "/school/exam-types/approve/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#approve",
-      "line": 178
+      "line": 179
     },
     {
       "method": "POST",
       "route": "/school/exam-types/reject/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#reject",
-      "line": 184
+      "line": 185
     },
     {
       "method": "GET",
       "route": "/school/exam-types/by-class/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#byClass",
-      "line": 190
+      "line": 191
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 201
+      "line": 202
     },
     {
       "method": "GET",
       "route": "/school/exam-types/default",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#default",
-      "line": 207
+      "line": 208
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
-      "line": 213
+      "line": 214
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 219
+      "line": 220
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 225
+      "line": 226
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 231
+      "line": 232
     },
     {
       "method": "POST",
       "route": "/school/exam-types/generate",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#generate",
-      "line": 246
+      "line": 247
     },
     {
       "method": "POST",
       "route": "/school/exam-types/generate-class",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#generateClass",
-      "line": 253
+      "line": 254
     },
     {
       "method": "GET",
       "route": "/school/exam-types/class-roll",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#classRoll",
-      "line": 260
+      "line": 261
     },
     {
       "method": "GET",
       "route": "/school/exam-types/class-pdf",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#classPdf",
-      "line": 277
+      "line": 279
     },
     {
       "method": "POST",
       "route": "/school/exam-types/:id/publish",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publish",
-      "line": 295
+      "line": 298
     },
     {
       "method": "POST",
       "route": "/school/exam-types/publish-class",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#publishClass",
-      "line": 302
+      "line": 305
     },
     {
       "method": "POST",
       "route": "/school/exam-types/:id/unpublish",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#unpublish",
-      "line": 308
+      "line": 311
     },
     {
       "method": "POST",
       "route": "/school/exam-types/comment",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#updateComment",
-      "line": 315
+      "line": 318
     },
     {
       "method": "GET",
       "route": "/school/exam-types/by-student/:studentProfileId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#byStudent",
-      "line": 321
+      "line": 324
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id/pdf",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#pdfDownload",
-      "line": 337
+      "line": 340
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#schema",
-      "line": 360
+      "line": 363
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#get",
-      "line": 369
+      "line": 372
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 376
+      "line": 379
     },
     {
       "method": "POST",
       "route": "/school/exam-types/preset",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#applyPreset",
-      "line": 383
+      "line": 386
     },
     {
       "method": "POST",
       "route": "/school/exam-types/reset",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#reset",
-      "line": 391
+      "line": 394
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 403
+      "line": 406
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 409
+      "line": 412
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 415
+      "line": 418
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 421
+      "line": 424
     },
     {
       "method": "POST",
       "route": "/school/exam-types/assign",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#assign",
-      "line": 429
+      "line": 432
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/assign/:examScheduleId/:invigilatorId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#unassign",
-      "line": 435
+      "line": 438
     },
     {
       "method": "GET",
       "route": "/school/exam-types/by-schedule/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bySchedule",
-      "line": 442
+      "line": 445
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 453
+      "line": 456
     },
     {
       "method": "GET",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#findOne",
-      "line": 459
+      "line": 462
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 465
+      "line": 468
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 471
+      "line": 474
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 477
+      "line": 480
     },
     {
       "method": "POST",
       "route": "/school/exam-types/achievement",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#recordAchievement",
-      "line": 485
+      "line": 488
     },
     {
       "method": "GET",
       "route": "/school/exam-types/achievements/student/:studentProfileId/term/:termId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#achievementsByStudentTerm",
-      "line": 491
+      "line": 494
     },
     {
       "method": "GET",
       "route": "/school/exam-types/achievements/subject/:subjectId/term/:termId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#achievementsBySubjectTerm",
-      "line": 497
+      "line": 500
     },
     {
       "method": "GET",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#list",
-      "line": 508
+      "line": 511
     },
     {
       "method": "GET",
       "route": "/school/exam-types/by-schedule/:examScheduleId",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#bySchedule",
-      "line": 514
+      "line": 517
     },
     {
       "method": "POST",
       "route": "/school/exam-types",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#create",
-      "line": 520
+      "line": 523
     },
     {
       "method": "PATCH",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#update",
-      "line": 526
+      "line": 529
     },
     {
       "method": "DELETE",
       "route": "/school/exam-types/:id",
       "handler": "apps/api/src/modules/school/examinations/examinations.controller.ts#remove",
-      "line": 532
+      "line": 535
     },
     {
       "method": "GET",
       "route": "/school/marks/exams",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#exams",
-      "line": 23
+      "line": 24
     },
     {
       "method": "GET",
       "route": "/school/marks/coverage",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#coverage",
-      "line": 29
+      "line": 30
     },
     {
       "method": "GET",
       "route": "/school/marks/subjects",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#subjects",
-      "line": 35
+      "line": 36
     },
     {
       "method": "POST",
       "route": "/school/marks/apply-classes",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#applyClasses",
-      "line": 41
+      "line": 43
     },
     {
       "method": "POST",
       "route": "/school/marks/remove-class",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#removeClass",
-      "line": 47
+      "line": 49
     },
     {
       "method": "GET",
       "route": "/school/marks/sheet",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#sheet",
-      "line": 53
+      "line": 55
     },
     {
       "method": "POST",
       "route": "/school/marks/entry",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#saveMark",
-      "line": 64
+      "line": 67
     },
     {
       "method": "GET",
       "route": "/school/marks/grid",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#grid",
-      "line": 70
+      "line": 73
     },
     {
       "method": "POST",
       "route": "/school/marks/lock",
       "handler": "apps/api/src/modules/school/examinations/marks-workspace.controller.ts#lock",
-      "line": 80
+      "line": 84
     },
     {
       "method": "GET",
@@ -2460,85 +2466,85 @@
       "method": "GET",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#findOne",
-      "line": 37
+      "line": 35
     },
     {
       "method": "POST",
       "route": "/school/academic-years",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#create",
-      "line": 43
+      "line": 41
     },
     {
       "method": "POST",
       "route": "/school/academic-years/set-current",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#setCurrent",
-      "line": 49
+      "line": 47
     },
     {
       "method": "PATCH",
       "route": "/school/academic-years/:id/status",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#setStatus",
-      "line": 60
+      "line": 58
     },
     {
       "method": "PATCH",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#update",
-      "line": 66
+      "line": 64
     },
     {
       "method": "DELETE",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#remove",
-      "line": 72
+      "line": 70
     },
     {
       "method": "GET",
       "route": "/school/academic-years",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#list",
-      "line": 84
+      "line": 82
     },
     {
       "method": "GET",
       "route": "/school/academic-years/current",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#current",
-      "line": 90
+      "line": 88
     },
     {
       "method": "GET",
       "route": "/school/academic-years/by-year/:academicYearId",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#byYear",
-      "line": 96
+      "line": 94
     },
     {
       "method": "GET",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#findOne",
-      "line": 102
+      "line": 100
     },
     {
       "method": "POST",
       "route": "/school/academic-years",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#create",
-      "line": 108
+      "line": 106
     },
     {
       "method": "POST",
       "route": "/school/academic-years/set-current",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#setCurrent",
-      "line": 114
+      "line": 112
     },
     {
       "method": "PATCH",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#update",
-      "line": 120
+      "line": 118
     },
     {
       "method": "DELETE",
       "route": "/school/academic-years/:id",
       "handler": "apps/api/src/modules/school/foundation/academic-year.controller.ts#remove",
-      "line": 126
+      "line": 124
     },
     {
       "method": "GET",
@@ -3890,25 +3896,25 @@
       "model": "studentAssessment",
       "operation": "createMany",
       "file": "apps/api/src/modules/school/assessment/assessment-workflow.service.ts",
-      "line": 176
+      "line": 232
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/assessment-workflow.service.ts",
-      "line": 223
+      "line": 279
     },
     {
       "model": "studentAssessment",
       "operation": "createMany",
       "file": "apps/api/src/modules/school/assessment/assessment-workflow.service.ts",
-      "line": 266
+      "line": 322
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/assessment-workflow.service.ts",
-      "line": 296
+      "line": 352
     },
     {
       "model": "studentAssessment",
@@ -3938,103 +3944,103 @@
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/gradebook.service.ts",
-      "line": 259
+      "line": 269
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 135
+      "line": 137
     },
     {
       "model": "studentAssessment",
       "operation": "create",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 188
+      "line": 190
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 286
+      "line": 293
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 331
+      "line": 338
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 404
+      "line": 421
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 539
+      "line": 557
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 563
+      "line": 584
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 573
+      "line": 594
     },
     {
       "model": "markEntry",
       "operation": "create",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 160
+      "line": 162
     },
     {
       "model": "markEntry",
       "operation": "deleteMany",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 293
+      "line": 300
     },
     {
       "model": "markEntry",
       "operation": "upsert",
       "file": "apps/api/src/modules/school/assessment/marking.service.ts",
-      "line": 303
-    },
-    {
-      "model": "resultSet",
-      "operation": "updateMany",
-      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
-      "line": 119
+      "line": 310
     },
     {
       "model": "resultSet",
       "operation": "deleteMany",
       "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
-      "line": 121
+      "line": 119
     },
     {
       "model": "resultSet",
       "operation": "create",
       "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
-      "line": 125
+      "line": 145
     },
     {
       "model": "resultSet",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
-      "line": 228
+      "line": 305
     },
     {
       "model": "resultSet",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
-      "line": 259
+      "line": 366
+    },
+    {
+      "model": "resultSet",
+      "operation": "updateMany",
+      "file": "apps/api/src/modules/school/assessment/result-run.service.ts",
+      "line": 374
     },
     {
       "model": "studentAssessment",
@@ -4046,49 +4052,49 @@
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 293
+      "line": 305
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 332
+      "line": 344
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 389
+      "line": 401
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 422
+      "line": 434
     },
     {
       "model": "studentAssessment",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 467
+      "line": 479
     },
     {
       "model": "reportCard",
       "operation": "updateMany",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 549
-    },
-    {
-      "model": "reportCard",
-      "operation": "upsert",
-      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 825
+      "line": 615
     },
     {
       "model": "reportCard",
       "operation": "upsert",
       "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
-      "line": 880
+      "line": 938
+    },
+    {
+      "model": "reportCard",
+      "operation": "upsert",
+      "file": "apps/api/src/modules/school/examinations/examinations.service.ts",
+      "line": 993
     },
     {
       "model": "reportCard",
@@ -4139,6 +4145,18 @@
       "line": 130
     },
     {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/test/unit/wave8-reaudit.spec.ts",
+      "line": 43
+    },
+    {
+      "model": "studentAssessment",
+      "operation": "updateMany",
+      "file": "apps/api/test/unit/wave8-reaudit.spec.ts",
+      "line": 58
+    },
+    {
       "model": "gradeEntry",
       "operation": "create",
       "file": "scripts/seed-school-extra.ts",
@@ -4187,20 +4205,8 @@
       "occurrences": 3
     },
     {
-      "file": "apps/portal/src/lib/portal-api.ts",
-      "occurrences": 2
-    },
-    {
       "file": "apps/web/src/features/school/api.ts",
       "occurrences": 4
-    },
-    {
-      "file": "apps/web/src/features/school/statutory-api.ts",
-      "occurrences": 1
-    },
-    {
-      "file": "apps/web/src/pages/school/library.tsx",
-      "occurrences": 1
     },
     {
       "file": "apps/web/src/pages/school/promotion.tsx",
@@ -4238,10 +4244,12 @@
     "apps/api/src/modules/school/assessment/gradebook.service.ts",
     "apps/api/src/modules/school/assessment/promotion-decision.dto.ts",
     "apps/api/src/modules/school/assessment/promotion-decision.service.ts",
+    "apps/api/src/modules/school/assessment/result-computation.ecd.spec.ts",
     "apps/api/src/modules/school/assessment/result-computation.golden.spec.ts",
     "apps/api/src/modules/school/assessment/result-computation.ts",
     "apps/api/src/modules/school/assessment/result-integrity.service.ts",
     "apps/api/src/modules/school/assessment/result-run.service.ts",
+    "apps/api/src/modules/school/assessment/result-status.ts",
     "apps/api/src/modules/school/assessment/subject-roles.ts",
     "apps/api/src/modules/school/certification/cert.service.ts",
     "apps/api/src/modules/school/enrollment/promotion-run.service.ts",
@@ -4280,6 +4288,8 @@
     "apps/api/test/integration/school-gradeentry-parity.spec.ts",
     "apps/api/test/integration/school-reporting.spec.ts",
     "apps/api/test/integration/school-result-integrity.spec.ts",
+    "apps/api/test/integration/wave10-handoffs.spec.ts",
+    "apps/api/test/integration/wave13-student-flow.spec.ts",
     "apps/api/test/unit/class-rank.spec.ts",
     "apps/api/test/unit/exam-phase5-contracts.spec.ts",
     "apps/api/test/unit/report-card-pdf-render.spec.ts",
@@ -4287,6 +4297,7 @@
     "apps/api/test/unit/report-card-template.spec.ts",
     "apps/portal/src/lib/portal-api.ts",
     "apps/portal/src/routes/shared/results-panel.tsx",
+    "apps/web/e2e/academic-journey.spec.ts",
     "apps/web/src/App.tsx",
     "apps/web/src/components/layout/app-shell.tsx",
     "apps/web/src/features/school/api.ts",
@@ -4316,6 +4327,7 @@
   ],
   "jobs": [
     "apps/api/src/kernel/events/outbox.worker.ts",
+    "apps/api/src/kernel/notifications/notifications.service.ts",
     "apps/api/src/kernel/recurring/recurring.service.ts",
     "apps/api/src/modules/backup/backup.service.ts",
     "apps/api/src/modules/communication/audience/audience-resolver.service.ts",
@@ -4324,6 +4336,7 @@
     "apps/api/src/modules/school/assessment/assessment.module.ts",
     "apps/api/src/modules/school/enrollment/enrollment.module.ts",
     "apps/api/src/modules/school/enrollment/suspension-expiry.worker.ts",
+    "apps/api/src/modules/school/fees/billing.service.ts",
     "apps/api/src/modules/school/fees/fees.module.ts",
     "apps/api/src/modules/school/lms/moodle/maintenance/orphan-check.service.ts",
     "apps/api/src/modules/school/lms/moodle/notify/lms-notify.service.ts",
@@ -4358,7 +4371,6 @@
     "apps/web/src/pages/school/assessments.tsx",
     "apps/web/src/pages/school/enrollment-summary.tsx",
     "apps/web/src/pages/school/enrollment/_shared.tsx",
-    "apps/web/src/pages/school/enrollment/migration.tsx",
     "apps/web/src/pages/school/enrollment/programmes.tsx",
     "apps/web/src/pages/school/enrollment/workspace.tsx",
     "apps/web/src/pages/school/enter-marks.tsx",
@@ -4368,6 +4380,7 @@
     "apps/web/src/pages/school/exam-results.tsx",
     "apps/web/src/pages/school/exam-workspace.tsx",
     "apps/web/src/pages/school/gradebook.tsx",
+    "apps/web/src/pages/school/grades-levels.tsx",
     "apps/web/src/pages/school/homework.tsx",
     "apps/web/src/pages/school/lms/admin.tsx",
     "apps/web/src/pages/school/lms/badges.tsx",

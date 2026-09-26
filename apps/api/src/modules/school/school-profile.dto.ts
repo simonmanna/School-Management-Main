@@ -23,6 +23,11 @@ export class UpdateSchoolProfileDto {
   @IsOptional() @IsString() @MaxLength(40) gradingSystem?: string;
   @IsOptional() @IsString() @MaxLength(40) attendanceMode?: string;
   @IsOptional() @IsIn(['ENFORCE', 'WARN', 'OFF']) capacityPolicy?: 'ENFORCE' | 'WARN' | 'OFF';
+  /** ADR-031 D2: how absent/exempt learners count toward term results. */
+  @IsOptional() @IsIn(['ABSENT_AS_ZERO', 'ABSENT_BLOCKS', 'ALL_BLOCK'])
+  resultAbsencePolicy?: 'ABSENT_AS_ZERO' | 'ABSENT_BLOCKS' | 'ALL_BLOCK';
+  /** ADR-031 D4: class teacher reads own stream, or every stream of the class. */
+  @IsOptional() @IsIn(['STREAM', 'CLASS']) classTeacherScope?: 'STREAM' | 'CLASS';
   /** Label overrides, e.g. { "section": "Class Group" }. Validated key by key. */
   @IsOptional() @IsObject() terminology?: Record<string, string>;
   @IsOptional() @IsObject() contacts?: Record<string, unknown>;

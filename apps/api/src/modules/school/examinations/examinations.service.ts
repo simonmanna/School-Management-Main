@@ -1,4 +1,5 @@
 import { assertTermWritable, assertYearWritable } from '../foundation/academic-year-guard';
+import { isReleasedStatus } from '../assessment/result-status';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Exam, ExamSchedule, ExamType, GradeEntry, GradingScale } from '@prisma/client';
 import { PERMISSIONS } from '@erp/shared';
@@ -13,7 +14,8 @@ import { ReportCardTemplateService } from './report-card-template.service';
 import { MarkingService } from '../assessment/marking.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { ResultRunService } from '../assessment/result-run.service';
-import { isDescriptorSystem } from '../assessment/result-computation';
+import { isDescriptorSystem, validateBands } from '../assessment/result-computation';
+import { inferScaleSystem } from '../assessment/grade-bands';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import type {
   BulkGradeEntryDto,
@@ -506,6 +508,22 @@ export class GradingScaleService extends BaseCrudService<GradingScale, CreateGra
   async default(): Promise<GradingScale | null> {
     return this.prisma.client.gradingScale.findFirst({ where: { isDefault: true } });
   }
+
+  /** A scale that leaves any percent without a grade is refused at the door (F01). */
+  override async create(data: CreateGradingScaleDto): Promise<GradingScale> {
+    this.assertBands(data.bands);
+    return super.create({ ...data, system: data.system ?? inferScaleSystem(data.name) } as any);
+  }
+
+  override async update(id: string, data: UpdateGradingScaleDto): Promise<GradingScale> {
+    if (data.bands !== undefined) this.assertBands(data.bands);
+    return super.update(id, data);
+  }
+
+  private assertBands(bands: unknown) {
+    const errors = validateBands(bands);
+    if (errors.length) throw new BadRequestException(`This grading scale cannot be used: ${errors.join('; ')}.`);
+  }
 }
 /**
  * ReportCardService — builds the JSON payload for a student's report card.
@@ -574,7 +592,7 @@ export class ReportCardService {
       where: { id: provenance.resultSetId, organizationId: this.tenant.organizationId, deletedAt: null },
       select: { revision: true, status: true, publishedAt: true },
     });
-    if (!resultSet || resultSet.status !== 'published' || !resultSet.publishedAt) {
+    if (!resultSet || !isReleasedStatus(resultSet.status) || !resultSet.publishedAt) {
       throw new BadRequestException(
         'The published results this card was built from are no longer published. Regenerate the card from the current revision.',
       );

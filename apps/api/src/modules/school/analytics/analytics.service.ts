@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { releasedResultSetWhere } from '../assessment/result-status';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 
@@ -102,7 +103,7 @@ export class AnalyticsService {
   /** Term-over-term trend for one student, across published result sets. */
   async studentTrend(studentProfileId: string) {
     const terms = await this.prisma.client.studentTermResult.findMany({
-      where: { studentProfileId, resultSet: { status: 'published' } },
+      where: { studentProfileId, resultSet: releasedResultSetWhere() },
       include: { resultSet: true },
       orderBy: { createdAt: 'asc' },
     });

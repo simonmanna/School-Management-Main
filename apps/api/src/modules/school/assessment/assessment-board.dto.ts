@@ -71,6 +71,8 @@ export class CreateUnifiedAssessmentDto {
   @IsOptional() @IsNumber() @Min(1) maxScore?: number;
   @IsOptional() @IsNumber() @Min(1) sequence?: number;
   @IsOptional() @IsString() componentId?: string;
+  /** F03: formative work is never part of a term total; summative counts through one component. */
+  @IsOptional() @IsIn(['formative', 'summative']) contribution?: 'formative' | 'summative';
   @IsOptional() @IsString() teacherPartnerId?: string;
   @IsOptional() @IsString() description?: string;
 

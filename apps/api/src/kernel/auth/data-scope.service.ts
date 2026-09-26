@@ -4,6 +4,16 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { EmployeeIdentityService } from './employee-identity.service';
 import { PortalIdentityService } from './portal-identity.service';
 
+/**
+ * One place a restricted reader may look: a whole class (`sectionId` null) or
+ * one stream of it. A reader's authority is a list of seats; an empty list is
+ * no authority at all, never all of it (F07).
+ */
+export interface ReadSeat {
+  classId: string;
+  sectionId: string | null;
+}
+
 /** The four scopes, ordered from narrowest to widest. */
 export const SCOPE_RANK: Record<string, number> = {
   own: 0,
@@ -91,11 +101,135 @@ export class DataScopeService {
    * classes sees nobody rather than everybody.
    */
   async readableClassIds(): Promise<string[] | 'all'> {
+    const seats = await this.readableSeats();
+    if (seats === 'all') return 'all';
+    return [...new Set(seats.map((s) => s.classId))];
+  }
+
+  /**
+   * Where a restricted caller may read pupils, stream by stream (F09, ADR-031 D4):
+   *   - a subject teacher: the class/stream of each of their assignments and
+   *     course offerings in an open year, and their timetabled classes;
+   *   - a homeroom (class) teacher: the whole class;
+   *   - a stream class teacher: their stream, or the whole class when the
+   *     school's `classTeacherScope` is CLASS.
+   */
+  async readableSeats(): Promise<ReadSeat[] | 'all'> {
     const scope = await this.effective();
     if (scope === 'school') return 'all';
     const staffProfileId = await this.identity.staffProfileIdForCaller();
     if (!staffProfileId) return [];
-    return this.taughtClassIds(staffProfileId);
+    return this.taughtSeats(staffProfileId);
+  }
+
+  private async taughtSeats(staffProfileId: string): Promise<ReadSeat[]> {
+    const organizationId = this.tenant.organizationId;
+    const openYear = { status: { in: ['PLANNING', 'ACTIVE'] } };
+    const now = new Date();
+    const [profile, assigned, timetabled, offerings, homeroom, streams] = await Promise.all([
+      this.db.schoolProfile.findFirst({ where: { organizationId }, select: { classTeacherScope: true } }),
+      this.db.teacherAssignment.findMany({
+        where: { organizationId, teacherPartnerId: staffProfileId, OR: [{ termId: null }, { term: { academicYear: openYear } }] },
+        select: { classId: true, sectionId: true },
+      }),
+      // A slot's year is its course offering's; an unlinked legacy slot counts
+      // only while its class is active.
+      this.db.timetableSlot.findMany({
+        where: {
+          organizationId,
+          teacherPartnerId: staffProfileId,
+          OR: [
+            { courseOfferingId: null, schoolClass: { isActive: true } },
+            { courseOffering: { deletedAt: null, academicYear: openYear } },
+          ],
+        },
+        select: { classId: true, sectionId: true },
+      }),
+      this.db.courseOfferingTeacher.findMany({
+        where: {
+          organizationId,
+          teacherPartnerId: staffProfileId,
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+          courseOffering: { deletedAt: null, academicYear: openYear },
+        },
+        select: { courseOffering: { select: { classId: true, sectionId: true } } },
+      }),
+      this.db.schoolClass.findMany({
+        where: { organizationId, homeroomTeacherId: staffProfileId, isActive: true },
+        select: { id: true },
+      }),
+      this.db.section.findMany({
+        where: { organizationId, classTeacherId: staffProfileId, isActive: true, deletedAt: null },
+        select: { id: true, classId: true },
+      }),
+    ]);
+    const wholeClassForStreamTeacher = profile?.classTeacherScope === 'CLASS';
+    const seats: ReadSeat[] = [
+      ...assigned.map((a: any) => ({ classId: a.classId, sectionId: a.sectionId ?? null })),
+      ...timetabled.map((t: any) => ({ classId: t.classId, sectionId: t.sectionId ?? null })),
+      ...offerings
+        .map((o: any) => o.courseOffering)
+        .filter((o: any) => o?.classId)
+        .map((o: any) => ({ classId: o.classId, sectionId: o.sectionId ?? null })),
+      ...homeroom.map((c: any) => ({ classId: c.id, sectionId: null })),
+      ...streams.map((s: any) => ({ classId: s.classId, sectionId: wholeClassForStreamTeacher ? null : s.id })),
+    ];
+    const whole = new Set(seats.filter((s) => !s.sectionId).map((s) => s.classId));
+    const out = new Map<string, ReadSeat>();
+    for (const s of seats) {
+      if (!s.classId) continue;
+      if (s.sectionId && whole.has(s.classId)) continue;
+      out.set(`${s.classId}:${s.sectionId ?? ''}`, s);
+    }
+    return [...out.values()];
+  }
+
+  /**
+   * A `StudentProfileWhereInput` fragment for the pupils the caller may read
+   * now, or `null` when unrestricted. A restricted caller with no seats gets a
+   * filter that matches nobody.
+   */
+  async studentReadWhere(): Promise<Record<string, unknown> | null> {
+    const seats = await this.readableSeats();
+    if (seats === 'all') return null;
+    if (seats.length === 0) return { id: { in: [] as string[] } };
+    return {
+      academicEnrollments: {
+        some: {
+          status: { in: ['ACTIVE', 'PENDING', 'SUSPENDED'] },
+          placements: {
+            some: {
+              effectiveTo: null,
+              OR: seats.map((s) =>
+                s.sectionId
+                  ? { sectionId: s.sectionId, classCohort: { classId: s.classId } }
+                  : { classCohort: { classId: s.classId } },
+              ),
+            },
+          },
+        },
+      },
+    };
+  }
+
+  /** Which of these pupils the caller may read; `'all'` when unrestricted. */
+  async visibleStudentIds(studentProfileIds: string[]): Promise<Set<string> | 'all'> {
+    const where = await this.studentReadWhere();
+    if (where === null) return 'all';
+    if (!studentProfileIds.length) return new Set();
+    const rows = await this.db.studentProfile.findMany({
+      where: { AND: [{ id: { in: studentProfileIds } }, where] },
+      select: { id: true },
+    });
+    return new Set(rows.map((r: any) => r.id));
+  }
+
+  /** Throw unless the caller reads school-wide (results office work, not a class view). */
+  async assertSchoolWide(): Promise<void> {
+    if ((await this.readableSeats()) !== 'all') {
+      throw new ForbiddenException('This is a school-wide view; you may only see the pupils you teach');
+    }
   }
 
   /**
@@ -147,27 +281,20 @@ export class DataScopeService {
    * still returned anyone in the school.
    */
   async assertMayReadStudent(studentProfileId: string): Promise<void> {
-    const readable = await this.readableClassIds();
-    if (readable === 'all') return;
-    const seat = readable.length
-      ? await this.db.enrollmentPlacement.findFirst({
-          where: {
-            organizationId: this.tenant.organizationId,
-            effectiveTo: null,
-            enrollment: { studentProfileId },
-            classCohort: { classId: { in: readable } },
-          },
-          select: { id: true },
-        })
-      : null;
-    if (!seat) throw new ForbiddenException('You may only open the records of pupils in classes you teach');
+    const visible = await this.visibleStudentIds([studentProfileId]);
+    if (visible === 'all' || visible.has(studentProfileId)) return;
+    throw new ForbiddenException('You may only open the records of pupils in classes you teach');
   }
 
-  /** Throw unless a class- or own-scoped caller teaches this class. Read-side twin of assertMayTouchClass. */
-  async assertMayReadClass(classId: string): Promise<void> {
-    const readable = await this.readableClassIds();
-    if (readable === 'all') return;
-    if (!readable.includes(classId)) throw new ForbiddenException('You may only list the pupils of classes you teach');
+  /**
+   * Throw unless the caller may read (part of) this class. A stream-only reader
+   * passes, and lists are then narrowed to their streams by `studentReadWhere`.
+   */
+  async assertMayReadClass(classId: string, sectionId?: string | null): Promise<void> {
+    const seats = await this.readableSeats();
+    if (seats === 'all') return;
+    const ok = seats.some((s) => s.classId === classId && (!s.sectionId || !sectionId || s.sectionId === sectionId));
+    if (!ok) throw new ForbiddenException('You may only list the pupils of classes you teach');
   }
 
   /** Throw unless the caller may act on this class under their scope. */

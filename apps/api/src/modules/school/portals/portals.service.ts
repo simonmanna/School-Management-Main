@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { releasedResultSetWhere } from '../assessment/result-status';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
@@ -555,7 +556,7 @@ export class PortalsService {
   /** A8: the student's published term results from the A3 result spine. */
   private async publishedResults(studentProfileId: string) {
     const terms = await this.prisma.client.studentTermResult.findMany({
-      where: { studentProfileId, resultSet: { status: 'published' } },
+      where: { studentProfileId, resultSet: releasedResultSetWhere() },
       include: { resultSet: true },
       orderBy: { createdAt: 'desc' },
       take: 6,

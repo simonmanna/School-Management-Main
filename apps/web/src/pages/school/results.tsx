@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useWorkingTerm } from '@/features/school/working-term';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Calculator, ShieldCheck, History, Send, Lock, FileText, GitBranch, GraduationCap, Sigma,
@@ -37,14 +38,15 @@ import { Empty, apiMessage, fmtDateTime, selectClass } from './_components/exam-
 export function SchoolResultsPage() {
   const [params, setParams] = useSearchParams();
   const { data: terms } = useTerms();
-  const termId = params.get('term') ?? '';
+  const [workingTerm, setWorkingTerm] = useWorkingTerm();
+  const termId = params.get('term') ?? workingTerm;
   const setId = params.get('set') ?? '';
   const tab = params.get('tab') ?? 'runs';
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params);
     if (v) next.set(k, v); else next.delete(k);
-    if (k === 'term') next.delete('set');
+    if (k === 'term') { next.delete('set'); setWorkingTerm(v); }
     setParams(next, { replace: true });
   };
 
@@ -131,7 +133,11 @@ export function SchoolResultsPage() {
               <CardContent className="flex flex-wrap items-end gap-3">
                 <select className={`${selectClass} w-64`} value={rosterId} onChange={(e) => setRosterId(e.target.value)}>
                   <option value="">Class list…</option>
-                  {(rosters?.data ?? []).filter((r) => !termId || r.termId === termId).map((r) => (
+                  {/* Whole-class, frozen lists for THIS term only: a subject group or one
+                      stream cannot become the class's results (F06). */}
+                  {(rosters?.data ?? [])
+                    .filter((r: any) => r.termId === termId && r.frozenAt && (r.scopeType ?? 'class') === 'class' && !r.subjectId && !r.sectionId && r.classId)
+                    .map((r) => (
                     <option key={r.id} value={r.id}>{rosterLabel(r)}</option>
                   ))}
                 </select>
@@ -147,7 +153,12 @@ export function SchoolResultsPage() {
                       });
                     } catch (e) {
                       notify.error('Could not work out results', {
-                        description: apiMessage(e, 'Every mark must be approved first, and the class list must be locked.'),
+                        description: apiMessage(
+                          e,
+                          published
+                            ? 'These results are released. Request an amendment and have it approved to recompute them.'
+                            : 'The class list must be locked and for this term.',
+                        ),
                       });
                     }
                   }}

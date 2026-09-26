@@ -43,6 +43,39 @@ export class StudentAttendanceService {
     await this.dataScope.assertTeachesClass(classId ?? undefined);
   }
 
+  /**
+   * F10: every learner on a register must have been seated in this class (and
+   * stream) on that day — not before they were admitted, not after they left
+   * or moved, not in another school. One stranger fails the whole register.
+   */
+  private async assertEntriesBelongToRegister(tx: any, dto: BulkMarkAttendanceDto, date: Date): Promise<void> {
+    const ids = dto.entries.map((e) => e.studentProfileId);
+    const unique = [...new Set(ids)];
+    if (unique.length !== ids.length) throw new BadRequestException('A learner appears on this register more than once.');
+    if (!unique.length) return;
+    const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+    const seated = await tx.enrollmentPlacement.findMany({
+      where: {
+        effectiveFrom: { lt: dayEnd },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: dayStart } }],
+        classCohort: { classId: dto.classId },
+        ...(dto.sectionId ? { sectionId: dto.sectionId } : {}),
+        enrollment: { studentProfileId: { in: unique }, status: { not: 'CANCELLED' } },
+      },
+      select: { enrollment: { select: { studentProfileId: true } } },
+    });
+    const present = new Set(seated.map((p: any) => p.enrollment.studentProfileId));
+    const strangers = unique.filter((id) => !present.has(id));
+    if (strangers.length) {
+      throw new BadRequestException({
+        code: 'NOT_ON_REGISTER',
+        message: `${strangers.length} learner(s) on this register were not in this class${dto.sectionId ? ' and stream' : ''} on ${dayStart.toISOString().slice(0, 10)}. Nothing was saved.`,
+        studentProfileIds: strangers,
+      });
+    }
+  }
+
   async mark(dto: BulkMarkAttendanceDto) {
     await this.assertMayMarkClass(dto.classId);
     const organizationId = this.tenant.organizationId;
@@ -59,13 +92,21 @@ export class StudentAttendanceService {
     await this.prisma.client.$transaction(async (tx: any) => {
       // A closed year's registers are history (Wave 5 closed-year guard).
       await assertDateWritable(tx, organizationId, date);
+      await this.assertEntriesBelongToRegister(tx, dto, date);
       for (const e of dto.entries) {
         const cfg = cfgByCode[e.status];
         const statusCfgId = cfg?.id ?? null;
         const existing = await tx.studentAttendance.findFirst({
           where: { organizationId, studentProfileId: e.studentProfileId, date, periodId },
-          select: { id: true },
+          select: { id: true, classId: true },
         });
+        // A re-submitted register updates its own rows. It never relabels a
+        // record another class's register made — that is a correction (F10).
+        if (existing && existing.classId && existing.classId !== dto.classId) {
+          throw new BadRequestException(
+            'A learner on this register already has attendance recorded under another class for this date. Correct that record instead.',
+          );
+        }
         const data = {
           classId: dto.classId,
           sectionId: dto.sectionId ?? null,

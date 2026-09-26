@@ -64,6 +64,13 @@ export class StudentController {
     return this.students.update(id, dto);
   }
 
+  /** Decrypt the pupil's national ID for someone who manages pupil records (audited). */
+  @Post(':id/reveal-nin')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  revealNin(@Param('id') id: string) {
+    return this.students.revealNin(id);
+  }
+
   /**
    * Bulk-import students from a CSV-shaped payload.
    * Body: { rows: Array<Record<string, string>> }

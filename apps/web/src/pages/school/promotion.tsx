@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useWorkingTerm } from '@/features/school/working-term';
+import { QueryError } from '@/components/query-state';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -75,7 +77,7 @@ export function SchoolPromotionPage() {
 
   // ── Filters ──
   const [yearId, setYearId] = useState('');
-  const [termId, setTermId] = useState('');
+  const [termId, setTermId] = useWorkingTerm();
   const [classId, setClassId] = useState('');
   const [search, setSearch] = useState('');
 
@@ -92,10 +94,10 @@ export function SchoolPromotionPage() {
   } | null>(null);
 
   // Only fetch students once a term + class is chosen (the decision surface).
-  // The API resolves "in this class" from placement history; the profile no
-  // longer carries a class of its own.
-  const { data: studentsResp, isLoading } = useStudents(
-    termId && classId ? { classId, search: search || undefined, page: 1, pageSize: 500 } : {},
+  // The cohort is the class AS IT WAS in the selected term, from placement
+  // history — not today's class, which a later move or withdrawal has changed (F19).
+  const { data: studentsResp, isLoading, isError, error, refetch } = useStudents(
+    termId && classId ? { classId, termId, search: search || undefined, page: 1, pageSize: 500 } : {},
   );
   const students = useMemo(() => {
     const list = (studentsResp?.data ?? []) as Array<{
@@ -327,9 +329,11 @@ export function SchoolPromotionPage() {
             <div className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading students…
             </div>
+          ) : isError ? (
+            <div className="p-4"><QueryError error={error} onRetry={() => void refetch()} /></div>
           ) : students.length === 0 ? (
             <div className="px-4 py-16 text-center text-sm text-muted-foreground">
-              No students found for the selected class.
+              No pupils were in this class during the selected term.
             </div>
           ) : (
             <table className="w-full text-sm">

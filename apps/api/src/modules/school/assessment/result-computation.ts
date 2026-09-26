@@ -32,6 +32,8 @@ export const DESCRIPTOR_SYSTEMS: GradingSystem[] = ['ECD'];
 export const isDescriptorSystem = (system: string): boolean =>
   DESCRIPTOR_SYSTEMS.includes(system as GradingSystem);
 export type RoundingModeName = 'half_up' | 'half_even' | 'floor' | 'ceil';
+/** ADR-031 D1: what the band lookup sees — the exact percent, or the nearest whole one. */
+export type BandRoundingName = 'none' | 'half_up_integer';
 /**
  * `none` means this cohort is not ranked at all. Nursery classes are the reason:
  * a position in class is a comparison between small children, and printing one
@@ -65,6 +67,8 @@ export interface AssessmentDatum {
   participation: string; // present|absent|exempt|excused|malpractice|special_consideration
   /** Ordering hint for the `last` aggregation (higher = later). */
   order?: number;
+  /** Formative work is evidence for teaching, never part of a term total (F03). */
+  formative?: boolean;
 }
 
 export interface SubjectInput {
@@ -91,11 +95,29 @@ export interface StudentInput {
 export interface ResultInput {
   gradingSystem: GradingSystem;
   bands: BandConfig[];
+  /** ADR-031 D1. Omitted = 'none'. */
+  bandRounding?: BandRoundingName;
+  /**
+   * A teacher's running total mid-term: missing components are left out and
+   * the total is taken over the weight present, flagged by `missingComponentIds`.
+   * Never set for a result run — a released result has no missing evidence.
+   */
+  provisional?: boolean;
   roundingMode: RoundingModeName;
   decimalPlaces: number;
   rankOn: RankOn;
   students: StudentInput[];
 }
+
+/**
+ * counted — evidence produced a percentage.
+ * exempt  — every piece of evidence was a recorded exemption/exclusion; the
+ *           component drops out and the remaining weights are re-spread.
+ * missing — no evidence, or evidence with neither a mark nor a participation
+ *           outcome. A missing component leaves the subject without a result;
+ *           it is never re-weighted away (F02).
+ */
+export type ComponentStatus = 'counted' | 'exempt' | 'missing';
 
 export interface ComponentContribution {
   componentId: string;
@@ -103,6 +125,7 @@ export interface ComponentContribution {
   weight: string;
   componentPercent: string | null;
   contribution: string;
+  status?: ComponentStatus;
 }
 
 export interface SubjectResult {
@@ -115,6 +138,8 @@ export interface SubjectResult {
   points: number | null;
   subjectRank: number | null;
   componentBreakdown: ComponentContribution[];
+  /** Components with no evidence; non-empty means no subject result (F02). */
+  missingComponentIds?: string[];
 }
 
 export interface TermResult {
@@ -212,12 +237,68 @@ export function aggregateComponent(data: AssessmentDatum[], c: ComponentConfig):
 }
 
 // ── band resolution ─────────────────────────────────────────────────────────
-export function bandFor(percent: Dec, bands: BandConfig[]): BandConfig | null {
-  const p = percent.toNumber();
-  return bands.find((b) => p >= b.min && p <= b.max) ?? bands[bands.length - 1] ?? null;
+export class InvalidGradingScaleError extends Error {}
+
+/**
+ * Structural problems with a band list, empty when usable. Bands are read as
+ * half-open intervals `[min, next min)`, so the only things that can be wrong
+ * are: nothing to read, a minimum that is not a number, two bands claiming the
+ * same minimum, or no band reaching down to 0 (a low score would match none).
+ */
+export function validateBands(bands: unknown): string[] {
+  if (!Array.isArray(bands) || bands.length === 0) return ['the scale has no bands'];
+  const errors: string[] = [];
+  const mins = new Set<number>();
+  for (const b of bands as any[]) {
+    if (typeof b?.min !== 'number' || !Number.isFinite(b.min)) errors.push(`band ${b?.grade ?? '?'} has no numeric minimum`);
+    else if (mins.has(b.min)) errors.push(`two bands start at ${b.min}`);
+    else mins.add(b.min);
+    if (typeof b?.grade !== 'string' || !b.grade) errors.push('a band has no grade label');
+  }
+  if (mins.size && Math.min(...mins) > 0) errors.push(`the lowest band starts at ${Math.min(...mins)}, so lower scores have no grade`);
+  return errors;
+}
+
+/**
+ * The band a percent falls in: the one with the highest `min` not above it.
+ * Continuous by construction — 89.5 on an 80/90 scale is in the 80 band, not in
+ * a gap between "80–89" and "90–100" (F01). No silent fallback: a percent
+ * below every band means the scale is broken, and that is an error.
+ */
+export function bandFor(percent: Dec, bands: BandConfig[], rounding: BandRoundingName = 'none'): BandConfig {
+  const p = rounding === 'half_up_integer' ? percent.toDecimalPlaces(0, D.ROUND_HALF_UP) : percent;
+  const sorted = [...bands].sort((a, b) => b.min - a.min);
+  const band = sorted.find((b) => p.greaterThanOrEqualTo(b.min));
+  if (!band) throw new InvalidGradingScaleError(`no grade band covers ${p.toString()}%`);
+  return band;
 }
 
 // ── subject scoring ─────────────────────────────────────────────────────────
+/**
+ * The evidence one component is built from (F03). Formative work never counts.
+ * Summative work counts where it is bound to this component; an unbound
+ * summative assessment (an exam mark projected before a policy existed) joins
+ * the component of its kind only when exactly one such component exists — the
+ * same evidence must never feed two components.
+ */
+export function componentMembers(subject: SubjectInput, c: ComponentConfig): AssessmentDatum[] {
+  const sameKind = subject.components.filter((x) => x.kind === c.kind).length;
+  return subject.assessments.filter(
+    (a) => !a.formative && (a.componentId === c.id || (a.componentId == null && sameKind === 1 && a.kind === c.kind)),
+  );
+}
+
+const EXCLUDING_PARTICIPATION = ['exempt', 'excused', 'withdrawn', 'not_enrolled'];
+
+/** Every piece of evidence was an explicit exclusion (never a blank). */
+function isExcluded(members: AssessmentDatum[], c: ComponentConfig): boolean {
+  if (members.length === 0) return false;
+  const countsAbsent = c.countsAbsentAsZero ?? true;
+  return members.every(
+    (m) => EXCLUDING_PARTICIPATION.includes(m.participation) || (m.participation === 'absent' && !countsAbsent),
+  );
+}
+
 export function computeSubject(subject: SubjectInput, input: ResultInput): SubjectResult {
   const breakdown: ComponentContribution[] = [];
   let finalPercent: Dec | null = null;
@@ -237,18 +318,20 @@ export function computeSubject(subject: SubjectInput, input: ResultInput): Subje
     let caWeight = new D(0);
     let examWeighted = new D(0);
     let examWeight = new D(0);
+    const missing: string[] = [];
     for (const c of subject.components) {
-      const members = subject.assessments.filter(
-        (a) => a.componentId === c.id || (a.componentId == null && a.kind === c.kind),
-      );
+      const members = componentMembers(subject, c);
       const componentPct = aggregateComponent(members, c);
       const weight = new D(c.weight);
+      const status: ComponentStatus = componentPct !== null ? 'counted' : isExcluded(members, c) ? 'exempt' : 'missing';
+      if (status === 'missing') missing.push(c.id);
       breakdown.push({
         componentId: c.id,
         kind: c.kind,
         weight: weight.toString(),
         componentPercent: componentPct ? componentPct.toString() : null,
         contribution: componentPct ? componentPct.mul(weight).div(100).toString() : '0',
+        status,
       });
       if (componentPct === null) continue;
       anyCounted = true;
@@ -264,23 +347,29 @@ export function computeSubject(subject: SubjectInput, input: ResultInput): Subje
         hasCa = true;
       }
     }
+    if (missing.length > 0 && !input.provisional) {
+      // A component with no evidence is not a smaller denominator: CAT 80 with
+      // the exam never sat is not 80% (F02). No result until it is resolved.
+      return { subjectId: subject.subjectId, caScore: null, examScore: null, finalPercent: null, grade: null, gradePoint: null, points: null, subjectRank: null, componentBreakdown: breakdown, missingComponentIds: missing };
+    }
     if (anyCounted && !totalWeight.isZero()) {
-      // Normalise by the weight actually present (defensive; publish gate
-      // enforces the sum-to-100 invariant separately).
+      // Normalise over counted components only — an exempt one dropped out by a
+      // recorded decision (ADR-031 D2), never because evidence is absent.
       finalPercent = weightedSum.div(totalWeight);
       caScore = caWeight.isZero() ? new D(0) : caWeighted.div(caWeight);
       examScore = examWeight.isZero() ? new D(0) : examWeighted.div(examWeight);
     }
   } else {
     // Simple mode (no policy): mean of the assessment percentages.
-    const pcts = subject.assessments
+    const summative = subject.assessments.filter((a) => !a.formative);
+    const pcts = summative
       .map((a) => assessmentPercent(a, true))
       .filter((p): p is Dec => p !== null);
     if (pcts.length > 0) {
       finalPercent = pcts.reduce((acc, p) => acc.add(p), new D(0)).div(pcts.length);
       // Split CA/exam by kind for display.
       const split = (kinds: (d: AssessmentDatum) => boolean) => {
-        const xs = subject.assessments.filter(kinds).map((a) => assessmentPercent(a, true)).filter((p): p is Dec => p !== null);
+        const xs = summative.filter(kinds).map((a) => assessmentPercent(a, true)).filter((p): p is Dec => p !== null);
         return xs.length ? xs.reduce((a, p) => a.add(p), new D(0)).div(xs.length) : null;
       };
       const exam = split((d) => d.kind === 'exam');
@@ -295,7 +384,7 @@ export function computeSubject(subject: SubjectInput, input: ResultInput): Subje
   }
 
   const rounded = roundDec(finalPercent, input.roundingMode, input.decimalPlaces);
-  const band = bandFor(rounded, input.bands);
+  const band = bandFor(rounded, input.bands, input.bandRounding ?? 'none');
   return {
     subjectId: subject.subjectId,
     caScore: hasCa ? roundDec(caScore, input.roundingMode, input.decimalPlaces) : null,
@@ -306,6 +395,7 @@ export function computeSubject(subject: SubjectInput, input: ResultInput): Subje
     points: band?.points ?? null,
     subjectRank: null, // filled in the ranking pass
     componentBreakdown: breakdown,
+    missingComponentIds: breakdown.filter((b) => b.status === 'missing').map((b) => b.componentId),
   };
 }
 

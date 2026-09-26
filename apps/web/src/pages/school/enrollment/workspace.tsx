@@ -452,7 +452,10 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
     previewMut
       .mutateAsync({ ...payload, reason: payload.reason.trim() || 'Preview' })
       .then((r) => { if (!cancelled) setPreview(r); })
-      .catch(() => { if (!cancelled) setPreview(null); });
+      // A failed check is not a passed one (F20): show why, and hold the move.
+      .catch((err) => {
+        if (!cancelled) setPreview({ ok: false, errors: [errorMessage(err, 'Could not check this move. Try again.')], warnings: [] } as any);
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cohortId, sectionId, effectiveFrom]);

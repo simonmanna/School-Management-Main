@@ -45,6 +45,18 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
     return this.prisma.client.$transaction(async (tx: any) => {
       const klass = dto.classId ? await tx.schoolClass.findFirst({ where: { id: dto.classId }, include: { gradeLevel: true } }) : null;
       if (dto.classId && !klass) throw new NotFoundException(`Class ${dto.classId} not found`);
+      const term = await tx.term.findFirst({ where: { id: dto.termId }, select: { startDate: true, endDate: true, academicYearId: true } });
+      if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
+      // F12: a roster is "who was in the class" on a day inside ITS term — the
+      // term's last day for a past term, today for the current one. Reading
+      // today's class for last term's list swapped in this term's pupils and
+      // dropped anyone who has left since.
+      const now = new Date();
+      const termEnd = new Date(term.endDate.getTime() + 24 * 60 * 60 * 1000 - 1);
+      const asOf = dto.asOf ? new Date(dto.asOf) : termEnd < now ? termEnd : now;
+      if (asOf < term.startDate || asOf > termEnd) {
+        throw new BadRequestException('The roster date must fall inside the term it is captured for.');
+      }
 
       const roster = await tx.academicRoster.create({
         data: {
@@ -65,19 +77,17 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
       // rosters carry it); what it is derived FROM is now placement history,
       // not the StudentProfile projection (ADR-027).
       if ((dto.source ?? 'derived_current_class') === 'derived_current_class' && dto.classId) {
+        const at = { asOf, academicYearId: term.academicYearId };
         const found = await tx.studentProfile.findMany({
-          where: {
-            status: 'active',
-            ...this.placements.studentWhere({
-              classIds: [dto.classId],
-              ...(dto.sectionId ? { sectionIds: [dto.sectionId] } : {}),
-            }),
-          },
+          where: this.placements.studentWhere(
+            { classIds: [dto.classId], ...(dto.sectionId ? { sectionIds: [dto.sectionId] } : {}) },
+            at,
+          ),
         });
         // On `tx`: the placements this roster is derived from may have been
         // written in this same transaction, and the lookup must not go looking
         // for a second connection while this one holds it.
-        const students = await this.placements.attach(found, { tx });
+        const students = await this.placements.attach(found, { tx, ...at });
         if (students.length > 0) {
           await tx.academicRosterMember.createMany({
             data: students.map((s: any) => ({
@@ -87,7 +97,8 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
               classId: s.placement?.classId ?? dto.classId,
               sectionId: s.placement?.sectionId ?? null,
               gradeLevelId: klass?.gradeLevelId ?? null,
-              joinReason: 'captured_from_current_class',
+              effectiveFrom: asOf,
+              joinReason: 'captured_from_class_placement',
             })),
           });
         }
@@ -97,7 +108,7 @@ export class AcademicRosterService extends BaseCrudService<AcademicRoster, Captu
         entity: 'AcademicRoster',
         entityId: roster.id,
         action: 'create',
-        newValues: { termId: roster.termId, classId: roster.classId, source: roster.source },
+        newValues: { termId: roster.termId, classId: roster.classId, source: roster.source, asOf: asOf.toISOString() },
       });
       return tx.academicRoster.findFirst({ where: { id: roster.id }, include: { members: true } });
     });

@@ -6,7 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { MarkingService } from './marking.service';
 import { AssessmentPolicyService } from './assessment-config.service';
-import { resolveBands } from './grade-bands';
+import { resolveScale } from './grade-bands';
 import { kindOf } from './assessment-math';
 import {
   computeSubject,
@@ -110,10 +110,14 @@ export class GradebookService {
     // computeSubject's member-matching exactly), else to the unweighted group.
     const columns = assessments.map((a) => {
       const kind = kindOf(a);
-      const owner =
-        components.find((c) => a.componentId === c.id) ??
-        components.find((c) => a.componentId == null && c.kind === kind) ??
-        null;
+      const formative = (a as any).contribution === 'formative';
+      const owner = formative
+        ? null
+        : components.find((c) => a.componentId === c.id) ??
+          (a.componentId == null && components.filter((c) => c.kind === kind).length === 1
+            ? components.find((c) => c.kind === kind)
+            : undefined) ??
+          null;
       return {
         assessmentId: a.id,
         title: a.title,
@@ -161,10 +165,12 @@ export class GradebookService {
       saByStudent.get(r.studentProfileId)!.set(r.assessmentId, r);
     }
 
-    const bands = await resolveBands(this.prisma.client, await this.gradingSystem());
+    const scale = await resolveScale(this.prisma.client, await this.gradingSystem());
     const input: ResultInput = {
       gradingSystem: (await this.gradingSystem()) as ResultInput['gradingSystem'],
-      bands,
+      bands: scale.bands,
+      bandRounding: scale.rounding,
+      provisional: true,
       roundingMode: 'half_up',
       decimalPlaces: 2,
       rankOn: 'meanPercent',
@@ -192,6 +198,7 @@ export class GradebookService {
           maxScore: a.maxScore,
           participation: r?.participation ?? 'present',
           order: i,
+          formative: (a as any).contribution === 'formative',
         });
       });
 
@@ -206,6 +213,8 @@ export class GradebookService {
         cells,
         finalPercent: result.finalPercent != null ? Number(result.finalPercent) : null,
         grade: result.grade,
+        // Running total over the work marked so far; the term result waits for all of it.
+        provisional: (result.missingComponentIds ?? []).length > 0,
         componentPercents: result.componentBreakdown.map((b) => ({
           componentId: b.componentId,
           percent: b.componentPercent != null ? Number(b.componentPercent) : null,
@@ -302,6 +311,8 @@ export class GradebookService {
         title: dto.title,
         maxScore: dto.maxScore ?? 100,
         kind: (dto.kind ?? component?.kind ?? 'cat') as any,
+        // A column with no component is the "not weighted" kind (F03).
+        contribution: dto.componentId ? 'summative' : 'formative',
         sourceType: 'manual',
         status: 'open',
         dueAt: dto.dueAt ? new Date(dto.dueAt) : null,

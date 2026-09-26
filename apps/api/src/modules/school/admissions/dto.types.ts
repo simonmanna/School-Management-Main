@@ -129,8 +129,13 @@ export class AddExamScoreDto {
   @IsOptional() @IsString() notes?: string;
 }
 
+/**
+ * F13: what the enrolling clerk wants to CHANGE from the accepted application.
+ * Every field is optional — the application is the source; a value here that
+ * differs from it is an override and needs `confirmOverrides`.
+ */
 export class EnrollStudentInput {
-  @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() @IsNotEmpty() name?: string;
   @IsOptional() @IsString() email?: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() dateOfBirth?: string;
@@ -139,6 +144,7 @@ export class EnrollStudentInput {
   @IsOptional() @IsString() religion?: string;
   @IsOptional() @IsString() house?: string;
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
+  @IsOptional() @IsString() studentCategoryId?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => GuardianDto) guardians?: GuardianDto[];
 }
 
@@ -157,9 +163,13 @@ export class EnrollApplicationDto {
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
+  @IsOptional()
   @ValidateNested()
   @Type(() => EnrollStudentInput)
-  student!: EnrollStudentInput;
+  student?: EnrollStudentInput;
+
+  /** Required when `student` changes something the application already says. */
+  @IsOptional() @IsBoolean() confirmOverrides?: boolean;
 }
 
 export class ScheduleInterviewDto {
@@ -194,9 +204,12 @@ export class BulkEnrollItemDto {
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
 
+  @IsOptional()
   @ValidateNested()
   @Type(() => EnrollStudentInput)
-  student!: EnrollStudentInput;
+  student?: EnrollStudentInput;
+
+  @IsOptional() @IsBoolean() confirmOverrides?: boolean;
 }
 
 export class BulkEnrollDto {

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -154,4 +155,25 @@ export function computeEffective(
  */
 export function kindOf(a: { kind?: string | null; sourceType?: string; component?: { kind?: string } | null }): string {
   return a.kind ?? a.component?.kind ?? (a.sourceType === 'exam_session' ? 'exam' : 'cat');
+}
+
+/**
+ * F03: what an assessment contributes. Formative work is teaching evidence and
+ * never reaches a term total. Summative work counts through one weighting
+ * component — chosen explicitly, except an exam paper, which binds to the
+ * policy's single exam component.
+ */
+export function assessmentContribution(
+  requested: 'formative' | 'summative' | undefined,
+  hasComponent: boolean,
+  kind: string,
+): 'formative' | 'summative' {
+  const contribution = requested ?? (hasComponent || kind === 'exam' ? 'summative' : 'formative');
+  if (contribution === 'formative' && hasComponent) {
+    throw new BadRequestException('Formative work does not count toward a weighting component — remove the component or mark it summative.');
+  }
+  if (contribution === 'summative' && !hasComponent && kind !== 'exam') {
+    throw new BadRequestException('Choose the weighting component this counts toward, or mark it formative (not counted in term results).');
+  }
+  return contribution;
 }

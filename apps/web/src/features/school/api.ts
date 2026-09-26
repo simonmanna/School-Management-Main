@@ -117,6 +117,8 @@ export interface SchoolProfile {
   educationLevel?: string;
   gradingSystem?: string;
   capacityPolicy?: 'ENFORCE' | 'WARN' | 'OFF';
+  resultAbsencePolicy?: 'ABSENT_AS_ZERO' | 'ABSENT_BLOCKS' | 'ALL_BLOCK';
+  classTeacherScope?: 'STREAM' | 'CLASS';
   /** Stored overrides only. */
   terminology?: Partial<Terminology>;
   /** Resolved labels: overrides with defaults filled in. */
@@ -1243,16 +1245,29 @@ export interface EnrollAdmissionInput {
   sectionId?: string;
   termId: string;
   rollNumber: string;
-  student: { name: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string };
+  /** Overrides of what the application says; omitted fields come from the application (F13). */
+  student?: { name?: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string; residenceType?: 'day' | 'boarder'; studentCategoryId?: string };
+  /** Required when `student` contradicts the application. */
+  confirmOverrides?: boolean;
 }
+
+export interface EnrollAdmissionResult {
+  studentProfileId: string;
+  studentProfile: { id: string };
+  conversionSummary?: { carried: string[]; overridden: string[] };
+}
+
+/** Everything an enrollment changes: admissions, pupils, seats, placements, course rosters (F20). */
+const ENROLLMENT_CONSUMERS = /admission|student|enrol|placement|course|roster|capacity|class|setup/i;
 
 export function useEnrollAdmission() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: EnrollAdmissionInput) => (await api.post(`${S}/admissions/enroll`, dto)).data,
+    mutationFn: async (dto: EnrollAdmissionInput) => (await api.post<EnrollAdmissionResult>(`${S}/admissions/enroll`, dto)).data,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['school', 'admissions'] });
-      qc.invalidateQueries({ queryKey: ['school', 'students'] });
+      qc.invalidateQueries({
+        predicate: (q) => q.queryKey[0] === 'school' && ENROLLMENT_CONSUMERS.test(String(q.queryKey[1] ?? '')),
+      });
     },
   });
 }
@@ -1323,6 +1338,8 @@ export interface StudentListParams {
   /** Learners placed in this class now (resolved from placement history by the API). */
   classId?: string;
   sectionId?: string;
+  /** Placed in the class during this term (a historical cohort), not now. */
+  termId?: string;
 }
 
 export function useStudents(params: StudentListParams = {}) {
@@ -4424,7 +4441,7 @@ export function useAssessmentPolicies() {
 export function useCreateAssessmentPolicy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { name: string; gradeLevelId?: string; classId?: string; subjectId?: string; termId?: string; passMark?: number; caCap?: number; roundingMode?: string; decimalPlaces?: number }) =>
+    mutationFn: async (dto: { name: string; gradeLevelId?: string; classId?: string; subjectId?: string; termId?: string; programmeId?: string; passMark?: number; caCap?: number; roundingMode?: string; decimalPlaces?: number }) =>
       (await api.post<AssessmentPolicy>(AS, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'assessment-policies'] }),
   });
@@ -5161,7 +5178,8 @@ export function useCreateQuestionPaper() {
 
 /* ── Grading scales (grade boundaries) ───────────────────────────────────── */
 export interface GradingBand { min: number; max: number; grade: string; gpa: number; remark?: string }
-export interface GradingScale { id: string; name: string; bands: GradingBand[]; isDefault: boolean }
+export type BandRounding = 'none' | 'half_up_integer';
+export interface GradingScale { id: string; name: string; bands: GradingBand[]; isDefault: boolean; system?: string | null; bandRounding?: BandRounding }
 
 export function useGradingScales() {
   return useQuery({
@@ -5178,7 +5196,7 @@ export function useDefaultGradingScale() {
 export function useCreateGradingScale() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { name: string; bands: GradingBand[]; isDefault?: boolean }) =>
+    mutationFn: async (dto: { name: string; bands: GradingBand[]; isDefault?: boolean; system?: string; bandRounding?: BandRounding }) =>
       (await api.post<GradingScale>(`${S}/grading-scales`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
   });
@@ -5186,7 +5204,7 @@ export function useCreateGradingScale() {
 export function useUpdateGradingScale() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, dto }: { id: string; dto: Partial<{ name: string; bands: GradingBand[]; isDefault: boolean }> }) =>
+    mutationFn: async ({ id, dto }: { id: string; dto: Partial<{ name: string; bands: GradingBand[]; isDefault: boolean; system: string; bandRounding: BandRounding }> }) =>
       (await api.patch<GradingScale>(`${S}/grading-scales/${id}`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'grading-scales'] }),
   });
@@ -7258,6 +7276,7 @@ export function useApprovalQueue(termId?: string, classId?: string) {
 
 export interface CreateAssessmentInput {
   kind: string;
+  contribution?: 'formative' | 'summative';
   classId?: string;
   subjectId?: string;
   termId: string;

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
-import { defaultBands } from '../assessment/grade-bands';
+import { resolveScale } from '../assessment/grade-bands';
+import { bandFor as kernelBandFor } from '../assessment/result-computation';
 
 const D = Prisma.Decimal;
 type Decimal = Prisma.Decimal;
@@ -67,11 +68,12 @@ export class GradingService {
     maxMarks: Prisma.Decimal.Value,
     system?: GradingSystem | string,
   ): Promise<GradeBand | null> {
-    const bands = await this.bandsFor(system ?? null);
+    const scale = await this.scaleFor(system ?? null);
     // A0: exact-Decimal percentage — band boundaries are precisely where JS
-    // float error would otherwise flip a grade (e.g. 49.999999999).
-    const pct = percent(marks, maxMarks);
-    return bands.find((b) => pct.gte(b.min) && pct.lte(b.max)) ?? bands[bands.length - 1];
+    // float error would otherwise flip a grade (e.g. 49.999999999). The lookup
+    // is the result kernel's continuous one, so 89.5 is never a gap (F01).
+    const pct = percent(marks, maxMarks).toDecimalPlaces(2, D.ROUND_HALF_UP);
+    return kernelBandFor(pct, scale.bands, scale.rounding);
   }
 
   /**
@@ -86,21 +88,20 @@ export class GradingService {
    * tenancy extension.)
    */
   async bandsFor(system?: GradingSystem | string | null): Promise<GradeBand[]> {
-    if (system) {
-      const exact = await this.prisma.client.gradingScale.findFirst({
-        where: { name: { equals: system as string, mode: 'insensitive' } },
-      });
-      if (exact) return exact.bands as unknown as GradeBand[];
-    }
-    const fallback = await this.prisma.client.gradingScale.findFirst({
-      where: { isDefault: true },
-    });
-    if (fallback) return fallback.bands as unknown as GradeBand[];
+    return (await this.scaleFor(system ?? null)).bands as GradeBand[];
+  }
 
-    // No registered scale — use the built-in default for the system. The band
-    // tables live in assessment/grade-bands.ts so the result kernel and the
-    // examinations vertical resolve the SAME grades (B6 fold — one resolver).
-    return defaultBands(system ?? 'UCE');
+  /**
+   * One resolver for the result kernel and this vertical (B6 fold): a scale
+   * registered for the system, else a school house scale for graded systems,
+   * else the built-in bands. Never another system's scale (F14).
+   */
+  private async scaleFor(system: string | null) {
+    if (!system) {
+      const profile = await this.prisma.client.schoolProfile.findFirst({ select: { gradingSystem: true } });
+      system = profile?.gradingSystem ?? 'UCE';
+    }
+    return resolveScale(this.prisma.client, system);
   }
 
   // ── UCE aggregate ──────────────────────────────────────────────────────

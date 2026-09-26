@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AssessmentComponentService, AssessmentPolicyService } from './assessment-config.service';
@@ -241,7 +242,10 @@ export class MarkingController {
 
 @Controller('school/rosters')
 export class AcademicRosterController {
-  constructor(private readonly service: AcademicRosterService) {}
+  constructor(
+    private readonly service: AcademicRosterService,
+    private readonly dataScope: DataScopeService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -257,8 +261,11 @@ export class AcademicRosterController {
 
   @Get(':id/members')
   @RequirePermissions(PERMISSIONS.school.read)
-  members(@Param('id') id: string) {
-    return this.service.members(id);
+  async members(@Param('id') id: string) {
+    // F09: a teacher reads only the members they may read.
+    const rows = await this.service.members(id);
+    const visible = await this.dataScope.visibleStudentIds(rows.map((r: any) => r.studentProfileId));
+    return visible === 'all' ? rows : rows.filter((r: any) => visible.has(r.studentProfileId));
   }
 
   @Post('capture')
@@ -376,6 +383,7 @@ export class ResultController {
   constructor(
     private readonly service: ResultRunService,
     private readonly integrity: ResultIntegrityService,
+    private readonly dataScope: DataScopeService,
   ) {}
 
   @Post('compute')
@@ -398,25 +406,30 @@ export class ResultController {
 
   @Get('by-student/:studentProfileId/term/:termId')
   @RequirePermissions(PERMISSIONS.school.read)
-  byStudent(@Param('studentProfileId') studentProfileId: string, @Param('termId') termId: string) {
+  async byStudent(@Param('studentProfileId') studentProfileId: string, @Param('termId') termId: string) {
+    await this.dataScope.assertMayReadStudent(studentProfileId);
     return this.service.latestPublished(termId, studentProfileId);
   }
 
+  // Results-office views: school-wide, never a class teacher's (F09).
   @Get('amendments/queue')
   @RequirePermissions(PERMISSIONS.school.read)
-  amendmentQueue(@Query('termId') termId?: string) {
+  async amendmentQueue(@Query('termId') termId?: string) {
+    await this.dataScope.assertSchoolWide();
     return this.integrity.amendmentQueue(termId);
   }
 
   @Get('amendments/by-result-set/:id')
   @RequirePermissions(PERMISSIONS.school.read)
-  amendmentsByResultSet(@Param('id') id: string) {
+  async amendmentsByResultSet(@Param('id') id: string) {
+    await this.dataScope.assertSchoolWide();
     return this.integrity.amendmentsByResultSet(id);
   }
 
   @Get(':id/readiness')
   @RequirePermissions(PERMISSIONS.school.read)
-  readiness(@Param('id') id: string) {
+  async readiness(@Param('id') id: string) {
+    await this.dataScope.assertSchoolWide();
     return this.service.readiness(id);
   }
 

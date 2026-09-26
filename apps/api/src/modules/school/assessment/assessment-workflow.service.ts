@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
+import { assessmentContribution } from './assessment-math';
 import { MarkingService } from './marking.service';
 import { reconcileCompulsoryRostersInTx } from '../course-offerings/course-roster-reconcile';
 import type { AssessmentLifecycleDto, BulkBoardMarksDto, CreateUnifiedAssessmentDto, ReconcileAssessmentContextDto, ReconcileHomeworkDto } from './assessment-board.dto';
@@ -47,15 +48,21 @@ export class AssessmentWorkflowService {
         where: { courseOfferingId, status: 'ENROLLED', startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] },
         include: { studentEnrollment: { include: { placements: { where: { termId: offering.termId, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }] }, include: { classCohort: true }, orderBy: { effectiveFrom: 'desc' as const }, take: 1 } } } },
       };
-      let enrollments = await tx.courseEnrollment.findMany(active);
-      if (!enrollments.length) {
-        // Self-heal before refusing. Placement reconciles compulsory rosters now,
-        // but offerings created after the class was filled — and every offering
-        // that predates that reconciliation — still start empty, and a teacher
-        // cannot be expected to diagnose that from a blank mark sheet.
-        await this.reconcileFromPlacements(tx, offering);
-        enrollments = await tx.courseEnrollment.findMany(active);
-      }
+      // Reconcile before every capture, not only when the roster is empty: a
+      // partly stale roster (a late admission, a stream move) is as wrong as an
+      // empty one, and the teacher cannot diagnose it from the mark sheet (F11).
+      await this.reconcileFromPlacements(tx, offering);
+      // Only learners whose seat today is in this course's audience. A course
+      // membership alone is not enough — it can outlive a move (F11).
+      const fits = (e: any) => {
+        const p = e.studentEnrollment.placements[0];
+        if (!p) return false;
+        if (offering.audienceScope === 'SCHOOL' || offering.audienceScope === 'CUSTOM') return true;
+        if (offering.classCohortId ? p.classCohortId !== offering.classCohortId : p.classCohort?.classId !== offering.classId) return false;
+        if (offering.audienceScope === 'SECTION' && p.sectionId !== offering.sectionId) return false;
+        return true;
+      };
+      const enrollments = (await tx.courseEnrollment.findMany(active)).filter(fits);
       if (!enrollments.length) {
         throw new BadRequestException(
           'No learner is placed in this course\'s class for this term, so there is no roster to capture. ' +
@@ -70,7 +77,7 @@ export class AssessmentWorkflowService {
       await tx.academicRosterMember.createMany({ data: enrollments.map((e: any) => {
         const placement = e.studentEnrollment.placements[0];
         return { organizationId: this.org, rosterId: roster.id, studentProfileId: e.studentEnrollment.studentProfileId,
-          classId: placement?.classCohort?.classId ?? offering.classId, sectionId: placement?.sectionId ?? offering.sectionId,
+          classId: placement.classCohort?.classId ?? null, sectionId: placement.sectionId ?? null,
           gradeLevelId: e.studentEnrollment.gradeLevelId, effectiveFrom: now, joinReason: `course:${courseOfferingId}` };
       }) });
       await tx.academicRoster.updateMany({ where: { id: roster.id }, data: { frozenAt: now, frozenById: this.tenant.userId, version: { increment: 1 } } });
@@ -89,7 +96,11 @@ export class AssessmentWorkflowService {
   private async reconcileFromPlacements(tx: any, offering: any) {
     if (offering.audienceScope === 'CUSTOM') return;
     const where: any = { termId: offering.termId, effectiveTo: null };
-    if (offering.audienceScope !== 'SCHOOL') where.classCohortId = offering.classCohortId;
+    if (offering.audienceScope !== 'SCHOOL') {
+      if (offering.classCohortId) where.classCohortId = offering.classCohortId;
+      else if (offering.classId) where.classCohort = { classId: offering.classId };
+      else return;
+    }
     if (offering.audienceScope === 'SECTION') where.sectionId = offering.sectionId;
     const placements = await tx.enrollmentPlacement.findMany({
       where,
@@ -142,6 +153,7 @@ export class AssessmentWorkflowService {
           throw new BadRequestException('Assessment policy does not apply to this course');
         }
       }
+      const contribution = assessmentContribution(dto.contribution, !!component, dto.kind);
       const outcomeIds = [...new Set(dto.learningOutcomeIds ?? [])];
       if (outcomeIds.length) {
         const outcomes = await tx.learningOutcome.findMany({ where: { id: { in: outcomeIds } } });
@@ -170,7 +182,7 @@ export class AssessmentWorkflowService {
         organizationId: this.org, courseOfferingId: offering.id, rosterId: dto.rosterId, componentId: component?.id,
         subjectId: offering.subjectId, classId: offering.classId, sectionId: offering.sectionId, termId: offering.termId,
         teacherPartnerId: offering.teachers.find((t: any) => t.isResponsible)?.teacherPartnerId ?? offering.teachers[0].teacherPartnerId,
-        title: dto.title.trim(), kind: dto.kind, maxScore: dto.maxScore ?? 100, sequence: dto.sequence ?? 1,
+        title: dto.title.trim(), kind: dto.kind, contribution, maxScore: dto.maxScore ?? 100, sequence: dto.sequence ?? 1,
         description: dto.description, sourceType: dto.kind === 'exam' ? 'exam_session' : 'assignment', sourceRef,
         status: 'draft', hiddenFromStudents: true, createdBy: this.tenant.userId,
         openAt: dto.openAt ? new Date(dto.openAt) : null, dueAt: dto.dueAt ? new Date(dto.dueAt) : null, closeAt: dto.closeAt ? new Date(dto.closeAt) : null,

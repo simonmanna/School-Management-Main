@@ -8,7 +8,8 @@
  *                  MARKS_NOT_APPROVED conflict.
  *  - A3-immutable: a published ResultSet's computed snapshot cannot be UPDATEd
  *                  (DB trigger), and its child result rows are frozen.
- *  - A3-amend:     an amendment recomputes into revision 2; revision 1 is
+ *  - A3-amend:     an approved amendment recomputes into revision 2; revision 1
+ *                  stays released until revision 2 is published, then is
  *                  archived, not mutated.
  */
 import { Test, TestingModule } from '@nestjs/testing';
@@ -255,10 +256,17 @@ describeDb('integration: A3 result spine', () => {
     expect(rs1.revision).toBe(1);
 
     const req: any = await asUser('head', () => results.requestAmendment({ resultSetId: rs1.id, reason: 'Re-mark subject' } as any));
-    const rs2: any = await asUser('head', () => results.approveAmendment(req.id));
+    // Segregation of duty: whoever asked for the amendment cannot approve it.
+    await expect(asUser('head', () => results.approveAmendment(req.id))).rejects.toThrow(/segregation of duty/);
+    const rs2: any = await asUser('deputy', () => results.approveAmendment(req.id));
     expect(rs2.revision).toBe(2);
+    expect(rs2.status).toBe('computed');
 
+    // F04: the released revision stays authoritative until its replacement is published.
+    expect((await raw.resultSet.findFirst({ where: { id: rs1.id } }))?.status).toBe('published');
+    await asUser('head', () => results.publish(rs2.id));
     const old = await raw.resultSet.findFirst({ where: { id: rs1.id } });
     expect(old?.status).toBe('archived'); // superseded, not mutated
+    expect((await raw.amendmentRequest.findFirst({ where: { id: req.id } }))?.status).toBe('applied');
   });
 });

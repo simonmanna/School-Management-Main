@@ -6,6 +6,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -130,6 +131,10 @@ export class CreateGradingScaleDto {
   bands!: GradingBand[];
 
   @IsOptional() @IsBoolean() isDefault?: boolean;
+  /** The grading system this scale serves; never borrowed by another (F14). */
+  @IsOptional() @IsIn(['PLE', 'UCE', 'UACE', 'CBC', 'ECD', 'generic']) system?: string;
+  /** ADR-031 D1: band the exact percent, or the nearest whole one. */
+  @IsOptional() @IsIn(['none', 'half_up_integer']) bandRounding?: 'none' | 'half_up_integer';
 }
 
 export class UpdateGradingScaleDto {
@@ -140,6 +145,8 @@ export class UpdateGradingScaleDto {
   @Type(() => GradingBand)
   bands?: GradingBand[];
   @IsOptional() @IsBoolean() isDefault?: boolean;
+  @IsOptional() @IsIn(['PLE', 'UCE', 'UACE', 'CBC', 'ECD', 'generic']) system?: string;
+  @IsOptional() @IsIn(['none', 'half_up_integer']) bandRounding?: 'none' | 'half_up_integer';
 }
 
 export class GenerateReportCardDto {

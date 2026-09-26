@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { closeCourseMembershipsInTx } from '../course-offerings/course-roster-reconcile';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -338,6 +339,9 @@ export class StudentEnrollmentService {
       if (holdsPlacement(from) && !holdsPlacement(to)) {
         const closed = await this.placements.closeOpen(tx, id, at, closeReasonFor(to) ?? 'CORRECTION');
         if (closed) await this.adjustAdmissionSeat(tx, enrollment, closed, -1);
+        // F11: a learner who has left is no longer on any course register. The
+        // rows keep their dates; frozen rosters keep their members.
+        await closeCourseMembershipsInTx(tx, { enrollmentId: id, at, reason: `enrollment ${to.toLowerCase()}`, actorId: this.tenant.userId ?? null });
       } else if (!holdsPlacement(from) && holdsPlacement(to)) {
         if (!dto.placement) {
           throw new BadRequestException(

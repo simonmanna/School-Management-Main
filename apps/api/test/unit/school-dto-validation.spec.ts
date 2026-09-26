@@ -38,11 +38,14 @@ describe('Admissions — EnrollApplicationDto (nested student)', () => {
     });
     expect(errs(d)).toHaveLength(0);
   });
-  it('validates the nested student (missing name)', () => {
+  it('validates the nested student overrides (bad residence)', () => {
+    // F13: every student field is an optional override of the application;
+    // what is sent must still be valid.
     const d = plainToInstance(EnrollApplicationDto, {
-      applicationId: 'app1', classId: 'c1', termId: 't1', rollNumber: '5', student: {},
+      applicationId: 'app1', classId: 'c1', termId: 't1', rollNumber: '5', student: { residenceType: 'hostel' },
     });
     expect(errs(d).length).toBeGreaterThan(0);
+    expect(errs(plainToInstance(EnrollApplicationDto, { applicationId: 'app1', classId: 'c1', termId: 't1', rollNumber: '5' }))).toHaveLength(0);
   });
 });
 

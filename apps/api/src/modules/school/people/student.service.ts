@@ -7,7 +7,8 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
-import { EVENTS, type PaginatedResult, type PaginationQuery } from '@erp/shared';
+import { EVENTS, PERMISSIONS, type PaginatedResult, type PaginationQuery } from '@erp/shared';
+import { EncryptionService } from '../../../kernel/encryption/encryption.service';
 import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
@@ -48,11 +49,40 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   protected readonly searchFields: string[] = ['admissionNo'];
   protected readonly defaultInclude = {
     // partner carries the student's name/email/phone (the AR account); the UI
-    // roster and every dropdown needs it, so include it by default.
+    // roster and every dropdown needs it, so include it by default. The medical
+    // record is NOT here: it travels only to callers holding the medical-read
+    // grant (F08) — see `include()`.
     partner: true,
     guardians: true,
-    medicalRecord: true,
   };
+
+  private canReadMedical(): boolean {
+    return (this.tenant.permissions ?? []).includes(PERMISSIONS.school.readMedical);
+  }
+
+  /** The include for a response to THIS caller (F08). */
+  private include(): Record<string, unknown> {
+    return this.canReadMedical() ? { ...this.defaultInclude, medicalRecord: true } : this.defaultInclude;
+  }
+
+  /**
+   * Strip identifiers that must not ride along with an ordinary pupil response
+   * (F08): the national ID lives encrypted and is shown masked; revealing it is
+   * its own audited action.
+   */
+  private redact<T extends Record<string, any>>(row: T): T {
+    const scrub = (cf: any) => {
+      if (!cf || typeof cf !== 'object') return cf;
+      const { nin: _nin, ninEncrypted: _enc, ...rest } = cf;
+      return rest;
+    };
+    const cf = (row as any).customFields ?? {};
+    return {
+      ...row,
+      customFields: { ...scrub(cf), ninOnFile: !!(cf.ninEncrypted || cf.nin), ninLast4: cf.ninLast4 ?? null },
+      ...((row as any).partner ? { partner: { ...(row as any).partner, customFields: scrub((row as any).partner.customFields) } } : {}),
+    } as T;
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -65,6 +95,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     private readonly finance: SchoolFinanceQueryService,
     private readonly placements: PlacementLookupService,
     private readonly admission: StudentAdmissionService,
+    private readonly encryption: EncryptionService,
     @Optional() private readonly dataScope?: DataScopeService,
   ) {
     super(prisma.client.studentProfile as unknown as CrudDelegate);
@@ -80,7 +111,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     return rows.map((r) => {
       const d = described.get(r.id);
       return {
-        ...r,
+        ...this.redact(r as any),
         currentClass: d?.classId
           ? { id: d.classId, name: d.className, gradeLevel: d.gradeLevelId ? { id: d.gradeLevelId, name: d.gradeLevelName } : null }
           : null,
@@ -94,35 +125,35 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     // R1 (Wave 5): a class-scoped teacher lists only the pupils of classes they
     // teach. Every staff preset holds school:read, so the Class Teacher's
     // `dataScope: 'class'` used to change nothing here — the whole school came back.
-    const readable = this.dataScope ? await this.dataScope.readableClassIds() : 'all';
-    if (readable !== 'all' && query.classId && !readable.includes(query.classId)) {
-      throw new ForbiddenException('You may only list the pupils of classes you teach');
-    }
+    // F07: authority is a list of seats. No seats means no pupils — an empty
+    // list was read as "no filter" and returned the whole school.
+    if (query.classId) await this.dataScope?.assertMayReadClass(query.classId, query.sectionId ?? null);
+    const scopeWhere = this.dataScope ? await this.dataScope.studentReadWhere() : null;
     const target = {
-      ...(query.classId ? { classIds: [query.classId] } : readable !== 'all' ? { classIds: readable } : {}),
+      ...(query.classId ? { classIds: [query.classId] } : {}),
       ...(query.sectionId ? { sectionIds: [query.sectionId] } : {}),
     };
-    // The search box says "name or admission no", but the name lives on the
-    // Partner, which the base list cannot reach — a pupil registered a moment
-    // ago was unfindable by name at the fee desk. Searches take this path.
-    if (Object.keys(target).length === 0 && !query.search) {
-      const page = await super.list(query);
-      return { ...page, data: (await this.withPlacement(page.data)) as any };
-    }
     const page = Math.max(1, Number(query.page) || 1);
     const pageSize = Math.min(500, Math.max(1, Number(query.pageSize) || 50));
-    const where: Record<string, unknown> = Object.keys(target).length ? { ...this.placements.studentWhere(target) } : {};
+    const clauses: Record<string, unknown>[] = [];
+    if (Object.keys(target).length || query.termId) {
+      clauses.push(this.placements.studentWhere(target, query.termId ? { termId: query.termId } : {}) as Record<string, unknown>);
+    }
+    if (scopeWhere) clauses.push(scopeWhere);
+    // The search box says "name or admission no", but the name lives on the
+    // Partner — a pupil registered a moment ago must be findable by name.
     if (query.search) {
       const term = { contains: query.search, mode: 'insensitive' };
-      where.OR = [{ admissionNo: term }, { partner: { name: term } }];
+      clauses.push({ OR: [{ admissionNo: term }, { partner: { name: term } }] });
     }
+    const where: Record<string, unknown> = clauses.length ? { AND: clauses } : {};
     const [rows, total] = await Promise.all([
       this.prisma.client.studentProfile.findMany({
         where,
         orderBy: { admissionNo: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: this.defaultInclude,
+        include: this.include(),
       }),
       this.prisma.client.studentProfile.count({ where }),
     ]);
@@ -134,8 +165,23 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
 
   override async findOne(id: string): Promise<StudentProfile> {
     await this.dataScope?.assertMayReadStudent(id);
-    const row = await super.findOne(id);
+    const row = await this.prisma.client.studentProfile.findFirst({ where: { id }, include: this.include() });
+    if (!row) throw new NotFoundException(`StudentProfile ${id} not found`);
     return (await this.withPlacement([row]))[0] as any;
+  }
+
+  /**
+   * The pupil's national ID, decrypted — an audited act for staff who manage
+   * pupil records, never part of an ordinary response (F08).
+   */
+  async revealNin(id: string): Promise<{ nin: string | null }> {
+    await this.dataScope?.assertMayReadStudent(id);
+    const row = await this.prisma.client.studentProfile.findFirst({ where: { id }, select: { customFields: true } });
+    if (!row) throw new NotFoundException(`StudentProfile ${id} not found`);
+    const cf: any = row.customFields ?? {};
+    const nin = cf.ninEncrypted ? this.encryption.decrypt(cf.ninEncrypted) : (cf.nin ?? null);
+    await this.audit.record({ entity: 'StudentProfile', entityId: id, action: 'read', newValues: { field: 'nin', revealed: nin != null } });
+    return { nin };
   }
 
   /**
@@ -213,11 +259,17 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       const before = await tx.studentProfile.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`Student ${id} not found`);
 
-      // Partner-side updates
-      const partnerUpdates: Partial<Partner> = {};
+      // Partner-side updates: name, contact and photo belong to the person and
+      // are saved here, in the same transaction as the profile, so one save is
+      // all-or-nothing and needs only the pupil-record grant (F15).
+      const partnerUpdates: Record<string, unknown> = {};
       if (dto.name !== undefined) partnerUpdates.name = dto.name;
-      if (dto.email !== undefined) partnerUpdates.email = dto.email;
-      if (dto.phone !== undefined) partnerUpdates.phone = dto.phone;
+      if (dto.email !== undefined) partnerUpdates.email = dto.email || null;
+      if (dto.phone !== undefined) partnerUpdates.phone = dto.phone || null;
+      if (dto.photoUrl !== undefined) {
+        const partner = await tx.partner.findFirst({ where: { id: before.partnerId }, select: { customFields: true } });
+        partnerUpdates.customFields = { ...((partner?.customFields as any) ?? {}), photoUrl: dto.photoUrl || null };
+      }
       if (Object.keys(partnerUpdates).length > 0) {
         await tx.partner.updateMany({ where: { id: before.partnerId }, data: partnerUpdates });
       }
@@ -293,25 +345,36 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       // Merge the new editable profile fields into customFields.
       const newCfKeys = ['middleName', 'preferredName', 'countryOfBirth', 'placeOfBirth', 'address'] as const;
       const hasNewCf = newCfKeys.some((k) => dto[k] !== undefined);
-      if (hasNewCf || dto.customFields !== undefined) {
-        const merged = { ...(before.customFields ?? {}) };
+      // The national ID is never stored in the clear (F08): whether it arrives
+      // as `nin` or inside customFields, it is encrypted and only its last four
+      // characters stay readable.
+      const { nin: cfNin, ninEncrypted: _e, ninOnFile: _o, ninLast4: _l, ...incomingCf } = (dto.customFields ?? {}) as any;
+      const nin = dto.nin !== undefined ? dto.nin : cfNin;
+      if (hasNewCf || dto.customFields !== undefined || nin !== undefined) {
+        const merged: any = { ...(before.customFields ?? {}) };
+        delete merged.nin;
         for (const k of newCfKeys) {
           if (dto[k] !== undefined) merged[k] = dto[k];
         }
-        if (dto.customFields) Object.assign(merged, dto.customFields);
+        Object.assign(merged, incomingCf);
+        if (nin !== undefined) {
+          const clean = typeof nin === 'string' ? nin.trim() : '';
+          merged.ninEncrypted = clean ? this.encryption.encrypt(clean) : null;
+          merged.ninLast4 = clean ? clean.slice(-4) : null;
+        }
         profileUpdates.customFields = merged;
       }
 
       await tx.studentProfile.updateMany({ where: { id }, data: profileUpdates });
-      const after = await tx.studentProfile.findFirst({ where: { id } });
+      const after = await tx.studentProfile.findFirst({ where: { id }, include: { partner: true } });
       await this.audit.recordInTx(tx, {
         entity: 'StudentProfile',
         entityId: id,
         action: 'update',
-        oldValues: before,
-        newValues: after,
+        oldValues: this.redact(before),
+        newValues: this.redact(after),
       });
-      return after;
+      return this.redact(after);
     });
   }
 
@@ -351,8 +414,10 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   /** Active learners placed in a class now, with their stream. */
   async listByClass(classId: string) {
     await this.dataScope?.assertMayReadClass(classId);
+    // A stream-only reader sees their stream of the class, not all of it (D4).
+    const scopeWhere = this.dataScope ? await this.dataScope.studentReadWhere() : null;
     const rows = await this.prisma.client.studentProfile.findMany({
-      where: { status: 'active', ...this.placements.studentWhere({ classIds: [classId] }) },
+      where: { AND: [{ status: 'active' }, this.placements.studentWhere({ classIds: [classId] }), ...(scopeWhere ? [scopeWhere] : [])] } as any,
       orderBy: { admissionNo: 'asc' },
       include: { partner: true },
     });
@@ -434,7 +499,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       where: { id: studentProfileId },
       include: {
         guardians: true,
-        medicalRecord: true,
+        ...(this.canReadMedical() ? { medicalRecord: true } : {}),
         academicEnrollments: {
           orderBy: { admissionDate: 'desc' },
           include: {

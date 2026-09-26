@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { releasedResultSetWhere } from '../assessment/result-status';
 import { randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -36,7 +37,7 @@ export class TranscriptService {
   async build(studentProfileId: string) {
     const organizationId = this.tenant.organizationId;
     const terms = await this.prisma.client.studentTermResult.findMany({
-      where: { studentProfileId, resultSet: { status: 'published' } },
+      where: { studentProfileId, resultSet: releasedResultSetWhere() },
       include: { resultSet: true },
       orderBy: { createdAt: 'asc' },
     });

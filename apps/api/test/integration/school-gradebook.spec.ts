@@ -156,21 +156,22 @@ describeDb('integration: gradebook — one weighted total, editable columns', ()
     expect(Math.round(Number(ssr!.finalPercent))).toBe(66); // identical to the gradebook
   });
 
-  it('groups a component-less column under its kind, matching the kernel', async () => {
-    // A manual column defaults to kind "cat". The result kernel counts a
-    // component-less "cat" assessment toward the CAT component by kind — so the
-    // gradebook must GROUP it there too, or its display would disagree with its
-    // own total. (A truly unweighted column is one whose kind no component has.)
+  it('keeps a component-less column formative: shown, never weighted (F03)', async () => {
+    // The column form says a column with no component is "not weighted". It
+    // used to be counted by kind anyway, so a practice quiz moved the term
+    // total. It is formative now, in the kernel and on the sheet alike.
     const loose = await asUser(() => gradebook.createColumn({ classId, termId, subjectId, title: 'Class quiz', maxScore: 10 }));
+    expect((await raw.assessment.findFirst({ where: { id: loose.id } }))?.contribution).toBe('formative');
     await asUser(() => gradebook.cell({ studentProfileId: studentIds[0], assessmentId: loose.id, marks: 10 }));
 
     const sheet = await asUser(() => gradebook.sheet({ classId, termId, subjectId }));
     const catGroup = sheet.groups.find((g) => g.id === catComponentId);
-    expect(catGroup?.columnIds).toContain(loose.id); // grouped where it actually counts
+    expect(catGroup?.columnIds).not.toContain(loose.id);
+    expect(sheet.groups.find((g) => g.id === '__unweighted__')?.columnIds).toContain(loose.id);
 
-    // It counts: CAT is now mean(80%, 100%) = 90%; total = 90×0.3 + 60×0.7 = 69.
+    // Unchanged: CAT 80% × 0.3 + exam 60% × 0.7 = 66, with or without the quiz.
     const abbo = sheet.students.find((s) => s.studentProfileId === studentIds[0])!;
-    expect(abbo.finalPercent).toBe(69);
+    expect(abbo.finalPercent).toBe(66);
   });
 
   it('refuses to rescale a column that already has marks', async () => {

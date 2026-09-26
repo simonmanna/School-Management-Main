@@ -1,4 +1,5 @@
 import { PERMISSIONS } from '@erp/shared';
+import { isReleasedStatus } from '../../assessment/result-status';
 import type { ReportColumn, ReportDefinition } from '../../../core/reporting/report.types';
 import type { SchoolReportDeps } from '../school-report-deps';
 import type { ResultSet } from '@prisma/client';
@@ -284,7 +285,7 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
         return {
           rows,
           caption: `Result set revision ${rs.revision} · status ${rs.status}`,
-          notes: rs.status !== 'published'
+          notes: !isReleasedStatus(rs.status)
             ? [`This result set is "${rs.status}", not published. Figures may still change.`]
             : [],
         };

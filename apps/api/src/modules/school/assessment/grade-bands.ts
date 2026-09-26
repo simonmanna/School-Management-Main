@@ -1,4 +1,4 @@
-import type { BandConfig } from './result-computation';
+import { InvalidGradingScaleError, validateBands, type BandConfig, type BandRoundingName } from './result-computation';
 
 /**
  * Built-in grading bands for the result kernel, mirroring the Uganda scales in
@@ -55,19 +55,49 @@ export function defaultBands(system: string): BandConfig[] {
   }
 }
 
+export interface ResolvedScale {
+  bands: BandConfig[];
+  rounding: BandRoundingName;
+  scaleId: string | null;
+}
+
+const KNOWN_SYSTEMS = ['UACE', 'UCE', 'PLE', 'CBC', 'ECD'];
+
+/** The system a legacy scale serves, read from its name by whole token. */
+export function inferScaleSystem(name: string): string | null {
+  const tokens = (name ?? '').toUpperCase().split(/[^A-Z0-9]+/);
+  if (/nursery/i.test(name ?? '')) return 'ECD';
+  return KNOWN_SYSTEMS.find((s) => tokens.includes(s)) ?? null;
+}
+
+const DESCRIPTOR = ['ECD'];
+
 /**
- * Resolve the bands to compute against: a registered GradingScale for the
- * system (name contains the system, org-scoped by the tenancy extension) wins;
- * otherwise the built-in default. `prismaClient` is the tenant-scoped client.
+ * The scale to grade `system` against (F14):
+ *   1. a registered scale for that system (the default one first);
+ *   2. for a graded (non-descriptor) system, a school default scale that names
+ *      no system — a school's own house scale;
+ *   3. the built-in bands for the system.
+ * A scale registered for another system is never borrowed, so nursery is never
+ * graded on the primary PLE scale however the school's default is set. A scale
+ * that cannot grade every percent is refused rather than silently used.
  */
+export async function resolveScale(prismaClient: any, system: string): Promise<ResolvedScale> {
+  const sys = (system || 'generic').toUpperCase();
+  const scales: any[] = await prismaClient.gradingScale.findMany({ where: { deletedAt: null } });
+  const systemOf = (s: any) => (s.system ? String(s.system).toUpperCase() : inferScaleSystem(s.name));
+  const forSystem = scales.filter((s) => systemOf(s) === sys);
+  const pick =
+    forSystem.find((s) => s.isDefault) ??
+    forSystem[0] ??
+    (!DESCRIPTOR.includes(sys) ? scales.find((s) => s.isDefault && systemOf(s) === null) : undefined);
+  if (!pick) return { bands: defaultBands(sys), rounding: 'none', scaleId: null };
+  const errors = validateBands(pick.bands);
+  if (errors.length) throw new InvalidGradingScaleError(`Grading scale "${pick.name}" is unusable: ${errors.join('; ')}`);
+  return { bands: pick.bands as BandConfig[], rounding: (pick.bandRounding ?? 'none') as BandRoundingName, scaleId: pick.id };
+}
+
+/** Bands only — for callers that do not band (display tables). */
 export async function resolveBands(prismaClient: any, system: string): Promise<BandConfig[]> {
-  // A scale registered FOR THIS SYSTEM wins over the school's default one.
-  // The other order meant a primary school's default PLE scale was used for its
-  // nursery classes too, so Top Class was graded D1–F9.
-  const scale =
-    (await prismaClient.gradingScale.findFirst({
-      where: { name: { contains: system, mode: 'insensitive' } },
-    })) ?? (await prismaClient.gradingScale.findFirst({ where: { isDefault: true } }));
-  if (scale?.bands) return scale.bands as unknown as BandConfig[];
-  return defaultBands(system);
+  return (await resolveScale(prismaClient, system)).bands;
 }

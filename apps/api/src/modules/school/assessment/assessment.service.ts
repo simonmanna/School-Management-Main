@@ -55,6 +55,9 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
           // projected exam a CAT — so a project created here would be weighted
           // against the CAT component.
           kind: (dto.kind ?? component?.kind ?? 'cat') as any,
+          contribution:
+            dto.contribution ??
+            (component || (dto.sourceType && dto.sourceType !== 'manual') ? 'summative' : 'formative'),
           dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
           createdBy: this.tenant.userId ?? null,
         },
@@ -79,6 +82,11 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
         throw new BadRequestException(`Assessment ${id} is ${before.status} and cannot be edited`);
       }
       const { version, dueAt, ...rest } = dto;
+      const nextContribution = dto.contribution ?? before.contribution;
+      const nextComponent = dto.componentId !== undefined ? dto.componentId : before.componentId;
+      if (nextContribution === 'formative' && nextComponent) {
+        throw new BadRequestException('Formative work does not count toward a weighting component — remove the component or mark it summative.');
+      }
       if (before.courseOfferingId && version === undefined) throw new BadRequestException('An expected version is required');
       if (dto.componentId) {
         const component = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId }, include: { policy: true } });

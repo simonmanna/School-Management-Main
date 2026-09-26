@@ -10,7 +10,6 @@ import {
   useAcademicYears, useClasses, useAdmissionCycles, useNationalities, useStudentCategories,
   useTerms, useStudentResultSet,
   type FeeStatement, type Guardian, type PupilEnrollment, useTerminology } from '@/features/school/api';
-import { useUpdatePartner } from '@/features/partners/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -57,7 +56,6 @@ export function SchoolStudent360Page() {
   const updateStudent = useUpdateStudent();
   const { data: terms } = useTerms();
   const { data: enrollments } = useStudentEnrollments(id);
-  const updatePartner = useUpdatePartner();
 
   const [tab, setTab] = useState('profile');
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -114,7 +112,7 @@ export function SchoolStudent360Page() {
     setAddress(cf.address ?? '');
     setReligion(s.religion ?? '');
 
-    setNin(cf.nin ?? '');
+    setNin('');
     setLearnerId(cf.learnerId ?? '');
     setSchoolPayCode(cf.schoolPayCode ?? '');
     setEmail(p.email ?? '');
@@ -133,11 +131,9 @@ export function SchoolStudent360Page() {
     if (!photoPreview || !student?.partnerId) return;
     setPhotoBusy(true);
     try {
-      const existing = (student.partner as any)?.customFields ?? {};
-      await updatePartner.mutateAsync({
-        id: student.partnerId,
-        data: { customFields: { ...existing, photoUrl: photoPreview } } as any,
-      });
+      // One pupil-record save (F15): the photo belongs to the pupil, and saving
+      // it must not need the general contact-editing permission.
+      await updateStudent.mutateAsync({ id: student.id, dto: { photoUrl: photoPreview } as any });
       qc.invalidateQueries({ queryKey: ['school', 'student', id] });
       notify.success('Profile photo updated');
       setPhotoOpen(false);
@@ -175,7 +171,6 @@ export function SchoolStudent360Page() {
         admissionCycleId: admissionCycleId || undefined,
         entryStatus: entryStatus || undefined,
         address: address || undefined,
-        nin: nin || undefined,
         learnerId: learnerId || undefined,
         schoolPayCode: schoolPayCode || undefined,
       };
@@ -192,18 +187,18 @@ export function SchoolStudent360Page() {
           // Placement is deliberately absent: it moves through the placement
           // dialog below, which writes an Enrollment. Sending it here is a 400.
           customFields: mergedCf,
+          // Name, contact and ID go in the same request: one transaction, so
+          // the record is either fully saved or unchanged (F15).
+          email,
+          phone,
+          ...(nin ? { nin } : {}),
         } as any,
       });
-      if (student.partnerId) {
-        await updatePartner.mutateAsync({
-          id: student.partnerId,
-          data: { name, email: email || undefined, phone: phone || undefined },
-        });
-      }
       qc.invalidateQueries({ queryKey: ['school', 'student', id] });
       notify.success('Student information updated');
-    } catch {
-      notify.error('Update failed');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message;
+      notify.error(`Nothing was saved. ${Array.isArray(msg) ? msg.join('; ') : msg ?? 'Try again.'}`);
     } finally {
       setBioBusy(false);
     }
@@ -392,7 +387,12 @@ export function SchoolStudent360Page() {
                     </Select>
                   </EditField>
                   <EditField label="National Identification Number">
-                    <Input value={nin} onChange={(e) => setNin(e.target.value)} placeholder="E.g. CM973535343" />
+                    <Input
+                      value={nin}
+                      onChange={(e) => setNin(e.target.value)}
+                      placeholder={cf.ninOnFile ? `On file (ends ${cf.ninLast4 ?? '····'}) — type to replace` : 'E.g. CM973535343'}
+                      autoComplete="off"
+                    />
                   </EditField>
                   <EditField label="Learner's Identification Number">
                     <Input value={learnerId} onChange={(e) => setLearnerId(e.target.value)} placeholder="Enter learner's identification number" />

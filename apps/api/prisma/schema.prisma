@@ -744,11 +744,11 @@ model Contact {
   updatedBy      String?
   deletedAt      DateTime?
 
-  partner       Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  partner                       Partner                @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   // H3: school guardianships that point at this Contact (see StudentGuardian).
-  guardianships StudentGuardian[] @relation("GuardianContact")
+  guardianships                 StudentGuardian[]      @relation("GuardianContact")
   /// Nursery pick-up authorizations naming this contact as the collector.
-  pickupAuthorizations PickupAuthorization[] @relation("PickupContact")
+  pickupAuthorizations          PickupAuthorization[]  @relation("PickupContact")
   admissionApplicationsAsParent AdmissionApplication[] @relation("AdmissionParentContact")
 
   @@index([organizationId])
@@ -4104,27 +4104,27 @@ model ReportTieoutSnapshot {
 /// events never get lost on commit failure and never fire on rollback. The
 /// OutboxWorker polls pending rows and dispatches them to handlers.
 model EventOutbox {
-  id             String    @id @default(uuid())
-  organizationId String
-  eventName      String
-  payload        Json
-  status         String    @default("pending")
-  attempts       Int       @default(0)
-  lastError      String?
+  id                String    @id @default(uuid())
+  organizationId    String
+  eventName         String
+  payload           Json
+  status            String    @default("pending")
+  attempts          Int       @default(0)
+  lastError         String?
   /// D4-3 / Multi-instance safety: a uuid set by the worker when it claims a
   /// row. Two workers that read the same pending row will see the same claim
   /// token; the UPDATE ... WHERE claimToken = ? pattern guarantees only one
   /// wins. Cleared on success.
-  claimToken     String?
-  claimedAt      DateTime?
+  claimToken        String?
+  claimedAt         DateTime?
   /// Not before this time: a failed row backs off before its next attempt.
-  availableAt    DateTime  @default(now())
+  availableAt       DateTime  @default(now())
   /// Handler indexes (registration order) that already succeeded for this row,
   /// so a retry re-runs only the handlers that failed (at-least-once, not
   /// at-least-N-times for the ones that worked).
-  completedHandlers Int[]  @default([])
-  createdAt      DateTime  @default(now())
-  shippedAt      DateTime?
+  completedHandlers Int[]     @default([])
+  createdAt         DateTime  @default(now())
+  shippedAt         DateTime?
 
   @@index([status, availableAt])
   @@index([status, createdAt])
@@ -10780,41 +10780,45 @@ model Campus {
 }
 
 model SchoolProfile {
-  id             String         @id @default(uuid())
-  organizationId String         @unique
-  name           String
-  motto          String?
-  logoUrl        String?
-  address        String?
-  phone          String?
-  email          String?
-  website        String?
+  id                  String              @id @default(uuid())
+  organizationId      String              @unique
+  name                String
+  motto               String?
+  logoUrl             String?
+  address             String?
+  phone               String?
+  email               String?
+  website             String?
   /// Country-specific config (Uganda defaults: UGX currency, primary/secondary cycle).
-  country        String         @default("UG")
-  currencyCode   String         @default("UGX")
+  country             String              @default("UG")
+  currencyCode        String              @default("UGX")
   /// School system: 'primary' | 'secondary' | 'mixed' | 'tertiary'.
-  educationLevel String         @default("mixed")
+  educationLevel      String              @default("mixed")
   /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
-  gradingSystem  String         @default("UCE")
+  gradingSystem       String              @default("UCE")
   /// P5: 'daily' (one register per class per day) or 'period' (per class period,
   /// for subject-teacher secondary schools). Attendance marking honours this.
-  attendanceMode String         @default("daily")
+  attendanceMode      String              @default("daily")
   /// Per-school display vocabulary (brief para 2), for example
   /// { "class": "Grade", "section": "Stream", "academicLevel": "Section" }.
   /// A handful of display strings with no relations and no history, so a JSON
   /// column rather than a table. Defaults and validation live in
   /// packages/shared/src/terminology.ts so API error messages and UI labels
   /// cannot drift apart. An empty object means use the defaults.
-  terminology    Json           @default("{}")
+  terminology         Json                @default("{}")
   /// How class/stream capacity is applied when a learner is placed (ADR-030).
   /// ENFORCE refuses an over-capacity placement unless the user holds the
   /// override permission and gives a reason; WARN seats and reports; OFF
   /// ignores capacity. A NULL capacity is unlimited under every policy.
-  capacityPolicy CapacityPolicy @default(ENFORCE)
-  contacts       Json           @default("{}")
-  customFields   Json           @default("{}")
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  capacityPolicy      CapacityPolicy      @default(ENFORCE)
+  /// ADR-031 (D2): how absent / exempt learners count toward term results.
+  resultAbsencePolicy ResultAbsencePolicy @default(ABSENT_AS_ZERO)
+  /// ADR-031 (D4): what a class teacher may read — own stream or whole class.
+  classTeacherScope   ClassTeacherScope   @default(STREAM)
+  contacts            Json                @default("{}")
+  customFields        Json                @default("{}")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   @@index([organizationId])
 }
@@ -10823,6 +10827,37 @@ model SchoolProfile {
 /// working in today; this answers whether it may still be written to. They are
 /// not the same question: a CLOSED year is never current, but a non-current year
 /// may be PLANNING (next year, being set up) or CLOSED (last year, read-only).
+/// ADR-031 (D2). ABSENT_AS_ZERO: unexcused absence scores 0 (per component
+/// `countsAbsentAsZero`), exemption is excluded and re-weighted. ABSENT_BLOCKS:
+/// an absence must be resolved (mark or exemption) before publication.
+/// ALL_BLOCK: every required component needs a real mark to publish.
+enum ResultAbsencePolicy {
+  ABSENT_AS_ZERO
+  ABSENT_BLOCKS
+  ALL_BLOCK
+}
+
+/// ADR-031 (D4). STREAM: a class teacher reads their own stream only.
+/// CLASS: a class teacher reads every stream of their class.
+enum ClassTeacherScope {
+  STREAM
+  CLASS
+}
+
+/// ADR-031 (D1). How a subject percent is rounded before its grade band is
+/// chosen. `none` bands the exact percent; `half_up_integer` bands the
+/// nearest whole percent (89.5 → 90).
+enum BandRounding {
+  none
+  half_up_integer
+}
+
+/// Whether an assessment counts toward term results (F03).
+enum AssessmentContribution {
+  formative
+  summative
+}
+
 enum CapacityPolicy {
   ENFORCE
   WARN
@@ -11037,8 +11072,8 @@ model SchoolClass {
   examSchedules         ExamSchedule[]
   admissionApplications AdmissionApplication[] @relation("AdmissionApplyingForClass")
   classCohorts          ClassCohort[]
-  admissionCapacities AdmissionCapacity[] @relation("AdmissionCapacityClass")
-  waitingListEntries  WaitingList[]       @relation("WaitingListClass")
+  admissionCapacities   AdmissionCapacity[]    @relation("AdmissionCapacityClass")
+  waitingListEntries    WaitingList[]          @relation("WaitingListClass")
 
   @@unique([organizationId, name])
   @@unique([organizationId, code])
@@ -11117,8 +11152,8 @@ model Subject {
   lessonPlans        LessonPlan[]
   entranceExams      EntranceExam[]
 
-  learningOutcomes LearningOutcome[]
-  courseOfferings  CourseOffering[]
+  learningOutcomes   LearningOutcome[]
+  courseOfferings    CourseOffering[]
   timetableOverrides TimetableOverride[] @relation("TimetableOverrideSubject")
 
   @@unique([organizationId, code])
@@ -11489,19 +11524,19 @@ model StaffProfile {
   updatedBy              String?
   deletedAt              DateTime?
 
-  department         Department?          @relation(fields: [departmentId], references: [id])
-  campus             Campus?              @relation(fields: [campusId], references: [id])
-  position           Position?            @relation(fields: [positionId], references: [id])
-  statusHistory      StaffStatusHistory[]
-  attendance         StaffAttendance[]
-  teacherAssignments TeacherAssignment[]
-  lessonPlans        LessonPlan[]
-  homeworks          HomeworkAssignment[]
-  timetableSlots     TimetableSlot[]
-  substituteSlots    TimetableSlot[]      @relation("TimetableSlotSubstitute")
-  sections           Section[] // Class teacher (homeroom) assignments
-  homeroomClasses    SchoolClass[]        @relation("HomeroomTeacher")
-  timetableOverridesAsTeacher TimetableOverride[] @relation("TimetableOverrideTeacher")
+  department                  Department?          @relation(fields: [departmentId], references: [id])
+  campus                      Campus?              @relation(fields: [campusId], references: [id])
+  position                    Position?            @relation(fields: [positionId], references: [id])
+  statusHistory               StaffStatusHistory[]
+  attendance                  StaffAttendance[]
+  teacherAssignments          TeacherAssignment[]
+  lessonPlans                 LessonPlan[]
+  homeworks                   HomeworkAssignment[]
+  timetableSlots              TimetableSlot[]
+  substituteSlots             TimetableSlot[]      @relation("TimetableSlotSubstitute")
+  sections                    Section[] // Class teacher (homeroom) assignments
+  homeroomClasses             SchoolClass[]        @relation("HomeroomTeacher")
+  timetableOverridesAsTeacher TimetableOverride[]  @relation("TimetableOverrideTeacher")
 
   @@unique([organizationId, employeeNo])
   @@index([organizationId])
@@ -11723,7 +11758,7 @@ model AdmissionCapacity {
   claimedSeats     Int     @default(0)
 
   admissionCycle AdmissionCycle @relation(fields: [admissionCycleId], references: [id], onDelete: Cascade)
-  schoolClass    SchoolClass @relation("AdmissionCapacityClass", fields: [classId], references: [id], onDelete: Cascade)
+  schoolClass    SchoolClass    @relation("AdmissionCapacityClass", fields: [classId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, admissionCycleId, classId, sectionId])
   @@index([organizationId])
@@ -12116,7 +12151,7 @@ model WaitingList {
   notes          String?
 
   application AdmissionApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  schoolClass SchoolClass @relation("WaitingListClass", fields: [classId], references: [id], onDelete: Cascade)
+  schoolClass SchoolClass          @relation("WaitingListClass", fields: [classId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([classId, position])
@@ -13576,7 +13611,7 @@ model TimetableRotation {
 
 /// Temporary timetable changes: swap a slot's subject/teacher for a date range.
 model TimetableOverride {
-  id               String   @id @default(uuid())
+  id               String        @id @default(uuid())
   organizationId   String
   classId          String
   sectionId        String?
@@ -13589,12 +13624,12 @@ model TimetableOverride {
   subjectId        String?
   teacherPartnerId String?
   reason           String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
   createdBy        String?
   /// A StaffProfile id despite the name (same as TimetableSlot.teacherPartnerId).
   teacherPartner   StaffProfile? @relation("TimetableOverrideTeacher", fields: [teacherPartnerId], references: [id], onDelete: SetNull)
-  subject          Subject? @relation("TimetableOverrideSubject", fields: [subjectId], references: [id], onDelete: SetNull)
+  subject          Subject?      @relation("TimetableOverrideSubject", fields: [subjectId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([classId, dayOfWeek, periodId])
@@ -14313,14 +14348,19 @@ model GradeEntry {
 }
 
 model GradingScale {
-  id             String    @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   name           String
   /// Bands: [{min:80, max:100, grade:'A', gpa:4.0, remark:'Distinction'}, ...]
+  /// A band covers [min, next band's min); `max` is display only.
   bands          Json
-  isDefault      Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  isDefault      Boolean      @default(false)
+  /// The grading system this scale serves (PLE, UCE, UACE, CBC, ECD, generic).
+  /// A default scale is never used for a different system (F14).
+  system         String?
+  bandRounding   BandRounding @default(none)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
 
   @@unique([organizationId, name])
@@ -14421,6 +14461,8 @@ model AssessmentPolicy {
   classId           String?
   subjectId         String?
   termId            String?
+  /// Programme scope (D5): lets P1–P3 carry their own learning-area weighting.
+  programmeId       String?
   passMark          Decimal      @default(50) @db.Decimal(5, 2)
   /// Optional ceiling on the total CA (non-exam) contribution, in percent.
   caCap             Decimal?     @db.Decimal(5, 2)
@@ -14479,7 +14521,7 @@ model AssessmentComponent {
 
 /// A concrete assessment instance ("Math CAT 2", "Physics Paper 1", "Homework 3").
 model Assessment {
-  id                 String               @id @default(uuid())
+  id                 String                 @id @default(uuid())
   organizationId     String
   /// Nullable: an adapter-projected exam mark is unattached until a policy maps
   /// it to a weighting bucket. Manual/assignment/quiz assessments attach on create.
@@ -14500,9 +14542,9 @@ model Assessment {
   /// queue say "submitted by Mr John" without joining through the mark ledger.
   /// NOTE: distinct from `StudentAssessment.enteredById`, which is a User id.
   teacherPartnerId   String?
-  maxScore           Decimal              @default(100) @db.Decimal(8, 2)
+  maxScore           Decimal                @default(100) @db.Decimal(8, 2)
   /// Relative weight if a component aggregates several assessments (e.g. best-N).
-  weightInComponent  Decimal              @default(1) @db.Decimal(6, 3)
+  weightInComponent  Decimal                @default(1) @db.Decimal(6, 3)
   /// What this assessment IS, independent of whether a weighting component has
   /// been attached yet. Kind used to be reachable only through
   /// `component.kind`, so an adapter-projected exam mark was typeless — which
@@ -14513,10 +14555,13 @@ model Assessment {
   /// yet classified" apart from "classified as cat"; both producers and data
   /// are now complete, so the legacy read-time guess is retired.
   kind               AssessmentKind
-  sourceType         AssessmentSourceType @default(manual)
+  /// Formative work never reaches term totals; summative work counts through
+  /// exactly one component (F03).
+  contribution       AssessmentContribution @default(summative)
+  sourceType         AssessmentSourceType   @default(manual)
   /// FK-less link to the origin row (examScheduleId, assignmentId, quizId).
   sourceRef          String?
-  status             AssessmentStatus     @default(draft)
+  status             AssessmentStatus       @default(draft)
   description        String?
   openAt             DateTime?
   dueAt              DateTime?
@@ -14524,14 +14569,14 @@ model Assessment {
   feedbackReleaseAt  DateTime?
   marksReleaseAt     DateTime?
   /// Moodle grade-item hide/lock (ADR-014 §3.5).
-  hiddenFromStudents Boolean              @default(false)
+  hiddenFromStudents Boolean                @default(false)
   lockedAt           DateTime?
   lockedById         String?
   /// Resit sitting of the same paper — carried over from ExamSchedule.
-  isResit            Boolean              @default(false)
-  version            Int                  @default(0)
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
+  isResit            Boolean                @default(false)
+  version            Int                    @default(0)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
   createdBy          String?
   updatedBy          String?
   deletedAt          DateTime?
@@ -20170,7 +20215,7 @@ model PickupAuthorization {
   id               String                  @id @default(uuid())
   organizationId   String
   studentProfileId String
-  kind             PickupAuthorizationKind  @default(STANDING)
+  kind             PickupAuthorizationKind @default(STANDING)
   /// The Contact, where the collector is already on record.
   contactId        String?
   /// A collector who is not a contact. One of `contactId` or `personName` is

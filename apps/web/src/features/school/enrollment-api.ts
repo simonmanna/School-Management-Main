@@ -362,12 +362,16 @@ export interface PlacementInput {
   notes?: string;
 }
 
-const invalidateEnrollment = (qc: ReturnType<typeof useQueryClient>) => {
-  qc.invalidateQueries({ queryKey: ['school', 'student-enrollments'] });
-  qc.invalidateQueries({ queryKey: ['school', 'placement-at'] });
-  qc.invalidateQueries({ queryKey: ['school', 'placement-roster'] });
-  qc.invalidateQueries({ queryKey: ['school', 'students'] });
-};
+/**
+ * A placement change reaches pupils, placements, seats, course rosters and the
+ * assessment wizard's drift warning — every one of them must refetch, or the
+ * screen shows the old class until someone refreshes (F20).
+ */
+const ENROLLMENT_CONSUMERS = /student|enrol|placement|course|roster|capacity|class|assessment-board|setup/i;
+const invalidateEnrollment = (qc: ReturnType<typeof useQueryClient>) =>
+  qc.invalidateQueries({
+    predicate: (q) => q.queryKey[0] === 'school' && ENROLLMENT_CONSUMERS.test(String(q.queryKey[1] ?? '')),
+  });
 
 export function useCreateEnrollment() {
   const qc = useQueryClient();

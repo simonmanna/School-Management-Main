@@ -37,6 +37,9 @@ const REQUIRED_INDEXES = [
   // Wave 7 — the NULL cases the Prisma @@unique keys let through.
   { name: 'TimetableVersion_unsectioned_version_key', why: 'one timetable version number per unstreamed class' },
   { name: 'AcademicReminderLog_no_user_key', why: 'a school-wide reminder is logged once per milestone' },
+  // Wave 13 (F04): a recomputation sits beside the released result, never over it.
+  { name: 'ResultSet_one_released_per_scope', why: 'at most one released (published/locked) result set per term and scope' },
+  { name: 'ResultSet_one_pending_per_scope', why: 'at most one unreleased result revision per term and scope' },
 ];
 
 // Wave 4 — constraints and triggers created by migrations 20260924150000-155000.

@@ -62,6 +62,7 @@ describeDb('Phase 5 examination and result integrity', () => {
   let subjectId = '';
   let course: any;
   let roster: any;
+  let classRoster: any;
   let examId = '';
   let paperId = '';
   let questionPaperId = '';
@@ -135,6 +136,13 @@ describeDb('Phase 5 examination and result integrity', () => {
     })).id;
 
     roster = await run(() => workflow.captureRoster(course.id));
+    // Term results are built from the CLASS list for the term, never from an
+    // exam paper's subject roster (F06).
+    classRoster = await db.academicRoster.create({ data: { organizationId, termId, scopeType: 'class', classId, name: 'S3 East — Term 1' } });
+    await db.academicRosterMember.createMany({
+      data: learners.map((studentProfileId) => ({ organizationId, rosterId: classRoster.id, studentProfileId, classId, gradeLevelId })),
+    });
+    classRoster = await db.academicRoster.update({ where: { id: classRoster.id }, data: { frozenAt: new Date() } });
   });
 
   afterAll(async () => {
@@ -405,7 +413,7 @@ describeDb('Phase 5 examination and result integrity', () => {
     await run(() => marks.markingApproval({ assessmentId: assessment.id, action: 'submit' }), 'marker-a');
     await run(() => marks.markingApproval({ assessmentId: assessment.id, action: 'approve' }), 'head-teacher');
 
-    const set: any = await run(() => results.compute({ termId, rosterId: roster.id }));
+    const set: any = await run(() => results.compute({ termId, rosterId: classRoster.id }));
     const readiness: any = await run(() => results.readiness(set.id));
     expect(readiness.ready).toBe(false);
     expect(readiness.conflicts.map((c: any) => c.code)).toContain('EXAM_PAPER_UNLOCKED');
@@ -420,7 +428,7 @@ describeDb('Phase 5 examination and result integrity', () => {
     const paper = await db.examSchedule.findFirst({ where: { id: paperId } });
     expect(paper.marksLockedAt).not.toBeNull();
 
-    const set: any = await run(() => results.compute({ termId, rosterId: roster.id }));
+    const set: any = await run(() => results.compute({ termId, rosterId: classRoster.id }));
     const readiness: any = await run(() => results.readiness(set.id));
     expect(readiness.conflicts).toEqual([]);
     expect(readiness.ready).toBe(true);
@@ -482,6 +490,9 @@ describeDb('Phase 5 examination and result integrity', () => {
 
     const next: any = await run(() => results.approveAmendment(amendment.id), 'head-teacher');
     expect(next.revision).toBe(before.revision + 1);
+    // F04: revision 1 stays released until revision 2 is published.
+    expect((await db.resultSet.findFirst({ where: { id: setId } })).status).toBe('published');
+    await run(() => results.publish(next.id), 'head-teacher');
 
     const original = await db.resultSet.findFirst({ where: { id: setId }, include: { termResults: true } });
     expect(original.status).toBe('archived');
@@ -498,9 +509,9 @@ describeDb('Phase 5 examination and result integrity', () => {
 
   it('proposes, decides and applies a promotion as three separate acts', async () => {
     const setId = (globalThis as any).__p5set2;
-    await expect(run(() => promotion.propose({ resultSetId: setId }))).rejects.toThrow('published result set');
+    // A superseded (archived) revision is not a basis for promotion.
+    await expect(run(() => promotion.propose({ resultSetId: (globalThis as any).__p5set }))).rejects.toThrow('published result set');
 
-    await run(() => results.publish(setId));
     const proposal: any = await run(() => promotion.propose({ resultSetId: setId }));
     expect(proposal.proposed).toBeGreaterThan(0);
 
@@ -512,7 +523,8 @@ describeDb('Phase 5 examination and result integrity', () => {
 
     // Departing from the recommendation needs a reason, and a promotion needs
     // somewhere to go. Both are refused before anything is written.
-    await expect(run(() => promotion.decide({ rows: [{ id: one.id, status: 'approved', decision: 'promote', toClassId: nextClass.id }] })))
+    const departure = one.recommendation === 'repeat' ? 'promote' : 'repeat';
+    await expect(run(() => promotion.decide({ rows: [{ id: one.id, status: 'approved', decision: departure, toClassId: nextClass.id }] })))
       .rejects.toThrow('needs a reason');
     await expect(run(() => promotion.decide({ rows: [{ id: one.id, status: 'approved', decision: 'promote', reason: 'Board decision' }] })))
       .rejects.toThrow('class the learner moves into');

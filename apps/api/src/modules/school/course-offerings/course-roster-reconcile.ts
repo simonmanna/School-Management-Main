@@ -61,6 +61,29 @@ export interface ReconcileResult {
   considered: number;
   /** Offering ids the learner was added to, for the audit trail. */
   offeringIds: string[];
+  /** Memberships ended because the learner's seat no longer covers them (F11). */
+  closedOfferingIds: string[];
+  /** Chosen (elective/remedial/manual) memberships with no equivalent in the new seat. */
+  needsReviewOfferingIds: string[];
+}
+
+/** Marks a membership the system ended, so the system may reopen it (F11). */
+export const SYSTEM_CLOSED_PREFIX = 'SYSTEM:';
+
+/**
+ * End every open course membership of an annual enrollment — the learner has
+ * left (withdrawn, transferred, completed). History stays: the row keeps its
+ * dates and frozen rosters keep their members (F11).
+ */
+export async function closeCourseMembershipsInTx(
+  tx: any,
+  args: { enrollmentId: string; at: Date; reason: string; actorId?: string | null },
+): Promise<number> {
+  const res = await tx.courseEnrollment.updateMany({
+    where: { studentEnrollmentId: args.enrollmentId, status: 'ENROLLED' },
+    data: { status: 'WITHDRAWN', endDate: args.at, withdrawalReason: `${SYSTEM_CLOSED_PREFIX} ${args.reason}`, updatedBy: args.actorId ?? null },
+  });
+  return res.count;
 }
 
 /**
@@ -74,6 +97,12 @@ export async function reconcileCompulsoryRostersInTx(
   tx: any,
   target: ReconcileTarget,
 ): Promise<ReconcileResult> {
+  // Offerings are keyed by cohort; older ones only by class. Both cover a seat.
+  const cohortClassId = target.classCohortId
+    ? (await tx.classCohort.findFirst({ where: { id: target.classCohortId }, select: { classId: true } }))?.classId ?? null
+    : null;
+  // A SECTION-scoped offering only covers learners in that stream.
+  const audience = [{ audienceScope: 'COHORT' }, { audienceScope: 'SECTION', sectionId: target.sectionId }];
   const offerings: ReconcilableOffering[] = await tx.courseOffering.findMany({
     where: {
       organizationId: target.organizationId,
@@ -83,18 +112,8 @@ export async function reconcileCompulsoryRostersInTx(
       audienceScope: { not: 'CUSTOM' },
       OR: [
         { audienceScope: 'SCHOOL' },
-        ...(target.classCohortId
-          ? [
-              {
-                classCohortId: target.classCohortId,
-                // A SECTION-scoped offering only covers learners in that stream.
-                OR: [
-                  { audienceScope: 'COHORT' },
-                  { audienceScope: 'SECTION', sectionId: target.sectionId },
-                ],
-              },
-            ]
-          : []),
+        ...(target.classCohortId ? [{ classCohortId: target.classCohortId, OR: audience }] : []),
+        ...(cohortClassId ? [{ classCohortId: null, classId: cohortClassId, OR: audience }] : []),
       ],
     },
     select: {
@@ -106,9 +125,9 @@ export async function reconcileCompulsoryRostersInTx(
       effectiveFrom: true,
     },
   });
-  if (!offerings.length) return { enrolled: 0, considered: 0, offeringIds: [] };
-
   const offeringIds: string[] = [];
+  const closedOfferingIds: string[] = [];
+  const needsReviewOfferingIds: string[] = [];
   for (const offering of offerings) {
     const curriculumSubject =
       offering.curriculumId && offering.subjectId
@@ -126,9 +145,20 @@ export async function reconcileCompulsoryRostersInTx(
           studentEnrollmentId: target.enrollmentId,
         },
       },
-      select: { id: true, source: true, status: true },
+      select: { id: true, source: true, status: true, withdrawalReason: true },
     });
-    if (existing) continue;
+    if (existing) {
+      // A membership the system ended when the learner moved away is theirs
+      // again when they move back. A deliberate opt-out or withdrawal is not.
+      if (existing.status === 'WITHDRAWN' && String(existing.withdrawalReason ?? '').startsWith(SYSTEM_CLOSED_PREFIX)) {
+        await tx.courseEnrollment.updateMany({
+          where: { id: existing.id },
+          data: { status: 'ENROLLED', startDate: target.effectiveFrom, endDate: null, withdrawalReason: null, updatedBy: target.actorId ?? null },
+        });
+        offeringIds.push(offering.id);
+      }
+      continue;
+    }
 
     // The learner joins when they arrive, not when the offering opened — a late
     // admission must not appear on rosters frozen before they were here.
@@ -148,7 +178,87 @@ export async function reconcileCompulsoryRostersInTx(
     offeringIds.push(offering.id);
   }
 
-  return { enrolled: offeringIds.length, considered: offerings.length, offeringIds };
+  // F11: memberships this seat no longer covers. Adding the new class's
+  // courses without leaving the old ones kept a moved learner on North's
+  // register and let a North assessment capture them under South.
+  const covering = new Set(offerings.map((o) => o.id));
+  const open = await tx.courseEnrollment.findMany({
+    where: {
+      studentEnrollmentId: target.enrollmentId,
+      status: 'ENROLLED',
+      courseOffering: { termId: target.termId, deletedAt: null },
+    },
+    select: {
+      id: true,
+      source: true,
+      courseOfferingId: true,
+      courseOffering: { select: { audienceScope: true, subjectId: true, offeringType: true, effectiveFrom: true } },
+    },
+  });
+  for (const m of open) {
+    if (covering.has(m.courseOfferingId)) continue;
+    const scope = m.courseOffering?.audienceScope;
+    // School-wide courses cover every seat; a CUSTOM group was chosen by hand.
+    if (scope === 'SCHOOL' || scope === 'CUSTOM') continue;
+    const close = () =>
+      tx.courseEnrollment.updateMany({
+        where: { id: m.id },
+        data: {
+          status: 'WITHDRAWN',
+          endDate: target.effectiveFrom,
+          withdrawalReason: `${SYSTEM_CLOSED_PREFIX} moved to another class or stream`,
+          updatedBy: target.actorId ?? null,
+        },
+      });
+    if (m.source === 'COMPULSORY') {
+      await close();
+      closedOfferingIds.push(m.courseOfferingId);
+      continue;
+    }
+    // A chosen course (elective, remedial, manual): follow the learner to the
+    // same subject in the new seat where one exists; otherwise a person decides.
+    const equivalent = offerings.find(
+      (o) => o.subjectId && o.subjectId === m.courseOffering?.subjectId && o.offeringType === m.courseOffering?.offeringType,
+    );
+    if (!equivalent) {
+      needsReviewOfferingIds.push(m.courseOfferingId);
+      continue;
+    }
+    await close();
+    closedOfferingIds.push(m.courseOfferingId);
+    const already = await tx.courseEnrollment.findUnique({
+      where: { courseOfferingId_studentEnrollmentId: { courseOfferingId: equivalent.id, studentEnrollmentId: target.enrollmentId } },
+      select: { id: true, status: true },
+    });
+    if (!already) {
+      await tx.courseEnrollment.create({
+        data: {
+          organizationId: target.organizationId,
+          courseOfferingId: equivalent.id,
+          studentEnrollmentId: target.enrollmentId,
+          source: m.source,
+          status: 'ENROLLED',
+          startDate: target.effectiveFrom > equivalent.effectiveFrom ? target.effectiveFrom : equivalent.effectiveFrom,
+          createdBy: target.actorId ?? null,
+        },
+      });
+      offeringIds.push(equivalent.id);
+    } else if (already.status !== 'ENROLLED') {
+      await tx.courseEnrollment.updateMany({
+        where: { id: already.id },
+        data: { status: 'ENROLLED', startDate: target.effectiveFrom, endDate: null, withdrawalReason: null, updatedBy: target.actorId ?? null },
+      });
+      offeringIds.push(equivalent.id);
+    }
+  }
+
+  return {
+    enrolled: offeringIds.length,
+    considered: offerings.length,
+    offeringIds,
+    closedOfferingIds,
+    needsReviewOfferingIds,
+  };
 }
 
 /**
@@ -187,14 +297,18 @@ export async function countRosterDrift(
     effectiveFrom: { lte: offering.term.endDate },
     OR: [{ effectiveTo: null }, { effectiveTo: { gte: offering.term.startDate } }],
   };
-  if (offering.audienceScope !== 'SCHOOL') where.classCohortId = offering.classCohortId;
+  if (offering.audienceScope !== 'SCHOOL') {
+    if (offering.classCohortId) where.classCohortId = offering.classCohortId;
+    else if ((offering as any).classId) where.classCohort = { classId: (offering as any).classId };
+    else return 0;
+  }
   if (offering.audienceScope === 'SECTION') where.sectionId = offering.sectionId;
 
   const placements = await client.enrollmentPlacement.findMany({ where, select: { enrollmentId: true } });
   if (!placements.length) return 0;
   const enrollmentIds = [...new Set(placements.map((p: any) => p.enrollmentId))] as string[];
   const onRoster = await client.courseEnrollment.count({
-    where: { courseOfferingId: offering.id, studentEnrollmentId: { in: enrollmentIds } },
+    where: { courseOfferingId: offering.id, studentEnrollmentId: { in: enrollmentIds }, status: 'ENROLLED' },
   });
   return Math.max(0, enrollmentIds.length - onRoster);
 }

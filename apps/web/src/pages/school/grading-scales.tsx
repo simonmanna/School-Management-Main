@@ -23,16 +23,21 @@ export function SchoolGradingScalePage() {
   const [name, setName] = useState('');
   const [isDefault, setIsDefault] = useState(false);
   const [bands, setBands] = useState<GradingBand[]>([]);
+  const [system, setSystem] = useState('');
+  const [bandRounding, setBandRounding] = useState<'none' | 'half_up_integer'>('none');
 
-  const startNew = () => { setEditing(null); setName(''); setIsDefault(false); setBands([emptyBand()]); };
-  const startEdit = (s: GradingScale) => { setEditing(s); setName(s.name); setIsDefault(s.isDefault); setBands(s.bands?.length ? [...s.bands] : [emptyBand()]); };
+  const startNew = () => { setEditing(null); setName(''); setIsDefault(false); setBands([emptyBand()]); setSystem(''); setBandRounding('none'); };
+  const startEdit = (s: GradingScale) => {
+    setEditing(s); setName(s.name); setIsDefault(s.isDefault); setBands(s.bands?.length ? [...s.bands] : [emptyBand()]);
+    setSystem(s.system ?? ''); setBandRounding(s.bandRounding ?? 'none');
+  };
 
   const setBand = (i: number, patch: Partial<GradingBand>) =>
     setBands((b) => b.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
 
   const save = async () => {
     if (!name) return notify.error('Name required');
-    const payload = { name, bands, isDefault };
+    const payload = { name, bands, isDefault, bandRounding, ...(system ? { system } : {}) };
     try {
       if (editing) await update.mutateAsync({ id: editing.id, dto: payload });
       else await create.mutateAsync(payload);
@@ -85,9 +90,30 @@ export function SchoolGradingScalePage() {
             <CardContent className="space-y-3">
               <div className="space-y-1"><Label className="text-xs">Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Uganda UCE 2024" /></div>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> Set as default scale</label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="scale-system" className="text-xs">Used for</Label>
+                  <select id="scale-system" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={system} onChange={(e) => setSystem(e.target.value)}>
+                    <option value="">School's own scale (graded classes)</option>
+                    <option value="PLE">PLE — primary</option>
+                    <option value="UCE">UCE — O level</option>
+                    <option value="UACE">UACE — A level</option>
+                    <option value="CBC">CBC</option>
+                    <option value="ECD">Nursery descriptors (ECD)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">A scale is only ever used for its own system — nursery is never graded on a primary scale.</p>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="scale-rounding" className="text-xs">Before choosing a grade</Label>
+                  <select id="scale-rounding" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={bandRounding} onChange={(e) => setBandRounding(e.target.value as typeof bandRounding)}>
+                    <option value="none">Use the exact percentage (89.5 → band starting at 80)</option>
+                    <option value="half_up_integer">Round to a whole percent first (89.5 → 90)</option>
+                  </select>
+                </div>
+              </div>
 
               <div className="space-y-2">
-                <div className="text-xs font-medium text-muted-foreground">Bands (sort by min %, no overlaps)</div>
+                <div className="text-xs font-medium text-muted-foreground">Bands — each band runs from its Min % up to the next band's Min %. The lowest band must start at 0.</div>
                 {bands.map((b, i) => (
                   <div key={i} className="flex flex-wrap items-end gap-2 rounded border p-2">
                     <div className="space-y-1"><Label className="text-xs">Min %</Label><Input type="number" className="w-20" value={b.min} onChange={(e) => setBand(i, { min: Number(e.target.value) })} /></div>

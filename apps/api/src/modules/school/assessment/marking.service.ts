@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { resultLockKey } from './result-status';
 import { Prisma } from '@prisma/client';
 import type { StudentAssessment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -338,6 +339,10 @@ export class MarkingService {
       where: { id: sa.id },
       data: {
         status: input.score === null ? 'assigned' : 'graded',
+        // A score is proof the learner sat it: a fanned-out row starts as
+        // `missing`, and a mark posted by any writer (exam agreement, CBT, LMS)
+        // must not stay invisible to results because nobody flipped it (F02).
+        ...(input.score !== null && sa.participation === 'missing' ? { participation: 'present' } : {}),
         enteredById: input.markerId ?? this.tenant.userId ?? null,
         // Stamped here, alongside the identity. submit() used to backfill
         // enteredAt, which only worked because it was also overwriting
@@ -564,6 +569,9 @@ export class MarkingService {
       }
 
       if (dto.action === 'approve') {
+        // Serialises with result publication for the term (F05): a publish that
+        // checked freshness cannot commit while an approval changes its inputs.
+        if (assessment?.termId) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${resultLockKey(organizationId, assessment.termId)}))`;
         const submitted = rows.filter((r: any) => r.approvalStatus === 'submitted');
         if (submitted.some((r: any) => r.enteredById && r.enteredById === actorId)) {
           throw new BadRequestException('You entered one or more of these marks and cannot approve them (segregation of duty).');

@@ -12,7 +12,7 @@ describe('GradingService — UCE bands (post-2020 UNEB scale)', () => {
   let prisma: any;
 
   beforeEach(() => {
-    prisma = { client: { gradingScale: { findFirst: jest.fn() } } };
+    prisma = { client: { gradingScale: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) }, schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) } } };
     service = new GradingService(prisma);
   });
 
@@ -50,7 +50,7 @@ describe('GradingService — UACE bands (A–O)', () => {
   let service: GradingService;
 
   beforeEach(() => {
-    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
+    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) } } } as any);
   });
 
   it('returns A / 5 pts for 80–100%', async () => {
@@ -72,7 +72,7 @@ describe('GradingService — CBC competency levels', () => {
   let service: GradingService;
 
   beforeEach(() => {
-    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
+    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) } } } as any);
   });
 
   it('returns A (Exceeding) for 80%+', async () => {
@@ -89,7 +89,7 @@ describe('GradingService — UCE aggregate (best 8)', () => {
   let service: GradingService;
 
   beforeEach(() => {
-    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
+    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) } } } as any);
   });
 
   it('sums the best 8 subject points', () => {
@@ -147,7 +147,7 @@ describe('GradingService — UACE aggregate (best 3 principals)', () => {
   let service: GradingService;
 
   beforeEach(() => {
-    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn() } } } as any);
+    service = new GradingService({ client: { gradingScale: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) } } } as any);
   });
 
   it('sums only the best 3 principal subject points', () => {

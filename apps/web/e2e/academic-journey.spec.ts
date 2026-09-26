@@ -23,6 +23,17 @@ import { expect, test, type Page } from '@playwright/test';
  * Without the teacher credentials the marking leg runs as the registrar and the
  * test says so — the journey is still proved end to end, the segregation of
  * duties is not.
+ *
+ * Wave 13 contract (student-flow audit 2026-09-26):
+ *   - an application is a form page, not a dialog;
+ *   - enrolment is one shared dialog that carries the pupil's details from the
+ *     application and offers only the application year's terms (F13/F18);
+ *   - an assessment counts toward term results only when bound to a weighting
+ *     component (F03), and must be published before it is marked;
+ *   - results are worked out from a locked WHOLE-CLASS list for the term (F06),
+ *     and a subject needs evidence for every required component (F02). Point
+ *     E2E_TERM at a term whose subject policy the journey's single assessment
+ *     can satisfy (e.g. a 100% CAT policy), or the release is correctly refused.
  */
 const ORG = process.env.E2E_ORG ?? '';
 const EMAIL = process.env.E2E_EMAIL ?? '';
@@ -67,17 +78,14 @@ test('application → enrolment → assessment → marks → results → publish
   await signIn(registrar, EMAIL, PASSWORD);
 
   /* ── 1. The application arrives ───────────────────────────────────────── */
+  await registrar.goto('/school/applications/new');
+  // Academic year first: the terms offered at enrolment are filtered by it.
+  await choose(registrar.locator('select').first());
+  await registrar.getByLabel(/^surname/i).fill(`Pupil${stamp}`);
+  await registrar.getByLabel(/^other names/i).fill('Journey');
+  await registrar.getByRole('button', { name: /^next/i }).click();
+  await registrar.getByRole('button', { name: /^submit/i }).click();
   await registrar.goto('/school/applications');
-  await registrar.getByRole('button', { name: /new application|create/i }).first().click();
-  const appDialog = registrar.getByRole('dialog');
-  await appDialog.getByLabel(/first name/i).fill('Journey');
-  await appDialog.getByLabel(/last name/i).fill(`Pupil${stamp}`);
-  // Academic year, then the class applied for. The year matters: the term offered
-  // at enrolment is filtered by it (Wave 10 H1).
-  const appSelects = appDialog.locator('select');
-  await choose(appSelects.nth(0));
-  await choose(appSelects.nth(1));
-  await appDialog.getByRole('button', { name: /^(save|create|submit)/i }).click();
   await expect(registrar.getByText(new RegExp(`Pupil${stamp}`))).toBeVisible();
 
   /* ── 2. Decision and offer, whatever this school's workflow requires ──── */
@@ -104,15 +112,16 @@ test('application → enrolment → assessment → marks → results → publish
   /* ── 3. Enrol: the term offered must belong to the application's year ── */
   await row.getByRole('button', { name: /^enrol/i }).click();
   const enrollDialog = registrar.getByRole('dialog');
-  await expect(enrollDialog.getByText(/is the year this application is for|No terms defined for/)).toBeVisible();
-  const enrollSelects = enrollDialog.locator('select');
-  await choose(enrollSelects.nth(0)); // class
-  const termSelect = enrollDialog.getByLabel(/^term/i).or(enrollSelects.nth(2));
-  await choose(termSelect, TERM || undefined);
-  await enrollDialog.getByLabel(/student name/i).fill(applicant);
+  // One shared dialog: the details come from the application, not re-typed.
+  await expect(enrollDialog.getByText(/the year applied for|No terms for/)).toBeVisible();
+  await expect(enrollDialog.getByText(`Pupil${stamp}`, { exact: false })).toBeVisible();
+  await choose(enrollDialog.getByLabel(/^term/i), TERM || undefined);
+  await choose(enrollDialog.getByLabel(/^class/i));
   await enrollDialog.getByLabel(/roll number/i).fill(String(stamp % 100000));
-  await enrollDialog.getByRole('button', { name: /^enrol/i }).click();
-  await expect(registrar.getByText(new RegExp(`${applicant} enrolled into`))).toBeVisible();
+  await enrollDialog.getByRole('button', { name: /^enroll pupil/i }).click();
+  await expect(registrar.getByText(/enrolled into/)).toBeVisible();
+  // The success notice links straight to the new pupil (F22).
+  await expect(registrar.getByRole('button', { name: /open pupil/i })).toBeVisible();
 
   /* ── 4. The pupil is on the course roster without anyone syncing it ──── */
   // The handoff the audit found broken: placement now reconciles compulsory
@@ -137,6 +146,8 @@ test('application → enrolment → assessment → marks → results → publish
   await expect(wizard.getByRole('button', { name: /^continue/i })).toBeDisabled();
   await wizard.getByLabel(/^due/i).fill('2026-06-08T08:00');
   await expect(wizard.getByText(/Due cannot be before the assessment opens/)).toBeHidden();
+  // Summative: bound to a weighting component, so it reaches the term result (F03).
+  await choose(wizard.locator('label', { hasText: /counts toward/i }).locator('select'));
   await wizard.getByRole('button', { name: /^continue/i }).click();
 
   // Step 3: freeze the roster the marks will hang off.
@@ -144,6 +155,8 @@ test('application → enrolment → assessment → marks → results → publish
   await expect(wizard.getByText(/learner\(s\) in the frozen snapshot/)).toBeVisible();
   await wizard.getByRole('button', { name: /create assessment draft/i }).click();
   await expect(marker).toHaveURL(/\/school\/assessments\/.+\/mark/);
+  // A draft is not marked: publish it to its frozen roster first.
+  await marker.getByRole('button', { name: /^publish assessment/i }).click();
 
   /* ── 6. Marks, then submit for approval ───────────────────────────────── */
   await expect(marker.getByText(applicant)).toBeVisible();
@@ -160,9 +173,19 @@ test('application → enrolment → assessment → marks → results → publish
   await approvalRow.getByRole('button', { name: /^approve/i }).click();
   await expect(registrar.getByText(/approved/i).first()).toBeVisible();
 
-  /* ── 8. Compute the term's results and release them ───────────────────── */
+  /* ── 8. Lock the whole-class list for the term, then compute and release ── */
+  // Results come from a locked class list of THIS term (F06), never from an
+  // assessment's subject roster.
+  await registrar.goto('/school/assessment-ops');
+  await choose(registrar.locator('select').first(), TERM || undefined);
+  await choose(registrar.locator('select').nth(1));
+  await registrar.getByPlaceholder(/name this class list/i).fill(`Journey list ${stamp}`);
+  await registrar.getByRole('button', { name: /save class list/i }).click();
+  await registrar.getByRole('button', { name: /^freeze/i }).first().click();
+
   await registrar.goto('/school/results');
   await choose(registrar.locator('select').first(), TERM || undefined);
+  await choose(registrar.locator('select').nth(1), `Journey list ${stamp}`);
   await registrar.getByRole('button', { name: /work out results/i }).click();
   await expect(registrar.getByText(/^Version 1/).first()).toBeVisible();
   await registrar.getByText(/^Version 1/).first().click();

@@ -2,15 +2,20 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from '@ne
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { EmergencyContactService } from './emergency-contact.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { CreateEmergencyContactDto, UpdateEmergencyContactDto } from './dto.types';
 
 @Controller('school/emergency-contacts')
 export class EmergencyContactController {
-  constructor(private readonly service: EmergencyContactService) {}
+  constructor(
+    private readonly service: EmergencyContactService,
+    private readonly dataScope: DataScopeService,
+  ) {}
 
   @Get('by-student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
-  listByStudent(@Param('studentProfileId') id: string) {
+  async listByStudent(@Param('studentProfileId') id: string) {
+    await this.dataScope.assertMayReadStudent(id); // F09
     return this.service.listByStudent(id);
   }
 

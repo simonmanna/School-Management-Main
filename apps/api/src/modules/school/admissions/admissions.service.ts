@@ -915,22 +915,16 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         }
       }
 
+      const mapped = this.mapApplicationToPupil(app, dto);
       const input: AdmitStudentInput = {
         organizationId,
         applicationId: app.id,
-        name: dto.student.name,
-        email: dto.student.email ?? null,
-        phone: dto.student.phone ?? null,
-        dateOfBirth: dto.student.dateOfBirth ?? null,
-        gender: dto.student.gender ?? null,
-        nationality: dto.student.nationality ?? null,
-        religion: dto.student.religion ?? null,
-        house: dto.student.house ?? null,
-        residenceType: dto.student.residenceType ?? 'day',
+        ...mapped.fields,
         // Separate admission/student numbers: admissionNo is generated (STU-...)
         // unless explicitly supplied; do NOT reuse applicationNumber.
         admissionNo: undefined,
-        guardians: dto.student.guardians,
+        customFields: mapped.customFields,
+        guardians: dto.student?.guardians,
         existingStudentProfileId,
         placement: {
           termId: dto.termId,
@@ -970,8 +964,92 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         classId: dto.classId,
         termId: dto.termId,
       });
-      return { studentProfile: profile, partner, enrollment, application: { ...app, status: 'enrolled' } };
+      return {
+        studentProfile: profile,
+        studentProfileId: profile.id,
+        partner,
+        enrollment,
+        application: { ...app, status: 'enrolled' },
+        conversionSummary: mapped.summary,
+      };
     });
+  }
+
+  /**
+   * F13: the pupil record is built from the ACCEPTED APPLICATION on the server,
+   * not from whichever fields a screen happened to send. The screens sent name,
+   * gender and birth date, so a boarder became a day pupil and a category-based
+   * applicant lost the category their fees depend on.
+   *
+   * Anything in `dto.student` is an override. An override that contradicts the
+   * application is refused unless the clerk confirms it, and every carried or
+   * overridden field is reported back.
+   */
+  private mapApplicationToPupil(app: any, dto: EnrollApplicationDto) {
+    const s = dto.student ?? {};
+    const fromApp: Record<string, string | null> = {
+      name: `${app.applicantFirstName ?? ''} ${app.applicantLastName ?? ''}`.trim() || null,
+      dateOfBirth: app.applicantDob ? new Date(app.applicantDob).toISOString().slice(0, 10) : null,
+      gender: app.applicantGender ?? null,
+      nationality: app.nationality ?? null,
+      residenceType: app.residenceType ?? null,
+      studentCategoryId: app.studentCategoryId ?? null,
+    };
+    const given: Record<string, string | null | undefined> = {
+      name: s.name,
+      dateOfBirth: s.dateOfBirth ? String(s.dateOfBirth).slice(0, 10) : s.dateOfBirth,
+      gender: s.gender,
+      nationality: s.nationality,
+      residenceType: s.residenceType,
+      studentCategoryId: s.studentCategoryId,
+    };
+    const norm = (v: unknown) => (v == null ? '' : String(v).trim().toLowerCase());
+    const conflicts = Object.keys(fromApp).filter(
+      (k) => given[k] != null && given[k] !== '' && fromApp[k] != null && norm(given[k]) !== norm(fromApp[k]),
+    );
+    if (conflicts.length && !dto.confirmOverrides) {
+      throw new BadRequestException({
+        code: 'CONFLICTING_OVERRIDES',
+        message: `The enrollment changes ${conflicts.join(', ')} from what the application says. Confirm the change to continue.`,
+        fields: conflicts.map((k) => ({ field: k, application: fromApp[k], requested: given[k] })),
+      });
+    }
+    const pick = (k: string) => (given[k] != null && given[k] !== '' ? (given[k] as string) : fromApp[k]);
+    const name = pick('name');
+    if (!name) throw new BadRequestException('The applicant has no name on the application.');
+
+    const customFields: Record<string, unknown> = {};
+    if (app.address) customFields.address = app.address;
+    if (app.entryStatus) customFields.entryStatus = app.entryStatus;
+    if (app.admissionCycleId) customFields.admissionCycleId = app.admissionCycleId;
+    if (app.ninCiphertext && app.ninIv && app.ninTag) {
+      const payload = { ciphertext: app.ninCiphertext, iv: app.ninIv, tag: app.ninTag };
+      customFields.ninEncrypted = payload;
+      const plain = this.encryption.decrypt(payload);
+      customFields.ninLast4 = plain ? plain.slice(-4) : null;
+    }
+
+    const carried = Object.keys(fromApp).filter((k) => fromApp[k] != null && !conflicts.includes(k));
+    return {
+      fields: {
+        name,
+        email: s.email ?? null,
+        phone: s.phone ?? null,
+        dateOfBirth: pick('dateOfBirth'),
+        gender: pick('gender'),
+        nationality: pick('nationality'),
+        religion: s.religion ?? null,
+        house: s.house ?? null,
+        // Day only when neither the application nor the clerk says otherwise.
+        residenceType: pick('residenceType') ?? 'day',
+        studentCategoryId: pick('studentCategoryId'),
+      },
+      customFields,
+      summary: {
+        carried: [...carried, ...(customFields.ninEncrypted ? ['nin'] : []), ...(app.address ? ['address'] : [])],
+        overridden: conflicts,
+      },
+    };
   }
 
   /**

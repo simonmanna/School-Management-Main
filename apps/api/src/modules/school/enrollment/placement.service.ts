@@ -504,12 +504,17 @@ export class PlacementService {
       effectiveFrom,
       actorId: this.tenant.userId ?? null,
     });
-    if (roster.enrolled > 0) {
+    if (roster.enrolled > 0 || roster.closedOfferingIds.length || roster.needsReviewOfferingIds.length) {
       await this.audit.recordInTx(tx, {
         entity: 'EnrollmentPlacement',
         entityId: created.id,
         action: 'update',
-        newValues: { compulsoryCoursesEnrolled: roster.enrolled, offeringIds: roster.offeringIds },
+        newValues: {
+          compulsoryCoursesEnrolled: roster.enrolled,
+          offeringIds: roster.offeringIds,
+          coursesLeft: roster.closedOfferingIds,
+          coursesNeedingReview: roster.needsReviewOfferingIds,
+        },
       });
     }
 
@@ -517,6 +522,9 @@ export class PlacementService {
       ...(override ? target.warnings.map((w) => `${w} Seated under a capacity override.`) : target.warnings),
       ...dateWarnings,
       ...(await this.earlyYearsWarnings(tx, enrollment, target)),
+      ...(roster.needsReviewOfferingIds.length
+        ? [`${roster.needsReviewOfferingIds.length} chosen course(s) have no equivalent in the new class or stream — review this learner's electives.`]
+        : []),
     ];
     return { placement: created, closed, warnings };
   }

@@ -1,4 +1,5 @@
 import { SCHOOL_FEE_SOURCE_TYPES } from '../fees/fee-document.constants';
+import { releasedResultSetWhere } from '../assessment/result-status';
 import { Injectable } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -251,7 +252,7 @@ export class ReportingService {
     if (!currentTerm) return [];
 
     const rows = await this.prisma.client.studentTermResult.findMany({
-      where: { termId: currentTerm.id, resultSet: { status: 'published' } },
+      where: { termId: currentTerm.id, resultSet: releasedResultSetWhere() },
       include: { resultSet: true },
       orderBy: [{ resultSet: { revision: 'desc' } }],
     });

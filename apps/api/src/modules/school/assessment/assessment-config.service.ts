@@ -16,6 +16,7 @@ export interface PolicyScope {
   subjectId?: string | null;
   classId?: string | null;
   gradeLevelId?: string | null;
+  programmeId?: string | null;
   termId?: string | null;
 }
 
@@ -83,7 +84,7 @@ export class AssessmentPolicyService extends BaseCrudService<
 
   /**
    * Resolve the governing policy for a scope, most-specific-first.
-   * Specificity weights: subject(8) > class(4) > gradeLevel(2) > term(1).
+   * Specificity weights: subject(16) > class(8) > gradeLevel(4) > programme(2) > term(1).
    */
   async resolve(scope: PolicyScope): Promise<(AssessmentPolicy & { components: AssessmentComponent[] }) | null> {
     const policies = await this.prisma.client.assessmentPolicy.findMany({
@@ -95,11 +96,12 @@ export class AssessmentPolicyService extends BaseCrudService<
         (p.subjectId == null || p.subjectId === scope.subjectId) &&
         (p.classId == null || p.classId === scope.classId) &&
         (p.gradeLevelId == null || p.gradeLevelId === scope.gradeLevelId) &&
+        (p.programmeId == null || p.programmeId === scope.programmeId) &&
         (p.termId == null || p.termId === scope.termId),
     );
     if (matches.length === 0) return null;
     const specificity = (p: AssessmentPolicy) =>
-      (p.subjectId ? 8 : 0) + (p.classId ? 4 : 0) + (p.gradeLevelId ? 2 : 0) + (p.termId ? 1 : 0);
+      (p.subjectId ? 16 : 0) + (p.classId ? 8 : 0) + (p.gradeLevelId ? 4 : 0) + (p.programmeId ? 2 : 0) + (p.termId ? 1 : 0);
     matches.sort((a, b) => specificity(b) - specificity(a) || Number(!!b.publishedAt) - Number(!!a.publishedAt) || b.revision - a.revision);
     return matches[0] as AssessmentPolicy & { components: AssessmentComponent[] };
   }

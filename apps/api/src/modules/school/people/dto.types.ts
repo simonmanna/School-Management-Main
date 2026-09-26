@@ -14,6 +14,8 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -32,6 +34,8 @@ const STAFF_ATT_STATUS = ['present', 'absent', 'late', 'leave', 'off_duty'] as c
 export class StudentListQueryDto extends PaginationDto {
   @IsOptional() @IsString() classId?: string;
   @IsOptional() @IsString() sectionId?: string;
+  /** Learners placed in the class during THIS term — a past term's cohort, not today's (F19). */
+  @IsOptional() @IsString() termId?: string;
 }
 
 export class CreateStudentDto {
@@ -95,6 +99,10 @@ export class UpdateStudentDto {
   @IsOptional() @IsString() countryOfBirth?: string;
   @IsOptional() @IsString() placeOfBirth?: string;
   @IsOptional() @IsString() address?: string;
+  /** National ID. Stored encrypted; responses carry only `ninOnFile`/`ninLast4` (F08). */
+  @IsOptional() @IsString() @MaxLength(40) nin?: string;
+  /** Profile photo as an https URL or a data:image URL (≤ 1.5 MB), saved with the record (F15). */
+  @IsOptional() @IsString() @MaxLength(2_000_000) @Matches(/^(https:\/\/|data:image\/(png|jpeg|webp);base64,)/, { message: 'photoUrl must be an https URL or a PNG/JPEG/WebP data URL' }) photoUrl?: string;
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
   @IsOptional() @IsIn([...STUDENT_STATUS]) status?: (typeof STUDENT_STATUS)[number];
   @IsOptional() @IsString() reason?: string;

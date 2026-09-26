@@ -59,6 +59,8 @@ export function SchoolSettingsPage() {
       currencyCode: profile.currencyCode ?? '',
       timezone: profile.timezone ?? 'UTC',
       capacityPolicy: profile.capacityPolicy ?? 'ENFORCE',
+      resultAbsencePolicy: profile.resultAbsencePolicy ?? 'ABSENT_AS_ZERO',
+      classTeacherScope: profile.classTeacherScope ?? 'STREAM',
       terminology: { ...(profile.terminology ?? {}) },
     });
   }, [profile]);
@@ -190,6 +192,39 @@ export function SchoolSettingsPage() {
               <option value="WARN">Warn but allow</option>
               <option value="OFF">Ignore capacity</option>
             </select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Results and access rules</CardTitle></CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="profile-absence">Absent and exempt learners</Label>
+            <select
+              id="profile-absence"
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              value={draft.resultAbsencePolicy}
+              onChange={(e) => set('resultAbsencePolicy', e.target.value as Draft['resultAbsencePolicy'])}
+            >
+              <option value="ABSENT_AS_ZERO">Absent scores 0; exempt is left out and re-weighted</option>
+              <option value="ABSENT_BLOCKS">Absences must be resolved before results are published</option>
+              <option value="ALL_BLOCK">Every required piece of work needs a real mark to publish</option>
+            </select>
+            <p className="text-xs text-muted-foreground">A missing mark always blocks publishing.</p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="profile-ct-scope">What a class teacher can see</Label>
+            <select
+              id="profile-ct-scope"
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              value={draft.classTeacherScope}
+              onChange={(e) => set('classTeacherScope', e.target.value as Draft['classTeacherScope'])}
+            >
+              <option value="STREAM">Their own stream only</option>
+              <option value="CLASS">Every stream of their class</option>
+            </select>
+            <p className="text-xs text-muted-foreground">Subject teachers always see only the learners they teach this year.</p>
           </div>
         </CardContent>
       </Card>

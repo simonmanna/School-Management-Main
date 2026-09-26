@@ -159,10 +159,10 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
     skipDuplicates: true,
   });
   await db.gradingScale.create({
-    data: { organizationId, name: 'PLE (UNEB)', bands: PLE_BANDS, isDefault: true },
+    data: { organizationId, name: 'PLE (UNEB)', system: 'PLE', bands: PLE_BANDS, isDefault: true },
   });
-  // The name must contain the system code so `resolveBands('ECD')` finds it.
+  // Each scale names its system; resolveScale never borrows across systems.
   await db.gradingScale.create({
-    data: { organizationId, name: 'ECD nursery descriptors', bands: ECD_BANDS, isDefault: false },
+    data: { organizationId, name: 'ECD nursery descriptors', system: 'ECD', bands: ECD_BANDS, isDefault: false },
   });
 }

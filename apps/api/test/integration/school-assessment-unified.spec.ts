@@ -50,6 +50,8 @@ describeDb('integration: assessments — one door, every kind', () => {
   let teacherPartnerId = '';
   let examId = '';
   let catComponentId = '';
+  let homeworkComponentId = '';
+  let projectComponentId = '';
   const studentIds: string[] = [];
 
   const perms = [
@@ -98,8 +100,8 @@ describeDb('integration: assessments — one door, every kind', () => {
       data: { organizationId, name: 'S2 Maths', subjectId, classId, gradeLevelId: grade.id, termId, passMark: 50 },
     });
     catComponentId = (await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'CATs', kind: 'cat', weight: 30, aggregation: 'mean' } })).id;
-    await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Homework', kind: 'homework', weight: 10, aggregation: 'mean' } });
-    await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Projects', kind: 'project', weight: 10, aggregation: 'mean' } });
+    homeworkComponentId = (await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Homework', kind: 'homework', weight: 10, aggregation: 'mean' } })).id;
+    projectComponentId = (await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Projects', kind: 'project', weight: 10, aggregation: 'mean' } })).id;
     await raw.assessmentComponent.create({ data: { organizationId, policyId: policy.id, name: 'Exams', kind: 'exam', weight: 50, aggregation: 'mean' } });
     await raw.assessmentPolicy.update({ where: { id: policy.id }, data: { publishedAt: new Date() } });
     const programme = await raw.academicProgramme.create({ data: { organizationId, code: 'SEC', name: 'Secondary', effectiveFrom: year.startDate } });
@@ -141,11 +143,11 @@ describeDb('integration: assessments — one door, every kind', () => {
     } as any));
     const homework = await asUser('teacher', () => board.createUnified({
       kind: 'homework', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Algebra exercise', maxScore: 10,
-      teacherPartnerId, dueAt: '2026-02-20',
+      componentId: homeworkComponentId, teacherPartnerId, dueAt: '2026-02-20',
     } as any));
     const project = await asUser('teacher', () => board.createUnified({
       kind: 'project', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Statistics project', maxScore: 25,
-      teacherPartnerId,
+      componentId: projectComponentId, teacherPartnerId,
     } as any));
     const exam = await asUser('exams_officer', () => board.createUnified({
       kind: 'exam', courseOfferingId, rosterId, classId, subjectId, termId, title: 'Paper 1', maxScore: 100,

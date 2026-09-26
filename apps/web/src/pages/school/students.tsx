@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
+import { ListPager, QueryError } from '@/components/query-state';
 
 const STATUS_META: Record<StudentStatus, string> = {
   active: 'bg-emerald-100 text-emerald-700',
@@ -47,7 +48,18 @@ export function SchoolStudentsPage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [detail, setDetail] = useState<Student | null>(null);
 
-  const { data, isLoading } = useStudents({ search: search || undefined, pageSize: 50 });
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(1);
+  const [classFilter, setClassFilter] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('');
+  const { data, isLoading, isError, error, refetch } = useStudents({
+    search: search || undefined,
+    classId: classFilter || undefined,
+    sectionId: sectionFilter || undefined,
+    page,
+    pageSize: PAGE_SIZE,
+  });
+  const total = data?.meta?.total ?? 0;
   const { data: classes } = useClasses();
   const { data: sections } = useSections();
   const { data: terms } = useTerms();
@@ -152,12 +164,37 @@ export function SchoolStudentsPage() {
         </Button>
       </div>
 
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search name or admission no…"
-        className="w-72 rounded-md border bg-card px-3 py-2 text-sm"
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          placeholder="Search name or admission no…"
+          aria-label="Search pupils"
+          className="w-72 max-w-full rounded-md border bg-card px-3 py-2 text-sm"
+        />
+        <select
+          aria-label="Filter by class"
+          className="rounded-md border bg-card px-3 py-2 text-sm"
+          value={classFilter}
+          onChange={(e) => { setClassFilter(e.target.value); setSectionFilter(''); setPage(1); }}
+        >
+          <option value="">All classes</option>
+          {(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {classFilter && (sections?.data ?? []).some((x: any) => x.classId === classFilter) && (
+          <select
+            aria-label={`Filter by ${vocab.section.toLowerCase()}`}
+            className="rounded-md border bg-card px-3 py-2 text-sm"
+            value={sectionFilter}
+            onChange={(e) => { setSectionFilter(e.target.value); setPage(1); }}
+          >
+            <option value="">All {vocab.sectionPlural.toLowerCase()}</option>
+            {(sections?.data ?? []).filter((x: any) => x.classId === classFilter).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        )}
+      </div>
+
+      {isError && <QueryError error={error} onRetry={() => void refetch()} />}
 
       <Card>
         <CardContent className="p-0">
@@ -176,8 +213,10 @@ export function SchoolStudentsPage() {
               {isLoading && (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
               )}
-              {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No students yet. Admit your first student.</td></tr>
+              {!isLoading && !isError && rows.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                  {search || classFilter ? 'No pupils match these filters.' : 'No students yet. Admit your first student.'}
+                </td></tr>
               )}
               {rows.map((s) => (
                 <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40">
@@ -200,6 +239,7 @@ export function SchoolStudentsPage() {
               ))}
             </tbody>
           </table>
+          {!isError && <ListPager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="pupils" />}
         </CardContent>
       </Card>
 

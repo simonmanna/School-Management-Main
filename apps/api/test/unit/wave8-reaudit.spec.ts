@@ -67,6 +67,10 @@ describe('re-audit #4 — teacher reads follow the classes they teach', () => {
       timetableSlot: { findMany: jest.fn(async () => []) },
       schoolClass: { findMany: jest.fn(async () => []) },
       section: { findMany: jest.fn(async () => []) },
+      schoolProfile: { findFirst: jest.fn(async () => ({ classTeacherScope: 'STREAM' })) },
+      courseOfferingTeacher: { findMany: jest.fn(async () => []) },
+      // Seat-based reads resolve the pupil through their current placement.
+      studentProfile: { findMany: jest.fn(async (args: any) => (seated ? [{ id: args.where.AND[0].id.in[0] }] : [])) },
       enrollmentPlacement: { findFirst: jest.fn(async () => (seated ? { id: 'p1' } : null)) },
     };
     const svc = new DataScopeService(
@@ -97,7 +101,7 @@ describe('re-audit #4 — teacher reads follow the classes they teach', () => {
   it('school-wide staff are not narrowed', async () => {
     const { svc, db } = make('school', [], false);
     await expect(svc.assertMayReadStudent('anyone')).resolves.toBeUndefined();
-    expect(db.enrollmentPlacement.findFirst).not.toHaveBeenCalled();
+    expect(db.studentProfile.findMany).not.toHaveBeenCalled();
   });
 
   it('only assignments in an open year count as teaching', async () => {

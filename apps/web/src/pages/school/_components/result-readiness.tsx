@@ -17,6 +17,10 @@ export interface ReadinessSummary {
   participationUnresolved?: number;
   weightingValid?: boolean;
   examPapersLocked?: boolean;
+  /** Wave 13: every required piece of work and every subject has evidence (F02). */
+  evidenceComplete?: boolean;
+  /** Wave 13: nothing changed since the results were worked out (F05). */
+  upToDate?: boolean;
 }
 
 export interface Readiness {
@@ -109,6 +113,36 @@ export function summarise(conflicts: Conflict[], nameById: Map<string, string>) 
         blurb: `${conflicts[0]?.detail ?? ''} Close the examination, or lock the paper, first.`,
         cta: { label: 'Examination operations', to: '/school/exam-operations' },
       };
+    // ── Wave 13 gate additions ──
+    case 'MISSING_EVIDENCE':
+      return {
+        title: n === 1 ? '1 pupil is missing required work' : `${n} pupils are missing required work`,
+        blurb: `${who ? `${who}: ` : ''}${conflicts[0]?.detail ?? ''}. Enter the mark, or record an absence or exemption.`,
+        cta: { label: 'Enter marks', to: '/school/enter-marks' },
+      };
+    case 'SUBJECT_MISSING':
+    case 'NO_SUBJECT_RESULT':
+    case 'NO_SUBJECT_RESULTS':
+      return {
+        title: n === 1 ? '1 pupil has a subject with no result' : `${n} pupils have subjects with no result`,
+        blurb: who ? `Affects: ${who}. Every subject a pupil takes needs approved marks before release.` : 'Every subject a pupil takes needs approved marks before release.',
+        cta: { label: 'Enter marks', to: '/school/enter-marks' },
+      };
+    case 'ABSENCE_UNRESOLVED':
+    case 'EXEMPTION_NOT_ALLOWED':
+      return {
+        title: 'School policy needs a real mark here',
+        blurb: `${who ? `${who}: ` : ''}the school's results rule does not allow ${code === 'ABSENCE_UNRESOLVED' ? 'an absence' : 'an exemption'} to stand. Record a mark (e.g. a make-up paper), or change the rule in School settings.`,
+        cta: { label: 'School settings', to: '/school/management/settings' },
+      };
+    case 'STALE_RESULTS':
+      return {
+        title: 'Marks changed after these results were worked out',
+        blurb: 'Work the results out again so the released numbers match the approved marks.',
+        cta: null,
+      };
+    case 'RECOMPUTE_FAILED':
+      return { title: 'These results can no longer be reproduced', blurb: conflicts[0]?.detail ?? '', cta: null };
     default:
       return { title: 'Something is blocking release', blurb: conflicts[0]?.detail ?? '', cta: null };
   }
@@ -149,6 +183,12 @@ export function ReadinessChecklist({
   }
   if (s.examPapersLocked !== undefined) {
     rows.push({ label: 'Exam papers are closed to further marking', ok: s.examPapersLocked });
+  }
+  if (s.evidenceComplete !== undefined) {
+    rows.push({ label: 'Every required piece of work and every subject has a mark', ok: s.evidenceComplete });
+  }
+  if (s.upToDate !== undefined) {
+    rows.push({ label: 'No marks changed since these results were worked out', ok: s.upToDate });
   }
   rows.push({ label: 'Results worked out in full', ok: !!s.hasChecksums });
 
