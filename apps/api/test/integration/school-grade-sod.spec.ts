@@ -10,7 +10,9 @@
  *                and every step writes an AuditLog row.
  *  - A0-concurrency: a stale `version` on re-entry yields 409, not a silent overwrite.
  *  - A0-approved-lock: approved marks can't be silently re-upserted.
- *  - A0-publish: report-card publish sets publishedAt; unpublish clears it.
+ *  - A0-publish: a card built from live approved marks is a staff preview and
+ *                refuses publication; a card pinned to a published ResultSet
+ *                revision publishes, and unpublish clears it.
  *
  * Same DB requirements as the other school integration specs (RLS-inert target).
  */
@@ -248,15 +250,52 @@ describeDb('integration: A0 grade hardening + SoD', () => {
     expect(Number((await spineRow(scheduleId))?.effectiveScore)).toBe(80);
   });
 
-  it('A0-publish: report-card publish sets publishedAt; unpublish clears it', async () => {
+  it('A0-publish: a live-marks card is a preview and cannot be published', async () => {
     const s = await makeStudent(`PUB-${Date.now()}`);
     const scheduleId = await makeSchedule(100);
     await asUser('teacher_a', () => grades.bulkUpsert({ examScheduleId: scheduleId, entries: [{ studentProfileId: s.id, marksObtained: 70, maxMarks: 100 }] } as any));
     await asUser('teacher_a', () => grades.submit(scheduleId));
     await asUser('hod_b', () => grades.approve(scheduleId));
 
+    // No results have been computed or published for this term, so the card is
+    // assembled from live approved marks. It carries no frozen cohort, no
+    // calculation version and no position, and the marks behind it can still be
+    // amended — so it is a staff preview, not something a family may receive.
     const card = await asUser('registrar', () => reportCards.generate({ studentProfileId: s.id, termId } as any)) as any;
     expect(card.publishedAt).toBeNull();
+    expect(card.payload.provenance.source).toBe('live_spine');
+    expect(card.payload.provenance.isDraft).toBe(true);
+
+    await expect(asUser('head', () => reportCards.publish(card.id))).rejects.toThrow(BadRequestException);
+    expect((await raw.reportCard.findFirst({ where: { id: card.id } }))?.publishedAt).toBeNull();
+  });
+
+  it('A0-publish: a card pinned to a published ResultSet publishes, and unpublish clears it', async () => {
+    const s = await makeStudent(`PUBOK-${Date.now()}`);
+    // Publication is about provenance, not about how the payload was assembled,
+    // so the card is written directly against a published revision here;
+    // `generate` itself is covered by the report-card and wave-10 suites.
+    const resultSet = await raw.resultSet.create({
+      data: {
+        organizationId,
+        termId,
+        scopeType: 'class',
+        scopeId: `a0-publish-${Date.now()}`,
+        revision: 1,
+        status: 'published',
+        publishedAt: new Date(),
+      },
+    });
+    const card = await raw.reportCard.create({
+      data: {
+        organizationId,
+        studentProfileId: s.id,
+        termId,
+        payload: {
+          provenance: { source: 'result_spine', resultSetId: resultSet.id, resultSetRevision: 1 },
+        } as any,
+      },
+    });
 
     const published = await asUser('head', () => reportCards.publish(card.id)) as any;
     expect(published.publishedAt).not.toBeNull();
