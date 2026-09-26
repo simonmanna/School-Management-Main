@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { assertTermWritable } from '../foundation/academic-year-guard';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { MarkingService } from './marking.service';
@@ -277,6 +278,8 @@ export class GradebookService {
     if (!klass) throw new NotFoundException(`Class ${dto.classId} not found`);
     if (!subject) throw new NotFoundException(`Subject ${dto.subjectId} not found`);
     if (!term) throw new NotFoundException(`Term ${dto.termId} not found`);
+    // Re-audit #3 P1-14: a closed year's assessments and results are history.
+    await assertTermWritable(this.prisma.client, this.org, dto.termId);
     if (dto.componentId) {
       const component = await this.prisma.client.assessmentComponent.findFirst({ where: { id: dto.componentId } });
       if (!component) throw new NotFoundException(`Component ${dto.componentId} not found`);
@@ -317,6 +320,7 @@ export class GradebookService {
   async updateColumn(assessmentId: string, dto: UpdateGradebookColumnDto) {
     const assessment = await this.prisma.client.assessment.findFirst({ where: { id: assessmentId, deletedAt: null } });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
+    await assertTermWritable(this.prisma.client, this.org, assessment.termId); // re-audit #3 P1-14
 
     // Rescaling a maximum after marks exist silently restates every percentage.
     if (dto.maxScore != null && Number(dto.maxScore) !== Number(assessment.maxScore)) {
@@ -347,6 +351,7 @@ export class GradebookService {
   async deleteColumn(assessmentId: string, force = false) {
     const assessment = await this.prisma.client.assessment.findFirst({ where: { id: assessmentId, deletedAt: null } });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
+    await assertTermWritable(this.prisma.client, this.org, assessment.termId); // re-audit #3 P1-14
 
     const marked = await this.prisma.client.markEntry.count({ where: { studentAssessment: { assessmentId } } });
     if (marked > 0 && !force) {
@@ -368,6 +373,7 @@ export class GradebookService {
   async setLock(assessmentId: string, locked: boolean) {
     const assessment = await this.prisma.client.assessment.findFirst({ where: { id: assessmentId, deletedAt: null } });
     if (!assessment) throw new NotFoundException(`Assessment ${assessmentId} not found`);
+    await assertTermWritable(this.prisma.client, this.org, assessment.termId); // re-audit #3 P1-14
     await this.prisma.client.assessment.updateMany({
       where: { id: assessmentId },
       data: { lockedAt: locked ? new Date() : null },

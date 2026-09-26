@@ -56,7 +56,7 @@ export class AcademicYearController {
    * parameter route.
    */
   @Patch(':id/status')
-  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  @RequirePermissions(PERMISSIONS.school.manageYearLifecycle)
   setStatus(@Param('id') id: string, @Body() dto: SetAcademicYearStatusDto) {
     return this.years.setStatus(id, dto);
   }

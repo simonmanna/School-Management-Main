@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import type { WorkflowDefinition } from '@erp/shared';
 import { WorkflowRegistry } from '../../../kernel/workflow/workflow.registry';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -7,6 +7,7 @@ import { StockService } from '../../inventory/stock.service';
 import { DocumentBuilderService } from '../document/document-builder.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
 import { JournalService } from '../../accounting/journal/journal.service';
+import { SCHOOL_FEE_SOURCE_TYPES } from '../../school/fees/fee-document.constants';
 
 /**
  * Registers the workflows for invoicing-side documents (ADR-007): invoice,
@@ -275,6 +276,7 @@ export class InvoicingWorkflowsInitializer implements OnModuleInit {
           permission: 'payment:void',
           sideEffect: async (ctx, tx) => {
             const payment = ctx.entity as any;
+            await this.refuseSchoolFeePayment(tx, payment);
             if (payment.journalEntryId) {
               await this.posting.reverse(payment.journalEntryId, { description: `Void of ${payment.paymentNumber}` }, tx);
             }
@@ -314,5 +316,29 @@ export class InvoicingWorkflowsInitializer implements OnModuleInit {
         },
       ],
     };
+  }
+
+  /**
+   * Re-audit #3 P1-8. This generic void hard-deletes allocations and drawer
+   * movements and knows nothing of fee credits, reversal records or term
+   * close. A school-fee receipt voided here lost its audit trail and could
+   * restore an invoice balance twice (once per already-reversed allocation).
+   * School fees are corrected through `POST /school/finance/payments/:id/reverse`.
+   */
+  private async refuseSchoolFeePayment(tx: any, payment: any) {
+    const feeAllocation = await tx.paymentAllocation.findFirst({
+      where: {
+        paymentId: payment.id,
+        document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } },
+      },
+      select: { id: true },
+    });
+    const fundedCredit = await tx.feeCredit.findFirst({ where: { sourcePaymentId: payment.id }, select: { id: true } });
+    if (feeAllocation || fundedCredit) {
+      throw new BadRequestException(
+        `${payment.paymentNumber ?? 'This payment'} is a school-fee receipt. Reverse it from Fees (reverse payment), ` +
+          'which keeps the reversal trail, unwinds credits and respects term close.',
+      );
+    }
   }
 }

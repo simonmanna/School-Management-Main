@@ -68,7 +68,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-no-reply@cafe-pos.local}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@school.local}
     ports:
       - "3000:3000"
     volumes:

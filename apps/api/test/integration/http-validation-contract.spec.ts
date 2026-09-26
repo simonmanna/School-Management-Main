@@ -17,6 +17,8 @@
  * test business logic — other specs do that — but to prove the request actually
  * reaches it.
  */
+import { DataScopeService } from '../../src/kernel/auth/data-scope.service';
+import { PrismaService } from '../../src/kernel/prisma/prisma.service';
 import { INestApplication, ValidationPipe, ExecutionContext } from '@nestjs/common';
 
 import { APP_GUARD } from '@nestjs/core';
@@ -86,6 +88,9 @@ describe('http contract: enrollment & placement routes survive the global Valida
         // No Idempotency-Key header in these requests: the interceptor just runs the handler.
         { provide: IdempotencyService, useValue: { execute: async (p: any) => ({ replayed: false, ...(await p.runHandler()) }) } },
         { provide: TenantContextService, useValue: { organizationId: 'org-test', userId: 'user-test' } },
+        // Re-audit #3 P1-15: enrollment/placement reads check the caller's data scope.
+        { provide: DataScopeService, useValue: { assertMayReadStudent: async () => undefined, assertMayReadClass: async () => undefined } },
+        { provide: PrismaService, useValue: { client: { studentEnrollment: { findFirst: async () => null }, classCohort: { findFirst: async () => null } } } },
         { provide: APP_GUARD, useClass: AllowAll },
       ],
     }).compile();

@@ -30,6 +30,7 @@ import { FilesPage } from '@/pages/files';
 import { ModulesPage } from '@/pages/modules';
 import { CrmDashboardPage } from '@/pages/crm/dashboard';
 import { SchoolDashboardPage } from '@/pages/school/dashboard';
+import { SchoolGuidePage } from '@/pages/school/guide';
 import { SchoolStudentsPage } from '@/pages/school/students';
 import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
@@ -525,6 +526,7 @@ export function App() {
           <Route path="/tasks/:id/edit" element={<TaskEditPage />} />
           {/* CRM — static segments before /crm/deals/:id */}
           <Route path="/crm" element={<CrmDashboardPage />} />
+          <Route path="/school/guide" element={<SchoolGuidePage />} />
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />

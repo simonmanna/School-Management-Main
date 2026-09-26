@@ -5,6 +5,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { BillingService } from './billing.service';
 import { FinanceControlsService } from './finance-controls.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { BILLABLE_STUDENT_STATUSES } from './fee-document.constants';
 
 /**
  * Phase 1.5 — billing as a resumable, auditable job (P1-10).
@@ -37,7 +38,7 @@ export class BillingRunService {
   async start(termId: string, classId?: string) {
     const organizationId = this.tenant.organizationId;
     await this.controls.assertTermOpen(termId);
-    const where: any = { organizationId, status: 'active' };
+    const where: any = { organizationId, status: { in: [...BILLABLE_STUDENT_STATUSES] } }; // D3
     // Placement history rather than the StudentProfile projection (ADR-027).
     // Compat: a learner not yet backfilled still matches on their projection.
     if (classId) Object.assign(where, this.placements.studentWhere({ classIds: [classId] }));

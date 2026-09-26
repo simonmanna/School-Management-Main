@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
+import { currentTerminology } from '@/features/school/api';
 import { Empty, apiMessage, num, selectClass } from './exam-ops-shared';
 
 const OUTCOMES = [
@@ -169,7 +170,7 @@ export function PromotionDecisionsPanel({
                     <TableHead>Recommended</TableHead>
                     <TableHead>Decision</TableHead>
                     <TableHead>Moves into</TableHead>
-                    <TableHead>Section / stream</TableHead>
+                    <TableHead>{currentTerminology().section}</TableHead>
                     <TableHead>Reason</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -253,7 +254,7 @@ export function PromotionDecisionsPanel({
                                     value={decisions[r.id]?.toStreamId ?? r.toStreamId ?? ''}
                                     onChange={(e) => patch(r.id, { toStreamId: e.target.value })}
                                   >
-                                    <option value="">Stream…</option>
+                                    <option value="">{currentTerminology().section}…</option>
                                     {streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                                   </select>
                                 )}

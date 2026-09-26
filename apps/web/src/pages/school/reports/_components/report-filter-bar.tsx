@@ -7,7 +7,6 @@ import {
   useClasses,
   useResultSets,
   useSectionsForClass,
-  useStreams,
   useSubjects,
   useTerms, currentTerminology } from '@/features/school/api';
 import type { ReportCatalogEntry, ReportFilters } from '@/features/school/reports-api';
@@ -77,7 +76,6 @@ export function ReportFilterBar({
   const campuses = useCampuses();
   const subjects = useSubjects();
   const sections = useSectionsForClass(shows.has('sectionId') ? filters.classId : undefined);
-  const streams = useStreams(shows.has('streamId') ? filters.classId : undefined);
   const resultSets = useResultSets(shows.has('resultSetId') ? filters.termId : undefined);
 
   const opt = (rows: Array<{ id: string; name?: string }> | undefined) =>
@@ -124,8 +122,8 @@ export function ReportFilterBar({
         <Field label="Class" required={required.has('classId')}>
           <Select
             value={filters.classId}
-            // Sections and streams hang off the class — clear them together.
-            onChange={(v) => onChange({ ...filters, classId: v, sectionId: undefined, streamId: undefined })}
+            // Sections hang off the class — clear them together.
+            onChange={(v) => onChange({ ...filters, classId: v, sectionId: undefined })}
             options={opt(classes.data?.data)}
             placeholder={required.has('classId') ? 'Select a class' : 'All classes'}
           />
@@ -138,18 +136,7 @@ export function ReportFilterBar({
             value={filters.sectionId}
             onChange={(v) => set('sectionId', v)}
             options={opt(sections.data)}
-            placeholder={filters.classId ? 'All sections' : 'Pick a class first'}
-          />
-        </Field>
-      )}
-
-      {shows.has('streamId') && (
-        <Field label="Stream" required={required.has('streamId')}>
-          <Select
-            value={filters.streamId}
-            onChange={(v) => set('streamId', v)}
-            options={opt(streams.data?.data)}
-            placeholder={filters.classId ? 'All streams' : 'Pick a class first'}
+            placeholder={filters.classId ? `All ${currentTerminology().sectionPlural.toLowerCase()}` : 'Pick a class first'}
           />
         </Field>
       )}

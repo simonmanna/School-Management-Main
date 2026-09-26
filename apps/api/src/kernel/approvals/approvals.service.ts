@@ -38,6 +38,7 @@ type WorkflowRow = {
 /** entityType -> where it is decided instead of the generic approvals page. */
 const DECIDED_ELSEWHERE: Record<string, string> = {
   school_fee_refund: 'Fees → Refund',
+  school_fee_correction: 'Fees → Corrections',
 };
 
 @Injectable()

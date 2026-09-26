@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
-import { Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, Mail, Monitor, Calendar, FileText, Coffee, ShieldCheck, Zap } from 'lucide-react';
+import { Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, Mail, Calendar, FileText, GraduationCap, ShieldCheck, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/lib/api';
@@ -208,7 +208,7 @@ export function LoginPage() {
 
             <div className="relative flex items-center gap-3">
               <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md border border-white/25">
-                <Coffee className="h-6 w-6 text-amber-300" />
+                <GraduationCap className="h-6 w-6 text-amber-300" />
               </div>
               <div className="text-xl font-extrabold tracking-tight">School Management</div>
               <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-400/15 border border-emerald-300/30 px-3 py-1 text-xs font-bold text-emerald-300">
@@ -218,26 +218,26 @@ export function LoginPage() {
 
             <div className="relative flex flex-col items-start justify-center flex-1 text-left">
               <h1 className="text-5xl font-black leading-[1.05] tracking-tight mb-5 max-w-md">
-                Run your floor,<br />tables & till —<br />
-                <span className="text-gradient">all in one place.</span>
+                Admissions, classes<br />& fees —<br />
+                <span className="text-gradient">one school, one place.</span>
               </h1>
               <p className="text-white/70 max-w-sm text-sm leading-relaxed">
-                One command center for orders, kitchen, inventory and books. Fast at the counter, honest in the ledger.
+                Pupils, registers, marks, fees and parents for your nursery and primary school. Sign in with your school code.
               </p>
 
               <div className="mt-8 flex gap-6">
-                <Stat value="99.9%" label="Uptime" />
+                <Stat value="Baby–P7" label="Classes" />
                 <div className="w-px bg-white/15" />
-                <Stat value="<200ms" label="Order sync" />
+                <Stat value="UGX" label="Fees & receipts" />
                 <div className="w-px bg-white/15" />
-                <Stat value="24/7" label="Offline-ready" />
+                <Stat value="SMS" label="Parent alerts" />
               </div>
             </div>
 
             <div className="relative grid grid-cols-3 gap-3 mt-10">
-              <Feature icon={<Monitor className="h-5 w-5" />} label="Tables" />
-              <Feature icon={<Calendar className="h-5 w-5" />} label="Reservations" />
-              <Feature icon={<FileText className="h-5 w-5" />} label="Audit" />
+              <Feature icon={<GraduationCap className="h-5 w-5" />} label="Pupils" />
+              <Feature icon={<Calendar className="h-5 w-5" />} label="Terms" />
+              <Feature icon={<FileText className="h-5 w-5" />} label="Report cards" />
             </div>
           </div>
 
@@ -246,7 +246,7 @@ export function LoginPage() {
             {/* Mobile-only brand row */}
             <div className="md:hidden flex items-center gap-2 mb-6">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 border border-white/20 text-amber-300">
-                <Coffee className="h-4 w-4" />
+                <GraduationCap className="h-4 w-4" />
               </div>
               <div className="font-extrabold text-base text-gradient">School Management</div>
             </div>
@@ -281,7 +281,7 @@ export function LoginPage() {
                     autoComplete="organization"
                     required
                     className="h-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40"
-                    placeholder="DEMO"
+                    placeholder="e.g. GVPS"
                   />
                 </Field>
                 <Field label="Email">

@@ -53,15 +53,16 @@ import {
 export class BookMetadataController {
   constructor(private readonly service: BookMetadataService) {}
   @Get() @RequirePermissions(PERMISSIONS.school.read) list(@Query() q: PaginationDto) { return this.service.list(q); }
+  // Dashboard / Reports — declared BEFORE ':id', or Express routes /books/stats
+  // to findOne('stats') and the library dashboard answers 404.
+  @Get('stats') @RequirePermissions(PERMISSIONS.school.read) getStats() { return this.service.getStats(); }
+  @Get('overdue') @RequirePermissions(PERMISSIONS.school.read) getOverdue() { return this.service.getOverdue(); }
+  @Get('popular') @RequirePermissions(PERMISSIONS.school.read) getPopular() { return this.service.getPopular(); }
   @Get(':id') @RequirePermissions(PERMISSIONS.school.read) findOne(@Param('id') id: string) { return this.service.findOne(id); }
   @Post() @RequirePermissions(PERMISSIONS.school.manageLibrary) create(@Body() dto: CreateBookMetadataDto) { return this.service.create(dto); }
   @Patch(':id') @RequirePermissions(PERMISSIONS.school.manageLibrary) update(@Param('id') id: string, @Body() dto: UpdateBookMetadataDto) { return this.service.update(id, dto); }
   @Delete(':id') @HttpCode(204) @RequirePermissions(PERMISSIONS.school.manageLibrary) remove(@Param('id') id: string) { return this.service.remove(id); }
 
-  // Dashboard / Reports
-  @Get('stats') @RequirePermissions(PERMISSIONS.school.read) getStats() { return this.service.getStats(); }
-  @Get('overdue') @RequirePermissions(PERMISSIONS.school.read) getOverdue() { return this.service.getOverdue(); }
-  @Get('popular') @RequirePermissions(PERMISSIONS.school.read) getPopular() { return this.service.getPopular(); }
 }
 
 @Controller('school/library/copies')
@@ -71,6 +72,7 @@ export class BookCopyController {
   @Get(':id') @RequirePermissions(PERMISSIONS.school.read) findOne(@Param('id') id: string) { return this.service.findOne(id); }
   @Post() @RequirePermissions(PERMISSIONS.school.manageLibrary) create(@Body() dto: CreateBookCopyDto) { return this.service.create(dto); }
   @Patch(':id') @RequirePermissions(PERMISSIONS.school.manageLibrary) update(@Param('id') id: string, @Body() dto: UpdateBookCopyDto) { return this.service.update(id, dto); }
+  @Delete(':id') @HttpCode(204) @RequirePermissions(PERMISSIONS.school.manageLibrary) remove(@Param('id') id: string) { return this.service.remove(id); }
 }
 
 @Controller('school/library/borrowings')

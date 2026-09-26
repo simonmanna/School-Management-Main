@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
+import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { PERMISSIONS } from '@erp/shared';
@@ -125,7 +127,22 @@ export class StudentEnrollmentController {
   constructor(
     private readonly service: StudentEnrollmentService,
     private readonly placements: PlacementService,
+    private readonly dataScope: DataScopeService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Re-audit #3 P1-15: enrollment and placement reads skipped data scope, so a
+   * class-scoped teacher could read any pupil's history by id. They now follow
+   * the same rule as opening the pupil (`DataScopeService.assertMayReadStudent`).
+   */
+  private async assertMayReadEnrollment(enrollmentId: string) {
+    const row = await this.prisma.client.studentEnrollment.findFirst({
+      where: { id: enrollmentId },
+      select: { studentProfileId: true },
+    });
+    if (row) await this.dataScope.assertMayReadStudent(row.studentProfileId);
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
@@ -153,7 +170,8 @@ export class StudentEnrollmentController {
 
   @Get('by-student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
-  forStudent(@Param('studentProfileId') studentProfileId: string) {
+  async forStudent(@Param('studentProfileId') studentProfileId: string) {
+    await this.dataScope.assertMayReadStudent(studentProfileId);
     return this.service.forStudent(studentProfileId);
   }
 
@@ -163,19 +181,22 @@ export class StudentEnrollmentController {
    */
   @Get('placement-at/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
-  placementAt(@Param('studentProfileId') studentProfileId: string, @Query('at') at?: string) {
+  async placementAt(@Param('studentProfileId') studentProfileId: string, @Query('at') at?: string) {
+    await this.dataScope.assertMayReadStudent(studentProfileId);
     return this.placements.placementAt(studentProfileId, at ? new Date(at) : new Date());
   }
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
-  get(@Param('id') id: string) {
+  async get(@Param('id') id: string) {
+    await this.assertMayReadEnrollment(id);
     return this.service.get(id);
   }
 
   @Get(':id/placements')
   @RequirePermissions(PERMISSIONS.school.read)
-  history(@Param('id') id: string) {
+  async history(@Param('id') id: string) {
+    await this.assertMayReadEnrollment(id);
     return this.placements.history(id);
   }
 
@@ -241,17 +262,24 @@ export class StudentEnrollmentController {
 @Idempotent()
 @Controller('school/placements')
 export class PlacementController {
-  constructor(private readonly service: PlacementService) {}
+  constructor(
+    private readonly service: PlacementService,
+    private readonly dataScope: DataScopeService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /** The class list for a cohort, as it stood at `at` (default: now). */
   @Get('roster/:cohortId')
   @RequirePermissions(PERMISSIONS.school.read)
-  roster(
+  async roster(
     @Param('cohortId') cohortId: string,
     @Query('at') at?: string,
     @Query('sectionId') sectionId?: string,
     @Query('termId') termId?: string,
   ) {
+    // Re-audit #3 P1-15: a class-scoped teacher lists only classes they teach.
+    const cohort = await this.prisma.client.classCohort.findFirst({ where: { id: cohortId }, select: { classId: true } });
+    if (cohort) await this.dataScope.assertMayReadClass(cohort.classId);
     return this.service.roster(cohortId, { at: at ? new Date(at) : undefined, sectionId, termId });
   }
 

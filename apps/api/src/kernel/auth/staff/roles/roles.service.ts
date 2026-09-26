@@ -22,7 +22,8 @@ const PERMISSION_SET = new Set<string>(ALL_PERMISSIONS);
 /**
  * RBAC role management. Scoped to the current organization via the
  * tenant-aware Prisma extension. System roles (e.g. "Administrator") are
- * seeded by default but are editable/deletable like any other role.
+ * seeded by default; they can be edited only by someone holding every one of
+ * their permissions, and never deleted.
  */
 @Injectable()
 export class RolesService {
@@ -103,6 +104,7 @@ export class RolesService {
   async update(id: string, dto: UpdateRoleDto): Promise<Role> {
     const current = await this.prisma.client.role.findFirst({ where: { id } });
     if (!current) throw new NotFoundException(`Role ${id} not found`);
+    this.assertMayAdminister(current);
     if (dto.permissions) this.validatePermissions(dto.permissions);
 
     // Privilege-escalation guard (see create()).
@@ -169,6 +171,8 @@ export class RolesService {
       include: { _count: { select: { users: true } } },
     });
     if (!role) throw new NotFoundException(`Role ${id} not found`);
+    if (role.isSystem) throw new ForbiddenException(`"${role.name}" is a built-in role and cannot be deleted.`);
+    this.assertMayAdminister(role);
     if (role._count.users > 0) {
       throw new ConflictException(
         `Role "${role.name}" is assigned to ${role._count.users} user(s); reassign them first`,
@@ -185,6 +189,24 @@ export class RolesService {
       });
     });
     this.events.publish(EVENTS.RoleDeleted, { id, organizationId: role.organizationId });
+  }
+
+  /**
+   * An actor may only edit or delete a role whose authority they hold in full
+   * (re-audit #10). The grant check alone stopped escalation but not the
+   * reverse: an IT Admin could empty or rename the Administrator role — a
+   * subset of their own permissions — and demote every administrator.
+   */
+  private assertMayAdminister(role: { name: string; permissions: string[] }): void {
+    const actor = this.tenant.permissions;
+    if (actor.includes('*')) return;
+    const beyond = (role.permissions ?? []).filter((p) => !actor.includes(p));
+    if (beyond.length > 0) {
+      throw new ForbiddenException(
+        `You cannot change the role "${role.name}": it holds permissions you do not have ` +
+          `(${beyond.slice(0, 5).join(', ')}${beyond.length > 5 ? ', …' : ''}).`,
+      );
+    }
   }
 
   private validatePermissions(perms: string[]): void {

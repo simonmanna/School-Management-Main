@@ -18,6 +18,8 @@ import {
   useRefundFee,
   useRefundRequests,
   useDecideRefundRequest,
+  useFeeCorrections,
+  useDecideFeeCorrection,
   useSponsorships,
   useCreateSponsorship,
   useFeeCredits,
@@ -391,6 +393,7 @@ function RefundTab() {
       </CardContent>
     </Card>
     <RefundRequestsCard />
+    <CorrectionRequestsCard />
     </div>
   );
 }
@@ -438,6 +441,75 @@ function RefundRequestsCard() {
                 />
                 <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => act(r.id, 'reject')}>Refuse</Button>
                 <Button size="sm" disabled={decide.isPending} onClick={() => act(r.id, 'approve')}>Approve &amp; pay out</Button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {r.createdById === me ? 'You requested this — someone else must approve it.' : 'Waiting for an approver.'}
+              </p>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+const CORRECTION_LABEL: Record<string, string> = {
+  reverse_payment: 'Reverse receipt',
+  reverse_allocation: 'Un-apply payment',
+  reallocate: 'Reallocate receipt',
+  credit: 'Manual fee credit',
+};
+
+/**
+ * D4 (re-audit #3): reversals, reallocations and manual credits wait here for
+ * a second person. The requester cannot decide their own.
+ */
+function CorrectionRequestsCard() {
+  const { data: requests } = useFeeCorrections('pending');
+  const decide = useDecideFeeCorrection();
+  const me = useAuthStore((s) => s.user?.id);
+  const perms = useAuthStore((s) => s.permissions);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  if (!requests || requests.length === 0) return null;
+
+  const mayDecide = (kind: string) =>
+    perms.includes(kind === 'credit' ? 'school:fees:credit:approve' : 'school:fees:refund:approve');
+  const act = async (id: string, decision: 'approve' | 'reject') => {
+    try {
+      await decide.mutateAsync({ id, decision, reason: reasons[id] });
+      notify.success(decision === 'approve' ? 'Correction approved and applied' : 'Correction refused');
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not record the decision');
+    }
+  };
+
+  return (
+    <Card className="max-w-xl">
+      <CardHeader><CardTitle className="text-base">Fee corrections awaiting approval</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        {requests.map((r) => (
+          <div key={r.id} className="space-y-2 rounded-md border p-3 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="font-medium">{CORRECTION_LABEL[r.snapshot.kind] ?? r.snapshot.kind}</div>
+                <div className="text-xs text-muted-foreground">
+                  {r.snapshot.amount != null ? `${money(r.snapshot.amount)} · ` : ''}
+                  {r.snapshot.correction.reason ?? r.snapshot.correction.source ?? ''} · requested {new Date(r.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <Badge variant="outline">Pending</Badge>
+            </div>
+            {mayDecide(r.snapshot.kind) && r.createdById !== me ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  className="h-8 flex-1"
+                  placeholder="Reason (required to refuse)"
+                  value={reasons[r.id] ?? ''}
+                  onChange={(e) => setReasons({ ...reasons, [r.id]: e.target.value })}
+                />
+                <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => act(r.id, 'reject')}>Refuse</Button>
+                <Button size="sm" disabled={decide.isPending} onClick={() => act(r.id, 'approve')}>Approve &amp; apply</Button>
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
@@ -520,7 +592,10 @@ function CreditsTab() {
   const apply = useApplyCredits();
   const [studentProfileId, setStudentProfileId] = useState('');
   const [amount, setAmount] = useState('');
-  const [source, setSource] = useState('advance');
+  // Re-audit #3 P1-9: the API accepts only these origins for a manual credit.
+  // 'advance' / 'refund' / 'adjustment' were always rejected; an overpayment
+  // credit is made at the till (collect → hold the rest as credit).
+  const [source, setSource] = useState<'opening_balance' | 'approved_adjustment'>('opening_balance');
 
   const studentOptions = (students.data?.data ?? []).map((s: any) => ({ value: s.id, label: s.admissionNo ? `${s.admissionNo} · ${s.firstName} ${s.lastName}` : s.id }));
 
@@ -535,15 +610,19 @@ function CreditsTab() {
             {studentOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Amount" type="number" />
-          <select className={sel} value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="advance">Advance</option>
-            <option value="refund">Refund</option>
-            <option value="overpayment">Overpayment</option>
-            <option value="adjustment">Adjustment</option>
+          <select className={sel} value={source} onChange={(e) => setSource(e.target.value as 'opening_balance' | 'approved_adjustment')}>
+            <option value="opening_balance">Opening balance</option>
+            <option value="approved_adjustment">Approved adjustment</option>
           </select>
         </div>
         <div className="flex gap-2">
-          <Button disabled={!studentProfileId || !amount || create.isPending} onClick={() => create.mutate({ studentProfileId, amount: Number(amount), source }, { onSuccess: () => { setAmount(''); } })}>
+          <Button disabled={!studentProfileId || !amount || create.isPending} onClick={() => create.mutate({ studentProfileId, amount: Number(amount), source }, {
+            onSuccess: (res) => {
+              setAmount('');
+              notify.success(res.status === 'pending_approval' ? 'Credit sent for approval' : 'Credit created');
+            },
+            onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Could not create the credit'),
+          })}>
             <Plus className="h-4 w-4 mr-1" /> Create credit
           </Button>
           <Button variant="outline" disabled={!studentProfileId || apply.isPending} onClick={() => apply.mutate(studentProfileId)}>

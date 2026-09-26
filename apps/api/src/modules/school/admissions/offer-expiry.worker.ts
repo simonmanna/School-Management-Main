@@ -58,11 +58,16 @@ export class OfferExpiryWorker implements OnApplicationBootstrap, OnModuleDestro
     const orgs = await this.prisma.raw.organization.findMany({ select: { id: true } });
     let total = 0;
     for (const org of orgs) {
-      const res = await this.tenant.run(
-        { organizationId: org.id, userId: 'system:offer-expiry', permissions: [] },
-        () => this.admissions.expireLapsedOffers(),
-      );
-      total += res.expired;
+      // One school's bad row must not stop every later school's offers expiring.
+      try {
+        const res = await this.tenant.run(
+          { organizationId: org.id, userId: 'system:offer-expiry', permissions: [] },
+          () => this.admissions.expireLapsedOffers(),
+        );
+        total += res.expired;
+      } catch (err) {
+        this.logger.error(`offer expiry failed for org ${org.id}: ${(err as Error).message}`);
+      }
     }
     if (total > 0) this.logger.log(`Expired ${total} lapsed offer(s)`);
   }

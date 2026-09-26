@@ -7,6 +7,8 @@ import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { AdvancedFinanceService } from './advanced.service';
 import { FeeNotificationsSubscriber } from './fee-notifications.subscriber';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { CreateFeeCreditDto } from './dto.types';
+import { FinanceCorrectionRequestService } from './finance-correction-request.service';
 
 /**
  * Advanced school finance endpoints (P1/P2): sponsorships, waivers, fee
@@ -21,6 +23,7 @@ export class AdvancedFinanceController {
     private readonly finance: AdvancedFinanceService,
     private readonly feeNotifications: FeeNotificationsSubscriber,
     private readonly tenant: TenantContextService,
+    private readonly corrections: FinanceCorrectionRequestService,
   ) {}
 
   /* ── Sponsorships (Phase 5: contained, not production-ready) ──
@@ -124,11 +127,14 @@ export class AdvancedFinanceController {
   // Phase 0: creating a credit mints a balance-sheet liability (Dr AR / Cr
   // Fee-Credit Liability) with no funding source required — P1-2. Gated behind
   // its own permission until A2 makes an explicit origin mandatory.
+  // D4 (re-audit #3): a manual credit is requested by the bursar and released
+  // by the credit approver. The service decides maker vs checker; the route
+  // only requires fee read access so both sides can reach it.
   @Post('credits')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.school.approveCredits)
-  createCredit(@Body() dto: any) {
-    return this.finance.createCredit(dto);
+  @RequirePermissions(PERMISSIONS.school.readFees)
+  createCredit(@Body() dto: CreateFeeCreditDto) {
+    return this.corrections.submit({ kind: 'credit', ...dto });
   }
 
   @Get('credits')

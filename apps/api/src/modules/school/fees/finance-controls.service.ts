@@ -178,10 +178,18 @@ export class FinanceControlsService {
     const organizationId = this.tenant.organizationId;
     const adj = await this.prisma.client.feeAdjustment.findFirst({ where: { id, organizationId } });
     if (!adj) throw new NotFoundException(`Adjustment ${id} not found`);
-    const updated = await this.prisma.client.feeAdjustment.update({
-      where: { id: adj.id },
+    // Re-audit #3 P1-10: only a pending adjustment can be rejected. A posted one
+    // has already moved the invoice residual and the GL; flipping its status to
+    // 'rejected' dropped it from the balance while the ledger still carried it.
+    // Claimed conditionally so a concurrent approve and reject cannot both win.
+    const claimed = await this.prisma.client.feeAdjustment.updateMany({
+      where: { id: adj.id, status: 'pending_approval' },
       data: { status: 'rejected', rejectionReason: reason ?? null },
     });
+    if (claimed.count !== 1) {
+      throw new BadRequestException(`Adjustment ${adj.code} is ${adj.status}, not pending_approval`);
+    }
+    const updated = await this.prisma.client.feeAdjustment.findFirst({ where: { id: adj.id } });
     await this.audit.record({ entity: 'FeeAdjustment', entityId: adj.id, action: 'reject', newValues: { reason } });
     return updated;
   }

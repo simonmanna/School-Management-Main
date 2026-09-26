@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, RotateCcw, Save } from 'lucide-react';
 import { TERMINOLOGY_DEFAULTS, TERMINOLOGY_KEYS, type Terminology } from '@erp/shared';
-import { useSchoolProfile, useUpdateSchoolProfile, type UpdateSchoolProfileInput } from '@/features/school/api';
+import { currentTerminology, useSchoolProfile, useUpdateSchoolProfile, type UpdateSchoolProfileInput } from '@/features/school/api';
 import { useCurrencies } from '@/features/accounting/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -179,7 +179,7 @@ export function SchoolSettingsPage() {
             {!zoneValid && <p className="text-xs text-destructive">Not a valid IANA time zone.</p>}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="profile-capacity">When a class or stream is full</Label>
+            <Label htmlFor="profile-capacity">When a class or {currentTerminology().section.toLowerCase()} is full</Label>
             <select
               id="profile-capacity"
               className="h-9 w-full rounded-md border bg-background px-2 text-sm"

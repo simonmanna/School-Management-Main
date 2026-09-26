@@ -58,10 +58,16 @@ export class SuspensionExpiryWorker implements OnApplicationBootstrap, OnModuleD
     });
     let total = 0;
     for (const { organizationId } of due) {
-      total += await this.tenant.run(
-        { organizationId, userId: 'system:suspension-expiry', permissions: [] },
-        () => this.enrollments.liftExpiredSuspensions(now),
-      );
+      // Isolated per school: one failure must not leave every later school's
+      // pupils suspended past their return date.
+      try {
+        total += await this.tenant.run(
+          { organizationId, userId: 'system:suspension-expiry', permissions: [] },
+          () => this.enrollments.liftExpiredSuspensions(now),
+        );
+      } catch (err) {
+        this.logger.error(`suspension expiry failed for org ${organizationId}: ${(err as Error).message}`);
+      }
     }
     if (total > 0) this.logger.log(`Reinstated ${total} learner(s) at the end of their suspension`);
     return total;

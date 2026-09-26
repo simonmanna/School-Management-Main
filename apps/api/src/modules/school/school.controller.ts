@@ -2,12 +2,23 @@ import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
 import { SchoolService } from './school.service';
+import { SetupStatusService } from './setup-status.service';
 import { UpdateSchoolProfileDto } from './school-profile.dto';
 import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
 
 @Controller('school')
 export class SchoolController {
-  constructor(private readonly school: SchoolService) {}
+  constructor(
+    private readonly school: SchoolService,
+    private readonly setup: SetupStatusService,
+  ) {}
+
+  /** The "get your school ready" checklist shown on the dashboard. */
+  @Get('setup-status')
+  @RequirePermissions(PERMISSIONS.school.read)
+  setupStatus() {
+    return this.setup.status();
+  }
 
   @Get('overview')
   @RequirePermissions(PERMISSIONS.school.read)

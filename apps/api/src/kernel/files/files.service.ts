@@ -5,6 +5,7 @@ import { mkdir } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
 import { createHash, randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { DataScopeService } from '../auth/data-scope.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 /**
@@ -45,6 +46,7 @@ export class FilesService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     @Optional() private readonly audit?: AuditService,
+    @Optional() private readonly dataScope?: DataScopeService,
   ) {
     this.driver = (process.env.STORAGE_DRIVER as 'local' | 's3') ?? 'local';
     if (this.driver !== 'local') {
@@ -138,13 +140,21 @@ export class FilesService {
         organizationId: true,
         ownerType: true,
         uploadedById: true,
-        studentDocuments: { select: { type: true } },
+        studentDocuments: { select: { type: true, studentProfileId: true } },
         applicationDocuments: { select: { id: true } },
         schoolDocs: { select: { category: true, type: true } },
       },
     });
     if (!file) throw new NotFoundException('File not found');
     this.assertMayOpen(file);
+    // A pupil's own papers (birth certificate, ID, report) follow the pupil:
+    // a class-scoped teacher opens those of the pupils they teach, not every
+    // pupil in the school (re-audit #5).
+    if (file.uploadedById !== this.tenant.userId && this.dataScope) {
+      for (const id of new Set(file.studentDocuments.map((d) => d.studentProfileId))) {
+        await this.dataScope.assertMayReadStudent(id);
+      }
+    }
     return this.sign(file.id, file.organizationId);
   }
 

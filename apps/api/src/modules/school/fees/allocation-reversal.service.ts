@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { OPEN_COLLECTABLE_FEE_WHERE } from './fee-document.constants';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { PostingService } from '../../accounting/posting/posting.service';
@@ -9,6 +10,10 @@ import { AccountDeterminationService } from '../../accounting/posting/account-de
 import { PaymentService } from '../../invoicing/payment/payment.service';
 import { dec, ZERO } from '../../../kernel/common/money';
 import { FinanceControlsService } from './finance-controls.service';
+import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
+import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { DmsTypeResolver } from '../../documents/dms-type-resolver.service';
+import { SCHOOL_ACCOUNTS } from './school-accounts';
 
 /**
  * Reversal of settled money (Phase 3 of the Fees production-hardening).
@@ -58,6 +63,10 @@ export class PaymentAllocationReversalService {
     private readonly accounts: AccountDeterminationService,
     private readonly payments: PaymentService,
     private readonly controls: FinanceControlsService,
+    // Re-audit #3 P0-2: a bounced receipt must also unwind the credit it funded.
+    private readonly resolver: AccountResolverService,
+    private readonly sequence: SequenceService,
+    private readonly dmsTypes: DmsTypeResolver,
   ) {}
 
   /**
@@ -190,9 +199,11 @@ export class PaymentAllocationReversalService {
     paymentId: string,
     newAllocations: Array<{ documentId: string; amount: number }>,
     reason: string,
+    /** D4: an approved correction runs inside the transaction that claims it. */
+    externalTx?: any,
   ) {
     const organizationId = this.tenant.organizationId;
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const run = async (tx: any) => {
       const payment = await tx.payment.findFirst({ where: { id: paymentId, organizationId } });
       if (!payment) throw new NotFoundException(`Payment ${paymentId} not found`);
 
@@ -213,10 +224,24 @@ export class PaymentAllocationReversalService {
         );
       }
 
-      await this.controls.assertDocumentsPeriodOpen(
-        newAllocations.map((a) => a.documentId),
-        tx,
-      );
+      // Only this payer's open fee invoices (re-audit #7). The payment writer
+      // accepts any document, so a draft, cancelled, non-fee or other
+      // family's invoice used to absorb real money. Moving a receipt to a
+      // different pupil is a reversal and a new receipt, not a reallocation.
+      const ids = [...new Set(newAllocations.map((a) => a.documentId))];
+      const eligible = await tx.document.findMany({
+        where: { ...OPEN_COLLECTABLE_FEE_WHERE, id: { in: ids }, organizationId, partnerId: payment.partnerId },
+        select: { id: true },
+      });
+      if (eligible.length !== ids.length) {
+        const ok = new Set(eligible.map((d: { id: string }) => d.id));
+        throw new BadRequestException(
+          `Only open fee invoices of the same payer can receive this payment (not: ${ids.filter((id) => !ok.has(id)).join(', ')}). ` +
+            'To move money to another pupil, reverse the payment and record a new one.',
+        );
+      }
+
+      await this.controls.assertDocumentsPeriodOpen(ids, tx);
 
       // Reuse the single payment writer's allocation semantics rather than
       // hand-rolling document maths here (ADR-011 §4).
@@ -232,7 +257,8 @@ export class PaymentAllocationReversalService {
         newValues: { reversed: posted.length, created: newAllocations.length, reason },
       });
       return { paymentId, reversed: posted.length, allocations: created };
-    });
+    };
+    return externalTx ? run(externalTx) : this.prisma.client.$transaction(run);
   }
 
   /**
@@ -243,21 +269,43 @@ export class PaymentAllocationReversalService {
    * Every allocation is reversed first, then the payment is cancelled and its
    * cash movement compensated.
    */
-  async reversePayment(paymentId: string, reason: string) {
+  async reversePayment(paymentId: string, reason: string, externalTx?: any) {
     if (!reason?.trim()) {
       throw new BadRequestException('A payment reversal must carry a reason — it is the audit trail.');
     }
     const organizationId = this.tenant.organizationId;
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const run = async (tx: any) => {
       const payment = await tx.payment.findFirst({ where: { id: paymentId, organizationId } });
       if (!payment) throw new NotFoundException(`Payment ${paymentId} not found`);
       if (payment.status === 'cancelled') {
         return { paymentId, alreadyReversed: true };
       }
+      if (payment.direction && payment.direction !== 'inbound') {
+        // A refund payout is money that left; "it never arrived" does not apply.
+        throw new BadRequestException(
+          'Only a receipt can be reversed as never received. A refund payout is corrected with a new receipt.',
+        );
+      }
 
       const posted = await tx.paymentAllocation.findMany({
         where: { organizationId, paymentId, status: 'posted' },
       });
+
+      // Re-audit #3 P0-2 - what this receipt funded beyond its allocations.
+      // Read BEFORE the allocation reversals below move value back into the
+      // unallocated pot. Of the receipt's amount, whatever is not allocated,
+      // not still unallocated and not converted to a credit was refunded in
+      // cash: money the family was paid out of a receipt that never arrived.
+      const fundedCredits = await tx.feeCredit.findMany({
+        where: { organizationId, sourcePaymentId: paymentId, status: { not: 'reversed' } },
+        orderBy: { createdAt: 'asc' },
+      });
+      const allocatedBefore = posted.reduce((t: Prisma.Decimal, a: any) => t.plus(dec(a.amount)), ZERO);
+      const creditedBefore = fundedCredits.reduce((t: Prisma.Decimal, c: any) => t.plus(dec(c.amount)), ZERO);
+      const refundedCash = Prisma.Decimal.max(
+        ZERO,
+        dec(payment.amount ?? 0).minus(allocatedBefore).minus(dec(payment.unallocatedAmount ?? 0)).minus(creditedBefore),
+      );
       for (const alloc of posted) {
         await this.reverseAllocation(alloc.id, `Payment reversed: ${reason}`, tx);
       }
@@ -279,6 +327,15 @@ export class PaymentAllocationReversalService {
         where: { id: paymentId },
         data: { status: 'cancelled', allocatedAmount: ZERO, unallocatedAmount: ZERO },
       });
+
+      // Owner decision D2 (2026-09-25): unspent credit is voided; what the
+      // credit already settled re-opens on those invoices; what was paid out in
+      // cash becomes a receivable on the family's account.
+      const unwound = await this.unwindFundedCredits(tx, fundedCredits, reason, payment.partnerId);
+      const recoveryAmount = refundedCash.plus(unwound.refunded);
+      const recovery = recoveryAmount.greaterThan(ZERO)
+        ? await this.raiseRecoveryCharge(tx, payment, recoveryAmount, reason)
+        : null;
 
       // The drawer never actually held this money, so the cash movement that
       // said it did must be compensated too or the Z-report overstates the till.
@@ -304,7 +361,13 @@ export class PaymentAllocationReversalService {
         entity: 'Payment',
         entityId: paymentId,
         action: 'reverse',
-        newValues: { reason, reversedAllocations: posted.length },
+        newValues: {
+          reason,
+          reversedAllocations: posted.length,
+          voidedCredits: unwound.creditIds,
+          reopenedByCredit: unwound.reopened.toString(),
+          recoveryDocumentId: recovery?.id ?? null,
+        },
       });
       this.events.publish('school.fee.payment.reversed', {
         organizationId,
@@ -312,7 +375,160 @@ export class PaymentAllocationReversalService {
         reason,
         reversedAllocations: posted.length,
       });
-      return { paymentId, alreadyReversed: false, reversedAllocations: posted.length };
+      return {
+        paymentId,
+        alreadyReversed: false,
+        reversedAllocations: posted.length,
+        voidedCredits: unwound.creditIds.length,
+        recoveryDocumentId: recovery?.id ?? null,
+        recoveryAmount: recoveryAmount.toString(),
+      };
+    };
+    return externalTx ? run(externalTx) : this.prisma.client.$transaction(run);
+  }
+
+  /**
+   * Re-audit #3 P0-2. Undo the credits a reversed receipt funded.
+   *
+   * For each credit: every posted drawdown is reversed (Dr AR / Cr Fee-Credit
+   * Liability; the invoice it settled is outstanding again), then the credit's
+   * whole unrefunded value is voided (Dr Liability / Cr AR, the mirror of
+   * `createCredit`). The part already refunded is returned so the caller can
+   * raise it as a receivable; the liability for it was discharged by the payout.
+   */
+  private async unwindFundedCredits(tx: any, credits: any[], reason: string, partnerId: string) {
+    const organizationId = this.tenant.organizationId;
+    const out = { creditIds: [] as string[], reopened: ZERO, refunded: ZERO };
+    if (credits.length === 0) return out;
+    const arAccount = await this.accounts.receivableAccount(null, tx);
+    const liability = await this.resolver.ensureByCode(SCHOOL_ACCOUNTS.feeCredit.code, SCHOOL_ACCOUNTS.feeCredit, tx);
+
+    for (const credit of credits) {
+      const drawdowns = await tx.feeCreditAllocation.findMany({
+        where: { organizationId, feeCreditId: credit.id, status: 'posted' },
+      });
+      await this.controls.assertDocumentsPeriodOpen(drawdowns.map((d: any) => d.documentId), tx);
+      let drawn = ZERO;
+      for (const d of drawdowns) {
+        const amount = dec(d.amount);
+        const doc = await tx.document.findFirst({ where: { id: d.documentId, organizationId } });
+        if (!doc) throw new NotFoundException(`Document ${d.documentId} not found`);
+        const residual = dec(doc.amountResidual).plus(amount);
+        await tx.document.update({
+          where: { id: doc.id },
+          data: {
+            amountResidual: residual,
+            paymentStatus: residual.greaterThanOrEqualTo(dec(doc.totalAmount)) ? 'not_paid' : 'partial',
+            status: doc.status === 'paid' ? 'posted' : doc.status,
+          },
+        });
+        await this.posting.post(
+          {
+            journalCode: 'GEN',
+            date: new Date(),
+            description: `Credit drawdown reversed · ${credit.code} · ${doc.documentNumber}`,
+            sourceType: 'school_fee_credit_apply_reversal',
+            sourceId: d.id,
+            lines: [
+              { accountId: arAccount, debit: amount.toString(), partnerId, description: 'AR re-opened: funding receipt reversed' },
+              { accountId: liability, credit: amount.toString(), description: 'Fee credit drawdown reversed' },
+            ],
+          },
+          tx,
+        );
+        await tx.feeCreditAllocation.update({
+          where: { id: d.id },
+          data: { status: 'reversed', reversedById: this.tenant.userId ?? null },
+        });
+        drawn = drawn.plus(amount);
+      }
+
+      const voidable = dec(credit.remaining).plus(drawn);
+      if (voidable.greaterThan(ZERO)) {
+        await this.posting.post(
+          {
+            journalCode: 'GEN',
+            date: new Date(),
+            description: `Fee credit voided · ${credit.code} · ${reason.trim()}`,
+            sourceType: 'school_fee_credit_void',
+            sourceId: credit.id,
+            lines: [
+              { accountId: liability, debit: voidable.toString(), description: 'Fee credit voided' },
+              { accountId: arAccount, credit: voidable.toString(), partnerId, description: 'Funding receipt reversed' },
+            ],
+          },
+          tx,
+        );
+      }
+      // Conditional on the value read above, so a concurrent drawdown or refund
+      // of this credit aborts the reversal instead of being silently lost.
+      const claimed = await tx.feeCredit.updateMany({
+        where: { id: credit.id, remaining: credit.remaining, status: { not: 'reversed' } },
+        data: { remaining: ZERO, isActive: false, status: 'reversed' },
+      });
+      if (claimed.count !== 1) {
+        throw new BadRequestException(
+          `Fee credit ${credit.code} changed while this payment was being reversed. Nothing was reversed; retry.`,
+        );
+      }
+      out.creditIds.push(credit.id);
+      out.reopened = out.reopened.plus(drawn);
+      out.refunded = out.refunded.plus(
+        Prisma.Decimal.max(ZERO, dec(credit.amount).minus(dec(credit.remaining)).minus(drawn)),
+      );
+    }
+    return out;
+  }
+
+  /**
+   * Re-audit #3 P0-2 / D2. Money refunded out of a receipt that never arrived is
+   * owed back by the family. The receipt reversal has already put it on GL AR
+   * (Dr AR / Cr Cash for the full receipt), so this document posts NO journal:
+   * it is the subledger row that makes the student balance agree with GL AR.
+   */
+  private async raiseRecoveryCharge(tx: any, payment: any, amount: Prisma.Decimal, reason: string) {
+    const organizationId = this.tenant.organizationId;
+    const now = new Date();
+    const documentNumber = await this.sequence.next(
+      `feeinvoice:${now.getUTCFullYear()}`,
+      { prefix: 'REC-', padding: 6 },
+      tx,
+    );
+    const doc = await tx.document.create({
+      data: {
+        organizationId,
+        documentNumber,
+        documentType: 'sales_invoice',
+        documentTypeId: await this.dmsTypes.resolveIdByCode('sales_invoice', tx),
+        partnerId: payment.partnerId,
+        issueDate: now,
+        dueDate: now,
+        status: 'posted',
+        paymentStatus: 'not_paid',
+        postedAt: now,
+        reference: `RECOVERY-${payment.paymentNumber}`,
+        notes: `Refunded from receipt ${payment.paymentNumber}, which was reversed: ${reason.trim()}`,
+        sourceType: 'school_payment_recovery',
+        sourceId: payment.id,
+        subtotal: amount,
+        totalAmount: amount,
+        amountResidual: amount,
+      },
     });
+    await tx.documentLine.create({
+      data: {
+        organizationId,
+        documentId: doc.id,
+        description: `Refund paid out of reversed receipt ${payment.paymentNumber}`,
+        quantity: 1,
+        unitPrice: amount,
+        discountPercent: 0,
+        lineNumber: 1,
+        subtotal: amount,
+        total: amount,
+        taxAmount: 0,
+      },
+    });
+    return doc;
   }
 }

@@ -72,7 +72,12 @@ describe('RefundRequestService', () => {
     });
     const res: any = await svc.approve('req_1', 'ok');
     expect(res.status).toBe('refunded');
-    expect(payments.refundFee).toHaveBeenCalledWith({ ...dto, externalReference: 'refund-request:req_1' });
+    // Paid inside the transaction that claimed the request (re-audit #6).
+    expect(payments.refundFee).toHaveBeenCalledWith(
+      { ...dto, externalReference: 'refund-request:req_1' },
+      // approvedRequest: the payout may use the requester's drawer (re-audit #3 P1-6).
+      { tx: expect.anything(), approvedRequest: true },
+    );
     expect(approvalRequest.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'req_1', status: 'pending' } }),
     );
@@ -85,6 +90,17 @@ describe('RefundRequestService', () => {
       permissions: ['school:fees:refund:approve'],
       request: { ...pending, status: 'approved' },
     });
+    await expect(svc.approve('req_1')).rejects.toBeInstanceOf(ConflictException);
+    expect(payments.refundFee).not.toHaveBeenCalled();
+  });
+
+  it('losing the claim to a concurrent decision pays nothing', async () => {
+    const { svc, payments, approvalRequest } = make({
+      userId: 'head',
+      permissions: ['school:fees:refund:approve'],
+      request: pending,
+    });
+    approvalRequest.updateMany.mockResolvedValueOnce({ count: 0 });
     await expect(svc.approve('req_1')).rejects.toBeInstanceOf(ConflictException);
     expect(payments.refundFee).not.toHaveBeenCalled();
   });

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { createHash } from 'node:crypto';
 import type { ResultSet } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { assertTermWritable } from '../foundation/academic-year-guard';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
@@ -92,6 +93,9 @@ export class ResultRunService {
     const outputChecksum = sha(output);
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Re-audit #3 P1-14: re-running results for a closed year archived the
+      // published set and changed promotion recommendations after the fact.
+      await assertTermWritable(tx, organizationId, dto.termId);
       const run = await tx.resultProcessingRun.create({
         data: {
           organizationId,

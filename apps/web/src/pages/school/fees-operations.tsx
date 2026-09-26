@@ -85,8 +85,12 @@ export function SchoolReceiptsPage() {
     );
     if (!reason?.trim()) return;
     try {
-      await reversePayment.mutateAsync({ paymentId: r.id, reason: reason.trim() });
-      notify.success(`Receipt ${r.paymentNumber} reversed`);
+      const res = await reversePayment.mutateAsync({ paymentId: r.id, reason: reason.trim() });
+      notify.success(
+        res.status === 'pending_approval'
+          ? `Reversal of ${r.paymentNumber} sent for approval`
+          : `Receipt ${r.paymentNumber} reversed`,
+      );
     } catch (e) {
       notify.error(apiError(e, 'Could not reverse the receipt'));
     }
@@ -100,8 +104,12 @@ export function SchoolReceiptsPage() {
     );
     if (!reason?.trim()) return;
     try {
-      await reverseAllocation.mutateAsync({ allocationId, reason: reason.trim() });
-      notify.success('Allocation reversed — the amount is back on the receipt');
+      const res = await reverseAllocation.mutateAsync({ allocationId, reason: reason.trim() });
+      notify.success(
+        res.status === 'pending_approval'
+          ? 'Sent for approval — the invoice changes once someone else approves it'
+          : 'Allocation reversed — the amount is back on the receipt',
+      );
     } catch (e) {
       notify.error(apiError(e, 'Could not reverse the allocation'));
     }
@@ -316,7 +324,10 @@ export function SchoolReceiptsPage() {
 export function SchoolBulkCollectPage() {
   const [classId, setClassId] = useState('');
   const [paymentDate, setPaymentDate] = useState(today());
-  const [draft, setDraft] = useState<Record<string, { amount: string; method: BatchRow['paymentMethod']; reference: string }>>({});
+  // `key` is the row's idempotency key (re-audit #3 P0-4). It is minted when
+  // the row is first touched and survives re-submits, so a row that already
+  // posted replays its receipt instead of collecting the money a second time.
+  const [draft, setDraft] = useState<Record<string, { amount: string; method: BatchRow['paymentMethod']; reference: string; key: string }>>({});
   const [result, setResult] = useState<Awaited<ReturnType<ReturnType<typeof useCollectBatch>['mutateAsync']>> | null>(null);
 
   const { data: classes } = useClasses();
@@ -333,6 +344,8 @@ export function SchoolBulkCollectPage() {
           amount: Number(v.amount),
           paymentMethod: v.method ?? 'cash',
           reference: v.reference || undefined,
+          externalReference: `batch-${v.key}`,
+          externalReferenceType: 'import_row' as const,
           // Reporting-day tenders are almost always round; anything over what
           // is owed is held as credit rather than rejected.
           convertOverpaymentToCredit: true,
@@ -350,6 +363,7 @@ export function SchoolBulkCollectPage() {
           amount: patch.amount ?? existing?.amount ?? '',
           method: patch.method ?? existing?.method ?? 'cash',
           reference: patch.reference ?? existing?.reference ?? '',
+          key: existing?.key ?? crypto.randomUUID(),
         },
       };
     });
@@ -363,6 +377,10 @@ export function SchoolBulkCollectPage() {
         notify.success(`${res.posted} receipt(s) posted · ${money(res.totalCollected)}`);
         setDraft({});
       } else {
+        // Keep only the failed rows. Posted rows used to stay in the form, so
+        // fixing the failures and pressing submit collected them again.
+        const done = new Set(res.results.filter((r) => r.status !== 'failed').map((r) => r.studentProfileId));
+        setDraft((d) => Object.fromEntries(Object.entries(d).filter(([id]) => !done.has(id))));
         notify.error(`${res.posted} posted, ${res.failed} failed — see the results below`);
       }
     } catch (e) {

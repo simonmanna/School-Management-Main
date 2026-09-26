@@ -25,7 +25,8 @@ describe('fee document constants (P0-1, P0-7)', () => {
     // Transport and admission fees are receivables too — leaving them out made
     // a posted invoice invisible to balance, aging, portal and clearance.
     expect([...SCHOOL_FEE_SOURCE_TYPES].sort()).toEqual(
-      ['library_fine', 'school_admission_fee', 'school_fee', 'school_meal', 'school_penalty', 'school_transport'].sort(),
+      // school_payment_recovery: refund paid out of a receipt later reversed (re-audit #3 P0-2).
+      ['library_fine', 'school_admission_fee', 'school_fee', 'school_meal', 'school_payment_recovery', 'school_penalty', 'school_transport'].sort(),
     );
   });
 
@@ -332,4 +333,23 @@ describe('SchoolPaymentService.refundFee — entitlement cap (P0-6)', () => {
       replayed: false,
     });
   });
+
+  it("refuses allocatedPaymentId that is not this payer's live receipt (re-audit #3 P0-3)", async () => {
+    // The allocations used to be loaded by paymentId alone: a mistyped id
+    // reversed ANOTHER family's allocations and funded this refund with them.
+    const { service, tx, createCustomerRefund } = makeRefundService({ unallocated: 0, creditRemaining: 0 });
+    const reversals = (service as any).reversals;
+    tx.payment.findFirst.mockResolvedValue(null); // not found for this partner
+    await expect(
+      service.refundFee({ ...dto, amount: 100_000, allocatedPaymentId: 'someone_elses_receipt' }),
+    ).rejects.toThrow(/not a live receipt of this pupil's payer/);
+    expect(tx.payment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'someone_elses_receipt', partnerId: 'p_1', direction: 'inbound' }),
+      }),
+    );
+    expect(reversals.reverseAllocation).not.toHaveBeenCalled();
+    expect(createCustomerRefund).not.toHaveBeenCalled();
+  });
 });
+

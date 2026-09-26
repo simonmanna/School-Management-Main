@@ -6,7 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { dec, round, ZERO } from '../../../kernel/common/money';
-import { COLLECTABLE_FEE_WHERE, OPEN_COLLECTABLE_FEE_WHERE } from './fee-document.constants';
+import { BILLABLE_STUDENT_STATUSES, COLLECTABLE_FEE_WHERE, OPEN_COLLECTABLE_FEE_WHERE } from './fee-document.constants';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
@@ -98,7 +98,9 @@ export class BillingService {
     // A4.1: no fee posting into a financially-closed term.
     await this.controls.assertTermOpen(dto.termId);
 
-    const studentWhere: any = { status: 'active' };
+    // Owner decision D3 (re-audit #3, 2026-09-25): a suspended pupil is still on
+    // the roll and is billed like everyone else. They used to be skipped.
+    const studentWhere: any = { status: { in: [...BILLABLE_STUDENT_STATUSES] } };
     // Placement history, not the projection on StudentProfile. Billing is
     // term-scoped: a learner who moved in week six must be billed against the
     // class they held for THIS term, not wherever they sit today (ADR-027).
@@ -606,7 +608,7 @@ export class BillingService {
     await assertTermWritable(this.prisma.client, this.tenant.organizationId, termId);
     const organizationId = this.tenant.organizationId;
     const found = await this.prisma.client.studentProfile.findFirst({
-      where: { id: studentProfileId, status: 'active' },
+      where: { id: studentProfileId, status: { in: [...BILLABLE_STUDENT_STATUSES] } },
     });
     if (!found) return { status: 'skipped' };
 
@@ -1220,11 +1222,18 @@ export class SchoolPaymentService {
         }
       }
 
-      // P1-B: every invoice this tender will settle must be in an OPEN term.
-      // Checking only a requested termId would let a Term-2 payment settle a
-      // Term-1 invoice after Term 1 closed (FINANCIAL_INVARIANTS §Period
-      // control). Runs inside this transaction so it cannot race a close.
-      await this.controls.assertDocumentsPeriodOpen(allocations.map((a) => a.documentId), tx);
+      // Owner decision D1 (re-audit #3, 2026-09-25): arrears in a CLOSED term
+      // stay collectible. This used to refuse any tender whose oldest-first
+      // allocation reached a closed-term invoice — so a family with old arrears
+      // could not pay at the desk at all, and a mobile-money callback for money
+      // already received failed on every retry while the term stayed closed.
+      //
+      // Settlement books no revenue and restates nothing in the closed term:
+      // the receipt posts Dr Cash / Cr AR on today's date (the accounting
+      // period guard still applies to that), and the term-close snapshot keeps
+      // the figures as they stood at close. Revenue- and balance-changing
+      // postings (billing, waivers, adjustments, credit drawdowns, reversals)
+      // still go through `assertDocumentsPeriodOpen`.
 
       // Delegate to the single payment writer. It posts the GL leg, updates
       // each Document's residual/status, writes the CashMovement when this is a
@@ -1484,9 +1493,26 @@ export class SchoolPaymentService {
    * Idempotency: a replayed `reference` returns the original refund rather
    * than paying out twice (mobile-money reversal retries).
    */
-  async refundFee(dto: RefundFeeDto) {
+  /**
+   * `opts.tx` lets a caller make the payout part of its own transaction — the
+   * refund approval claims its request and pays out atomically, so a
+   * concurrent reject cannot close a request whose money already left.
+   */
+  async refundFee(
+    dto: RefundFeeDto,
+    opts: {
+      tx?: any;
+      /**
+       * Re-audit #3 P1-6: set by the refund APPROVAL. The payout leaves the
+       * requesting bursar's drawer (the session named on the request), but the
+       * approver is someone else by rule, so the drawer-owner check used to
+       * refuse every approved cash refund tied to a session.
+       */
+      approvedRequest?: boolean;
+    } = {},
+  ) {
     const organizationId = this.tenant.organizationId;
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const run = async (tx: any) => {
       const student = await tx.studentProfile.findFirst({
         where: { id: dto.studentProfileId },
       });
@@ -1542,6 +1568,19 @@ export class SchoolPaymentService {
       // payment increases outstanding AR."
       const reversedAllocations: string[] = [];
       if (dto.allocatedPaymentId) {
+        // Re-audit #3 P0-3: the payment must be THIS payer's receipt. Allocations
+        // used to be loaded by paymentId alone, so a mistyped id reversed another
+        // family's allocations — re-opening their paid invoices — and funded this
+        // family's refund with the value.
+        const source = await tx.payment.findFirst({
+          where: { id: dto.allocatedPaymentId, organizationId, partnerId: student.partnerId, direction: 'inbound' },
+          select: { id: true, status: true },
+        });
+        if (!source || source.status === 'cancelled') {
+          throw new BadRequestException(
+            `Payment ${dto.allocatedPaymentId} is not a live receipt of this pupil's payer.`,
+          );
+        }
         const priorAllocations = await tx.paymentAllocation.findMany({
           where: { organizationId, paymentId: dto.allocatedPaymentId, status: 'posted' },
           select: { id: true, documentId: true },
@@ -1714,6 +1753,7 @@ export class SchoolPaymentService {
           cashSessionId: dto.cashSessionId,
         },
         tx,
+        { allowSessionOwnerMismatch: opts.approvedRequest === true },
       );
 
       // P0-C, GL half. `createCustomerRefund` posts Dr AR / Cr Cash — correct
@@ -1770,6 +1810,7 @@ export class SchoolPaymentService {
       });
 
       return { payment: refund, replayed: false, overpaymentCredit, creditsSpent, reversedAllocations };
-    });
+    };
+    return opts.tx ? run(opts.tx) : this.prisma.client.$transaction(run);
   }
 }

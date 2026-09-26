@@ -4,7 +4,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { StudentEnrollmentService } from './student-enrollment.service';
-import { PLACEMENT_HOLDING_STATUSES } from './enrollment-fsm';
+import { PLACEMENT_HOLDING_STATUSES, PROGRESSABLE_STATUSES } from './enrollment-fsm';
 import type { PromoteStudentDto, PromotionOutcome, PromotionRolloverDto } from './enrollment.dto';
 
 type PlanOutcome = PromotionOutcome | 'skipped';
@@ -69,12 +69,18 @@ export class PromotionRunService {
     }
     await this.assertLaterYear(client, fromTerm.academicYearId, toTerm.academicYearId);
 
-    // Everyone who was on a class roll in the source term and still holds a seat.
+    // Everyone who was on a class roll in the source term and still holds a
+    // seat, PLUS learners whose year was already marked complete: "Mark the year
+    // complete, then promote" closes the seat (COMPLETION), and those learners
+    // used to vanish from the rollover without even a skip row (re-audit #3
+    // P1-11). A graduation closes with GRADUATION and stays out.
     const open = await client.enrollmentPlacement.findMany({
       where: {
         termId: dto.fromTermId,
-        effectiveTo: null,
-        enrollment: { status: { in: [...PLACEMENT_HOLDING_STATUSES] } },
+        OR: [
+          { effectiveTo: null, enrollment: { status: { in: [...PLACEMENT_HOLDING_STATUSES] } } },
+          { endReason: 'COMPLETION', enrollment: { status: 'COMPLETED' } },
+        ],
       },
       include: {
         enrollment: { include: { gradeLevel: true, student: { select: { id: true, admissionNo: true } } } },
@@ -210,7 +216,11 @@ export class PromotionRunService {
   /** The learner's enrollment that currently holds a class seat (latest year first). */
   private async currentEnrollment(tx: any, studentProfileId: string) {
     const rows = await tx.studentEnrollment.findMany({
-      where: { studentProfileId, status: { in: [...PLACEMENT_HOLDING_STATUSES] } },
+      // PROGRESSABLE, not placement-holding: a learner whose year was marked
+      // complete has no open seat but is exactly who promotion is for
+      // (re-audit #3 P1-11). Latest year first, so an already-promoted learner
+      // resolves to the new year and is refused as "already enrolled".
+      where: { studentProfileId, status: { in: [...PROGRESSABLE_STATUSES] } },
       include: { academicYear: { select: { startDate: true } } },
     });
     if (rows.length === 0) return null;

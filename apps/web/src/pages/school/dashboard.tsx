@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthStore } from '@/stores/auth.store';
 import { PERMISSIONS } from '@erp/shared';
+import { SetupChecklist } from './_components/SetupChecklist';
 
 // Amount in the school's currency; the tiles used to prefix a literal "UGX"
 // and print two decimals UGX does not have.
@@ -114,6 +115,8 @@ export function SchoolDashboardPage() {
           What is waiting on someone, how the term is marked, and where the fees stand.
         </p>
       </div>
+
+      <SetupChecklist />
 
       {/* ── Work queue ─────────────────────────────────────────────────────
           The dashboard used to be finance and headcount only, so nothing on it

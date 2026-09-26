@@ -174,7 +174,11 @@ function makeService() {
     workflowSvc,
     makePlacementLookupStub() as any,
     // AdmissionFeeService — settlement is read from the fee invoice; covered in admission-fee.spec.ts.
-    { isSettled: jest.fn(async (_c: any, app: any) => app?.feeStatus !== 'pending') } as any,
+    {
+      isSettled: jest.fn(async (_c: any, app: any) => app?.feeStatus !== 'pending'),
+      // Re-audit #3 P1-16: enrolment moves the application fee onto the pupil.
+      moveToStudentAccount: jest.fn(async () => undefined),
+    } as any,
   );
 
   return {

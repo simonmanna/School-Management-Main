@@ -19,6 +19,7 @@ import {
   useStudents,
   usePromoteStudent,
   useRollover,
+  currentTerminology,
 } from '@/features/school/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -340,7 +341,7 @@ export function SchoolPromotionPage() {
                   <th className="py-2 pr-4">Othernames</th>
                   <th className="py-2 pr-4">Gender</th>
                   <th className="py-2 pr-4">Current Class</th>
-                  <th className="py-2 pr-4">Current Stream</th>
+                  <th className="py-2 pr-4">Current {currentTerminology().section}</th>
                   <th className="py-2 pr-4">Promotion Status</th>
                   <th className="py-2 pr-4">Target Class</th>
                 </tr>

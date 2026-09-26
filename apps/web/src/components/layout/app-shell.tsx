@@ -188,7 +188,13 @@ const flagEnabled = (flag?: string): boolean =>
   !flag || (import.meta.env as Record<string, string | undefined>)[flag] === 'true';
 
 const NAV_SECTIONS: NavSection[] = [
-  { items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard }] },
+  {
+    items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      // Plain-language walkthrough of the school year and who does what.
+      { to: '/school/guide', label: 'How it works', icon: BookOpen, permission: PERMISSIONS.school.read },
+    ],
+  },
   {
     title: 'Frontdesk',
     icon: Users,

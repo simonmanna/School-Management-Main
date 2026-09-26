@@ -90,7 +90,10 @@ export class FilesController {
   ) {
     const file = await this.files.resolveSignedDownload(id, token, expires, org);
     res.setHeader('Content-Type', file.contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    // A filename is user-supplied: strip quotes/control characters from the
+    // plain form and send the exact name RFC 5987-encoded.
+    const safe = file.filename.replace(/[\x00-\x1f"\\]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`);
     if (this.files['driver'] === 'local') {
       const { stream } = this.files.streamFromDisk(file.storageKey);
       stream.pipe(res);

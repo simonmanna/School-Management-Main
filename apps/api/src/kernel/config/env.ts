@@ -115,6 +115,26 @@ export function validateEnv(): EnvValidationResult {
     }
   }
 
+  // Production wiring a school cannot run without, or would run blind without.
+  if (process.env.NODE_ENV === 'production') {
+    // Invitations and password resets are links into the web app. Without the
+    // base URL every emailed link is relative and nobody can accept an invite.
+    if (!process.env.WEB_URL) errors.push('WEB_URL is not set — invite and password-reset links would be broken');
+    if (!process.env.PORTAL_URL) logger.warn('PORTAL_URL is not set — parent portal invitation links will be broken');
+    if (!process.env.SMTP_HOST) {
+      logger.warn('SMTP_HOST is not set — no email will be sent; such notifications are recorded as failed');
+    }
+    if (!smsEnabled && !process.env.TWILIO_ACCOUNT_SID) {
+      logger.warn(
+        'No SMS route: set ENABLE_COMMUNICATION_SMS=true and configure a gateway under Communication → Channels ' +
+          '(or TWILIO_*). Until then parent SMS alerts are recorded as failed.',
+      );
+    }
+    if (!process.env.PROVISIONING_SECRET) {
+      logger.warn('PROVISIONING_SECRET is not set — creating a new school (tenant bootstrap) is disabled');
+    }
+  }
+
   if (errors.length > 0) {
     for (const err of errors) {
       logger.error(err);

@@ -548,6 +548,56 @@ export class AdvancedFinanceService {
     return externalTx ? run(externalTx) : this.prisma.client.$transaction(run);
   }
 
+  /**
+   * Re-audit #3 P1-9: the HTTP entry point for a manual credit.
+   *
+   * An overpayment credit must be funded by a live receipt of THIS pupil's
+   * payer that still has that much unallocated, and it draws that down in the
+   * same transaction (the entitlement-uniqueness rule `collect` already keeps).
+   * Without the draw-down the same money was both refundable cash and a
+   * spendable credit.
+   */
+  async createCreditFromRequest(dto: {
+    studentProfileId: string;
+    amount: number;
+    source: 'overpayment' | 'approved_adjustment' | 'opening_balance';
+    sourcePaymentId?: string;
+    sourceDocumentId?: string;
+    expiresAt?: string;
+  },
+    /** D4: an approved correction applies inside the transaction that claims it. */
+    externalTx?: any,
+  ) {
+    if (dto.source !== 'overpayment') return this.createCredit(dto, externalTx);
+    if (!dto.sourcePaymentId) {
+      throw new BadRequestException('An overpayment credit must name the receipt (sourcePaymentId) that funds it.');
+    }
+    const organizationId = this.tenant.organizationId;
+    const run = async (tx: any) => {
+      const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
+      if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+      const amount = dec(dto.amount);
+      const drawn = await tx.payment.updateMany({
+        where: {
+          id: dto.sourcePaymentId,
+          organizationId,
+          partnerId: student.partnerId,
+          direction: 'inbound',
+          status: { not: 'cancelled' },
+          unallocatedAmount: { gte: amount },
+        },
+        data: { unallocatedAmount: { decrement: amount } },
+      });
+      if (drawn.count !== 1) {
+        throw new BadRequestException(
+          `Receipt ${dto.sourcePaymentId} is not a live receipt of this pupil's payer with ${amount.toString()} unallocated.`,
+        );
+      }
+      return this.createCredit(dto, tx);
+    };
+    return externalTx ? run(externalTx) : this.prisma.client.$transaction(run);
+  }
+
   listCredits(studentProfileId?: string) {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.feeCredit.findMany({

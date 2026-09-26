@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { TrendingUp, ClipboardList, FileBadge, Mail, UserPlus, Users, Ban } from 'lucide-react';
 import {
-  useTerms, useClasses, useStudents, useStudentPortal, useTeacherPortal,
-  useRolloverPlan, useGuardians, usePortalAccounts, useInvitePortalAccount,
+  useClasses, useStudents, useStudentPortal, useTeacherPortal,
+  useGuardians, usePortalAccounts, useInvitePortalAccount,
   useRevokePortalAccount, useBulkInviteGuardians,
   type BulkInviteOutcome,
 } from '@/features/school/api';
@@ -320,45 +321,21 @@ function TeacherPortalTab() {
   );
 }
 
+/**
+ * Re-audit #3 P1-12. This tab used to run the year-end rollover itself. It read
+ * `r.plan.length` from a response that carries promote/repeat/graduate/skip,
+ * so "Execute" committed the whole school and then reported "Rollover failed",
+ * with no confirmation step. The Promotion page is the one place that runs it:
+ * preview, per-learner decisions, confirmation and per-row errors.
+ */
 function RolloverTab() {
-  const { data: terms } = useTerms();
-  const { data: classes } = useClasses();
-  const [fromTermId, setFrom] = useState('');
-  const [toTermId, setTo] = useState('');
-  const plan = useRolloverPlan();
-  const [result, setResult] = useState<{ plan: Array<{ studentProfileId: string; outcome: string; toClassId?: string | null }>; dryRun: boolean } | null>(null);
-
-  const runDry = async () => {
-    try { const r = await plan.mutateAsync({ fromTermId, toTermId, dryRun: true }); setResult(r as any); notify.success(`Plan: ${r.plan.length} students`); }
-    catch { notify.error('Rollover plan failed — need results + recommendations'); }
-  };
-  const execute = async () => {
-    try { const r = await plan.mutateAsync({ fromTermId, toTermId, dryRun: false }); setResult(r as any); notify.success(`Rolled over ${r.plan.length} students`); }
-    catch { notify.error('Rollover failed'); }
-  };
-
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <select className={sel + ' w-44'} value={fromTermId} onChange={(e) => setFrom(e.target.value)}><option value="">From term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        <select className={sel + ' w-44'} value={toTermId} onChange={(e) => setTo(e.target.value)}><option value="">To term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        <Button size="sm" disabled={!fromTermId || !toTermId || plan.isPending} onClick={runDry}><TrendingUp className="h-4 w-4" /> Dry-run plan</Button>
-        <Button size="sm" variant="ghost" disabled={!fromTermId || !toTermId || plan.isPending} onClick={execute}>Execute</Button>
-      </div>
-      {result && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Plan ({result.plan.length}) {result.dryRun ? <Badge variant="secondary">preview</Badge> : <Badge>committed</Badge>}</CardTitle></CardHeader>
-          <CardContent>
-            <table className="w-full text-sm"><thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Student</th><th className="px-2 py-1">Outcome</th><th className="px-2 py-1">To class</th></tr></thead>
-              <tbody>{result.plan.slice(0, 50).map((e, i) => <tr key={i} className="border-b last:border-0">
-                <td className="px-2 py-1">{e.studentProfileId.slice(0,6)}</td>
-                <td className="px-2 py-1"><Badge variant={e.outcome === 'promoted' ? 'default' : e.outcome === 'repeated' ? 'destructive' : 'secondary'}>{e.outcome}</Badge></td>
-                <td className="px-2 py-1">{e.toClassId ? (classes?.data ?? []).find((c) => c.id === e.toClassId)?.name ?? e.toClassId.slice(0,6) : '—'}</td>
-              </tr>)}</tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    <Card>
+      <CardHeader><CardTitle className="text-base">Year-end promotion</CardTitle></CardHeader>
+      <CardContent className="space-y-3 text-sm text-muted-foreground">
+        <p>Promotion and rollover run from the Promotion page, where you can preview the plan, review each learner and confirm before anything is committed.</p>
+        <Button size="sm" asChild><Link to="/school/promotion"><TrendingUp className="h-4 w-4" /> Open Promotion</Link></Button>
+      </CardContent>
+    </Card>
   );
 }

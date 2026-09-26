@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
+import { useAuthStore } from '@/stores/auth.store';
 
 type YearStatus = 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED';
 
@@ -44,6 +45,9 @@ const NEXT: Record<YearStatus, Array<{ to: YearStatus; label: string; confirm?: 
  */
 export function SchoolAcademicYearsPage() {
   const qc = useQueryClient();
+  // Closing and archiving are the head's decision (school:academicyear:lifecycle);
+  // staff who can edit years but not end them see no lifecycle buttons.
+  const mayChangeStatus = useAuthStore((s) => s.hasPermission('school:academicyear:lifecycle'));
 
   const move = async (row: { id: string; name: string }, step: (typeof NEXT)[YearStatus][number]) => {
     if (step.confirm && !confirm(`${row.name}: ${step.confirm}`)) return;
@@ -91,7 +95,7 @@ export function SchoolAcademicYearsPage() {
         { key: 'isCurrent', label: 'Current', render: (r) => (r.isCurrent ? '✓' : '') },
       ]}
       rowActions={(r) =>
-        NEXT[(r.status ?? 'PLANNING') as YearStatus].map((step) => (
+        !mayChangeStatus ? null : NEXT[(r.status ?? 'PLANNING') as YearStatus].map((step) => (
           <Button key={step.to} variant="ghost" size="sm" onClick={() => move(r, step)}>
             {step.label}
           </Button>

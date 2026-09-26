@@ -33,6 +33,7 @@ import { SchoolDocumentsModule } from './documents/school-documents.module';
 import { FrontDeskModule } from './front-desk/front-desk.module';
 import { SchoolService } from './school.service';
 import { SchoolController } from './school.controller';
+import { SetupStatusService } from './setup-status.service';
 
 // The advanced Moodle-shaped delivery layer is unfinished and fail-closed.
 // Core offerings, lesson plans, assignments and the canonical assessment spine
@@ -89,7 +90,7 @@ const advancedLmsImports = process.env.ENABLE_ADVANCED_LMS === 'true' ? [LmsMood
     FrontDeskModule,
   ],
   controllers: [SchoolController],
-  providers: [SchoolService],
+  providers: [SchoolService, SetupStatusService],
   exports: [SchoolService],
 })
 export class SchoolModule implements OnModuleInit {

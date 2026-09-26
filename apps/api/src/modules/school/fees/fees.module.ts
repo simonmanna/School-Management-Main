@@ -28,6 +28,7 @@ import {
 } from './catalog.controller';
 import { BillingService, SchoolPaymentService } from './billing.service';
 import { RefundRequestService } from './refund-request.service';
+import { FinanceCorrectionRequestService } from './finance-correction-request.service';
 import { AdvancedFinanceService } from './advanced.service';
 import { BillingController, SchoolPaymentController } from './billing.controller';
 import { AdvancedFinanceController } from './advanced.controller';
@@ -102,6 +103,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     BillingService,
     SchoolPaymentService,
     RefundRequestService,
+    FinanceCorrectionRequestService,
     AdvancedFinanceService,
     PenaltyCronWorker,
     BudgetService,

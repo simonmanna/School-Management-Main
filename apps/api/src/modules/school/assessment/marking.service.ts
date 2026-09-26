@@ -9,6 +9,7 @@ import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { computeEffective } from './assessment-math';
+import { assertTermWritable } from '../foundation/academic-year-guard';
 import type { AppendAdjustmentDto, MarkingApprovalDto, RecordMarkDto, SetParticipationDto } from './dto.types';
 
 /** Tags a MarkEntry synthesised by `healLedgerlessScore`, so healed rows stay findable. */
@@ -266,6 +267,11 @@ export class MarkingService {
       const roster = await tx.academicRoster.findFirst({ where: { id: assessment.rosterId } });
       if (!roster?.frozenAt) throw new ConflictException('Assessment roster must be frozen before marking');
     }
+    // A closed or archived year's marks are history (re-audit #3). Exams,
+    // attendance and billing already refused; the marking ledger — which every
+    // gradebook, homework and LMS mark goes through — did not. Backfills that
+    // re-project an approved exam mark are the one legitimate late writer.
+    if (!input.allowWhenApproved) await this.assertYearOpen(tx, assessment);
     if (assessment?.lockedAt) {
       // 409, not 400: a locked item is a STATE conflict, not a malformed
       // request, and the marks workspace already contracts on 409 for its own
@@ -362,8 +368,14 @@ export class MarkingService {
    * assessment could still be edited by either. A lock that only holds against
    * one of three doors is not a lock.
    */
+  /** Refuse marking writes into a CLOSED or ARCHIVED academic year. */
+  private async assertYearOpen(tx: any, assessment: { termId?: string | null } | null) {
+    if (assessment?.termId) await assertTermWritable(tx, this.tenant.organizationId, assessment.termId);
+  }
+
   private async assertAssessmentMutable(tx: any, sa: { id: string; assessmentId: string; approvalStatus: string }) {
     const assessment = await tx.assessment.findFirst({ where: { id: sa.assessmentId } });
+    await this.assertYearOpen(tx, assessment);
     if (assessment?.lockedAt) {
       throw new ConflictException('This grade item is locked. Unlock it before changing marks.');
     }
@@ -517,6 +529,7 @@ export class MarkingService {
       const rows = await tx.studentAssessment.findMany({ where: { assessmentId: dto.assessmentId } });
       if (rows.length === 0) throw new NotFoundException(`No student assessments for assessment ${dto.assessmentId}`);
       const assessment = await tx.assessment.findFirst({ where: { id: dto.assessmentId }, include: { roster: { include: { members: true } } } });
+      await this.assertYearOpen(tx, assessment);
       if (assessment?.courseOfferingId) {
         if (!assessment.roster?.frozenAt || ['draft', 'scheduled', 'archived'].includes(assessment.status)) throw new BadRequestException('A published assessment and frozen roster are required');
         const rosterIds = new Set(assessment.roster.members.map((m: any) => m.studentProfileId));

@@ -123,14 +123,19 @@ export class StudentAttendanceService {
     // a teacher may fix their own register, and only their own. Every correction
     // is audit-logged either way.
     await this.assertMayMarkClass(existing.classId);
-    const updated = await this.prisma.client.studentAttendance.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        minutesLate: dto.minutesLate ?? 0,
-        reason: dto.reason ?? existing.reason,
-        markedById: this.tenant.userId ?? null,
-      },
+    // Re-audit #3 P1-14: marking a register refused a closed year, correcting
+    // one did not — so a closed year's registers could still be rewritten.
+    const updated = await this.prisma.client.$transaction(async (tx: any) => {
+      await assertDateWritable(tx, organizationId, new Date(existing.date));
+      return tx.studentAttendance.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          minutesLate: dto.minutesLate ?? 0,
+          reason: dto.reason ?? existing.reason,
+          markedById: this.tenant.userId ?? null,
+        },
+      });
     });
     this.events.publish(EVENTS.SchoolAttendanceCorrected, {
       organizationId,
@@ -174,6 +179,8 @@ export class StudentAttendanceService {
 
   /** Per-student summary: attendance % over a date range, derived from config flags. */
   async byStudent(studentProfileId: string, from: Date | string, to: Date | string) {
+    // A class teacher reads the attendance of pupils they teach, not the school's.
+    await this.dataScope.assertMayReadStudent(studentProfileId);
     const start = from ? new Date(from) : new Date(Date.now() - 90 * 86400000);
     const end = to ? new Date(to) : new Date();
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {

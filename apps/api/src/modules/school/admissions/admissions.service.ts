@@ -950,6 +950,9 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // enrolled student had zero guardians (no fee payer, no emergency contact).
       await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
       await this.copyApplicationDocuments(tx, app.id, profile.id);
+      // Re-audit #3 P1-16: the application fee follows the pupil onto their own
+      // statement, portal and clearance.
+      await this.admissionFees.moveToStudentAccount(tx, app.id, profile.partnerId, organizationId);
 
       await this.applyReview(
         tx,

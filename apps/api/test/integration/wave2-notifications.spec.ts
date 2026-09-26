@@ -19,6 +19,7 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { FeeNotificationsSubscriber } from '../../src/modules/school/fees/fee-notifications.subscriber';
+import { NotificationsService } from '../../src/kernel/notifications/notifications.service';
 
 describeDb('integration: guardian notifications are delivered once (N1)', () => {
   const rawUrl = (() => {
@@ -32,6 +33,8 @@ describeDb('integration: guardian notifications are delivered once (N1)', () => 
   const stamp = Date.now();
   const organizationId = `org_w2notif_${stamp}`;
   let studentProfileId = '';
+  let notifications: NotificationsService;
+  const texts: Array<{ to: string; body: string }> = [];
 
   beforeAll(async () => {
     await raw.$connect();
@@ -74,6 +77,16 @@ describeDb('integration: guardian notifications are delivered once (N1)', () => 
     await moduleRef.init();
     tenant = moduleRef.get(TenantContextService);
     subscriber = moduleRef.get(FeeNotificationsSubscriber);
+    notifications = moduleRef.get(NotificationsService);
+    // Stand-ins for the school's SMS gateway and the SMTP server. With neither
+    // configured a message is recorded as failed, never as sent (re-audit P1-2).
+    notifications.registerSmsTransport({
+      send: async (m) => {
+        texts.push({ to: m.to, body: m.body });
+        return 'sent';
+      },
+    });
+    (notifications as any).smtpTransport = { sendMail: async () => ({}) };
   });
 
   afterAll(async () => {
@@ -102,8 +115,47 @@ describeDb('integration: guardian notifications are delivered once (N1)', () => 
     const sms = await raw.notification.findMany({ where: { organizationId, channel: 'sms' } });
     expect(sms.every((n) => n.status === 'sent' && n.dedupeKey)).toBe(true);
 
+    expect(texts.map((t) => t.to).sort()).toEqual(['+256772000111', '+256772000222']);
+
     await invoicePosted();
     expect(await count('sms')).toBe(2);
     expect(await count('email')).toBe(1);
+  });
+
+  it('with no SMS gateway a text is recorded as failed and can be retried later', async () => {
+    notifications.registerSmsTransport({ send: async () => 'not_configured' });
+    const res = await notifications.send({
+      organizationId,
+      channel: 'sms',
+      category: 'fees',
+      title: 'Test',
+      body: 'Hello',
+      recipient: { phone: '0772 000 444' },
+      dedupeKey: `retry-${stamp}`,
+    });
+    expect(res.delivered).toBe(false);
+    const row = await raw.notification.findFirst({ where: { id: res.id } });
+    expect(row?.status).toBe('failed');
+    expect(row?.error).toMatch(/no SMS gateway/);
+    expect(row?.dedupeKey).toBeNull();
+
+    // The gateway is configured later: the same message now goes out.
+    notifications.registerSmsTransport({
+      send: async (m) => {
+        texts.push({ to: m.to, body: m.body });
+        return 'sent';
+      },
+    });
+    const again = await notifications.send({
+      organizationId,
+      channel: 'sms',
+      category: 'fees',
+      title: 'Test',
+      body: 'Hello',
+      recipient: { phone: '0772 000 444' },
+      dedupeKey: `retry-${stamp}`,
+    });
+    expect(again.delivered).toBe(true);
+    expect(texts.at(-1)?.to).toBe('+256772000444');
   });
 });

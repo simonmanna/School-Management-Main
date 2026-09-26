@@ -276,6 +276,47 @@ export class GenerateBillingDto {
   classId?: string;
 }
 
+/** One {invoice, amount} pair in a collection or a reallocation. */
+export class FeeAllocationLineDto {
+  @IsString() @IsNotEmpty() documentId!: string;
+  @IsNumber() @IsPositive() amount!: number;
+}
+
+/** A correction that must say why (reversals). */
+export class FinanceReasonDto {
+  @IsString() @IsNotEmpty() reason!: string;
+}
+
+/**
+ * Re-audit #3 P1-9: `POST /credits` took `any`, so the funding source was never
+ * checked and an overpayment credit could be minted against someone else's
+ * receipt, or against cash already spent.
+ */
+export class CreateFeeCreditDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+
+  @IsNumber()
+  @IsPositive()
+  amount!: number;
+
+  @IsIn(['overpayment', 'approved_adjustment', 'opening_balance'])
+  source!: 'overpayment' | 'approved_adjustment' | 'opening_balance';
+
+  @IsOptional() @IsString() sourcePaymentId?: string;
+  @IsOptional() @IsString() sourceDocumentId?: string;
+  @IsOptional() @IsString() expiresAt?: string;
+}
+
+/** Move a receipt's value onto different invoices of the same payer. */
+export class ReallocatePaymentDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FeeAllocationLineDto)
+  allocations!: FeeAllocationLineDto[];
+
+  @IsString() @IsNotEmpty() reason!: string;
+}
+
 export class CollectFeePaymentDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
 
@@ -305,7 +346,9 @@ export class CollectFeePaymentDto {
    */
   @IsOptional()
   @IsArray()
-  allocations?: Array<{ documentId: string; amount: number }>;
+  @ValidateNested({ each: true })
+  @Type(() => FeeAllocationLineDto)
+  allocations?: FeeAllocationLineDto[];
 
   /**
    * Free-text narration printed on the receipt. NOT an idempotency key: a

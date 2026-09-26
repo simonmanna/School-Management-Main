@@ -375,6 +375,10 @@ export const PERMISSIONS = {
   school: {
     read: 'school:read',
     manageFoundation: 'school:foundation:write',
+    /// Close, archive or re-open an academic year. Split from
+    /// `manageFoundation` (re-audit P1-1): Front Desk and Registrar hold that
+    /// grant to edit classes and terms, and archiving is irreversible.
+    manageYearLifecycle: 'school:academicyear:lifecycle',
     manageStudents: 'school:students:write',
     // Phase 1 (ADR-018 / ADR-019). Enrollment membership and placement history
     // are deliberately NOT folded into `school:students:write`: moving a
@@ -1171,6 +1175,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:promotion:apply',
       'school:admissions:decide',
       'school:enrollment:reactivate',
+      // Re-audit P1-1: closing and archiving a year is the head's decision.
+      'school:academicyear:lifecycle',
       'school:medical:read',
       'school:statutory:read',
       'school:statutory:export',
@@ -1219,6 +1225,9 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:fees:reconcile',
       'school:fees:refund',
       'school:analytics:read',
+      // Re-audit #8: a sponsorship names its sponsor (a Partner). Without this
+      // the Sponsors tab's picker answered 403 and stayed empty.
+      'partner:read',
       'invoice:read',
       // `invoice:write` was listed here and is not a permission — the catalogue
       // has create/update/post — so a freshly provisioned Bursar could read an

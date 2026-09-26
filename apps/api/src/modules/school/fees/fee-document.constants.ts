@@ -53,6 +53,12 @@ export const FINANCIAL_DOCUMENT_PROFILES: readonly FinancialDocumentProfile[] = 
   receivable('school_transport', 'Transport', true),
   receivable('school_admission_fee', 'Admission / application fee'),
   {
+    // Re-audit #3 P0-2: cash refunded out of a receipt that was later reversed
+    // (bounced cheque). Owed by the family, but it is not income.
+    ...receivable('school_payment_recovery', 'Refund recovered after reversed receipt'),
+    revenueBearing: false,
+  },
+  {
     // Cafeteria wallet: prepaid stored value, never an invoice. Listed so the
     // classification is explicit rather than an omission.
     sourceType: 'meal_wallet',
@@ -123,3 +129,10 @@ export const OPEN_COLLECTABLE_FEE_WHERE: Prisma.DocumentWhereInput = {
   paymentStatus: { in: [...OPEN_PAYMENT_STATUSES] },
   amountResidual: { gt: 0 },
 };
+
+/**
+ * StudentProfile statuses a term invoice is raised for. Suspension is
+ * disciplinary, not departure: the pupil keeps their seat and is billed
+ * (owner decision D3, re-audit #3, 2026-09-25).
+ */
+export const BILLABLE_STUDENT_STATUSES = ['active', 'suspended'] as const;

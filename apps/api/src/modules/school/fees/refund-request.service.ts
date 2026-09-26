@@ -88,27 +88,35 @@ export class RefundRequestService {
   }
 
   /**
-   * Approve = pay out. The refund carries `refund-request:<id>` as its
-   * idempotency key, so two approvers clicking at once pay out once: the second
-   * replays the first's refund, and only one compare-and-set closes the request.
+   * Approve = pay out, in ONE transaction with claiming the request. The claim
+   * (compare-and-set pending → approved) comes first: a concurrent approve or
+   * reject that loses it pays nothing. Paying first and closing after let a
+   * reject win the close while the money had already gone (re-audit #6).
    */
   async approve(requestId: string, comment?: string) {
     const req = await this.pending(requestId);
     const dto = (req.snapshot as any)?.dto as RefundFeeDto;
     if (!dto?.studentProfileId) throw new BadRequestException('This refund request is malformed.');
 
-    const res = await this.payments.refundFee({
-      ...dto,
-      externalReference: dto.externalReference ?? `refund-request:${req.id}`,
+    const res = await this.prisma.client.$transaction(async (tx: any) => {
+      await this.claim(tx, req.id, 'approved');
+      const paid = await this.payments.refundFee(
+        { ...dto, externalReference: dto.externalReference ?? `refund-request:${req.id}` },
+        { tx, approvedRequest: true },
+      );
+      await this.record(tx, req.id, 'approved', comment, { paymentId: (paid as any)?.payment?.id ?? null });
+      return paid;
     });
-    await this.close(req.id, 'approved', comment, { paymentId: (res as any)?.payment?.id ?? null });
     return { status: 'refunded' as const, requestId: req.id, ...res };
   }
 
   async reject(requestId: string, reason: string) {
     if (!reason?.trim()) throw new BadRequestException('Say why the refund is refused — the bursar sees it.');
     const req = await this.pending(requestId);
-    await this.close(req.id, 'rejected', reason.trim());
+    await this.prisma.client.$transaction(async (tx: any) => {
+      await this.claim(tx, req.id, 'rejected');
+      await this.record(tx, req.id, 'rejected', reason.trim());
+    });
     return { status: 'rejected' as const, requestId: req.id };
   }
 
@@ -125,29 +133,31 @@ export class RefundRequestService {
     return req;
   }
 
-  private async close(requestId: string, status: 'approved' | 'rejected', comment?: string, extra: Record<string, unknown> = {}) {
-    await this.prisma.client.$transaction(async (tx: any) => {
-      const cas = await tx.approvalRequest.updateMany({
-        where: { id: requestId, status: 'pending' },
-        data: { status, decidedAt: new Date() },
-      });
-      if (cas.count === 0) return; // a concurrent approver closed it; the refund replayed
-      await tx.approvalDecision.create({
-        data: {
-          organizationId: this.tenant.organizationId,
-          requestId,
-          approverId: this.tenant.userId!,
-          stepOrder: 1,
-          status,
-          comment: comment ?? null,
-        },
-      });
-      await this.audit.recordInTx(tx, {
-        entity: 'ApprovalRequest',
-        entityId: requestId,
-        action: status === 'approved' ? 'approve' : 'reject',
-        newValues: { status, comment: comment ?? null, ...extra },
-      });
+  /** Compare-and-set pending → decided. Losing it means someone else decided first. */
+  private async claim(tx: any, requestId: string, status: 'approved' | 'rejected') {
+    const cas = await tx.approvalRequest.updateMany({
+      where: { id: requestId, status: 'pending' },
+      data: { status, decidedAt: new Date() },
+    });
+    if (cas.count === 0) throw new ConflictException('This refund request was decided by someone else a moment ago.');
+  }
+
+  private async record(tx: any, requestId: string, status: 'approved' | 'rejected', comment?: string, extra: Record<string, unknown> = {}) {
+    await tx.approvalDecision.create({
+      data: {
+        organizationId: this.tenant.organizationId,
+        requestId,
+        approverId: this.tenant.userId!,
+        stepOrder: 1,
+        status,
+        comment: comment ?? null,
+      },
+    });
+    await this.audit.recordInTx(tx, {
+      entity: 'ApprovalRequest',
+      entityId: requestId,
+      action: status === 'approved' ? 'approve' : 'reject',
+      newValues: { status, comment: comment ?? null, ...extra },
     });
   }
 }

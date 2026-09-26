@@ -70,7 +70,9 @@ Default credentials seeded:
 - [ ] TLS termination (Caddy / nginx / a load balancer).
 - [ ] Postgres backups (pg_dump cron + offsite copy).
 - [ ] SMTP provider configured (otherwise password-reset emails won't send).
-- [ ] `STORAGE_DRIVER=s3` + AWS credentials when you outgrow local disk.
+- [ ] File uploads live on the `uploads` volume (`STORAGE_LOCAL_DIR`). Only the
+      `local` driver exists; the API refuses to start with `STORAGE_DRIVER=s3`.
+      Include the volume in backups.
 - [ ] `ThrottlerModule` is registered globally — verify by hitting login 100×.
 - [ ] `JWT_ACCESS_SECRET` rotated quarterly (re-encrypt User.mfaSecret rows).
 - [ ] Run `pnpm verify` in CI before every release.
@@ -82,6 +84,54 @@ Default credentials seeded:
       navigates to it, so hiding the web nav alone is not enough.
 - [ ] `scripts/validate-production.ts` is never pointed at production — it
       writes real sales, refunds and GL entries. Staging only.
+
+## Go-live for a school
+
+### 1. Settings the API needs (`docker-compose.prod.yml` refuses to start without the starred ones)
+
+| Variable | Why |
+|---|---|
+| `WEB_URL` \* | Staff invitation and password-reset links point here. |
+| `PORTAL_URL` \* | Parent portal invitation links point here. |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` \* | Email. Without SMTP, emails are recorded as **not sent** (never as sent). |
+| `COMM_ENCRYPTION_KEY` \* | Encrypts the SMS gateway's credentials. `openssl rand -base64 32`. |
+| `SMS_DEFAULT_COUNTRY_CODE` | `+256` by default: turns `0772…` into `+256772…`. |
+| `PROVISIONING_SECRET` | Only while creating a new school; unset it afterwards. |
+
+### 2. Create the school (operator, once)
+
+```bash
+curl -X POST https://<api>/api/v1/organizations/bootstrap \
+  -H "X-Provisioning-Secret: $PROVISIONING_SECRET" -H 'content-type: application/json' \
+  -d '{"organizationCode":"GVPS","organizationName":"Green Valley Primary School","adminEmail":"head@gvps.ug","adminFirstName":"Head"}'
+```
+
+The school starts in UGX / Africa/Kampala with Baby–Top and P1–P7 (with the
+promotion ladder), attendance statuses, the PLE grading scale and a main campus.
+The administrator receives an email link to set their password.
+
+### 3. Connect SMS for parents
+
+Sign in as the administrator → **Communication → Channels** → add an SMS
+channel with your gateway's details. Fee, attendance and admission alerts go
+through it. Until a channel exists they are recorded as *failed — no SMS gateway*.
+
+### 4. Follow the in-app checklist
+
+The dashboard shows **Get your school ready**: eleven steps computed from real
+data (year → terms → classes → subjects → staff → teachers → fees → pupils →
+SMS → parents), each linking to the screen that does it. **How it works** (top
+of the menu) explains the school year and who does what.
+
+### 5. Roles to hand out
+
+| Person | Role | Can | Cannot |
+|---|---|---|---|
+| Head teacher | Head Teacher | approve marks, refunds, write-offs; open / close / archive the year | collect money |
+| Bursar | Bursar | fees, payments, receipts, refund **requests** | approve their own refund |
+| Registrar | Registrar | admissions, pupils, placement, parent accounts | close a year, fees |
+| Class teacher | Class Teacher | register and marks for **their** classes only | other classes, fees |
+| Front desk | Front Desk | visitors, enquiries | close a year |
 
 ## Observability
 

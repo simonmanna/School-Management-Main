@@ -307,7 +307,7 @@ export function SchoolEnterMarksPage() {
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {sheet.exam.name} · out of {maxMarks}
-                  {streamId && streamList.find((s) => s.id === streamId) && <> · {streamList.find((s) => s.id === streamId)!.name} stream</>}
+                  {streamId && streamList.find((s) => s.id === streamId) && <> · {streamList.find((s) => s.id === streamId)!.name} {currentTerminology().section.toLowerCase()}</>}
                 </p>
               </div>
 

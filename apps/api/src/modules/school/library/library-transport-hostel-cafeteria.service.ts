@@ -1,6 +1,6 @@
 /** Library + Transport + Hostel + Cafeteria + Reports — fast CRUD with finance hooks. */
 
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type {
   Bed,
   BookCopy,
@@ -136,6 +136,13 @@ export class BookCopyService extends BaseCrudService<BookCopy, CreateBookCopyDto
   protected readonly defaultOrderBy = { id: 'desc' } as Record<string, 'asc' | 'desc'>;
   constructor(private readonly prisma: PrismaService) {
     super(prisma.client.bookCopy as unknown as CrudDelegate);
+  }
+
+  /** A copy that has ever been lent keeps its history (and its fines); retire it instead. */
+  override async remove(id: string): Promise<void> {
+    const lent = await this.prisma.client.borrowing.count({ where: { bookCopyId: id } });
+    if (lent > 0) throw new ConflictException('This copy has lending history. Mark it lost or withdrawn instead of deleting it.');
+    return super.remove(id);
   }
 }
 

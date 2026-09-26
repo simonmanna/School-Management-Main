@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Assessment } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { assertTermWritable } from '../foundation/academic-year-guard';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
@@ -40,6 +41,7 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
 
   async create(dto: CreateAssessmentDto): Promise<Assessment> {
     return this.prisma.client.$transaction(async (tx: any) => {
+      await assertTermWritable(tx, this.tenant.organizationId, (dto as any).termId); // re-audit #3 P1-14
       let component: any = null;
       if (dto.componentId) {
         component = await tx.assessmentComponent.findFirst({ where: { id: dto.componentId } });
@@ -71,6 +73,7 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
     return this.prisma.client.$transaction(async (tx: any) => {
       const before = await tx.assessment.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`Assessment ${id} not found`);
+      await assertTermWritable(tx, this.tenant.organizationId, before.termId); // re-audit #3 P1-14
       // Once graded/archived, structural edits are refused — the marks depend on it.
       if (!['draft', 'scheduled'].includes(before.status)) {
         throw new BadRequestException(`Assessment ${id} is ${before.status} and cannot be edited`);
@@ -108,6 +111,7 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
     return this.prisma.client.$transaction(async (tx: any) => {
       const before = await tx.assessment.findFirst({ where: { id } });
       if (!before) throw new NotFoundException(`Assessment ${id} not found`);
+      await assertTermWritable(tx, this.tenant.organizationId, before.termId); // re-audit #3 P1-14
       if (!t.from.includes(before.status)) {
         throw new BadRequestException(
           `Cannot ${action} an assessment in '${before.status}' (allowed from: ${t.from.join(', ')})`,
@@ -140,6 +144,7 @@ export class AssessmentService extends BaseCrudService<Assessment, CreateAssessm
   async remove(id: string): Promise<void> {
     const row = await this.prisma.client.assessment.findFirst({ where: { id } });
     if (!row) throw new NotFoundException('Assessment not found');
+    await assertTermWritable(this.prisma.client, this.tenant.organizationId, row.termId); // re-audit #3 P1-14
     if (!['draft', 'scheduled'].includes(row.status)) throw new BadRequestException('Published assessment evidence cannot be deleted; archive the assessment instead');
     return super.remove(id);
   }

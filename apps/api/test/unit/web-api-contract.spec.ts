@@ -32,6 +32,10 @@ import {
 
 const ROOT = join(__dirname, '..', '..', '..', '..');
 const WEB_FEATURES = join(ROOT, 'apps', 'web', 'src', 'features');
+// Re-audit #3: pages and the parent portal call the API too. The library stats
+// route-order bug and the portal's LMS pages slipped past a features-only scan.
+const WEB_PAGES = join(ROOT, 'apps', 'web', 'src', 'pages');
+const PORTAL_SRC = join(ROOT, 'apps', 'portal', 'src');
 const API_SRC = join(ROOT, 'apps', 'api', 'src');
 
 /* ─────────────────────────── Part A: payloads ─────────────────────────── */
@@ -175,9 +179,10 @@ function literalAt(src: string, at: number): string | null {
 }
 
 /** Web calls: `api.get(`${S}/x/${id}`)`, with S resolved per file. */
-function webCalls(): Route[] {
+function webCalls(roots: string[] = [WEB_FEATURES]): Route[] {
   const calls: Route[] = [];
-  for (const file of walk(WEB_FEATURES, (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))) {
+  const files = roots.flatMap((root) => walk(root, (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f)));
+  for (const file of files) {
     const src = readFileSync(file, 'utf8');
     const consts: Record<string, string> = {};
     for (const c of src.matchAll(/const (\w+)\s*=\s*'(\/[^']*)'/g)) consts[c[1]] = c[2];
@@ -247,4 +252,23 @@ describe('web feature clients only call routes that exist', () => {
  * Unmatched web calls outside the enrollment surface when this spec landed.
  * Lower it as they are fixed; never raise it.
  */
-const KNOWN_UNMATCHED = 10;
+const KNOWN_UNMATCHED = 5;
+
+describe('web pages and the parent portal only call school routes that exist (re-audit #3)', () => {
+  const routes = nestRoutes();
+  const pageCalls = webCalls([WEB_PAGES]);
+  const portalCalls = webCalls([PORTAL_SRC]);
+
+  it('found calls on both surfaces', () => {
+    expect(pageCalls.length).toBeGreaterThan(20);
+    expect(portalCalls.length).toBeGreaterThan(20);
+  });
+
+  it('every /school/* URL called from web pages or the portal resolves to a Nest route', () => {
+    const missing = [...pageCalls, ...portalCalls]
+      .filter((c) => c.segments[0] === 'school')
+      .filter((c) => !routes.some((r) => matches(c, r)))
+      .map((c) => `${c.verb.toUpperCase()} /${c.segments.join('/')}  (${c.where})`);
+    expect(missing).toEqual([]);
+  });
+});

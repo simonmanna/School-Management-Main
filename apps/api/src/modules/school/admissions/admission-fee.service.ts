@@ -325,6 +325,93 @@ export class AdmissionFeeService implements OnModuleInit {
    * `parentContactId` so the charge, the payment and any waiver all bill the
    * same account.
    */
+  /**
+   * Re-audit #3 P1-16. At enrolment, move the application fee onto the new
+   * pupil's own account.
+   *
+   * The fee is charged before the pupil exists, so it bills the paying
+   * guardian's account: an `ADM-PAYER-*` account, or — when a sibling is
+   * already enrolled — the guardian contact that belongs to the SIBLING's
+   * account. Every statement, balance, portal and clearance query reads by the
+   * pupil's own account, so the fee and its payment never showed for the new
+   * pupil, and showed on the sibling's statement instead.
+   *
+   * The invoice moves, and so does every receipt that paid this fee and
+   * nothing else (a receipt that also paid other invoices stays with its
+   * payer). The GL AR those items carry moves with them in one transfer entry
+   * — Dr AR (pupil) / Cr AR (payer) for `residual − unallocated moved` — so
+   * the per-account identity `GL AR = open residual − unallocated receipts`
+   * holds for both accounts afterwards. Runs inside the enrolment transaction.
+   */
+  async moveToStudentAccount(tx: any, applicationId: string, studentPartnerId: string, organizationId: string) {
+    const docs = await tx.document.findMany({
+      where: { organizationId, sourceType: 'school_admission_fee', sourceId: applicationId, status: { not: 'cancelled' } },
+    });
+    for (const doc of docs) {
+      const from = doc.partnerId;
+      if (!from || from === studentPartnerId) continue;
+
+      const allocations = await tx.paymentAllocation.findMany({
+        where: { organizationId, documentId: doc.id, status: 'posted' },
+        include: { payment: true },
+      });
+      const moved: any[] = [];
+      for (const a of allocations) {
+        const p = a.payment;
+        if (!p || p.partnerId !== from || p.status === 'cancelled' || moved.some((m) => m.id === p.id)) continue;
+        const elsewhere = await tx.paymentAllocation.count({
+          where: { organizationId, paymentId: p.id, status: 'posted', documentId: { not: doc.id } },
+        });
+        if (elsewhere === 0) moved.push(p);
+      }
+
+      const unallocatedMoved = moved.reduce((t, p) => t.plus(dec(p.unallocatedAmount ?? 0)), ZERO);
+      const transfer = dec(doc.amountResidual).minus(unallocatedMoved);
+      if (!transfer.isZero()) {
+        const arLine = doc.journalEntryId
+          ? await tx.journalLine.findFirst({
+              where: { journalEntryId: doc.journalEntryId, debit: { gt: 0 } },
+              select: { accountId: true },
+            })
+          : null;
+        if (!arLine) {
+          throw new BadRequestException(
+            `Application fee ${doc.documentNumber} has no posted receivable line, so it cannot be moved to the pupil's account.`,
+          );
+        }
+        const amount = transfer.abs().toString();
+        const [dr, cr] = transfer.greaterThan(ZERO) ? [studentPartnerId, from] : [from, studentPartnerId];
+        await this.posting.post(
+          {
+            journalCode: 'GEN',
+            date: new Date(),
+            description: `Application fee ${doc.documentNumber} moved to the pupil's account`,
+            sourceType: 'school_admission_fee_transfer',
+            sourceId: doc.id,
+            postingKey: `school_admission_fee_transfer:${doc.id}`,
+            lines: [
+              { accountId: arLine.accountId, debit: amount, partnerId: dr, description: 'Application fee (to pupil)' },
+              { accountId: arLine.accountId, credit: amount, partnerId: cr, description: 'Application fee (from payer)' },
+            ],
+          },
+          tx,
+        );
+      }
+
+      await tx.document.update({ where: { id: doc.id }, data: { partnerId: studentPartnerId } });
+      for (const p of moved) {
+        await tx.payment.update({ where: { id: p.id }, data: { partnerId: studentPartnerId } });
+      }
+      await this.audit.recordInTx(tx, {
+        entity: 'Document',
+        entityId: doc.id,
+        action: 'transfer',
+        oldValues: { partnerId: from },
+        newValues: { partnerId: studentPartnerId, movedPayments: moved.map((p) => p.id), glTransfer: transfer.toString() },
+      });
+    }
+  }
+
   private async feePartnerId(tx: any, app: any): Promise<string> {
     if (app.parentContactId) {
       const contact = await tx.contact.findFirst({ where: { id: app.parentContactId }, select: { partnerId: true } });

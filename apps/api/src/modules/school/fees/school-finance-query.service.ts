@@ -945,9 +945,8 @@ export class SchoolFinanceQueryService {
     credits: Array<{ id: string; code: string; source: string; remaining: number }>;
   }> {
     const organizationId = this.tenant.organizationId;
-    const [inboundAgg, convertedAgg, credits]: [
+    const [inboundAgg, credits]: [
       { _sum: { unallocatedAmount: unknown } },
-      { _sum: { amount: unknown } },
       Array<{ id: string; code: string; source: string; remaining: unknown }>,
     ] = await Promise.all([
       // Unallocated value on live receipts. A refund draws this down on the
@@ -959,11 +958,6 @@ export class SchoolFinanceQueryService {
       db.payment.aggregate({
         where: { organizationId, partnerId, direction: 'inbound', status: { not: 'cancelled' } },
         _sum: { unallocatedAmount: true },
-      }),
-      // overpayment already converted into a credit (counted once — P1-3)
-      db.feeCredit.aggregate({
-        where: { organizationId, studentProfileId, source: 'overpayment' },
-        _sum: { amount: true },
       }),
       // Refundable outstanding credits, oldest-first.
       //
@@ -986,12 +980,17 @@ export class SchoolFinanceQueryService {
     ]);
 
     const unallocated = Number(inboundAgg._sum.unallocatedAmount ?? 0);
-    const converted = Number(convertedAgg._sum.amount ?? 0);
     const fromCredits = credits.reduce((s, c) => s + Number(c.remaining), 0);
 
-    // Unallocated payment value minus the portion already re-represented as a
-    // FeeCredit (entitlement uniqueness), PLUS refundable outstanding credits.
-    const fromPayments = Math.max(0, unallocated - converted);
+    // Re-audit #3 P1-7: unallocated value PLUS refundable outstanding credits.
+    //
+    // This used to subtract every overpayment credit ever converted. But every
+    // conversion already draws `Payment.unallocatedAmount` down in its own
+    // transaction (collect B1, createCreditFromRequest), so the money was
+    // counted out twice: after one converted overpayment, later genuine
+    // overpayments were permanently under-refundable. Entitlement uniqueness
+    // holds without it: converted value lives on the credit, not the receipt.
+    const fromPayments = Math.max(0, unallocated);
 
     return {
       fromPayments: Number(dec(fromPayments).toFixed(6)),

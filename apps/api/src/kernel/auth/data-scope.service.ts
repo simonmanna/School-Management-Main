@@ -108,19 +108,66 @@ export class DataScopeService {
    * must not make that trade, so it reads this instead.
    */
   private async taughtClassIds(staffProfileId: string): Promise<string[]> {
-    const [assigned, timetabled] = await Promise.all([
+    const [assigned, timetabled, homeroom, sectionTeacher] = await Promise.all([
+      // A class taught in a year that has since closed is not taught now
+      // (re-audit #4): only term-less assignments and those in an open year count.
       this.db.teacherAssignment.findMany({
-        where: { organizationId: this.tenant.organizationId, teacherPartnerId: staffProfileId },
+        where: {
+          organizationId: this.tenant.organizationId,
+          teacherPartnerId: staffProfileId,
+          OR: [{ termId: null }, { term: { academicYear: { status: { in: ['PLANNING', 'ACTIVE'] } } } }],
+        },
         select: { classId: true },
       }),
       this.db.timetableSlot.findMany({
         where: { organizationId: this.tenant.organizationId, teacherPartnerId: staffProfileId },
         select: { classId: true },
       }),
+      // Re-audit #3 P1-15: the class teacher. A homeroom teacher with no
+      // subject assignment or timetable row used to see none of their pupils.
+      this.db.schoolClass.findMany({
+        where: { organizationId: this.tenant.organizationId, homeroomTeacherId: staffProfileId, isActive: true },
+        select: { id: true },
+      }),
+      this.db.section.findMany({
+        where: { organizationId: this.tenant.organizationId, classTeacherId: staffProfileId, isActive: true, deletedAt: null },
+        select: { classId: true },
+      }),
     ]);
     const ids = new Set<string>();
-    for (const r of [...assigned, ...timetabled]) if (r.classId) ids.add(r.classId);
+    for (const r of [...assigned, ...timetabled, ...sectionTeacher]) if (r.classId) ids.add(r.classId);
+    for (const r of homeroom) ids.add(r.id);
     return [...ids];
+  }
+
+  /**
+   * Throw unless a class- or own-scoped caller teaches a class this pupil is
+   * seated in now (re-audit #4). The list endpoint was scoped, but opening one
+   * pupil by id, listing another class by id or reading one pupil's attendance
+   * still returned anyone in the school.
+   */
+  async assertMayReadStudent(studentProfileId: string): Promise<void> {
+    const readable = await this.readableClassIds();
+    if (readable === 'all') return;
+    const seat = readable.length
+      ? await this.db.enrollmentPlacement.findFirst({
+          where: {
+            organizationId: this.tenant.organizationId,
+            effectiveTo: null,
+            enrollment: { studentProfileId },
+            classCohort: { classId: { in: readable } },
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!seat) throw new ForbiddenException('You may only open the records of pupils in classes you teach');
+  }
+
+  /** Throw unless a class- or own-scoped caller teaches this class. Read-side twin of assertMayTouchClass. */
+  async assertMayReadClass(classId: string): Promise<void> {
+    const readable = await this.readableClassIds();
+    if (readable === 'all') return;
+    if (!readable.includes(classId)) throw new ForbiddenException('You may only list the pupils of classes you teach');
   }
 
   /** Throw unless the caller may act on this class under their scope. */

@@ -5,6 +5,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { safeTimeZone, zonedDate, zonedPeriodStarts } from '../../../kernel/common/school-time';
 
 /**
  * ReportingService — aggregation queries that power the four school dashboards:
@@ -40,7 +41,7 @@ export class ReportingService {
       this.prisma.client.staffProfile.count({ where: { status: 'active', staffCategory: 'teaching' } }),
       this.prisma.client.campus.count({ where: { isActive: true } }),
       this.prisma.client.schoolClass.count(),
-      this.prisma.client.section.count(),
+      this.prisma.client.section.count({ where: { deletedAt: null, isActive: true } }),
     ]);
     // The admin dashboard is open to every staff role; the fee total is not.
     const perms = this.tenant.permissions;
@@ -100,16 +101,27 @@ export class ReportingService {
     };
   }
 
+  /** The school's zone; dashboards count "today" and "this month" in it. */
+  private async schoolTimeZone(): Promise<string> {
+    const org = await this.prisma.raw.organization.findUnique({
+      where: { id: this.tenant.organizationId },
+      select: { timezone: true },
+    });
+    return safeTimeZone(org?.timezone);
+  }
+
   async financeDashboard() {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const { monthStart: startOfMonth } = zonedPeriodStarts(await this.schoolTimeZone());
     const [collectionsThisMonth, totals] = await Promise.all([
       // Collections = allocated money, not raw Payment rows. A `Payment` may be
       // cancelled, or sit unallocated; PaymentAllocation is the authoritative
       // record of value actually applied to a fee document.
+      // Fee money only (re-audit #11): canteen, POS and other invoices settled
+      // through the same payment engine are not school-fee collections.
       this.prisma.client.paymentAllocation.aggregate({
         where: {
-          status: { not: 'reversed' },
+          status: 'posted',
+          document: { sourceType: { in: [...SCHOOL_FEE_SOURCE_TYPES] } },
           payment: { direction: 'inbound', status: { not: 'cancelled' }, paymentDate: { gte: startOfMonth } },
         },
         _sum: { amount: true },
@@ -208,10 +220,11 @@ export class ReportingService {
 
   /** Attendance summary (today) for the admin dashboard. */
   async attendanceToday() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+    // Attendance rows carry the calendar date as UTC midnight; "today" is the
+    // school's local calendar day, not the server's.
+    const { year, month, day } = zonedDate(new Date(), await this.schoolTimeZone());
+    const today = new Date(Date.UTC(year, month - 1, day));
+    const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
     const counts = await this.prisma.client.studentAttendance.groupBy({
       by: ['status'],
       where: { date: { gte: today, lt: tomorrow } },

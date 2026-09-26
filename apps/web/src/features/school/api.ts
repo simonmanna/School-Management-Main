@@ -165,6 +165,27 @@ export function currentTerminology(): Terminology {
   return queryClient.getQueryData<Terminology>(['school', 'terminology']) ?? TERMINOLOGY_DEFAULTS;
 }
 
+/** One step of the "get your school ready" checklist (GET /school/setup-status). */
+export interface SetupStep {
+  id: string;
+  title: string;
+  why: string;
+  done: boolean;
+  detail: string | null;
+  href: string;
+  who: string;
+}
+
+export function useSetupStatus(enabled = true) {
+  return useQuery({
+    queryKey: ['school', 'setup-status'],
+    queryFn: async () =>
+      (await api.get<{ steps: SetupStep[]; done: number; total: number; ready: boolean }>(`${S}/setup-status`)).data,
+    enabled,
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useSchoolOverview() {
   return useQuery({
     queryKey: ['school', 'overview'],
@@ -2097,6 +2118,7 @@ export interface BatchRow {
   paymentMethod?: 'cash' | 'bank' | 'mobile_money' | 'card';
   reference?: string;
   externalReference?: string;
+  externalReferenceType?: 'import_row';
   convertOverpaymentToCredit?: boolean;
 }
 export interface BatchResult {
@@ -2172,7 +2194,7 @@ export function useReverseAllocation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ allocationId, reason }: { allocationId: string; reason: string }) =>
-      (await api.post(`${S}/finance/allocations/${allocationId}/reverse`, { reason })).data,
+      (await api.post<CorrectionOutcome>(`${S}/finance/allocations/${allocationId}/reverse`, { reason })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
   });
 }
@@ -2180,7 +2202,7 @@ export function useReversePayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ paymentId, reason }: { paymentId: string; reason: string }) =>
-      (await api.post(`${S}/finance/payments/${paymentId}/reverse`, { reason })).data,
+      (await api.post<CorrectionOutcome>(`${S}/finance/payments/${paymentId}/reverse`, { reason })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
   });
 }
@@ -2195,7 +2217,46 @@ export function useReallocatePayment() {
       paymentId: string;
       allocations: Array<{ documentId: string; amount: number }>;
       reason: string;
-    }) => (await api.post(`${S}/finance/payments/${paymentId}/reallocate`, { allocations, reason })).data,
+    }) => (await api.post<CorrectionOutcome>(`${S}/finance/payments/${paymentId}/reallocate`, { allocations, reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
+  });
+}
+
+/**
+ * D4 (re-audit #3): reversals, reallocations and manual credits are
+ * maker-checker. A request comes back `pending_approval` unless the caller
+ * holds both sides (then `applied`).
+ */
+export type CorrectionOutcome = { status: 'applied' | 'pending_approval'; requestId?: string };
+export interface FeeCorrectionRequest {
+  id: string;
+  status: string;
+  createdAt: string;
+  createdById: string | null;
+  snapshot: {
+    kind: 'reverse_allocation' | 'reallocate' | 'reverse_payment' | 'credit';
+    amount: number | null;
+    correction: Record<string, any> & { reason?: string };
+  };
+}
+export function useFeeCorrections(status: 'pending' | 'approved' | 'rejected' = 'pending') {
+  return useQuery({
+    queryKey: ['school', 'fee-corrections', status],
+    enabled: canReadFees(),
+    queryFn: async () =>
+      (await api.get<FeeCorrectionRequest[]>(`${S}/finance/corrections`, { params: { status } })).data,
+  });
+}
+export function useDecideFeeCorrection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (v: { id: string; decision: 'approve' | 'reject'; reason?: string }) =>
+      (
+        await api.post(
+          `${S}/finance/corrections/${v.id}/${v.decision}`,
+          v.decision === 'approve' ? { comment: v.reason } : { reason: v.reason },
+        )
+      ).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
   });
 }
@@ -2875,7 +2936,7 @@ export function useDecideRefundRequest() {
 export function usePartners() {
   return useQuery({
     queryKey: ['partners'],
-    queryFn: async () => (await api.get<{ data: { id: string; name: string }[] }>(`/partner/partners`, { params: { pageSize: 200 } })).data,
+    queryFn: async () => (await api.get<{ data: { id: string; name: string }[] }>(`/partners`, { params: { pageSize: 200 } })).data,
   });
 }
 
@@ -2957,8 +3018,8 @@ export function useFeeCredits(studentProfileId?: string) {
 export function useCreateFeeCredit() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { studentProfileId: string; amount: number; source?: string; sourcePaymentId?: string; sourceDocumentId?: string; expiresAt?: string }) =>
-      (await api.post<FeeCredit>(`${S}/finance/credits`, dto)).data,
+    mutationFn: async (dto: { studentProfileId: string; amount: number; source: 'opening_balance' | 'approved_adjustment' | 'overpayment'; sourcePaymentId?: string; sourceDocumentId?: string; expiresAt?: string }) =>
+      (await api.post<CorrectionOutcome>(`${S}/finance/credits`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'fee-credits'] }),
   });
 }
@@ -4932,7 +4993,6 @@ export function useExamAttendance(examId: string | undefined) {
 /* ── A8 Portals (student / parent / teacher) + Promotion gate ─────────────── */
 
 const POR = `${S}/portals`;
-const PRO = `${S}/promotion`;
 
 export interface StudentPortal {
   studentProfileId: string;
@@ -4951,20 +5011,12 @@ export interface TeacherPortal {
   markingQueue: Array<{ id: string; title: string; pending: number }>;
   submissions: unknown[];
 }
-export interface PromotionPlanEntry { studentProfileId: string; fromClassId?: string | null; toClassId?: string | null; outcome: string; reason?: string | null }
 
 export function useStudentPortal(studentProfileId: string | undefined) {
   return useQuery({ queryKey: ['school', 'portal-student', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<StudentPortal>(`${POR}/student/${studentProfileId}`)).data });
 }
 export function useTeacherPortal(teacherPartnerId: string | undefined) {
   return useQuery({ queryKey: ['school', 'portal-teacher', teacherPartnerId], enabled: !!teacherPartnerId, queryFn: async () => (await api.get<TeacherPortal>(`${POR}/teacher/${teacherPartnerId}`)).data });
-}
-export function useRolloverPlan() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (dto: { fromTermId: string; toTermId: string; dryRun?: boolean }) => (await api.post<{ plan: PromotionPlanEntry[]; dryRun: boolean }>(`${PRO}/rollover`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'rollover'] }),
-  });
 }
 
 /* ── P0-A Report card comments ─────────────────────────────────────────────── */
@@ -5493,21 +5545,21 @@ export interface LibraryStats {
 export function useLibraryStats() {
   return useQuery({
     queryKey: ['school', 'library', 'stats'],
-    queryFn: async () => (await api.get<LibraryStats>(`${S}/library/stats`)).data,
+    queryFn: async () => (await api.get<LibraryStats>(`${S}/library/books/stats`)).data,
   });
 }
 
 export function useOverdueBooks() {
   return useQuery({
     queryKey: ['school', 'library', 'overdue'],
-    queryFn: async () => (await api.get<any[]>(`${S}/library/overdue`)).data,
+    queryFn: async () => (await api.get<any[]>(`${S}/library/books/overdue`)).data,
   });
 }
 
 export function usePopularBooks() {
   return useQuery({
     queryKey: ['school', 'library', 'popular'],
-    queryFn: async () => (await api.get<any[]>(`${S}/library/popular`)).data,
+    queryFn: async () => (await api.get<any[]>(`${S}/library/books/popular`)).data,
   });
 }
 

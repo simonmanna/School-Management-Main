@@ -10,8 +10,11 @@ import { PushService } from './push.service';
  * Channels:
  *   - in_app: a row in `Notification` is always created (durable record).
  *   - email:  nodemailer SMTP transport (configurable via env).
- *   - sms:    Twilio (optional). If credentials are missing, SMS is logged as
- *             "would-send" but the in-app row is still created.
+ *   - sms:    the school's own SMS gateway (communication module, registered
+ *             at boot via `registerSmsTransport`), else Twilio from env.
+ *   - With no provider for a channel the row is marked `failed` with the
+ *     reason — never `sent`. A parent told nothing must not look told
+ *     (re-audit P1-2).
  *   - push:   placeholder hook; downstream code can register handlers.
  *
  * Delivery model:
@@ -49,6 +52,35 @@ export interface SendInput {
   dedupeKey?: string;
 }
 
+/**
+ * A per-school SMS transport supplied by a feature module (the communication
+ * module's configured gateway). Registered at boot so the kernel never imports
+ * a module (ADR-011). `not_configured` means this school has no gateway and the
+ * next transport may be tried.
+ */
+export interface SmsTransport {
+  send(input: { organizationId: string; to: string; body: string; reference: string }): Promise<'sent' | 'not_configured'>;
+}
+
+/** Nothing could carry this message. Recorded as a failure with the reason. */
+export class NoProviderError extends Error {}
+
+/**
+ * E.164 for a human-typed number. "0772 123456" in Uganda is +256772123456;
+ * Twilio and every gateway reject the national form.
+ */
+export function toE164(raw: string, defaultCountryCode = process.env.SMS_DEFAULT_COUNTRY_CODE ?? '+256'): string {
+  const trimmed = raw.trim();
+  let digits = trimmed.replace(/\D/g, '');
+  if (!trimmed.startsWith('+')) {
+    const cc = defaultCountryCode.replace(/\D/g, '');
+    if (digits.startsWith('0')) digits = cc + digits.replace(/^0+/, '');
+    else if (!digits.startsWith(cc)) digits = cc + digits;
+  }
+  if (digits.length < 8 || digits.length > 15) throw new Error(`'${raw}' is not a valid phone number`);
+  return `+${digits}`;
+}
+
 /** A person to reach by their contact details — a guardian has no staff login. */
 export interface ContactRecipient {
   id: string;
@@ -61,6 +93,7 @@ export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger('NotificationsService');
   private smtpTransport: nodemailer.Transporter | null = null;
   private twilioClient: any | null = null;
+  private smsTransport: SmsTransport | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -89,6 +122,11 @@ export class NotificationsService implements OnModuleInit {
       this.twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       this.logger.log('Twilio client ready');
     }
+  }
+
+  /** Called once at boot by the module that owns the school's SMS gateway. */
+  registerSmsTransport(transport: SmsTransport): void {
+    this.smsTransport = transport;
   }
 
   async send(input: SendInput): Promise<{ id: string; delivered: boolean; duplicate?: boolean }> {
@@ -152,9 +190,12 @@ export class NotificationsService implements OnModuleInit {
       });
       return { id: row.id, delivered: true };
     } catch (err) {
+      // Release the dedupe key: it exists so a message is not SENT twice, and
+      // this one was not sent. Keeping it made every failure permanent — the
+      // next reminder run or re-emitted event was discarded as a duplicate.
       await this.prisma.raw.notification.update({
         where: { id: row.id },
-        data: { status: 'failed', error: String(err).slice(0, 500) },
+        data: { status: 'failed', error: String((err as Error)?.message ?? err).slice(0, 500), dedupeKey: null },
       });
       this.logger.warn(`Notification ${row.id} failed: ${String(err)}`);
       return { id: row.id, delivered: false };
@@ -219,8 +260,8 @@ export class NotificationsService implements OnModuleInit {
     }
     if (!to) throw new Error('No email address on file');
     if (!this.smtpTransport) {
-      this.logger.warn(`[DEV-EMAIL] to=${to} subject=${input.title} body=${input.body}`);
-      return;
+      this.logger.warn(`[NO-SMTP] email to=${to} subject=${input.title} not sent`);
+      throw new NoProviderError('Not sent: no email server is configured (SMTP_HOST).');
     }
     // The café-POS default leaked into school mail headers; set SMTP_FROM per deployment.
     const from = process.env.SMTP_FROM ?? 'no-reply@school.local';
@@ -234,13 +275,8 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private async sendSms(input: SendInput, notificationId: string): Promise<void> {
-    const direct = input.recipient?.phone?.trim() || null;
-    if (!direct && !input.userId) throw new Error('sms channel requires userId or recipient.phone');
-    if (!this.twilioClient) {
-      this.logger.warn(`[DEV-SMS] to=${direct ?? `user:${input.userId}`} body=${input.body}`);
-      return;
-    }
-    let phone = direct;
+    let phone = input.recipient?.phone?.trim() || null;
+    if (!phone && !input.userId) throw new Error('sms channel requires userId or recipient.phone');
     if (!phone) {
       const user = await this.prisma.raw.user.findFirst({ where: { id: input.userId! } });
       const partner = user?.email
@@ -249,11 +285,27 @@ export class NotificationsService implements OnModuleInit {
       phone = partner?.phone ?? null;
     }
     if (!phone) throw new Error('No phone number on file');
-    await this.twilioClient.messages.create({
-      from: process.env.TWILIO_FROM ?? '',
-      to: phone,
-      body: `${input.title}\n${input.body}`,
-    });
+    const to = toE164(phone);
+    const text = `${input.title}
+${input.body}`;
+
+    // 1. The school's own gateway, configured under Communication → Channels.
+    if (this.smsTransport) {
+      const res = await this.smsTransport.send({
+        organizationId: input.organizationId,
+        to,
+        body: text,
+        reference: `notification:${notificationId}`,
+      });
+      if (res === 'sent') return;
+    }
+    // 2. A deployment-wide Twilio account.
+    if (this.twilioClient) {
+      await this.twilioClient.messages.create({ from: process.env.TWILIO_FROM ?? '', to, body: text });
+      return;
+    }
+    this.logger.warn(`[NO-SMS] to=${to} not sent: no SMS gateway configured`);
+    throw new NoProviderError('Not sent: no SMS gateway is configured for this school.');
   }
 
   private async sendPush(input: SendInput): Promise<void> {

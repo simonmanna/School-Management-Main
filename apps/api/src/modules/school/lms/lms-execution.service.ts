@@ -4,6 +4,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { MarkingService } from '../assessment/marking.service';
 import { AssessmentMintService } from '../assessment/assessment-mint.service';
+import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
 
 const notFound = (what: string) => new NotFoundException(`${what} not found`);
 
@@ -25,10 +26,28 @@ export class LmsExecutionService {
     private readonly tenant: TenantContextService,
     private readonly marking: MarkingService,
     private readonly mint: AssessmentMintService,
+    private readonly portalIdentity: PortalIdentityService,
   ) {}
 
   private get org() {
     return this.tenant.organizationId;
+  }
+
+  /**
+   * Re-audit #3 P0-1: Parent and Student presets hold `school:lms:read`, which
+   * also opens these staff reporting routes. Staff get `null` (no narrowing);
+   * a family caller gets exactly the pupils they may see, so naming another
+   * family's `studentProfileId` — or naming none — returns nothing of theirs.
+   */
+  private async familyStudentScope(): Promise<string[] | null> {
+    const p = this.portalIdentity.principal();
+    if (p.kind === 'staff') return null;
+    return this.portalIdentity.accessibleStudents();
+  }
+
+  /** The author of a post is the caller — never whoever the request body names. */
+  private get callerUserId(): string | null {
+    return this.tenant.userId ?? null;
   }
 
   // ───────────── Phase 2: Scheduled lesson execution ─────────────
@@ -141,7 +160,8 @@ export class LmsExecutionService {
         body: dto.body ?? null,
         courseOfferingId: dto.courseOfferingId ?? null,
         lessonPlanId: dto.lessonPlanId ?? null,
-        createdById: dto.createdById ?? null,
+        // Re-audit #3 P0-1: was `dto.createdById`, so anyone could post as anyone.
+        createdById: this.callerUserId,
       },
     });
   }
@@ -171,7 +191,7 @@ export class LmsExecutionService {
         organizationId: this.org,
         discussionId,
         body: dto.body,
-        authorId: dto.authorId ?? null,
+        authorId: this.callerUserId,
         parentPostId: dto.parentPostId ?? null,
       },
     });
@@ -344,10 +364,15 @@ export class LmsExecutionService {
   // ───────────── Phase 5: Reporting ─────────────
 
   async objectiveMastery(opts: { learningObjectiveId?: string; studentProfileId?: string; termId?: string; classId?: string } = {}) {
+    const family = await this.familyStudentScope();
+    const studentFilter =
+      family === null
+        ? opts.studentProfileId ? { studentProfileId: opts.studentProfileId } : {}
+        : { studentProfileId: { in: opts.studentProfileId ? family.filter((id) => id === opts.studentProfileId) : family } };
     return this.prisma.client.learningObjectiveProgress.findMany({
       where: {
         organizationId: this.org,
-        ...(opts.studentProfileId ? { studentProfileId: opts.studentProfileId } : {}),
+        ...studentFilter,
         ...(opts.learningObjectiveId ? { learningObjectiveId: opts.learningObjectiveId } : {}),
       },
       orderBy: { masteryPct: 'desc' },
@@ -355,8 +380,13 @@ export class LmsExecutionService {
   }
 
   async courseProgressList(opts: { courseOfferingId?: string } = {}) {
+    const family = await this.familyStudentScope();
     return this.prisma.client.studentCourseProgress.findMany({
-      where: { organizationId: this.org, ...(opts.courseOfferingId ? { courseOfferingId: opts.courseOfferingId } : {}) },
+      where: {
+        organizationId: this.org,
+        ...(opts.courseOfferingId ? { courseOfferingId: opts.courseOfferingId } : {}),
+        ...(family === null ? {} : { studentProfileId: { in: family } }),
+      },
       orderBy: { progressPct: 'desc' },
     });
   }

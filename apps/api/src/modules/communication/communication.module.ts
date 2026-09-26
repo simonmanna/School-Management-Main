@@ -27,6 +27,7 @@ import { WhatsAppCloudProvider } from './providers/whatsapp/whatsapp-cloud.provi
 import { TelegramProvider } from './providers/telegram/telegram.provider';
 import { TelegramWebhookController } from './providers/telegram/telegram-webhook.controller';
 import { HttpSmsProvider } from './providers/sms/http-sms.provider';
+import { SchoolSmsTransport } from './providers/sms/school-sms-transport.service';
 import { SmsWebhookController } from './providers/sms/sms-webhook.controller';
 import { ConsentService } from './consent/consent.service';
 import { AudienceResolverService } from './audience/audience-resolver.service';
@@ -80,6 +81,7 @@ import { PlacementLookupModule } from '../school/enrollment/placement-lookup.mod
     TelegramProvider,
     // Phase 5 — SMS (one config-driven adapter for every gateway) + consent.
     HttpSmsProvider,
+    SchoolSmsTransport,
     ConsentService,
     // Phase 6 — school audiences, broadcasts and transport fallback chains.
     AudienceResolverService,

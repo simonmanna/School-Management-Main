@@ -133,6 +133,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   }
 
   override async findOne(id: string): Promise<StudentProfile> {
+    await this.dataScope?.assertMayReadStudent(id);
     const row = await super.findOne(id);
     return (await this.withPlacement([row]))[0] as any;
   }
@@ -349,6 +350,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
 
   /** Active learners placed in a class now, with their stream. */
   async listByClass(classId: string) {
+    await this.dataScope?.assertMayReadClass(classId);
     const rows = await this.prisma.client.studentProfile.findMany({
       where: { status: 'active', ...this.placements.studentWhere({ classIds: [classId] }) },
       orderBy: { admissionNo: 'asc' },
@@ -420,6 +422,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   }
 
   async activitiesForStudent(studentProfileId: string) {
+    await this.dataScope?.assertMayReadStudent(studentProfileId);
     return this.prisma.client.activity.findMany({
       where: { subjectType: 'student', subjectId: studentProfileId },
       orderBy: { occurredAt: 'desc' },
