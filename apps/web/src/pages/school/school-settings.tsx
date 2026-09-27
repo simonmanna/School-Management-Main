@@ -61,6 +61,9 @@ export function SchoolSettingsPage() {
       capacityPolicy: profile.capacityPolicy ?? 'ENFORCE',
       resultAbsencePolicy: profile.resultAbsencePolicy ?? 'ABSENT_AS_ZERO',
       classTeacherScope: profile.classTeacherScope ?? 'STREAM',
+      attendanceLateContribution: profile.attendanceLateContribution == null ? null : Number(profile.attendanceLateContribution),
+      attendanceExcusedInDenominator: profile.attendanceExcusedInDenominator ?? false,
+      cashCustodyMode: profile.cashCustodyMode ?? 'cashbook',
       terminology: { ...(profile.terminology ?? {}) },
     });
   }, [profile]);
@@ -105,8 +108,11 @@ export function SchoolSettingsPage() {
       notify.error(`"${draft.timezone}" is not a valid time zone.`);
       return;
     }
+    const { attendanceLateContribution, ...rest } = draft;
     const payload: UpdateSchoolProfileInput = {
-      ...draft,
+      ...rest,
+      // Not chosen stays not chosen: the API has no default for it (ADR-032 P1).
+      ...(attendanceLateContribution == null ? {} : { attendanceLateContribution: Number(attendanceLateContribution) }),
       email: draft.email?.trim() || undefined,
       country: draft.country?.trim().toUpperCase() || undefined,
       terminology: Object.fromEntries(
@@ -225,6 +231,55 @@ export function SchoolSettingsPage() {
               <option value="CLASS">Every stream of their class</option>
             </select>
             <p className="text-xs text-muted-foreground">Subject teachers always see only the learners they teach this year.</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Attendance and cash</CardTitle></CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="profile-late">A pupil who arrives late counts as</Label>
+            <select
+              id="profile-late"
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              value={draft.attendanceLateContribution == null ? '' : String(draft.attendanceLateContribution)}
+              onChange={(e) => set('attendanceLateContribution', e.target.value === '' ? null : Number(e.target.value))}
+            >
+              <option value="" disabled>Choose — attendance rates stay hidden until you do</option>
+              <option value="1">Present for the day</option>
+              <option value="0.5">Half a day</option>
+            </select>
+            {draft.attendanceLateContribution == null && (
+              <p className="text-xs text-amber-700">Attendance percentages are not shown until the school chooses.</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="profile-excused">Excused absences</Label>
+            <select
+              id="profile-excused"
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              value={draft.attendanceExcusedInDenominator ? 'in' : 'out'}
+              onChange={(e) => set('attendanceExcusedInDenominator', e.target.value === 'in')}
+            >
+              <option value="out">Do not count against the pupil</option>
+              <option value="in">Count as a day missed</option>
+            </select>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label htmlFor="profile-cash">How the fee desk keeps cash</Label>
+            <select
+              id="profile-cash"
+              className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+              value={draft.cashCustodyMode}
+              onChange={(e) => set('cashCustodyMode', e.target.value as Draft['cashCustodyMode'])}
+            >
+              <option value="cashbook">Daily cashbook — no cash drawer</option>
+              <option value="drawer">Cash drawer — each cashier opens, counts and closes a drawer</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              With a drawer, cash cannot be taken until the cashier opens one, and the day closes on a count.
+            </p>
           </div>
         </CardContent>
       </Card>

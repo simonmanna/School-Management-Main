@@ -724,6 +724,9 @@ export class BillingService {
   ): Promise<any> {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
+          // Audit F05 (I-021): the close gate at the point of mutation. A run
+          // queued while the term was open must not post after it closed.
+          await this.controls.assertTermOpen(dto.termId, tx);
           const existing = await tx.document.findFirst({
             where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
           });
@@ -906,7 +909,7 @@ export class BillingService {
       // in the cron worker so a manually triggered run is covered too — and the
       // daily cron would otherwise keep assessing penalties against terms the
       // bursar had already closed and reconciled.
-      await this.controls.assertTermOpen(schedule.termId);
+      await this.controls.assertTermOpen(schedule.termId, tx);
 
       const due = new Date(schedule.dueDate);
       const cutoff = new Date(due);
@@ -1109,6 +1112,33 @@ export class SchoolPaymentService {
    * such as the MoMo callback commit its own state change atomically with the
    * payment; `settlementAccountId` debits a gateway clearing account.
    */
+  /**
+   * The cash session a cash tender or cash refund must go through (ADR-032 P3,
+   * audit F09). `cashbook` schools record cash without sessions; `drawer`
+   * schools must have a session open — the one named, or the caller's own.
+   */
+  private async cashCustodySession(tx: any, method: string | undefined, given?: string): Promise<string | undefined> {
+    if ((method ?? 'cash') !== 'cash') return given;
+    const organizationId = this.tenant.organizationId;
+    const profile = await tx.schoolProfile.findFirst({ where: { organizationId }, select: { cashCustodyMode: true } });
+    if ((profile?.cashCustodyMode ?? 'cashbook') !== 'drawer') return given;
+    if (given) return given;
+    const userId = this.tenant.userId;
+    const open = userId
+      ? await tx.cashSession.findFirst({
+          where: { organizationId, userId, status: 'open' },
+          orderBy: { openedAt: 'desc' },
+          select: { id: true },
+        })
+      : null;
+    if (!open) {
+      throw new BadRequestException(
+        'This school keeps cash in a cash drawer. Open your drawer on the fee desk before taking or paying out cash.',
+      );
+    }
+    return open.id;
+  }
+
   async collect(dto: CollectFeePaymentDto, opts: { tx?: any; settlementAccountId?: string } = {}) {
     const organizationId = this.tenant.organizationId;
     const run = async (tx: any) => {
@@ -1120,6 +1150,9 @@ export class SchoolPaymentService {
       const partnerId = student.partnerId;
       const paymentDate = dto.paymentDate ? new Date(dto.paymentDate) : new Date();
       const method = dto.paymentMethod ?? 'cash';
+      // Audit F09 (I-023): in drawer mode, cash goes through the cashier's open
+      // session so the drawer, the receipt and the GL agree at close.
+      const cashSessionId = await this.cashCustodySession(tx, method, dto.cashSessionId);
 
       // Idempotency: mobile-money providers retry with the same external
       // transaction id. A replayed key returns the original receipt rather than
@@ -1262,7 +1295,7 @@ export class SchoolPaymentService {
             reference: dto.reference,
             externalReference: dto.externalReference,
             externalReferenceType: dto.externalReferenceType,
-            cashSessionId: dto.cashSessionId,
+            cashSessionId,
             allocations,
           },
           tx,
@@ -1740,6 +1773,7 @@ export class SchoolPaymentService {
         }
       }
 
+      const refundSessionId = await this.cashCustodySession(tx, dto.paymentMethod, dto.cashSessionId);
       const refund: any = await this.payments.createCustomerRefund(
         {
           partnerId: student.partnerId,
@@ -1750,7 +1784,7 @@ export class SchoolPaymentService {
           reference: dto.reference,
           externalReference: dto.externalReference,
           externalReferenceType: dto.externalReferenceType,
-          cashSessionId: dto.cashSessionId,
+          cashSessionId: refundSessionId,
         },
         tx,
         { allowSessionOwnerMismatch: opts.approvedRequest === true },

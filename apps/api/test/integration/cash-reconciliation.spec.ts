@@ -45,6 +45,12 @@ describeDb('integration: cash reconciliation (F-CASH-1 / F-CASH-2)', () => {
 
   beforeAll(async () => {
     await prisma.$connect();
+    // Fresh databases carry no currencies (audit F19): seed what this spec uses.
+    await prisma.currency.upsert({
+      where: { code: 'USD' },
+      update: {},
+      create: { code: 'USD', symbol: '$', name: 'US Dollar', decimalPlaces: 2 },
+    });
     const org = await prisma.organization.create({
       data: { code: `INT-CASH-${Date.now()}`, name: 'Cash Reconciliation Org', currencyCode: 'USD' },
     });

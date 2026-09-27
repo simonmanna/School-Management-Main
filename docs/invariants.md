@@ -12,7 +12,7 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 |---|---|---|---|---|---|---|---|
 | I-001 | A likely duplicate never silently creates another pupil, on any admission path | | | D07 | D07 | | open |
 | I-002 | A pupil has at most one active placement per term | DB exclusion constraint (preflight) | | existing placement suites | | preflight | enforced |
-| I-003 | A financial document has exactly one authoritative pupil | | | D04 | | | open |
+| I-003 | A financial document has exactly one authoritative pupil | `FinanceControlsService.pupilOfDocument` (adjustments derive the pupil) | | `wave14-finance-integrity.spec.ts` D04 | | `docs/audit/posting-inventory.md` | enforced |
 
 ## Authorization
 
@@ -27,11 +27,11 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-020 | One approved adjustment has exactly one economic effect (one journal, one residual change) | | | D03 | | | open |
-| I-021 | A financially closed term accepts no posting through any path | | | D05 | | `docs/audit/posting-inventory.md` | open |
-| I-022 | Adjustment pupil equals invoice pupil | | | D04 | | | open |
-| I-023 | Every cash receipt has a custody representation (drawer movement) or appears as variance / untracked custody | | | D09 | D09 | | open |
-| I-024 | Cashbook day boundaries follow the school time zone; the requested date is the reported date | | | F21 spec | | | open |
+| I-020 | One approved adjustment has exactly one economic effect (one journal, one residual change) | `approveAdjustment` row locks in tx; `postingKey`; unique `FeeAdjustment.journalEntryId` | | `wave14-finance-integrity.spec.ts` D03 | | | enforced |
+| I-021 | A financially closed term accepts no posting through any path | `term-close-gate.ts` shared/exclusive advisory lock; gates inside every posting tx | | `wave14-finance-integrity.spec.ts` D05 | | `docs/audit/posting-inventory.md` | enforced |
+| I-022 | Adjustment pupil equals invoice pupil | `createAdjustment` | | `wave14-finance-integrity.spec.ts` D04 | | | enforced |
+| I-023 | Every cash receipt has a custody representation (drawer movement) or appears as variance / untracked custody | `cashCustodySession`; `reconcileOperationalCash`; `CashDeskService` | | `wave14-finance-integrity.spec.ts` D09 | fee desk drawer bar | | enforced |
+| I-024 | Cashbook day boundaries follow the school time zone; the requested date is the reported date | `dailyCashBook` via `school-time.ts` | | `wave14-finance-integrity.spec.ts` F21 | | | enforced |
 
 ## Attendance
 

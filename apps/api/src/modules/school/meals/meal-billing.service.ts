@@ -16,6 +16,7 @@ import { DocumentBuilderService } from '../../invoicing/document/document-builde
 import { PostingService } from '../../accounting/posting/posting.service';
 import { EVENTS } from '@erp/shared';
 import type { GenerateMealChargesDto } from './dto.types';
+import { lockTermsOpen } from '../fees/term-close-gate';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 
 @Injectable()
@@ -63,6 +64,8 @@ export class MealBillingService {
 
       try {
         const doc = await this.prisma.client.$transaction(async (tx: any) => {
+          // Audit F05 equivalent path: meal invoices are term charges too.
+          await lockTermsOpen(tx, organizationId, [dto.termId], 'bill meals');
           const existing = await tx.document.findFirst({
             where: { organizationId, sourceType: 'school_meal', sourceId, reference },
           });

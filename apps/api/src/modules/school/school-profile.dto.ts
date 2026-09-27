@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsObject, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsObject, IsOptional, IsString, Length, MaxLength } from 'class-validator';
 
 /**
  * The editable school profile. Previously `PATCH /school/profile` took an
@@ -28,6 +28,12 @@ export class UpdateSchoolProfileDto {
   resultAbsencePolicy?: 'ABSENT_AS_ZERO' | 'ABSENT_BLOCKS' | 'ALL_BLOCK';
   /** ADR-031 D4: class teacher reads own stream, or every stream of the class. */
   @IsOptional() @IsIn(['STREAM', 'CLASS']) classTeacherScope?: 'STREAM' | 'CLASS';
+  /** ADR-032 P1: a late mark counts as a whole session (1) or half (0.5). No default. */
+  @IsOptional() @IsIn([1, 0.5]) attendanceLateContribution?: 1 | 0.5;
+  /** ADR-032 P1: whether an excused absence counts in the attendance denominator. */
+  @IsOptional() @IsBoolean() attendanceExcusedInDenominator?: boolean;
+  /** ADR-032 P3: cash through a drawer session, or a cashbook with untracked custody. */
+  @IsOptional() @IsIn(['drawer', 'cashbook']) cashCustodyMode?: 'drawer' | 'cashbook';
   /** Label overrides, e.g. { "section": "Class Group" }. Validated key by key. */
   @IsOptional() @IsObject() terminology?: Record<string, string>;
   @IsOptional() @IsObject() contacts?: Record<string, unknown>;

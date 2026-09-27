@@ -119,6 +119,11 @@ export interface SchoolProfile {
   capacityPolicy?: 'ENFORCE' | 'WARN' | 'OFF';
   resultAbsencePolicy?: 'ABSENT_AS_ZERO' | 'ABSENT_BLOCKS' | 'ALL_BLOCK';
   classTeacherScope?: 'STREAM' | 'CLASS';
+  /** ADR-032 P1: what a late mark counts as. Null = not chosen yet (no rate is shown). */
+  attendanceLateContribution?: number | string | null;
+  attendanceExcusedInDenominator?: boolean;
+  /** ADR-032 P3: cash through a drawer session, or a cashbook. */
+  cashCustodyMode?: 'drawer' | 'cashbook';
   /** Stored overrides only. */
   terminology?: Partial<Terminology>;
   /** Resolved labels: overrides with defaults filled in. */
@@ -7690,4 +7695,42 @@ export function useCachedProjectionReconciliation() {
 /** Finance reads need `school:fees:read`; skip the request instead of eating a 403. */
 function canReadFees(): boolean {
   return useAuthStore.getState().hasPermission(PERMISSIONS.school.readFees);
+}
+
+/* ───────────────────────── Fee desk cash drawer (ADR-032 P3, audit F09) ───────────────────────── */
+
+export interface CashDeskStatus {
+  mode: 'drawer' | 'cashbook';
+  mustOpenDrawer: boolean;
+  session: {
+    id: string;
+    openedAt: string;
+    openingFloat: string;
+    register: { id: string; name: string; code: string } | null;
+    expectedCash: string | null;
+  } | null;
+}
+
+export function useCashDesk() {
+  return useQuery({
+    queryKey: ['school', 'cash-desk'],
+    queryFn: async () => (await api.get<CashDeskStatus>(`${S}/fees/cash-desk`)).data,
+  });
+}
+
+export function useOpenCashDrawer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (openingFloat: number) => (await api.post<CashDeskStatus>(`${S}/fees/cash-desk/open`, { openingFloat })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'cash-desk'] }),
+  });
+}
+
+export function useCloseCashDrawer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { closingCounted: number; varianceReason?: string }) =>
+      (await api.post(`${S}/fees/cash-desk/close`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'cash-desk'] }),
+  });
 }

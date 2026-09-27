@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2, Printer } from 'lucide-react';
 import {
   useCollectPayment,
+  useCashDesk,
   useStudents,
   useStudent,
   useStudentStatement,
@@ -31,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
 import { money, sel, Stat, apiError } from './fees-shared';
+import { CashDrawerBar } from '@/features/school/cash-drawer-bar';
 
 /* ───────────────────────── Fee Receipt (printable) ───────────────────────── */
 
@@ -133,7 +135,10 @@ export function SchoolFeesCollectPage() {
   const { data: terms } = useTerms();
   const { data: student } = useStudent(studentId || undefined);
   const collect = useCollectPayment();
+  const { data: cashDesk } = useCashDesk();
   const [receipt, setReceipt] = useState<CollectResult | null>(null);
+  // Audit F09: a drawer school cannot take cash with the drawer shut.
+  const cashBlocked = method === 'cash' && !!cashDesk?.mustOpenDrawer;
 
   const number = Number(amount) || 0;
   const openInvoices = statement?.invoices?.filter((i: any) => Number(i.amountResidual) > 0) ?? [];
@@ -206,7 +211,7 @@ export function SchoolFeesCollectPage() {
     }
   };
 
-  const detailsValid = !!studentId && number > 0 && !!paymentDate && !!method;
+  const detailsValid = !!studentId && number > 0 && !!paymentDate && !!method && !cashBlocked;
   // B1: an overpayment is a normal event, not an error.
   //
   // This used to require `unallocated === 0`, so a parent paying more than was
@@ -224,6 +229,8 @@ export function SchoolFeesCollectPage() {
           Record a payment and allocate it to specific unsettled invoices, then print a receipt.
         </p>
       </div>
+
+      <CashDrawerBar />
 
       {/* Stepper */}
       <div className="flex items-center gap-2">

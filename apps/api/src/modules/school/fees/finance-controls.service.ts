@@ -7,10 +7,11 @@ import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { PostingService } from '../../accounting/posting/posting.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
 import { AccountResolverService } from '../../accounting/posting/account-resolver.service';
-import { dec, ZERO } from '../../../kernel/common/money';
+import { dec, ZERO, type Money } from '../../../kernel/common/money';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
 import { POSTED_FEE_WHERE } from './fee-document.constants';
 import { SCHOOL_ACCOUNTS } from './school-accounts';
+import { lockTermExclusive, lockTermsOpen } from './term-close-gate';
 
 /**
  * Finance controls (A2 FeeAdjustment, A4.1 TermFinancialClose).
@@ -43,7 +44,8 @@ export class FinanceControlsService {
   /* ───────────────────────── FeeAdjustment ───────────────────────── */
 
   async createAdjustment(dto: {
-    studentProfileId: string;
+    /** Optional consistency check only — the pupil is derived from the invoice (audit F04). */
+    studentProfileId?: string;
     documentId: string;
     direction: 'debit' | 'credit';
     amount: number;
@@ -54,25 +56,65 @@ export class FinanceControlsService {
       throw new BadRequestException("direction must be 'debit' or 'credit'");
     }
     if (dec(dto.amount).lessThanOrEqualTo(ZERO)) throw new BadRequestException('amount must be positive');
+    if (!dto.reason?.trim()) throw new BadRequestException('Give the reason for the adjustment.');
     const doc = await this.prisma.client.document.findFirst({ where: { id: dto.documentId, organizationId } });
     if (!doc) throw new NotFoundException(`Document ${dto.documentId} not found`);
+    // Audit F04 (I-003, I-022): an adjustment belongs to the invoice's pupil, and
+    // only a live school-fee invoice can be adjusted.
+    const eligible = await this.prisma.client.document.findFirst({
+      where: { AND: [{ id: doc.id, organizationId }, POSTED_FEE_WHERE] },
+      select: { id: true },
+    });
+    if (!eligible) {
+      throw new BadRequestException(
+        `${doc.documentNumber ?? 'That document'} is not a posted school-fee invoice (it is ${doc.status}), so it cannot be adjusted.`,
+      );
+    }
+    const studentProfileId = await this.pupilOfDocument(doc);
+    if (!studentProfileId) {
+      throw new BadRequestException(`${doc.documentNumber ?? 'That invoice'} is not linked to a pupil, so it cannot be adjusted.`);
+    }
+    if (dto.studentProfileId && dto.studentProfileId !== studentProfileId) {
+      throw new BadRequestException(
+        `${doc.documentNumber ?? 'That invoice'} belongs to a different pupil. An adjustment is always recorded against the invoice's own pupil.`,
+      );
+    }
+    await this.assertDocumentsPeriodOpen([doc.id]);
 
     const code = await this.sequence.next(`feeadjustment:${new Date().getUTCFullYear()}`, { prefix: 'ADJ-', padding: 6 });
     const row = await this.prisma.client.feeAdjustment.create({
       data: {
         organizationId,
         code,
-        studentProfileId: dto.studentProfileId,
+        studentProfileId,
         documentId: dto.documentId,
         direction: dto.direction,
         amount: dec(dto.amount),
-        reason: dto.reason,
+        reason: dto.reason.trim(),
         status: 'pending_approval',
         createdById: this.tenant.userId ?? null,
       },
     });
     await this.audit.record({ entity: 'FeeAdjustment', entityId: row.id, action: 'create', newValues: row });
     return row;
+  }
+
+  /**
+   * The pupil a fee document belongs to: its SchoolFeeInvoice for tuition, the
+   * source invoice's for a penalty, otherwise the pupil whose billing partner it
+   * was raised against.
+   */
+  private async pupilOfDocument(doc: { id: string; partnerId: string | null; sourceType: string | null; sourceId: string | null }): Promise<string | null> {
+    const db = this.prisma.client;
+    const direct = await db.schoolFeeInvoice.findFirst({ where: { documentId: doc.id }, select: { studentProfileId: true } });
+    if (direct) return direct.studentProfileId;
+    if (doc.sourceType === 'school_penalty' && doc.sourceId) {
+      const src = await db.schoolFeeInvoice.findFirst({ where: { documentId: doc.sourceId }, select: { studentProfileId: true } });
+      if (src) return src.studentProfileId;
+    }
+    if (!doc.partnerId) return null;
+    const pupils = await db.studentProfile.findMany({ where: { partnerId: doc.partnerId }, select: { id: true }, take: 2 });
+    return pupils.length === 1 ? pupils[0].id : null;
   }
 
   listAdjustments(studentProfileId?: string, status?: string) {
@@ -92,23 +134,33 @@ export class FinanceControlsService {
   async approveAdjustment(id: string) {
     const organizationId = this.tenant.organizationId;
     const approverId = this.tenant.userId ?? null;
-    const adj = await this.prisma.client.feeAdjustment.findFirst({ where: { id, organizationId } });
-    if (!adj) throw new NotFoundException(`Adjustment ${id} not found`);
-    if (adj.status === 'posted') return adj;
-    if (adj.status !== 'pending_approval') {
-      throw new BadRequestException(`Adjustment ${adj.code} is ${adj.status}, not pending_approval`);
-    }
-    if (approverId && adj.createdById && approverId === adj.createdById) {
-      throw new BadRequestException('The user who created an adjustment cannot approve it (maker-checker).');
-    }
+    const seen = await this.prisma.client.feeAdjustment.findFirst({ where: { id, organizationId } });
+    if (!seen) throw new NotFoundException(`Adjustment ${id} not found`);
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Audit F03 (I-020): the status read that decides whether to post is made
+      // under a row lock INSIDE the posting transaction. Two approvals used to
+      // both read 'pending_approval' before either began, and both posted.
+      await tx.$queryRawUnsafe(`SELECT id FROM "FeeAdjustment" WHERE id = $1 FOR UPDATE`, id);
+      const adj = await tx.feeAdjustment.findFirst({ where: { id, organizationId } });
+      if (!adj) throw new NotFoundException(`Adjustment ${id} not found`);
+      // A replay of an approval that already posted returns the original.
+      if (adj.status === 'posted') return adj;
+      if (adj.status !== 'pending_approval') {
+        throw new BadRequestException(`Adjustment ${adj.code} is ${adj.status}, not pending_approval`);
+      }
+      if (approverId && adj.createdById && approverId === adj.createdById) {
+        throw new BadRequestException('The user who created an adjustment cannot approve it (maker-checker).');
+      }
+
+      // The invoice row is locked too, so two DIFFERENT adjustments to one
+      // invoice apply one after the other instead of overwriting each other's
+      // residual.
+      await tx.$queryRawUnsafe(`SELECT id FROM "Document" WHERE id = $1 FOR UPDATE`, adj.documentId);
       const doc = await tx.document.findFirst({ where: { id: adj.documentId!, organizationId } });
       if (!doc) throw new NotFoundException(`Document ${adj.documentId} not found`);
 
-      // P1-B: an adjustment moves this document's residual and its GL AR leg,
-      // so the term the document belongs to must be open — regardless of when
-      // the adjustment itself was raised.
+      // P1-B / F05: the invoice's term must be open, checked under the close lock.
       await this.assertDocumentsPeriodOpen([doc.id], tx);
 
       const amount = dec(adj.amount);
@@ -153,6 +205,8 @@ export class FinanceControlsService {
           description: `Fee adjustment · ${adj.code}`,
           sourceType: 'school_fee_adjustment',
           sourceId: adj.id,
+          // Ledger-level idempotency: one adjustment can only ever post once.
+          postingKey: `school_fee_adjustment:${adj.id}`,
           lines,
         },
         tx,
@@ -203,9 +257,14 @@ export class FinanceControlsService {
     return row?.status === 'closed';
   }
 
-  /** Throw if the term is closed — called by collection / billing entry points. */
-  async assertTermOpen(termId: string | null | undefined): Promise<void> {
+  /**
+   * Throw if the term is closed. Without `tx` this is an early, friendly check
+   * only; a posting must ALSO call it with its transaction (or `lockTermsOpen`),
+   * which holds the close lock until commit (audit F05, I-021).
+   */
+  async assertTermOpen(termId: string | null | undefined, tx?: any): Promise<void> {
     if (!termId) return;
+    if (tx) return lockTermsOpen(tx, this.tenant.organizationId, [termId]);
     if (await this.isTermClosed(termId)) {
       throw new BadRequestException(
         `Term ${termId} is financially closed. Reopen it (maker-checker) before posting fee transactions.`,
@@ -242,6 +301,16 @@ export class FinanceControlsService {
     const termByDoc = await this.termsOfDocuments(ids, db);
     const termIds = [...new Set(termByDoc.values())];
     if (termIds.length === 0) return;
+    // Inside a transaction, hold each term's close lock until commit so a
+    // concurrent close cannot slip between this check and the write (F05).
+    if (tx) {
+      for (const t of [...termIds].sort()) {
+        await tx.$queryRawUnsafe(
+          'SELECT 1 AS ok FROM pg_advisory_xact_lock_shared(hashtextextended($1, 0))',
+          `term-close:${organizationId}:${t}`,
+        );
+      }
+    }
 
     const closes = await db.termFinancialClose.findMany({
       where: { organizationId, termId: { in: termIds }, status: 'closed' },
@@ -299,13 +368,13 @@ export class FinanceControlsService {
   }
 
   /** Every financially active fee document that belongs to a term. */
-  private async termDocuments(termId: string) {
-    const tuition = await this.prisma.client.schoolFeeInvoice.findMany({
+  private async termDocuments(termId: string, db: any = this.prisma.client) {
+    const tuition = await db.schoolFeeInvoice.findMany({
       where: { termId },
       select: { documentId: true },
     });
-    const tuitionIds = tuition.map((t) => t.documentId);
-    return this.prisma.client.document.findMany({
+    const tuitionIds = tuition.map((t: any) => t.documentId as string);
+    return db.document.findMany({
       where: {
         ...POSTED_FEE_WHERE,
         OR: [
@@ -329,26 +398,26 @@ export class FinanceControlsService {
    * Throws rather than returning partial totals: the result is frozen as the
    * permanent record of a closed term.
    */
-  async termTotalsSnapshot(termId: string) {
-    const term = await this.prisma.client.term.findFirst({
+  async termTotalsSnapshot(termId: string, db: any = this.prisma.client) {
+    const term = await db.term.findFirst({
       where: { id: termId },
       select: { id: true, name: true, academicYearId: true },
     });
     if (!term) throw new NotFoundException(`Term ${termId} not found`);
 
-    const docs = await this.termDocuments(termId);
-    const docIds = docs.map((d) => d.id);
+    const docs: any[] = await this.termDocuments(termId, db);
+    const docIds = docs.map((d: any) => d.id);
 
     const [collectedAgg, creditedAgg, adjustments] = await Promise.all([
-      this.prisma.client.paymentAllocation.aggregate({
+      db.paymentAllocation.aggregate({
         where: { documentId: { in: docIds }, status: 'posted' },
         _sum: { amount: true },
       }),
-      this.prisma.client.feeCreditAllocation.aggregate({
+      db.feeCreditAllocation.aggregate({
         where: { documentId: { in: docIds }, status: 'posted' },
         _sum: { amount: true },
       }),
-      this.prisma.client.feeAdjustment.findMany({
+      db.feeAdjustment.findMany({
         where: { documentId: { in: docIds }, status: 'posted' },
         select: { direction: true, amount: true },
       }),
@@ -362,7 +431,7 @@ export class FinanceControlsService {
     // each invoice records its share in amountWaived, which is term-attributable.
     const waived = docs.reduce((t, d) => t.plus(dec(d.amountWaived ?? 0)), ZERO);
     const adjusted = adjustments.reduce(
-      (t, a) => (a.direction === 'debit' ? t.plus(dec(a.amount)) : t.minus(dec(a.amount))),
+      (t: Money, a: any) => (a.direction === 'debit' ? t.plus(dec(a.amount)) : t.minus(dec(a.amount))),
       ZERO,
     );
     const balance = billed.minus(collected).minus(credited).minus(waived).plus(adjusted);
@@ -416,22 +485,32 @@ export class FinanceControlsService {
     //
     // P2-E: computed by grouped aggregates rather than an N+1 loop over up to
     // 5000 students, which is also why it could time out in the first place.
-    const snapshot = await this.termTotalsSnapshot(termId);
-    const now = new Date();
-    const fields = {
-      status: 'closed',
-      academicYearId: snapshot.academicYearId,
-      closedById,
-      closedAt: now,
-      snapshotAt: now,
-      snapshot: snapshot as any,
-    };
-
-    const row = await this.prisma.client.termFinancialClose.upsert({
-      where: { organizationId_termId: { organizationId, termId } },
-      create: { organizationId, termId, ...fields },
-      update: fields,
-    });
+    //
+    // F05: the snapshot and the close row are written under the term's
+    // EXCLUSIVE close lock. Every posting holds the shared lock for its whole
+    // transaction, so none can land between the snapshot and the close.
+    const { row, snapshot } = await this.prisma.client.$transaction(
+      async (tx: any) => {
+        await lockTermExclusive(tx, organizationId, termId);
+        const snap = await this.termTotalsSnapshot(termId, tx);
+        const now = new Date();
+        const fields = {
+          status: 'closed',
+          academicYearId: snap.academicYearId,
+          closedById,
+          closedAt: now,
+          snapshotAt: now,
+          snapshot: snap as any,
+        };
+        const saved = await tx.termFinancialClose.upsert({
+          where: { organizationId_termId: { organizationId, termId } },
+          create: { organizationId, termId, ...fields },
+          update: fields,
+        });
+        return { row: saved, snapshot: snap };
+      },
+      { timeout: 120_000, maxWait: 30_000 },
+    );
     await this.audit.record({ entity: 'TermFinancialClose', entityId: row.id, action: 'update', newValues: { event: 'close', termId, snapshot } });
     this.events.publish('school.fee.term.closed', { organizationId, termId, closedById: closedById ?? 'system' });
     return row;
@@ -448,9 +527,15 @@ export class FinanceControlsService {
     if (reopenedById && existing.closedById && reopenedById === existing.closedById) {
       throw new BadRequestException('The user who closed a term cannot reopen it (maker-checker).');
     }
-    const row = await this.prisma.client.termFinancialClose.update({
-      where: { id: existing.id },
-      data: { status: 'open', reopenedById, reopenedAt: new Date(), reopenReason: reason ?? null },
+    if (!reason?.trim()) {
+      throw new BadRequestException('Give the reason for reopening a closed term; it is part of the record.');
+    }
+    const row = await this.prisma.client.$transaction(async (tx: any) => {
+      await lockTermExclusive(tx, organizationId, termId);
+      return tx.termFinancialClose.update({
+        where: { id: existing.id },
+        data: { status: 'open', reopenedById, reopenedAt: new Date(), reopenReason: reason.trim() },
+      });
     });
     await this.audit.record({ entity: 'TermFinancialClose', entityId: row.id, action: 'update', newValues: { event: 'reopen', termId, reason } });
     this.events.publish('school.fee.term.reopened', { organizationId, termId, reopenedById: reopenedById ?? 'system', reason });

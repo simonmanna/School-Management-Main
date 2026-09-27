@@ -10780,45 +10780,55 @@ model Campus {
 }
 
 model SchoolProfile {
-  id                  String              @id @default(uuid())
-  organizationId      String              @unique
-  name                String
-  motto               String?
-  logoUrl             String?
-  address             String?
-  phone               String?
-  email               String?
-  website             String?
+  id                             String              @id @default(uuid())
+  organizationId                 String              @unique
+  name                           String
+  motto                          String?
+  logoUrl                        String?
+  address                        String?
+  phone                          String?
+  email                          String?
+  website                        String?
   /// Country-specific config (Uganda defaults: UGX currency, primary/secondary cycle).
-  country             String              @default("UG")
-  currencyCode        String              @default("UGX")
+  country                        String              @default("UG")
+  currencyCode                   String              @default("UGX")
   /// School system: 'primary' | 'secondary' | 'mixed' | 'tertiary'.
-  educationLevel      String              @default("mixed")
+  educationLevel                 String              @default("mixed")
   /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
-  gradingSystem       String              @default("UCE")
+  gradingSystem                  String              @default("UCE")
   /// P5: 'daily' (one register per class per day) or 'period' (per class period,
   /// for subject-teacher secondary schools). Attendance marking honours this.
-  attendanceMode      String              @default("daily")
+  attendanceMode                 String              @default("daily")
   /// Per-school display vocabulary (brief para 2), for example
   /// { "class": "Grade", "section": "Stream", "academicLevel": "Section" }.
   /// A handful of display strings with no relations and no history, so a JSON
   /// column rather than a table. Defaults and validation live in
   /// packages/shared/src/terminology.ts so API error messages and UI labels
   /// cannot drift apart. An empty object means use the defaults.
-  terminology         Json                @default("{}")
+  terminology                    Json                @default("{}")
   /// How class/stream capacity is applied when a learner is placed (ADR-030).
   /// ENFORCE refuses an over-capacity placement unless the user holds the
   /// override permission and gives a reason; WARN seats and reports; OFF
   /// ignores capacity. A NULL capacity is unlimited under every policy.
-  capacityPolicy      CapacityPolicy      @default(ENFORCE)
+  capacityPolicy                 CapacityPolicy      @default(ENFORCE)
   /// ADR-031 (D2): how absent / exempt learners count toward term results.
-  resultAbsencePolicy ResultAbsencePolicy @default(ABSENT_AS_ZERO)
+  resultAbsencePolicy            ResultAbsencePolicy @default(ABSENT_AS_ZERO)
   /// ADR-031 (D4): what a class teacher may read — own stream or whole class.
-  classTeacherScope   ClassTeacherScope   @default(STREAM)
-  contacts            Json                @default("{}")
-  customFields        Json                @default("{}")
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
+  classTeacherScope              ClassTeacherScope   @default(STREAM)
+  /// ADR-032 P1: what a LATE mark contributes to attendance (1.0 or 0.5 of a
+  /// session). No platform default — null means the school has not chosen, and
+  /// no attendance rate is shown until it does (audit F08).
+  attendanceLateContribution     Decimal?            @db.Decimal(3, 2)
+  /// ADR-032 P1: whether an EXCUSED absence counts in the denominator.
+  attendanceExcusedInDenominator Boolean             @default(false)
+  /// ADR-032 P3: `drawer` — cash fee receipts go through the cashier's open cash
+  /// session; `cashbook` — no sessions, and custody is reported as untracked
+  /// rather than reconciled (audit F09).
+  cashCustodyMode                String              @default("cashbook")
+  contacts                       Json                @default("{}")
+  customFields                   Json                @default("{}")
+  createdAt                      DateTime            @default(now())
+  updatedAt                      DateTime            @updatedAt
 
   @@index([organizationId])
 }

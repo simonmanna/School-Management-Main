@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AccountDeterminationService } from '../../accounting/posting/account-determination.service';
 import { dec } from '../../../kernel/common/money';
+import { zonedDate, zonedMidnight } from '../../../kernel/common/school-time';
 import {
   ACTIVE_FEE_STATUSES,
   OPEN_FEE_WHERE,
@@ -797,10 +798,16 @@ export class SchoolFinanceQueryService {
    * never mistaken for an accounting defect.
    */
   async reconcileOperationalCash(): Promise<{
+    mode: 'drawer' | 'cashbook';
     byMethod: Array<{ paymentMethod: string; payments: number; cashMovements: number; variance: number }>;
     variance: number;
+    /** Cash received with no drawer behind it (cashbook mode): reported, never netted to zero. */
+    untrackedCustody: number;
+    notes: string[];
   }> {
     const organizationId = this.tenant.organizationId;
+    const profile = await this.prisma.client.schoolProfile.findFirst({ select: { cashCustodyMode: true } });
+    const mode: 'drawer' | 'cashbook' = profile?.cashCustodyMode === 'drawer' ? 'drawer' : 'cashbook';
 
     const payments = await this.prisma.client.payment.groupBy({
       by: ['paymentMethod'],
@@ -808,8 +815,6 @@ export class SchoolFinanceQueryService {
       _sum: { amount: true },
     });
 
-    // Only cash-drawer methods produce a CashMovement; a bank transfer has no
-    // till movement, so comparing it against one would manufacture a variance.
     const movements = await this.prisma.raw.$queryRawUnsafe<Array<{ paymentMethod: string; total: unknown }>>(
       `SELECT p."paymentMethod" AS "paymentMethod", COALESCE(SUM(cm."amount"), 0) AS "total"
          FROM "CashMovement" cm
@@ -819,23 +824,41 @@ export class SchoolFinanceQueryService {
       organizationId,
     );
     const movementByMethod = new Map(movements.map((m) => [m.paymentMethod, Number(m.total ?? 0)]));
+    const paidByMethod = new Map(payments.map((p) => [p.paymentMethod as string, Number(p._sum.amount ?? 0)]));
 
-    const byMethod = payments
-      .filter((p) => movementByMethod.has(p.paymentMethod))
-      .map((p) => {
-        const paid = Number(p._sum.amount ?? 0);
-        const moved = movementByMethod.get(p.paymentMethod) ?? 0;
-        return {
-          paymentMethod: p.paymentMethod,
-          payments: paid,
-          cashMovements: moved,
-          variance: Number((paid - moved).toFixed(2)),
-        };
+    // Audit F09 (I-023): the methods compared are the DRAWER methods — cash
+    // always, plus anything that has a movement — not "methods that happen to
+    // have a movement". A cash receipt with no movement at all used to drop out
+    // of the comparison and report zero variance.
+    const drawerMethods = new Set<string>(['cash', ...movementByMethod.keys()]);
+    const byMethod = [...drawerMethods]
+      .filter((m) => (paidByMethod.get(m) ?? 0) !== 0 || (movementByMethod.get(m) ?? 0) !== 0)
+      .map((m) => {
+        const paid = paidByMethod.get(m) ?? 0;
+        const moved = movementByMethod.get(m) ?? 0;
+        return { paymentMethod: m, payments: paid, cashMovements: moved, variance: Number((paid - moved).toFixed(2)) };
       });
 
+    const gap = Number(byMethod.reduce((t, m) => t + m.variance, 0).toFixed(2));
+    if (mode === 'cashbook') {
+      // No drawer is kept, so the gap is not a reconciliation — it is cash the
+      // system cannot vouch for, and it is shown as such.
+      return {
+        mode,
+        byMethod,
+        variance: 0,
+        untrackedCustody: gap,
+        notes: gap !== 0
+          ? [`${gap.toLocaleString()} in cash was received without a cash drawer. This school keeps a cashbook, so custody is not reconciled here — count and bank it against the daily cashbook.`]
+          : [],
+      };
+    }
     return {
+      mode,
       byMethod,
-      variance: Number(byMethod.reduce((t, m) => t + m.variance, 0).toFixed(2)),
+      variance: gap,
+      untrackedCustody: 0,
+      notes: gap !== 0 ? [`${gap.toLocaleString()} in cash receipts has no matching drawer movement.`] : [],
     };
   }
 
@@ -1286,11 +1309,21 @@ export class SchoolFinanceQueryService {
    */
   async dailyCashBook(dateStr?: string) {
     const organizationId = this.tenant.organizationId;
-    const day = dateStr ? new Date(dateStr) : new Date();
-    const from = new Date(day);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(day);
-    to.setHours(23, 59, 59, 999);
+    // Audit F21 (I-024): the school's day, in the school's time zone — not the
+    // server's. The requested date is the reported date.
+    const org = await this.prisma.client.organization.findFirst({ where: { id: organizationId }, select: { timezone: true } });
+    const timeZone = org?.timezone || 'Africa/Kampala';
+    const asked = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr ?? '');
+    if (dateStr && !asked && Number.isNaN(new Date(dateStr).getTime())) {
+      throw new BadRequestException(`'${dateStr}' is not a date (use YYYY-MM-DD).`);
+    }
+    const ymd = asked
+      ? { year: Number(asked[1]), month: Number(asked[2]), day: Number(asked[3]) }
+      : zonedDate(dateStr ? new Date(dateStr) : new Date(), timeZone);
+    const from = zonedMidnight(ymd.year, ymd.month, ymd.day, timeZone);
+    const next = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + 1));
+    const to = new Date(zonedMidnight(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), timeZone).getTime() - 1);
+    const label = `${ymd.year}-${String(ymd.month).padStart(2, '0')}-${String(ymd.day).padStart(2, '0')}`;
 
     const payments = await this.prisma.client.payment.findMany({
       where: { organizationId, direction: 'inbound', paymentDate: { gte: from, lte: to } },
@@ -1326,7 +1359,8 @@ export class SchoolFinanceQueryService {
     });
 
     return {
-      date: from.toISOString().slice(0, 10),
+      date: label,
+      timeZone,
       byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
       totalCollected: live.reduce((t, p) => t + Number(p.amount), 0),
       receiptCount: live.length,

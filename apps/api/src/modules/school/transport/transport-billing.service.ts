@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { lockTermsOpen } from '../fees/term-close-gate';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -102,6 +103,8 @@ export class TransportBillingService {
 
       try {
         const doc = await this.prisma.client.$transaction(async (tx: Prisma.TransactionClient) => {
+          // Audit F05 equivalent path: transport invoices are term charges too.
+          await lockTermsOpen(tx, orgId, [a.termId], 'bill transport');
           const existingCharge = await tx.transportCharge.findFirst({
             where: { organizationId: orgId, assignmentId: a.id, periodStart, periodEnd },
           });

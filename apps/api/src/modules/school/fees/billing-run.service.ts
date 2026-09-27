@@ -77,6 +77,11 @@ export class BillingRunService {
     const organizationId = this.tenant.organizationId;
     const run = await this.prisma.client.billingRun.findFirst({ where: { id: runId, organizationId } });
     if (!run) throw new NotFoundException(`BillingRun ${runId} not found`);
+    // Audit F05: a run queued while the term was open does not post after the
+    // bursar closes it. Items stay pending, so the run resumes after an
+    // authorized reopen. (Each posting re-checks under the close lock too, so a
+    // close that lands mid-run fails the remaining items instead.)
+    await this.controls.assertTermOpen(run.termId);
 
     await this.prisma.client.billingRun.update({
       where: { id: run.id },

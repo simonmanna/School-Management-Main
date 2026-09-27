@@ -62,6 +62,8 @@ function makeCollectService(openInvoices: any[] = []) {
   const tx = {
     $queryRawUnsafe: jest.fn(async () => []), // F7 per-payer row lock
     studentProfile: { findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }) },
+    // ADR-032 P3: no profile row = cashbook mode (no drawer session required).
+    schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) },
     document: { findMany: documentFindMany },
     payment: { findFirst: jest.fn().mockResolvedValue({ id: 'pay_1', allocations: [] }) },
   };
@@ -143,6 +145,7 @@ function makeRefundService(opts: { unallocated: number; creditRemaining: number 
     studentProfile: {
       findFirst: jest.fn().mockResolvedValue({ id: 'stu_1', partnerId: 'p_1' }),
     },
+    schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) },
     payment: {
       findFirst: jest.fn().mockResolvedValue(null), // no replay
       findMany: jest.fn().mockResolvedValue(

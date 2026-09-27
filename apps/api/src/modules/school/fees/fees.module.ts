@@ -48,6 +48,8 @@ import { BillingRunService } from './billing-run.service';
 import { BillingRunController } from './billing-run.controller';
 import { PaymentReconciliationService } from './payment-reconciliation.service';
 import { PaymentReconciliationController } from './payment-reconciliation.controller';
+import { CashDeskService } from './cash-desk.service';
+import { CashDeskController } from './cash-desk.controller';
 
 /**
  * The Fees module depends on DocumentBuilderService + PostingService +
@@ -69,6 +71,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
   // history rather than the StudentProfile projection (ADR-027).
   imports: [InvoicingModule, AccountingModule, PlacementLookupModule],
   controllers: [
+    CashDeskController,
     MobileMoneyController,
     FeeStructureController,
     FeeCategoryController,
@@ -90,6 +93,7 @@ import { PaymentReconciliationController } from './payment-reconciliation.contro
     PaymentReconciliationController,
   ],
   providers: [
+    CashDeskService,
     FeeStructureService,
     FeeCategoryService,
     FeeScheduleService,
