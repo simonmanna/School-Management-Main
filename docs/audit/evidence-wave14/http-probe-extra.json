@@ -1,0 +1,164 @@
+[
+  {
+    "name": "F03 concurrent approvals",
+    "create": 201,
+    "approvals": [
+      201,
+      201
+    ],
+    "residualBefore": 250000,
+    "residualAfter": 251000,
+    "journals": 1
+  },
+  {
+    "name": "F09 operational cash recon (cashbook mode)",
+    "status": 200,
+    "data": {
+      "mode": "cashbook",
+      "byMethod": [
+        {
+          "paymentMethod": "cash",
+          "payments": 100000,
+          "cashMovements": 0,
+          "variance": 100000
+        }
+      ],
+      "variance": 0,
+      "untrackedCustody": 100000,
+      "notes": [
+        "100,000 in cash was received without a cash drawer. This school keeps a cashbook, so custody is not reconciled here — count and bank it against the daily cashbook."
+      ]
+    }
+  },
+  {
+    "name": "F21 cash book date",
+    "requested": "2026-09-27",
+    "reported": "2026-09-27",
+    "timeZone": "Africa/Kampala",
+    "cashTotal": 100000
+  },
+  {
+    "name": "F08 late rate with policy 0.5",
+    "status": 200,
+    "data": {
+      "total": 1,
+      "present": 0,
+      "late": 1,
+      "excused": 0,
+      "absent": 0,
+      "denominator": 1,
+      "attendanceRate": 50,
+      "policyMissing": false
+    }
+  },
+  {
+    "name": "F09 drawer mode: cash without drawer",
+    "status": 400,
+    "data": {
+      "message": "This school keeps cash in a cash drawer. Open your drawer on the fee desk before taking or paying out cash.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "name": "F09 drawer open",
+    "status": 201,
+    "data": {
+      "mode": "drawer",
+      "mustOpenDrawer": false,
+      "session": {
+        "id": "b0f18966-5dcb-4f3a-94ad-e6e496928630",
+        "openedAt": "2026-09-27T15:23:24.237Z",
+        "openingFloat": "0",
+        "register": {
+          "id": "e33f2588-33e7-4599-98ec-8bd83ce2a8d2",
+          "name": "Fee desk",
+          "code": "FEE-DESK"
+        },
+        "expectedCash": "0"
+      }
+    }
+  },
+  {
+    "name": "F09 cash with drawer",
+    "status": 201,
+    "data": {
+      "payment": {
+        "id": "698cda09-da34-4951-9978-64a520b2f55a",
+        "organizationId": "bb1e0145-1544-425a-8157-3ae13f22bdce",
+        "paymentNumber": "PAY-2026-000002",
+        "direction": "inbound",
+        "partnerId": "5851c8bb-ffbb-48bb-b6bd-3a58356cc802",
+        "paymentDate": "2026-09-27T15:23:24.274Z",
+        "paymentMethod": "cash",
+        "journalId": null,
+        "accountId": "0d9a5bd0-fa5f-4f27-8651-71c396fda404",
+        "currencyId": null,
+        "exchangeRate": "1",
+        "amount": "5000",
+        "allocatedAmount": "5000",
+        "unallocatedAmount": "0",
+        "reference": null,
+        "externalReference": null,
+        "externalReferenceType": null,
+        "status": "posted",
+        "branchId": null,
+        "journalEntryId": "b78bc92b-d1d5-4c95-a146-df5f1ed4586e",
+        "createdAt": "2026-09-27T15:23:24.292Z",
+        "updatedAt": "2026-09-27T15:23:24.353Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "allocations": [
+          {
+            "id": "fbc28ec3-7b14-4cca-82e4-0f9fe7f5f6ad",
+            "organizationId": "bb1e0145-1544-425a-8157-3ae13f22bdce",
+            "paymentId": "698cda09-da34-4951-9978-64a520b2f55a",
+            "documentId": "521f3e69-7d4d-4de3-965a-55849e6f30b2",
+            "invoiceId": null,
+            "amount": "5000",
+            "status": "posted",
+            "createdAt": "2026-09-27T15:23:24.345Z"
+          }
+        ]
+      },
+      "allocations": [
+        {
+          "documentId": "521f3e69-7d4d-4de3-965a-55849e6f30b2",
+          "amount": 5000
+        }
+      ],
+      "unallocated": 0,
+      "overpaymentCredit": null,
+      "replayed": false
+    }
+  },
+  {
+    "name": "F09 recon (drawer mode)",
+    "status": 200,
+    "data": {
+      "mode": "drawer",
+      "byMethod": [
+        {
+          "paymentMethod": "cash",
+          "payments": 105000,
+          "cashMovements": 5000,
+          "variance": 100000
+        }
+      ],
+      "variance": 100000,
+      "untrackedCustody": 0,
+      "notes": [
+        "100,000 in cash receipts has no matching drawer movement."
+      ]
+    }
+  },
+  {
+    "name": "F13 live MoMo request",
+    "status": 403,
+    "data": {
+      "message": "Live mobile-money collection is not enabled for this school. Record a payment the family has already made with method \"mobile money\" instead.",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  }
+]

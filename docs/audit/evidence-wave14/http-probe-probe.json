@@ -1,0 +1,246 @@
+[
+  {
+    "name": "teacher basic roster",
+    "status": 200,
+    "data": {
+      "data": [],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 0,
+        "totalPages": 1
+      }
+    }
+  },
+  {
+    "name": "teacher other pupil profile",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher other pupil care",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher whole other class care",
+    "status": 403,
+    "data": {
+      "message": "You may only list the pupils of classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher other pupil vaccination",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher collectors",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher whole incident list",
+    "status": 200,
+    "data": []
+  },
+  {
+    "name": "teacher delete denied",
+    "status": 403,
+    "data": {
+      "message": "Missing required permission(s): school:students:write",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher report register",
+    "status": 201,
+    "data": {
+      "key": "student.register",
+      "title": "Student Register",
+      "columns": [
+        {
+          "key": "admissionNo",
+          "label": "Admission No",
+          "type": "string",
+          "width": 12,
+          "link": {
+            "route": "/school/students/:studentProfileId",
+            "paramFrom": {
+              "studentProfileId": "studentProfileId"
+            }
+          }
+        },
+        {
+          "key": "studentName",
+          "label": "Name",
+          "type": "string",
+          "width": 24
+        },
+        {
+          "key": "gender",
+          "label": "Gender",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "className",
+          "label": "Class",
+          "type": "string",
+          "width": 12
+        },
+        {
+          "key": "sectionName",
+          "label": "Section",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "rollNumber",
+          "label": "Roll No",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "residenceType",
+          "label": "Residence",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "house",
+          "label": "House",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "enum",
+          "width": 10
+        },
+        {
+          "key": "enrolledAt",
+          "label": "Enrolled",
+          "type": "date",
+          "width": 12
+        }
+      ],
+      "data": [],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 0,
+        "totalPages": 1
+      },
+      "caption": "Term: Term 3 · 2026-09-07 to 2026-12-04 · Class basis: enrollment · Generated 2026-09-27 15:32",
+      "notes": []
+    }
+  },
+  {
+    "name": "approved guardian release",
+    "status": 201,
+    "data": {
+      "id": "f0539ccf-fcb1-46ff-9bf1-b30e5047ee86",
+      "organizationId": "bb1e0145-1544-425a-8157-3ae13f22bdce",
+      "studentProfileId": "daccf0be-7199-4393-bd67-05d684069cf2",
+      "authorizationId": null,
+      "studentGuardianId": "24e80c0a-ef23-497f-9fc1-e10ee6ee09bc",
+      "authorizationSource": "guardian",
+      "collectedByName": "Akello AuditGuardian",
+      "collectedAt": "2026-09-27T15:22:41.742Z",
+      "releasedById": "c1c1f585-9988-44fe-bed7-ac163d45d744",
+      "overrideReason": null,
+      "notes": null,
+      "idempotencyKey": null,
+      "createdAt": "2026-09-27T15:22:41.757Z"
+    }
+  },
+  {
+    "name": "teacher release other class",
+    "status": 403,
+    "data": {
+      "message": "Missing required permission(s): school:pickup:release",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher other pupil attendance",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher other pupil guardians",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "wrong role care write",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "care DB after teacher write",
+    "note": "Private draft nursery note"
+  },
+  {
+    "name": "anonymous pupil denied",
+    "status": 401,
+    "data": {
+      "message": "Authentication required",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  {
+    "name": "duplicate child rejected",
+    "status": 409,
+    "before": 4,
+    "after": 4,
+    "response": {
+      "code": "LIKELY_DUPLICATE",
+      "message": "Atim AuditChild looks like a pupil already on the register (STU-000001). Open that record instead, or confirm this is a different child and say why.",
+      "duplicates": [
+        {
+          "id": "daccf0be-7199-4393-bd67-05d684069cf2",
+          "admissionNo": "STU-000001",
+          "status": "active",
+          "name": "Atim AuditChild",
+          "dateOfBirth": "2023-03-01"
+        }
+      ]
+    }
+  }
+]

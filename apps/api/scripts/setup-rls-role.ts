@@ -99,12 +99,24 @@ async function main(): Promise<void> {
         // Tables created by future migrations inherit the same grants.
         `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role}`,
         `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${role}`,
+        // Document numbering (SequenceService): sequences are created at runtime
+        // in their own schema, never in public.
+        `GRANT USAGE ON SCHEMA numbering TO ${role}`,
+        `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA numbering TO ${role}`,
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA numbering GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${role}`,
       ];
       for (const sql of grants) await prisma.$executeRawUnsafe(sql);
     };
 
     await ensureRole(ROLE, false, process.env.RLS_APP_PASSWORD);
     await ensureRole(SYSTEM_ROLE, true, process.env.RLS_SYSTEM_PASSWORD);
+
+    // Only the system role creates numbering sequences (a new school's first
+    // invoice); whatever it creates is usable by the app role.
+    await prisma.$executeRawUnsafe(`GRANT CREATE ON SCHEMA numbering TO ${SYSTEM_ROLE}`);
+    await prisma.$executeRawUnsafe(
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${SYSTEM_ROLE} IN SCHEMA numbering GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${ROLE}`,
+    );
 
     const [{ n: policies }] = await prisma.$queryRaw<{ n: bigint }[]>`
       SELECT count(*) AS n FROM pg_policies

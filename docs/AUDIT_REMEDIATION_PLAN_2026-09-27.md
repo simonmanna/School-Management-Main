@@ -133,3 +133,22 @@ New docs: `docs/invariants.md`, `docs/audit/authz-inventory.md`, `docs/audit/pos
 
 ## Verification
 Per phase: targeted integration specs on real PG (`school_audit_*` DB) fail-first then pass; inventory tables complete; invariant rows mapped. Browser checks via preview (seed script first). Phase 4 via Docker + external device. Final: Phase 5.0–5.2 gate, adversarial re-audit clean.
+
+---
+
+## Status (2026-09-27, branch `wave14-audit-remediation`)
+
+| Phase | State | Evidence |
+|---|---|---|
+| 0 Policies + invariants | Done (owner decisions recorded) | ADR-032, `docs/invariants.md` |
+| 1 F01/F02 (+F06) | Enforced | `PupilScopeGuard`, `docs/audit/authz-inventory.md` (`npm run authz:check`), D01/D02/D06 |
+| 2 F03/F04/F05/F09/F21 | Enforced | `term-close-gate.ts`, `docs/audit/posting-inventory.md`, D03/D04/D05/D09 |
+| 3 F07/F08 | Enforced | D07/D08 |
+| 4 F10–F13 | Enforced; host checks pending | image build + prod-role boot, restore drill spec, MoMo off |
+| 4.5 Existing data | Audit script ready | `apps/api/scripts/integrity/wave14-integrity-audit.sql` |
+| 5.0 Acceptance | Suites green on a fresh DB; HTTP re-probe of the audit clean | `docs/audit/evidence-wave14/` |
+| 5.1 Independent re-audit | **Not started** — must be someone who did not do this work | `docs/audit/reaudit-brief-wave14.md` |
+| 5.2 Host smoke | **Not started** — needs the deployment host, DNS/TLS, real volumes | `docs/operations/wave14-go-live-checklist.md` |
+| 6 P2 | F14, F15, F16, F19, F20 done; F17 (navigation), F18 (bundle size), pupil merge tool open | |
+
+Verdict: the reproduced P0/P1 failures no longer reproduce on this branch. **Production GO still requires 5.1 and 5.2** — this plan's own rule.

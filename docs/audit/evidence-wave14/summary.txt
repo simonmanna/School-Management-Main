@@ -1,0 +1,16 @@
+Wave 14 verification — 2026-09-27 — fresh database from migrations (school_wave14)
+
+Unit:          2,416 passed / 2,416
+Integration:   shard 1/3  219 passed / 219
+               shard 2/3  29 suites passed (Jest ran out of heap after suite 26 with no failures;
+                          the remaining 3 suites run separately: 12 passed)
+               shard 3/3  238 passed, 9 skipped (skips are pre-existing environment-gated suites)
+Typecheck:     api, web, portal clean
+Lint:          api 0 errors, web 0 errors (warnings pre-existing)
+Builds:        web (PWA manifest name "School Management", start_url /school), portal, API image
+DB preflight:  scripts/assert-db-constraints.mjs passed on a fresh database
+               (RLS forced and policed on 622 org-scoped tables; same-org FK triggers)
+Image:         Prisma client asserted from apps/api (638 models) in build and runtime; pg_dump 16.15;
+               no .env in image; boots NODE_ENV=production on NOBYPASSRLS/BYPASSRLS roles;
+               numbered writes (STU-, PAY-) succeed under those roles
+HTTP probe:    the audit's own probe script re-run against the new build — http-probe-*.json

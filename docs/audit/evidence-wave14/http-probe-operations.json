@@ -1,0 +1,37 @@
+[
+  {
+    "name": "mark one late pupil",
+    "status": 201,
+    "data": {
+      "late": 1
+    }
+  },
+  {
+    "name": "late attendance rate",
+    "status": 200,
+    "data": {
+      "total": 1,
+      "present": 0,
+      "late": 1,
+      "excused": 0,
+      "absent": 0,
+      "denominator": 1,
+      "attendanceRate": null,
+      "policyMissing": true
+    }
+  },
+  {
+    "name": "cash receipt vs drawer",
+    "payments": [
+      {
+        "amount": "100000",
+        "method": "cash"
+      }
+    ],
+    "cashMovements": 0
+  },
+  {
+    "name": "guardian release event count",
+    "events": 1
+  }
+]

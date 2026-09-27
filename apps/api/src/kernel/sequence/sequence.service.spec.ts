@@ -38,7 +38,7 @@ describeDb('SequenceService (concurrent / native Postgres sequences)', () => {
   afterAll(async () => {
     try {
       await prisma.$executeRawUnsafe(
-        `DROP SEQUENCE IF EXISTS "seq_${createdOrgId.replace(/-/g, '').slice(0, 8)}_stock_move"`,
+        `DROP SEQUENCE IF EXISTS numbering."seq_${createdOrgId.replace(/-/g, '').slice(0, 8)}_stock_move"`,
       );
     } catch {
       /* ignore */

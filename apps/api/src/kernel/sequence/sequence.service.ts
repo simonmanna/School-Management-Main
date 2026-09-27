@@ -31,6 +31,9 @@ const SAFE_IDENT = /[^a-zA-Z0-9_]/g;
  * sequence is created lazily on first use and cached in-memory so the
  * `CREATE SEQUENCE IF NOT EXISTS` only runs once per process per (org, key).
  */
+/** Schema holding every per-organization numbering sequence (migration 20260928140000). */
+export const SEQUENCE_SCHEMA = 'numbering';
+
 @Injectable()
 export class SequenceService implements OnApplicationBootstrap {
   private readonly logger = new Logger('SequenceService');
@@ -142,7 +145,7 @@ export class SequenceService implements OnApplicationBootstrap {
 
     const seqName = this.seqName(organizationId, key);
     const rows = (await client.$queryRawUnsafe(
-      `SELECT nextval('"${seqName}"') AS nextval`,
+      `SELECT nextval('${SEQUENCE_SCHEMA}."${seqName}"') AS nextval`,
     )) as Array<{ nextval: string | number }>;
     const reserved = Number(rows[0].nextval);
     const padding = options.padding ?? DEFAULT_PADDING;
@@ -167,7 +170,7 @@ export class SequenceService implements OnApplicationBootstrap {
 
     const seqName = this.seqName(organizationId, key);
     const rows = (await client.$queryRawUnsafe(
-      `SELECT nextval('"${seqName}"') AS nextval FROM generate_series(1, ${Math.floor(count)})`,
+      `SELECT nextval('${SEQUENCE_SCHEMA}."${seqName}"') AS nextval FROM generate_series(1, ${Math.floor(count)})`,
     )) as Array<{ nextval: string | number }>;
     const padding = options.padding ?? DEFAULT_PADDING;
     return rows.map(
@@ -182,10 +185,21 @@ export class SequenceService implements OnApplicationBootstrap {
     // CREATE SEQUENCE IF NOT EXISTS is atomic at the catalog level.
     // Two concurrent first-time callers race here, but only one wins; the
     // loser gets a `relation already exists` notice which we swallow.
+    // Wave 14: in production the runtime roles cannot create objects in
+    // `public` (and PostgreSQL checks CREATE even for IF NOT EXISTS), so every
+    // numbered document failed with "permission denied for schema public".
+    // Sequences live in their own schema, where only the system role may
+    // create; an existing one is found without needing CREATE at all.
     try {
-      await this.prisma.raw.$executeRawUnsafe(
-        `CREATE SEQUENCE IF NOT EXISTS "${seqName}" INCREMENT BY 1 START WITH 1`,
-      );
+      const found = (await this.prisma.raw.$queryRawUnsafe(
+        `SELECT to_regclass($1) IS NOT NULL AS ok`,
+        `${SEQUENCE_SCHEMA}."${seqName}"`,
+      )) as Array<{ ok: boolean }>;
+      if (!found[0]?.ok) {
+        await this.prisma.raw.$executeRawUnsafe(
+          `CREATE SEQUENCE IF NOT EXISTS ${SEQUENCE_SCHEMA}."${seqName}" INCREMENT BY 1 START WITH 1`,
+        );
+      }
     } catch (err) {
       const msg = String(err);
       if (!msg.includes('already exists')) throw err;

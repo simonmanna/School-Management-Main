@@ -38,10 +38,10 @@ async function nextSerial(key: string, prefix: string, padding: number): Promise
   const orgShort = org.id.replace(/-/g, '').slice(0, 8);
   const seqName = `seq_${orgShort}_${key.replace(/[^a-zA-Z0-9_]/g, '_')}`;
   await prisma.$executeRawUnsafe(
-    `CREATE SEQUENCE IF NOT EXISTS "${seqName}" INCREMENT BY 1 START WITH 1`,
+    `CREATE SEQUENCE IF NOT EXISTS numbering."${seqName}" INCREMENT BY 1 START WITH 1`,
   );
   const rows = (await prisma.$queryRawUnsafe(
-    `SELECT nextval('"${seqName}"') AS n`,
+    `SELECT nextval('numbering."${seqName}"') AS n`,
   )) as Array<{ n: string | number }>;
   return `${prefix}${String(Number(rows[0].n)).padStart(padding, '0')}`;
 }

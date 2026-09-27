@@ -369,9 +369,18 @@ describeDb('integration: Phase 0–8 production invariants', () => {
   it('refuses a likely duplicate learner (same name + date of birth) unless confirmed', async () => {
     const dto = { name: 'Nakato Grace', admissionNo: `DUP-${stamp}-1`, enrollmentDate: now.toISOString(), dateOfBirth: `${Y - 9}-03-04` } as any;
     await asRegistrar(() => students.create(dto));
-    await expect(asRegistrar(() => students.create({ ...dto, admissionNo: `DUP-${stamp}-2` }))).rejects.toThrow(/already exists/);
+    await expect(asRegistrar(() => students.create({ ...dto, admissionNo: `DUP-${stamp}-2` }))).rejects.toThrow(/already on the register/);
+    // ADR-032 P4 (Wave 14): confirming a different child needs the override
+    // grant (held by the Registrar preset) and a written reason.
+    const withOverride = [...REGISTRAR, 'school:students:override_duplicate'];
     await expect(
-      asRegistrar(() => students.create({ ...dto, admissionNo: `DUP-${stamp}-3`, allowDuplicate: true })),
+      asRegistrar(() => students.create({ ...dto, admissionNo: `DUP-${stamp}-3`, allowDuplicate: true, duplicateReason: 'Twin' })),
+    ).rejects.toThrow(/override grant/);
+    await expect(
+      asUser(withOverride, () => students.create({ ...dto, admissionNo: `DUP-${stamp}-4`, allowDuplicate: true })),
+    ).rejects.toThrow(/why/);
+    await expect(
+      asUser(withOverride, () => students.create({ ...dto, admissionNo: `DUP-${stamp}-5`, allowDuplicate: true, duplicateReason: 'Different parents' })),
     ).resolves.toBeDefined();
   });
 
