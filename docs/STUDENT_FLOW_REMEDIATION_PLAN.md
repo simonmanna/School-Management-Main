@@ -45,7 +45,13 @@ Also found and fixed while verifying:
 - Compute inserted result rows one at a time inside a 5 s transaction, which could not handle a full class. Rows are now bulk-inserted: 350 pupils compute in 3.9 s and publish in 3.1 s.
 - The Wave 12 early-years tables had no cross-tenant FK guard, so the deploy preflight failed. Added migration `20260927120000_tenant_fk_guard_early_years`.
 
-Phase 6 (browser): `apps/web/e2e/academic-journey.spec.ts` is updated to the Wave 13 screens. It still needs real role credentials to run, and has not been run.
+Phase 6 (browser): **passing** against SUNRISE with two real logins (admin + subject teacher), 2026-09-27. It covers application → decision/offer → enrolment (details carried from the application) → teacher sets a CAT and an exam paper and marks every learner → the admin approves (segregation of duty) → the exam is closed → the whole-class list is locked → results are worked out and released → report cards are built and released. A repeat run in the same term checks that released results cannot be recomputed without an amendment (F04). Prepare SUNRISE with `pnpm --filter @erp/api exec tsx ../../scripts/seed-sunrise-academics.ts`, which sets up Term 3 as current, grading scales, a CA 40% / exam 60% policy, a P.1 A Mathematics course, the teacher login and an open exam sitting.
+
+Found and fixed by the browser run:
+- The admission row menus left the page unresponsive after a decision dialog (the menus are now non-modal).
+- The assessment wizard offered closed exam sittings, and sittings that already had this course's paper.
+- A saved class list was not selected, so it could not be frozen, and every list showed "? members".
+- A class report-card release stopped part-way at the first late-admitted pupil: some families got their cards and the rest did not, behind an error message. It now releases every card that can be released and counts the ones held back.
 Phase 7 (production proof): the RLS/FK preflight passes (622 tables). A backup/restore drill was run: 30.8 MB dump in 50 s, restore in 144 s, migrations up to date and the preflight passing on the restored copy. Finance sign-off and a real-hardware load test are still open.
 Phase 8: the chosen term is now remembered across results, promotion and class lists.
 

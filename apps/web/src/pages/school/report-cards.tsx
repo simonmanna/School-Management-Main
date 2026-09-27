@@ -93,9 +93,12 @@ export function SchoolReportCardsPage() {
     try {
       const res = await publishClass.mutateAsync({ classId, termId });
       notify.success(`${res.published} report card${res.published === 1 ? '' : 's'} released to families`, {
-        description: res.notGenerated
-          ? `${res.notGenerated} pupil${res.notGenerated === 1 ? ' has' : 's have'} no card yet — build those first.`
-          : 'They are now visible in the parent portal.',
+        description: [
+          res.notGenerated ? `${res.notGenerated} pupil${res.notGenerated === 1 ? ' has' : 's have'} no card yet — build those first.` : '',
+          res.awaitingResults
+            ? `${res.awaitingResults} card${res.awaitingResults === 1 ? ' is' : 's are'} held back: ${res.awaitingResults === 1 ? 'that pupil is' : 'those pupils are'} not in the released results yet (e.g. admitted later) — amend the results, then rebuild.`
+            : '',
+        ].filter(Boolean).join(' ') || 'They are now visible in the parent portal.',
         action: { label: 'Print class set', onClick: () => void doPrintClass() },
       });
     } catch (e: any) {

@@ -64,20 +64,20 @@ function RostersTab() {
           {(rosters?.data ?? []).map((r) => (
             <button key={r.id} className="flex w-full items-center justify-between rounded border p-2 text-sm text-left hover:bg-accent" onClick={() => setRosterId(r.id)}>
               <span>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`} <Badge variant="secondary">{r.frozenAt ? 'Frozen' : 'Draft'}</Badge></span>
-              <span className="text-xs text-muted-foreground">{r.memberCount ?? '?'} members</span>
+              <span className="text-xs text-muted-foreground">{(r as any).memberCount ?? (r as any).members?.length ?? 0} members</span>
             </button>
           ))}
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
           <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class (scope)…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <Input placeholder="Name this class list" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => { await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined }); setName(''); notify.success('Class list saved', { description: 'Lock it before working out results, so the list cannot change underneath them.' }); }}> <Plus className="h-4 w-4" /> Save class list</Button>
+          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => { const saved: any = await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined }); setName(''); if (saved?.id) setRosterId(saved.id); notify.success('Class list saved', { description: 'Lock it before working out results, so the list cannot change underneath them.' }); }}> <Plus className="h-4 w-4" /> Save class list</Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Members</CardTitle>
-          {rosterId && <Button size="sm" variant="ghost" disabled={freeze.isPending} onClick={() => freeze.mutate(rosterId)}><Lock className="h-4 w-4" /> Freeze</Button>}
+          {rosterId && <Button size="sm" variant="ghost" disabled={freeze.isPending} onClick={() => freeze.mutate(rosterId, { onSuccess: () => notify.success('Class list locked', { description: 'It can now be used to work out results.' }), onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Could not lock this class list') })}><Lock className="h-4 w-4" /> Freeze</Button>}
         </CardHeader>
         <CardContent className="space-y-2">
           {(members ?? []).map((m) => (

@@ -74,7 +74,7 @@ export class MarksWorkspaceService {
     const examIds = exams.map((e) => e.id);
     const schedules = await this.prisma.client.examSchedule.findMany({
       where: { examId: { in: examIds } },
-      select: { id: true, examId: true, classId: true, marksLockedAt: true },
+      select: { id: true, examId: true, classId: true, subjectId: true, marksLockedAt: true },
     });
     const enteredBySchedule = await this.markedPerPaper(schedules.map((s) => s.id));
 
@@ -105,6 +105,9 @@ export class MarksWorkspaceService {
         isFinal: exam.examType?.isFinal ?? false,
         classCount: classes.size,
         paperCount: own.length,
+        // Which class/subject papers exist, so a form can offer only the exams
+        // that can still take this course's paper.
+        papers: own.map((p) => ({ classId: p.classId, subjectId: p.subjectId })),
         lockedPaperCount: own.filter((s) => s.marksLockedAt != null).length,
         marksExpected: expected,
         marksEntered: done,

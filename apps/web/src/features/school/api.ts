@@ -4075,7 +4075,7 @@ export function usePublishClassReportCards() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (dto: ClassReportCardScope) =>
-      (await api.post<{ published: number; alreadyPublished: number; notGenerated: number }>(
+      (await api.post<{ published: number; alreadyPublished: number; notGenerated: number; awaitingResults?: number }>(
         `${S}/report-cards/publish-class`,
         dto,
       )).data,
@@ -6184,6 +6184,7 @@ export interface WorkspaceExam {
   id: string;
   name: string;
   status: string;
+  papers?: Array<{ classId: string; subjectId: string }>;
   startDate: string;
   endDate: string;
   termId: string;

@@ -254,3 +254,34 @@ describe('F13 — the accepted application is the source of the pupil record', (
     expect(m.fields.residenceType).toBe('day');
   });
 });
+
+describe('Report cards — a class release never stops half-way', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { ReportCardService } = require('../../src/modules/school/examinations/examinations.service');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { BadRequestException } = require('@nestjs/common');
+
+  it('releases every releasable card and counts the previews it held back', async () => {
+    const svc: any = Object.create(ReportCardService.prototype);
+    svc.classRoll = async () => [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' }];
+    svc.prisma = {
+      client: {
+        reportCard: {
+          findMany: async () => [
+            { id: 'c1', publishedAt: null },
+            { id: 'c2', publishedAt: null }, // a late admission: preview only
+            { id: 'c3', publishedAt: new Date() },
+          ],
+        },
+      },
+    };
+    const released: string[] = [];
+    svc.setPublished = async (id: string) => {
+      if (id === 'c2') throw new BadRequestException('built from live marks');
+      released.push(id);
+    };
+    const res = await svc.publishForClass({ classId: 'k', termId: 't' });
+    expect(released).toEqual(['c1']);
+    expect(res).toEqual({ published: 1, alreadyPublished: 1, notGenerated: 1, awaitingResults: 1 });
+  });
+});

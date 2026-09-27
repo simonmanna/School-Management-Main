@@ -41,6 +41,11 @@ const PASSWORD = process.env.E2E_PASSWORD ?? '';
 const TEACHER_EMAIL = process.env.E2E_TEACHER_EMAIL ?? '';
 const TEACHER_PASSWORD = process.env.E2E_TEACHER_PASSWORD ?? '';
 const TERM = process.env.E2E_TERM ?? '';
+/** The class and course set up by scripts/seed-sunrise-academics.ts. */
+const CLASS = process.env.E2E_CLASS ?? 'P.1 A';
+const COURSE = process.env.E2E_COURSE ?? 'P.1 A Mathematics — Term 3';
+// Run `pnpm --filter @erp/api exec tsx ../../scripts/seed-sunrise-academics.ts`
+// before each run: it opens a fresh exam sitting once the previous one is closed.
 
 test.skip(!ORG || !EMAIL || !PASSWORD, 'Set E2E_ORG, E2E_EMAIL and E2E_PASSWORD to run the academic journey');
 
@@ -58,8 +63,10 @@ async function signIn(page: Page, email: string, password: string) {
 /** Pick the first real option of a `select`, or the one whose label matches. */
 async function choose(select: ReturnType<Page['locator']>, label?: string) {
   if (label) {
-    await expect(select.locator('option', { hasText: label }).first()).toBeAttached();
-    await select.selectOption({ label });
+    // Labels may carry a suffix such as "(current)"; match on the text.
+    const option = select.locator('option', { hasText: label }).first();
+    await expect(option).toBeAttached();
+    await select.selectOption((await option.getAttribute('value'))!);
     return label;
   }
   const options = select.locator('option');
@@ -74,7 +81,7 @@ test('application → enrolment → assessment → marks → results → publish
   // One test for the whole year: it needs far more than the default budget.
   test.setTimeout(600_000);
   const stamp = Date.now();
-  const applicant = `Journey Pupil ${stamp}`;
+  const applicant = `Journey Pupil${stamp}`; // other names + surname, as the application records them
   const assessmentTitle = `Journey Check ${stamp}`;
 
   const registrar = await browser.newPage();
@@ -93,7 +100,10 @@ test('application → enrolment → assessment → marks → results → publish
   // Admission date, then date of birth (the two date inputs, in form order).
   const dates = form.locator('input[type="date"]');
   await dates.nth(0).fill(new Date().toISOString().slice(0, 10));
-  await dates.nth(1).fill('2019-03-04');
+  // A distinct birth date per run: the same child entered twice is (rightly)
+  // stopped by the duplicate-pupil check at enrolment.
+  const dob = new Date(Date.UTC(2018, 0, 1) + (stamp % 1400) * 86_400_000).toISOString().slice(0, 10);
+  await dates.nth(1).fill(dob);
   // Every other required choice (gender, nationality, entry, residence, class,
   // relationship): take the first real option of any still-unset selector.
   const selects = form.locator('select');
@@ -142,7 +152,7 @@ test('application → enrolment → assessment → marks → results → publish
   await expect(enrollDialog.getByText(/the year applied for|No terms for/)).toBeVisible();
   await expect(enrollDialog.getByText(`Pupil${stamp}`, { exact: false }).first()).toBeVisible();
   await choose(enrollDialog.getByLabel(/^term/i), TERM || undefined);
-  await choose(enrollDialog.getByLabel(/^class/i));
+  await choose(enrollDialog.getByLabel(/^class/i), CLASS);
   await enrollDialog.getByLabel(/roll number/i).fill(String(stamp % 100000));
   await enrollDialog.getByRole('button', { name: /^enroll pupil/i }).click();
   await expect(registrar.getByText(/enrolled into/)).toBeVisible();
@@ -150,85 +160,196 @@ test('application → enrolment → assessment → marks → results → publish
   await expect(registrar.getByRole('button', { name: /open pupil/i })).toBeVisible();
 
   /* ── 4. The pupil is on the course roster without anyone syncing it ──── */
-  // The handoff the audit found broken: placement now reconciles compulsory
-  // course rosters, so the assessment wizard can see this learner immediately.
+  // Placement reconciles compulsory course rosters, so the teacher's frozen
+  // snapshot below includes the pupil enrolled a moment ago.
   const marker = await browser.newPage();
   const teacherRole = !!(TEACHER_EMAIL && TEACHER_PASSWORD);
   await signIn(marker, teacherRole ? TEACHER_EMAIL : EMAIL, teacherRole ? TEACHER_PASSWORD : PASSWORD);
 
-  /* ── 5. The teacher sets an assessment on the frozen roster ───────────── */
-  await marker.goto('/school/assessments');
-  await marker.getByRole('button', { name: /new assessment|create assessment/i }).first().click();
-  const wizard = marker.getByRole('dialog');
-  await choose(wizard.locator('select').first()); // course offering
-  await wizard.getByLabel(/^title/i).fill(assessmentTitle);
-  await wizard.getByRole('button', { name: /^continue/i }).click();
+  /* ── 5. The teacher sets the CAT and the exam paper ────────────────────── */
+  // The school weights continuous assessment 40% and the end-of-term exam 60%,
+  // so a result needs both (F02).
+  const setAssessment = async (kind: 'CAT' | 'Exam', title: string, validateDates = false) => {
+    await marker.goto('/school/assessments');
+    await marker.getByRole('button', { name: /new assessment|create assessment/i }).first().click();
+    const wizard = marker.getByRole('dialog');
+    await choose(wizard.locator('select').first(), COURSE || undefined);
+    await wizard.getByRole('button', { name: kind, exact: true }).click();
+    await wizard.getByLabel(/^title/i).fill(title);
+    await wizard.getByRole('button', { name: /^continue/i }).click();
+    if (validateDates) {
+      // Step 2 validates inline: an out-of-order date sequence blocks Continue
+      // and names the field, rather than failing on submit.
+      await wizard.getByLabel(/^opens/i).fill('2026-10-01T08:00');
+      await wizard.getByLabel(/^due/i).fill('2026-09-20T08:00');
+      await expect(wizard.getByText(/Due cannot be before the assessment opens/)).toBeVisible();
+      await expect(wizard.getByRole('button', { name: /^continue/i })).toBeDisabled();
+      await wizard.getByLabel(/^due/i).fill('2026-10-08T08:00');
+      await expect(wizard.getByText(/Due cannot be before the assessment opens/)).toBeHidden();
+    }
+    if (kind === 'Exam') {
+      // Only open sittings without this course's paper are offered.
+      await choose(wizard.locator('label', { hasText: /exam event/i }).locator('select'), 'End of Term 3');
+    } else {
+      // Summative: bound to the continuous-assessment component (F03).
+      await choose(wizard.locator('label', { hasText: /counts toward/i }).locator('select'));
+    }
+    await wizard.getByRole('button', { name: /^continue/i }).click();
+    await wizard.getByRole('button', { name: /capture & freeze/i }).click();
+    await expect(wizard.getByText(/learner\(s\) in the frozen snapshot/)).toBeVisible();
+    await wizard.getByRole('button', { name: /create assessment draft/i }).click();
+    await expect(marker).toHaveURL(/\/school\/assessments\/.+\/mark/);
+    // A draft is not marked: publish it to its frozen roster first.
+    await marker.getByRole('button', { name: /^publish assessment/i }).click();
+    await expect(marker.getByRole('button', { name: /^publish assessment/i })).toBeHidden();
+  };
 
-  // Step 2 validates inline now: an out-of-order date sequence must block
-  // Continue and say which field is wrong, rather than failing on submit.
-  await wizard.getByLabel(/^opens/i).fill('2026-06-01T08:00');
-  await wizard.getByLabel(/^due/i).fill('2026-05-01T08:00');
-  await expect(wizard.getByText(/Due cannot be before the assessment opens/)).toBeVisible();
-  await expect(wizard.getByRole('button', { name: /^continue/i })).toBeDisabled();
-  await wizard.getByLabel(/^due/i).fill('2026-06-08T08:00');
-  await expect(wizard.getByText(/Due cannot be before the assessment opens/)).toBeHidden();
-  // Summative: bound to a weighting component, so it reaches the term result (F03).
-  await choose(wizard.locator('label', { hasText: /counts toward/i }).locator('select'));
-  await wizard.getByRole('button', { name: /^continue/i }).click();
+  /* ── 6. Marks for every learner, then submit for approval ─────────────── */
+  const markAll = async (base: number, expectApplicant = true) => {
+    if (expectApplicant) await expect(marker.getByLabel(`Mark for ${applicant}`, { exact: false }).first()).toBeVisible();
+    const boxes = marker.locator('input[aria-label^="Mark for "]');
+    await expect(boxes.first()).toBeVisible();
+    const n = await boxes.count();
+    for (let i = 0; i < n; i += 1) {
+      const box = boxes.nth(i);
+      if ((await box.isEnabled()) && !(await box.inputValue())) await box.fill(String(base + ((i * 7) % 25)));
+    }
+    // Nothing to save when every mark was already saved by an earlier session.
+    const save = marker.getByRole('button', { name: /^save draft/i });
+    if (await save.isEnabled()) await save.click();
+    await expect(marker.getByRole('button', { name: /^submit marks/i })).toBeEnabled();
+    await marker.getByRole('button', { name: /^submit marks/i }).click();
+    await expect(marker.getByText(/sent for approval/i).first()).toBeVisible();
+    return n;
+  };
 
-  // Step 3: freeze the roster the marks will hang off.
-  await wizard.getByRole('button', { name: /capture & freeze/i }).click();
-  await expect(wizard.getByText(/learner\(s\) in the frozen snapshot/)).toBeVisible();
-  await wizard.getByRole('button', { name: /create assessment draft/i }).click();
-  await expect(marker).toHaveURL(/\/school\/assessments\/.+\/mark/);
-  // A draft is not marked: publish it to its frozen roster first.
-  await marker.getByRole('button', { name: /^publish assessment/i }).click();
+  const catTitle = `${assessmentTitle} CAT`;
+  const examTitle = `${assessmentTitle} Paper 1`;
+  await setAssessment('CAT', catTitle, true);
+  const learners = await markAll(55);
+  expect(learners).toBeGreaterThan(0);
+  await setAssessment('Exam', examTitle);
+  await markAll(48);
 
-  /* ── 6. Marks, then submit for approval ───────────────────────────────── */
-  await expect(marker.getByText(applicant)).toBeVisible();
-  const scoreBox = marker.getByRole('spinbutton').first();
-  await scoreBox.fill('72');
-  await scoreBox.blur();
-  await marker.getByRole('button', { name: /submit for approval|send for approval/i }).first().click();
-  await expect(marker.getByText(/submitted|awaiting approval/i).first()).toBeVisible();
+  /* ── 6b. Nothing left half-marked for this class ──────────────────────── */
+  // A term result needs every piece of summative work finished (F02/F05). On
+  // a shared demo school an earlier, interrupted run may have left work open;
+  // the teacher finishes it the ordinary way — mark, then submit.
+  for (let i = 0; i < 10; i += 1) {
+    await marker.goto('/school/assessments');
+    const pending = marker.getByRole('main').getByRole('button', { name: /^(mark|review & publish|submit marks)$/i });
+    await marker.waitForTimeout(1500);
+    if (!(await pending.count())) break;
+    const next = pending.first();
+    const label = ((await next.textContent()) ?? '').trim().toLowerCase();
+    await next.click();
+    if (label.includes('submit')) {
+      await expect(marker.getByText(/sent for approval/i).first()).toBeVisible();
+      continue;
+    }
+    await expect(marker).toHaveURL(/\/school\/assessments\/.+\/mark/);
+    await expect(marker.getByRole('tab', { name: /markbook/i })).toBeVisible();
+    const publish = marker.getByRole('button', { name: /^publish assessment/i });
+    if (await publish.isVisible()) {
+      await publish.click();
+      await expect(publish).toBeHidden();
+    }
+    await markAll(50, false);
+  }
 
   /* ── 7. Someone other than the marker approves ────────────────────────── */
-  await registrar.goto('/school/approvals');
-  const approvalRow = registrar.getByRole('row', { hasText: assessmentTitle });
-  await expect(approvalRow).toBeVisible();
-  await approvalRow.getByRole('button', { name: /^approve/i }).click();
-  await expect(registrar.getByText(/approved/i).first()).toBeVisible();
+  for (const title of [catTitle, examTitle]) {
+    await registrar.goto('/school/approvals');
+    const approvalRow = registrar.locator('tr', { hasText: title }).first();
+    await expect(approvalRow).toBeVisible();
+    await approvalRow.getByRole('button', { name: /^approve/i }).click();
+    await expect(approvalRow).toBeHidden();
+  }
+  // …and anything else this class's teacher sent for approval.
+  for (let i = 0; i < 10; i += 1) {
+    await registrar.goto('/school/approvals');
+    const row = registrar.locator('tr', { hasText: 'Journey Check' }).first();
+    await registrar.waitForTimeout(1500);
+    if (!(await row.count())) break;
+    await row.getByRole('button', { name: /^approve/i }).click();
+    await expect(registrar.getByText(/mark\(s\) approved/i).first()).toBeVisible();
+  }
+
+  /* ── 7b. Close the examination so its papers stop taking marks ────────── */
+  // Every open sitting of the term's end-of-term exam — a paper still open for
+  // marking must not feed a released result (Phase 5 gate).
+  await registrar.goto('/school/exam-operations');
+  const examSelect = registrar.getByRole('main').locator('select').first();
+  await expect.poll(() => examSelect.locator('option').count()).toBeGreaterThan(0);
+  const sittings = examSelect.locator('option', { hasText: 'End of Term 3' });
+  const sittingValues = await sittings.evaluateAll((els) => els.map((e) => (e as HTMLOptionElement).value));
+  const done = registrar.getByText(/nothing further to advance/i);
+  for (const value of sittingValues) {
+    await examSelect.selectOption(value);
+    // Marking → moderation → results ready → closed: each step's gate must pass.
+    for (let i = 0; i < 5; i += 1) {
+      const move = registrar.getByRole('button', { name: /^move to/i });
+      await expect(move.or(done).first()).toBeVisible();
+      if (await done.isVisible()) break;
+      const label = (await move.textContent()) ?? '';
+      await expect(move).toBeEnabled();
+      await move.click();
+      // Wait until the page shows the following step (or the end).
+      await expect
+        .poll(
+          async () => ((await done.isVisible()) ? 'done' : ((await move.textContent({ timeout: 2000 }).catch(() => '')) ?? '')),
+          { timeout: 60_000 },
+        )
+        .not.toBe(label);
+    }
+    await expect(done).toBeVisible();
+  }
 
   /* ── 8. Lock the whole-class list for the term, then compute and release ── */
   // Results come from a locked class list of THIS term (F06), never from an
   // assessment's subject roster.
   await registrar.goto('/school/assessment-ops');
-  await choose(registrar.locator('select').first(), TERM || undefined);
-  await choose(registrar.locator('select').nth(1));
+  await choose(registrar.getByRole('main').locator('select').first(), TERM || undefined);
+  await choose(registrar.getByRole('main').locator('select').nth(1), CLASS);
   await registrar.getByPlaceholder(/name this class list/i).fill(`Journey list ${stamp}`);
   await registrar.getByRole('button', { name: /save class list/i }).click();
+  // The saved list is selected; lock it.
   await registrar.getByRole('button', { name: /^freeze/i }).first().click();
+  await expect(registrar.getByText(/class list locked/i).first()).toBeVisible();
 
   await registrar.goto('/school/results');
-  await choose(registrar.locator('select').first(), TERM || undefined);
-  await choose(registrar.locator('select').nth(1), `Journey list ${stamp}`);
+  await choose(registrar.getByRole('main').locator('select').first(), TERM || undefined);
+  await choose(registrar.getByRole('main').locator('select').nth(1), `Journey list ${stamp}`);
   await registrar.getByRole('button', { name: /work out results/i }).click();
-  await expect(registrar.getByText(/^Version 1/).first()).toBeVisible();
-  await registrar.getByText(/^Version 1/).first().click();
-  await registrar.getByRole('button', { name: /release to parents/i }).click();
-  await expect(registrar.getByText(/published/i).first()).toBeVisible();
+  // First release of the term: work out, then release. A term already released
+  // (an earlier run) is not recomputed over — that needs an approved amendment
+  // (F04) — and its released version is what the report cards use.
+  const computed = registrar.getByText(/results worked out/i).first();
+  const refused = registrar.getByText(/already released/i).first();
+  await expect(computed.or(refused).first()).toBeVisible();
+  const firstRelease = await computed.isVisible();
+  if (firstRelease) {
+    await registrar.getByRole('button', { name: /release to parents/i }).click();
+    await expect(registrar.getByText(/results released to parents/i).first()).toBeVisible();
+  } else {
+    await expect(registrar.getByText(/released/i).first()).toBeVisible();
+  }
 
   /* ── 9. Only now can a report card be released to the family ──────────── */
   // The third handoff: publication requires provenance pinned to the published
   // ResultSet revision, so this must be generated AFTER step 8 to be releasable.
   await registrar.goto('/school/report-cards');
-  const rcSelects = registrar.locator('select');
-  await choose(rcSelects.nth(0)); // class
+  const rcSelects = registrar.getByRole('main').locator('select');
+  await choose(rcSelects.nth(0), CLASS); // class
   await choose(rcSelects.nth(1), TERM || undefined); // term
   await registrar.getByRole('button', { name: /^(build all|generate)/i }).first().click();
-  await expect(registrar.getByText(/generated|ready/i).first()).toBeVisible();
+  await expect(registrar.getByText(/report cards? ready for/i).first()).toBeVisible();
   await registrar.getByRole('button', { name: /^(release all|publish)/i }).first().click();
-  await expect(registrar.getByText('Published').first()).toBeVisible();
+  const released = registrar.getByText(/report cards? released to families/i).first();
+  await expect(released).toBeVisible();
+  // The term's first release puts cards out; a later run finds them already out
+  // and holds back cards for pupils admitted after the release (they need an amendment).
+  if (firstRelease) expect(Number((await released.textContent())?.match(/\d+/)?.[0] ?? 0)).toBeGreaterThan(0);
 
   await marker.close();
   await registrar.close();

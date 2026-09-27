@@ -730,13 +730,28 @@ export class ReportCardService {
       select: { id: true, publishedAt: true },
     });
 
+    // Release every card that is pinned to released results. A card that is
+    // only a preview (a pupil admitted after the results were released) is
+    // held back and counted — it used to throw part-way through, leaving some
+    // families released and the rest not, behind an error message.
     const pending = cards.filter((c) => !c.publishedAt);
-    for (const c of pending) await this.setPublished(c.id, true);
+    let published = 0;
+    let awaitingResults = 0;
+    for (const c of pending) {
+      try {
+        await this.setPublished(c.id, true);
+        published += 1;
+      } catch (e) {
+        if (e instanceof BadRequestException) awaitingResults += 1;
+        else throw e;
+      }
+    }
 
     return {
-      published: pending.length,
+      published,
       alreadyPublished: cards.length - pending.length,
       notGenerated: pupils.length - cards.length,
+      awaitingResults,
     };
   }
 
