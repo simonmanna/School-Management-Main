@@ -7,6 +7,7 @@ import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.
 import { AttendanceStatusConfigService } from '../attendance/attendance-status-config.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { countCodes, loadAttendancePolicy, summarizeAttendance } from '../attendance/attendance-rate';
 
 /** What the portal app needs on boot to know who it is talking to. */
 export interface PortalContext {
@@ -385,7 +386,7 @@ export class PortalsService {
   private async recentAttendance(studentProfileId: string) {
     const from = new Date();
     from.setDate(from.getDate() - 30);
-    const [rows, cfg] = await Promise.all([
+    const [rows, cfg, policy] = await Promise.all([
       this.prisma.client.studentAttendance.findMany({
         where: { studentProfileId, date: { gte: from } },
         orderBy: { date: 'desc' },
@@ -393,12 +394,19 @@ export class PortalsService {
       }),
       // P-att-status: rate maths uses the org's configured present/late flags.
       this.statusConfig.catalogByCode(),
+      loadAttendancePolicy(this.prisma.client),
     ]);
-    const total = rows.length;
-    const present = rows.filter((r) => cfg[r.status]?.isPresent).length;
-    const late = rows.filter((r) => cfg[r.status]?.isLate).length;
-    const absent = rows.filter((r) => cfg[r.status]?.isAbsent).length;
-    return { total, present, late, absent, rate: total > 0 ? Math.round(((present + late * 0.5) / total) * 100) : 0 };
+    // Audit F08: the same calculation the staff screens use.
+    const s = summarizeAttendance(countCodes(rows.map((r) => r.status)), cfg, policy);
+    return {
+      total: s.sessions,
+      present: s.present,
+      late: s.late,
+      excused: s.excused,
+      absent: s.absent,
+      rate: s.rate == null ? null : Math.round(s.rate),
+      policyMissing: s.policyMissing,
+    };
   }
 
   /**

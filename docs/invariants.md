@@ -10,7 +10,7 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-001 | A likely duplicate never silently creates another pupil, on any admission path | | | D07 | D07 | | open |
+| I-001 | A likely duplicate never silently creates another pupil, on any admission path | `StudentAdmissionService.admit` → `assertNotLikelyDuplicate` (advisory lock); duplicate dialog in the students page | | `wave14-identity-attendance.spec.ts` D07 | | | enforced |
 | I-002 | A pupil has at most one active placement per term | DB exclusion constraint (preflight) | | existing placement suites | | preflight | enforced |
 | I-003 | A financial document has exactly one authoritative pupil | `FinanceControlsService.pupilOfDocument` (adjustments derive the pupil) | | `wave14-finance-integrity.spec.ts` D04 | | `docs/audit/posting-inventory.md` | enforced |
 
@@ -37,8 +37,8 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-030 | One attendance session contributes exactly once, per the school's ADR-032 P1 policy | | | D08 | | | open |
-| I-031 | Every rate lies in 0–100 because the arithmetic is correct, never because it is clamped; all consumers agree | | | D08 | | | open |
+| I-030 | One attendance session contributes exactly once, per the school's ADR-032 P1 policy | `attendance/attendance-rate.ts` (`bucketOf`, `summarizeAttendance`) used by pupil summary, class report, reports, portal, report card | calculator property test | `wave14-identity-attendance.spec.ts` D08 | | | enforced |
+| I-031 | Every rate lies in 0–100 because the arithmetic is correct, never because it is clamped; all consumers agree | same | | `wave14-identity-attendance.spec.ts` D08 | | | enforced |
 
 ## Nursery
 

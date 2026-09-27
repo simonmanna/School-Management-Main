@@ -31,6 +31,7 @@ interface FormState {
   isPresent: boolean;
   isLate: boolean;
   isAbsent: boolean;
+  isExcused: boolean;
 }
 
 const emptyForm: FormState = {
@@ -42,6 +43,7 @@ const emptyForm: FormState = {
   isPresent: false,
   isLate: false,
   isAbsent: false,
+  isExcused: false,
 };
 
 export function SchoolAttendanceStatusesPage() {
@@ -71,6 +73,7 @@ export function SchoolAttendanceStatusesPage() {
       isPresent: r.isPresent,
       isLate: r.isLate,
       isAbsent: r.isAbsent,
+      isExcused: r.isExcused ?? false,
     });
     setEditing(r);
   };
@@ -89,6 +92,7 @@ export function SchoolAttendanceStatusesPage() {
       isPresent: form.isPresent,
       isLate: form.isLate,
       isAbsent: form.isAbsent,
+      isExcused: form.isExcused,
     };
     try {
       if (editing) await update.mutateAsync({ id: editing.id, dto: payload });
@@ -161,6 +165,7 @@ export function SchoolAttendanceStatusesPage() {
                     {flagBadge('Present', r.isPresent)}
                     {flagBadge('Late', r.isLate)}
                     {flagBadge('Absent', r.isAbsent)}
+                    {flagBadge('Excused', r.isExcused ?? false)}
                   </div></td>
                   <td className="px-4 py-2 text-right">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(r)} aria-label="Edit"><Pencil className="h-4 w-4" /></Button>
@@ -210,6 +215,7 @@ export function SchoolAttendanceStatusesPage() {
                 <Check label="Counts as Present" checked={form.isPresent} onChange={(v) => setForm({ ...form, isPresent: v })} />
                 <Check label="Counts as Late" checked={form.isLate} onChange={(v) => setForm({ ...form, isLate: v })} />
                 <Check label="Counts as Absent" checked={form.isAbsent} onChange={(v) => setForm({ ...form, isAbsent: v })} />
+                <Check label="Excused (counted as School settings says)" checked={form.isExcused} onChange={(v) => setForm({ ...form, isExcused: v })} />
               </div>
             </div>
           </div>

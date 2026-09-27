@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { EVENTS } from '@erp/shared';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
@@ -86,6 +86,13 @@ export class AdmitStudentInput {
    * enrollment and placement.
    */
   existingStudentProfileId?: string | null;
+  /**
+   * Register even though a likely duplicate exists (a genuinely different child
+   * with the same name and date of birth). Needs `school:students:override_duplicate`
+   * and a reason; audited (ADR-032 P4, audit F07).
+   */
+  allowDuplicate?: boolean;
+  duplicateReason?: string | null;
 }
 
 /** Quick "register & place" payload — everything a secretary types on one screen. */
@@ -107,6 +114,9 @@ export class RegisterStudentDto {
   @IsOptional() @IsString() guardianName?: string;
   @IsOptional() @IsString() guardianPhone?: string;
   @IsOptional() @IsString() guardianRelationship?: string;
+  /** A different child who shares a name and birthday with an existing pupil (ADR-032 P4). */
+  @IsOptional() @IsBoolean() allowDuplicate?: boolean;
+  @IsOptional() @IsString() @MaxLength(500) duplicateReason?: string;
 }
 
 /**
@@ -159,6 +169,11 @@ export class StudentAdmissionService {
       if (input.existingStudentProfileId) {
         return this.enrolExisting(tx, input);
       }
+
+      // Audit F07 (I-001): every path that creates a pupil asks the same
+      // question first. An application is exempt: its identity-match review
+      // (confirm or dismiss each candidate) is that decision, already made.
+      const duplicateOverride = input.applicationId ? null : await this.assertNotLikelyDuplicate(tx, input);
 
       const code = await this.sequence.next(
         `student:${new Date().getUTCFullYear()}`,
@@ -261,6 +276,14 @@ export class StudentAdmissionService {
         action: 'create',
         newValues: { partner, profile, enrollmentId: enrollment?.id ?? null },
       });
+      if (duplicateOverride) {
+        await this.audit.recordInTx(tx, {
+          entity: 'StudentProfile',
+          entityId: profile.id,
+          action: 'create',
+          newValues: { duplicateOverride: true, reason: duplicateOverride.reason, matchedAdmissionNos: duplicateOverride.matches },
+        });
+      }
       await this.events.publishInTx(tx, EVENTS.SchoolStudentCreated, {
         organizationId,
         studentProfileId: profile.id,
@@ -274,21 +297,71 @@ export class StudentAdmissionService {
 
   /**
    * Learners that are probably the same child: same name (case/space-insensitive)
-   * AND same date of birth. Name alone is never enough — two pupils may share it.
+   * AND same date of birth. Name alone is never enough — two pupils may share it —
+   * except inside one class, where a second identical name with no birthday to
+   * tell them apart is almost always the same child typed twice.
    */
-  async findLikelyDuplicates(client: any, name: string, dateOfBirth: string | null) {
-    if (!dateOfBirth) return [];
-    const dob = new Date(dateOfBirth);
-    if (Number.isNaN(dob.getTime())) return [];
+  async findLikelyDuplicates(client: any, name: string, dateOfBirth: string | null, classId?: string | null) {
+    const normalized = name.trim().replace(/\s+/g, ' ');
+    const byName = { partner: { name: { equals: normalized, mode: 'insensitive' } } };
+    const dob = dateOfBirth ? new Date(dateOfBirth) : null;
+    let where: any = null;
+    if (dob && !Number.isNaN(dob.getTime())) {
+      where = { ...byName, dateOfBirth: dob };
+    } else if (classId) {
+      where = {
+        ...byName,
+        academicEnrollments: {
+          some: {
+            status: { in: ['ACTIVE', 'PENDING', 'SUSPENDED'] },
+            placements: { some: { effectiveTo: null, classCohort: { classId } } },
+          },
+        },
+      };
+    }
+    if (!where) return [];
     const rows = await client.studentProfile.findMany({
-      where: {
-        dateOfBirth: dob,
-        partner: { name: { equals: name.trim().replace(/\s+/g, ' '), mode: 'insensitive' } },
-      },
-      select: { id: true, admissionNo: true, status: true },
+      where: { ...where, status: { notIn: ['archived', 'deceased'] } },
+      select: { id: true, admissionNo: true, status: true, dateOfBirth: true, partner: { select: { name: true } } },
       take: 5,
     });
-    return rows as Array<{ id: string; admissionNo: string; status: string }>;
+    return (rows as any[]).map((r) => ({
+      id: r.id as string,
+      admissionNo: r.admissionNo as string,
+      status: r.status as string,
+      name: (r.partner?.name as string) ?? null,
+      dateOfBirth: r.dateOfBirth ? new Date(r.dateOfBirth).toISOString().slice(0, 10) : null,
+    }));
+  }
+
+  /**
+   * Refuse a likely duplicate unless the caller deliberately overrides (ADR-032
+   * P4). Serialized per identity with a transaction advisory lock, so two
+   * simultaneous registrations of the same child cannot both see "no match".
+   * Returns the override record to audit, or null when there was no match.
+   */
+  private async assertNotLikelyDuplicate(tx: any, input: AdmitStudentInput) {
+    const normalized = input.name.trim().replace(/\s+/g, ' ').toLowerCase();
+    const identity = `pupil-identity:${input.organizationId}:${normalized}:${input.dateOfBirth ? String(input.dateOfBirth).slice(0, 10) : `class:${input.placement?.classId ?? ''}`}`;
+    await tx.$queryRawUnsafe('SELECT 1 AS ok FROM pg_advisory_xact_lock(hashtextextended($1, 0))', identity);
+    const matches = await this.findLikelyDuplicates(tx, input.name, input.dateOfBirth ?? null, input.placement?.classId ?? null);
+    if (matches.length === 0) return null;
+    if (!input.allowDuplicate) {
+      throw new ConflictException({
+        code: 'LIKELY_DUPLICATE',
+        message:
+          `${input.name} looks like a pupil already on the register (${matches.map((m) => m.admissionNo).join(', ')}). ` +
+          'Open that record instead, or confirm this is a different child and say why.',
+        duplicates: matches,
+      });
+    }
+    const held = this.tenant.permissions;
+    if (!held.includes('*') && !held.includes(PERMISSIONS.school.overrideDuplicate)) {
+      throw new ForbiddenException('Registering a pupil who matches an existing one needs the duplicate-override grant.');
+    }
+    const reason = input.duplicateReason?.trim();
+    if (!reason) throw new BadRequestException('Say why this is a different child from the matching pupil.');
+    return { reason, matches: matches.map((m) => m.admissionNo) };
   }
 
   /** Enrol a learner who already has a StudentProfile (no new master record). */
@@ -382,6 +455,8 @@ export class StudentAdmissionService {
         sectionId: dto.sectionId ?? null,
         rollNumber: dto.rollNumber ?? null,
       },
+      allowDuplicate: dto.allowDuplicate ?? false,
+      duplicateReason: dto.duplicateReason ?? null,
     });
   }
 

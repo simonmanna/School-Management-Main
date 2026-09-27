@@ -234,6 +234,9 @@ export class TransferInDto {
   @IsString() @IsNotEmpty() termId!: string;
   @IsString() @IsNotEmpty() rollNumber!: string;
   @IsOptional() @IsString() admissionNo?: string;
+  /** A different child who shares a name and birthday with an existing pupil (ADR-032 P4). */
+  @IsOptional() @IsBoolean() allowDuplicate?: boolean;
+  @IsOptional() @IsString() duplicateReason?: string;
 }
 
 export class WithdrawStudentDto {

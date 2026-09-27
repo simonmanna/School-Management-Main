@@ -53,6 +53,8 @@ export class CreateStudentDto {
    * it, a likely duplicate is refused with the candidates listed.
    */
   @IsOptional() @IsBoolean() allowDuplicate?: boolean;
+  /** Why this is a different child from the matching pupil (ADR-032 P4). */
+  @IsOptional() @IsString() @MaxLength(500) duplicateReason?: string;
   /** Admit straight into a class. Creates the enrollment and opening placement. */
   @IsOptional() @IsString() classId?: string;
   /** The class's stream (section), when the class is divided. */

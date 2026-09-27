@@ -8,6 +8,7 @@ import type { BulkMarkAttendanceDto, CorrectAttendanceDto } from './dto.types';
 import { AttendanceStatusConfigService } from './attendance-status-config.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
+import { countCodes, loadAttendancePolicy, summarizeAttendance } from './attendance-rate';
 
 /**
  * StudentAttendanceService — bulk-mark a class's daily attendance in one tx.
@@ -227,16 +228,23 @@ export class StudentAttendanceService {
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       throw new BadRequestException('Invalid from/to date');
     }
-    const [rows, cfg] = await Promise.all([
+    const [rows, cfg, policy] = await Promise.all([
       this.prisma.client.studentAttendance.findMany({ where: { studentProfileId, date: { gte: start, lte: end } } }),
       this.statusConfig.catalogByCode(),
+      loadAttendancePolicy(this.prisma.client),
     ]);
-    const total = rows.length;
-    const present = rows.filter((r) => cfg[r.status]?.isPresent).length;
-    const late = rows.filter((r) => cfg[r.status]?.isLate).length;
-    const absent = rows.filter((r) => cfg[r.status]?.isAbsent).length;
-    const rate = total > 0 ? ((present + late * 0.5) / total) * 100 : 0;
-    return { total, present, late, absent, attendanceRate: Math.round(rate * 100) / 100 };
+    // Audit F08: one bucket per session, the school's late policy, no clamp.
+    const s = summarizeAttendance(countCodes(rows.map((r) => r.status)), cfg, policy);
+    return {
+      total: s.sessions,
+      present: s.present,
+      late: s.late,
+      excused: s.excused,
+      absent: s.absent,
+      denominator: s.denominator,
+      attendanceRate: s.rate,
+      policyMissing: s.policyMissing,
+    };
   }
 
   /**
@@ -253,31 +261,26 @@ export class StudentAttendanceService {
     }
     end.setHours(23, 59, 59, 999);
 
-    const [rows, catalog] = await Promise.all([
+    const [rows, catalog, policy] = await Promise.all([
       this.prisma.client.studentAttendance.findMany({
         where: { classId, date: { gte: start, lte: end } },
         include: { statusConfig: true },
       }),
       this.statusConfig.list(),
+      loadAttendancePolicy(this.prisma.client),
     ]);
     const cfgByCode = Object.fromEntries(catalog.map((c) => [c.code, c]));
 
     const byDate: Array<{ date: string; day: string; total: number; counts: Record<string, number> }> = [];
     const dailyMap = new Map<string, { total: number; counts: Record<string, number> }>();
-    let present = 0;
-    let absent = 0;
-    let late = 0;
-
     for (const r of rows) {
       const key = r.date.toISOString().slice(0, 10);
       if (!dailyMap.has(key)) dailyMap.set(key, { total: 0, counts: {} });
       const bucket = dailyMap.get(key)!;
       bucket.total++;
       bucket.counts[r.status] = (bucket.counts[r.status] ?? 0) + 1;
-      if (cfgByCode[r.status]?.isPresent) present++;
-      else if (cfgByCode[r.status]?.isLate) late++;
-      else if (cfgByCode[r.status]?.isAbsent) absent++;
     }
+    const s = summarizeAttendance(countCodes(rows.map((r) => r.status)), cfgByCode, policy);
 
     for (const [key, bucket] of [...dailyMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
       byDate.push({
@@ -288,13 +291,23 @@ export class StudentAttendanceService {
       });
     }
 
-    const grandTotal = rows.length;
     return {
       classId,
       start: start.toISOString(),
       end: end.toISOString(),
       statuses: catalog,
-      summary: { present, absent, late, total: grandTotal },
+      /** The school's ADR-032 P1 policy, so every consumer computes the same rate. */
+      policy,
+      summary: {
+        present: s.present,
+        absent: s.absent,
+        late: s.late,
+        excused: s.excused,
+        total: s.sessions,
+        denominator: s.denominator,
+        rate: s.rate,
+        policyMissing: s.policyMissing,
+      },
       byDate,
     };
   }

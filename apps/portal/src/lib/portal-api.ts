@@ -74,7 +74,8 @@ export interface ParentChildRow {
     currentSection?: { name: string } | null;
     partner?: { name: string } | null;
   };
-  attendance: { total: number; present: number; late: number; absent: number; rate: number };
+  /** `rate` is null when it depends on a late policy the school has not chosen. */
+  attendance: { total: number; present: number; late: number; absent: number; rate: number | null; policyMissing?: boolean };
   fees: { billed: number; collected: number; waived: number; balance: number; invoiceCount: number };
   announcements: Array<{ id: string; title: string; body: string; publishedAt: string | null }>;
 }
@@ -297,7 +298,8 @@ export interface StudentDashboard {
     period?: { name: string; startTime: string; endTime: string } | null;
     room?: string | null;
   }>;
-  attendance: { total: number; present: number; late: number; absent: number; rate: number };
+  /** `rate` is null when it depends on a late policy the school has not chosen. */
+  attendance: { total: number; present: number; late: number; absent: number; rate: number | null; policyMissing?: boolean };
   /**
    * Recent marks, off the assessment spine and approved only. The dashboard used
    * to read the legacy GradeEntry table with no approval filter, which put

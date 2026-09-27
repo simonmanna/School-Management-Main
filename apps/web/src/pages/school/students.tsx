@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
+import { DuplicatePupilDialog, likelyDuplicatesFrom, type LikelyDuplicate } from '@/features/school/duplicate-pupil-dialog';
 import { ListPager, QueryError } from '@/components/query-state';
 
 const STATUS_META: Record<StudentStatus, string> = {
@@ -80,7 +81,11 @@ export function SchoolStudentsPage() {
     setOpen(true);
   };
 
-  const submit = async () => {
+  // Audit F07: a likely duplicate comes back as 409 with the matches; the
+  // registrar opens the existing record or states why this is another child.
+  const [dupes, setDupes] = useState<{ matches: LikelyDuplicate[]; name: string; retry: (reason: string) => Promise<void> } | null>(null);
+
+  const submit = async (override?: { duplicateReason: string }) => {
     try {
       if (editing) {
         await update.mutateAsync({
@@ -107,18 +112,25 @@ export function SchoolStudentsPage() {
           gender: (form.gender || undefined) as 'male' | 'female' | 'other' | undefined,
           classId: form.currentClassId || undefined,
           residenceType: (form.residenceType || undefined) as 'day' | 'boarder' | undefined,
+          ...(override ? { allowDuplicate: true, duplicateReason: override.duplicateReason } : {}),
         });
         notify.success('Student admitted');
       }
       setOpen(false);
-    } catch (e) {
-      notify.error('Could not save student');
+      setDupes(null);
+    } catch (e: any) {
+      const matches = likelyDuplicatesFrom(e);
+      if (matches && !editing) {
+        setDupes({ matches, name: form.name ?? 'This pupil', retry: (duplicateReason) => submit({ duplicateReason }) });
+        return;
+      }
+      notify.error(e?.response?.data?.message ?? 'Could not save student');
     }
   };
 
   // ── Quick "register & place" — one action creates the student AND enrolls them. ──
   const [quick, setQuick] = useState<Record<string, string>>({});
-  const quickSubmit = async () => {
+  const quickSubmit = async (override?: { duplicateReason: string }) => {
     try {
       if (!quick.name?.trim() || !quick.classId || !quick.termId || !quick.rollNumber?.trim()) {
         notify.error('Name, class, term and roll number are required');
@@ -140,11 +152,18 @@ export function SchoolStudentsPage() {
         guardianName: quick.guardianName?.trim() || undefined,
         guardianPhone: quick.guardianPhone?.trim() || undefined,
         guardianRelationship: quick.guardianRelationship?.trim() || undefined,
+        ...(override ? { allowDuplicate: true, duplicateReason: override.duplicateReason } : {}),
       });
       notify.success('Student registered and placed');
       setQuickOpen(false);
       setQuick({});
+      setDupes(null);
     } catch (e: any) {
+      const matches = likelyDuplicatesFrom(e);
+      if (matches) {
+        setDupes({ matches, name: quick.name?.trim() || 'This pupil', retry: (duplicateReason) => quickSubmit({ duplicateReason }) });
+        return;
+      }
       notify.error(e?.response?.data?.message ?? 'Could not register student');
     }
   };
@@ -244,6 +263,14 @@ export function SchoolStudentsPage() {
       </Card>
 
       {/* Create / edit dialog */}
+      <DuplicatePupilDialog
+        matches={dupes?.matches ?? null}
+        name={dupes?.name ?? ''}
+        pending={create.isPending || register.isPending}
+        onCancel={() => setDupes(null)}
+        onConfirmDifferent={(reason) => void dupes?.retry(reason)}
+      />
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
@@ -287,7 +314,7 @@ export function SchoolStudentsPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={create.isPending || update.isPending || !form.name || (!editing && (!form.admissionNo || !form.enrollmentDate))}>
+            <Button onClick={() => void submit()} disabled={create.isPending || update.isPending || !form.name || (!editing && (!form.admissionNo || !form.enrollmentDate))}>
               {editing ? 'Save' : 'Admit'}
             </Button>
           </DialogFooter>
@@ -304,7 +331,7 @@ export function SchoolStudentsPage() {
         terms={terms?.data ?? []}
         classes={classes?.data ?? []}
         sections={sections?.data ?? []}
-        onSubmit={quickSubmit}
+        onSubmit={() => void quickSubmit()}
         busy={register.isPending}
       />
     </div>

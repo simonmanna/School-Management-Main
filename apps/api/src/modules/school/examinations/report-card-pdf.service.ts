@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { bucketOf } from '../attendance/attendance-rate';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -205,17 +206,18 @@ export class ReportCardPdfService {
           select: { status: true },
         }),
         this.prisma.client.attendanceStatusConfig.findMany({
-          select: { code: true, isPresent: true, isLate: true, isAbsent: true },
+          select: { code: true, isPresent: true, isLate: true, isAbsent: true, isExcused: true },
         }),
       ]);
       const byCode = new Map(configs.map((c: any) => [c.code, c]));
       const out = { ...empty, total: records.length };
+      // Audit F08: the same one-bucket-per-session rule as every other
+      // attendance figure; an excused day is an absence on the card.
       for (const r of records) {
-        const cfg: any = byCode.get(r.status);
-        // Fall back to the conventional codes when a status has no config row.
-        if (cfg ? cfg.isLate : r.status === 'late') out.late += 1;
-        else if (cfg ? cfg.isAbsent : r.status === 'absent') out.absent += 1;
-        else if (cfg ? cfg.isPresent : r.status === 'present') out.present += 1;
+        const bucket = bucketOf(byCode.get(r.status) as any, r.status);
+        if (bucket === 'late') out.late += 1;
+        else if (bucket === 'absent' || bucket === 'excused') out.absent += 1;
+        else if (bucket === 'present') out.present += 1;
       }
       return out;
     } catch {

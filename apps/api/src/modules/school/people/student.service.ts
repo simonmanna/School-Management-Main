@@ -202,17 +202,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       }
       termId = term.id;
     }
-    if (!dto.allowDuplicate) {
-      const dupes = await this.admission.findLikelyDuplicates(this.prisma.client, dto.name, dto.dateOfBirth ?? null);
-      if (dupes.length > 0) {
-        throw new ConflictException({
-          message:
-            `A learner named "${dto.name}" with the same date of birth already exists ` +
-            `(${dupes.map((d) => d.admissionNo).join(', ')}). Open that record instead, or confirm this is a different child.`,
-          duplicates: dupes,
-        });
-      }
-    }
+    // The likely-duplicate check lives in `admit` for every path (audit F07).
     const { profile } = await this.admission.admit({
       organizationId: this.tenant.organizationId,
       name: dto.name,
@@ -246,6 +236,8 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         dto.classId && termId
           ? { termId, classId: dto.classId, sectionId: dto.sectionId ?? null, rollNumber: dto.admissionNo }
           : null,
+      allowDuplicate: dto.allowDuplicate ?? false,
+      duplicateReason: dto.duplicateReason ?? null,
     });
     return profile;
   }
@@ -476,6 +468,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
           sectionId,
           termId: val(row, 'termId') || undefined,
           allowDuplicate: val(row, 'allowDuplicate').toLowerCase() === 'true',
+          duplicateReason: val(row, 'duplicateReason') || 'Marked as a different child in the import file',
         });
         created.push(student);
       } catch (e: any) {

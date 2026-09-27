@@ -1379,6 +1379,7 @@ export interface CreateStudentInput {
   termId?: string;
   /** Confirm this is a different child when the API reports a likely duplicate. */
   allowDuplicate?: boolean;
+  duplicateReason?: string;
   residenceType?: 'day' | 'boarder';
   house?: string;
   nationality?: string;
@@ -1411,6 +1412,9 @@ export interface RegisterStudentInput {
   guardianName?: string;
   guardianPhone?: string;
   guardianRelationship?: string;
+  /** ADR-032 P4: a different child who matches an existing pupil, with the reason. */
+  allowDuplicate?: boolean;
+  duplicateReason?: string;
 }
 export function useRegisterStudent() {
   const qc = useQueryClient();
@@ -1618,8 +1622,11 @@ export interface AttendanceSummary {
   total: number;
   present: number;
   late: number;
+  excused?: number;
   absent: number;
-  attendanceRate: number;
+  /** Null when it depends on a late policy the school has not chosen (ADR-032 P1). */
+  attendanceRate: number | null;
+  policyMissing?: boolean;
 }
 export function useStudentAttendance(studentProfileId: string | undefined, from?: string, to?: string) {
   return useQuery({
@@ -3216,6 +3223,7 @@ export interface AttendanceStatusConfig {
   isPresent: boolean;
   isLate: boolean;
   isAbsent: boolean;
+  isExcused?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -3230,7 +3238,7 @@ export function useAttendanceStatuses() {
 export function useCreateAttendanceStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { code: string; label: string; color?: string; isDefault?: boolean; sortOrder?: number; isPresent?: boolean; isLate?: boolean; isAbsent?: boolean }) =>
+    mutationFn: async (dto: { code: string; label: string; color?: string; isDefault?: boolean; sortOrder?: number; isPresent?: boolean; isLate?: boolean; isAbsent?: boolean; isExcused?: boolean }) =>
       (await api.post(`${S}/attendance/statuses`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'attendance-statuses'] }),
   });

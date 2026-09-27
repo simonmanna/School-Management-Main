@@ -1355,6 +1355,8 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         rollNumber: dto.rollNumber,
         enrollmentType: 'TRANSFER_IN',
       },
+      allowDuplicate: dto.allowDuplicate ?? false,
+      duplicateReason: dto.duplicateReason ?? null,
     });
     return { studentProfile: profile, enrollment };
   }

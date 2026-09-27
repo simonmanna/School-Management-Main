@@ -779,7 +779,8 @@ function AttendanceTab({ summary }: { summary?: any }) {
   const present = summary.present ?? 0;
   const late = summary.late ?? 0;
   const absent = summary.absent ?? 0;
-  const rate = typeof summary.attendanceRate === 'number' ? summary.attendanceRate : (total ? ((present + late * 0.5) / total) * 100 : 0);
+  // Audit F08: the server's one calculation; never re-derived here.
+  const rate: number | null = typeof summary.attendanceRate === 'number' ? summary.attendanceRate : null;
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Attendance · last 90 days</CardTitle></CardHeader>
@@ -787,9 +788,14 @@ function AttendanceTab({ summary }: { summary?: any }) {
         <Stat label="Present" value={String(present)} />
         <Stat label="Late" value={String(late)} />
         <Stat label="Absent" value={String(absent)} />
-        <Stat label="Rate" value={`${Number(rate).toFixed(1)}%`} tone={rate >= 75 ? 'emerald' : 'rose'} />
+        <Stat label="Rate" value={rate == null ? '—' : `${rate.toFixed(1)}%`} tone={rate == null || rate >= 75 ? 'emerald' : 'rose'} />
       </CardContent>
-      <CardContent className="text-xs text-muted-foreground">Total marked days: {total}. Rate weights late as half-present.</CardContent>
+      <CardContent className="text-xs text-muted-foreground">
+        Total marked days: {total}.{' '}
+        {summary.policyMissing
+          ? 'The rate is hidden until the school chooses how late arrivals count (School settings).'
+          : 'Late arrivals count as the school has set in School settings.'}
+      </CardContent>
     </Card>
   );
 }

@@ -17,9 +17,9 @@ export default function StudentAttendance() {
       <PageTitle>Attendance</PageTitle>
       <Stat
         label="Your attendance"
-        value={`${a.rate}%`}
-        tone={a.rate >= 90 ? 'good' : a.rate >= 75 ? 'default' : 'bad'}
-        sub="Arriving late counts as half a day present"
+        value={a.rate == null ? '—' : `${a.rate}%`}
+        tone={a.rate == null ? 'default' : a.rate >= 90 ? 'good' : a.rate >= 75 ? 'default' : 'bad'}
+        sub={a.policyMissing ? 'The school has not yet set how late arrivals count' : 'Late arrivals count as the school has set'}
       />
       <Card>
         <CardHeader><CardTitle className="text-base">This term so far</CardTitle></CardHeader>

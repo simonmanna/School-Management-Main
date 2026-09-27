@@ -84,7 +84,7 @@ const ATTENDANCE = [
   { code: 'present', label: 'Present', color: '#16a34a', isDefault: true, isPresent: true, sortOrder: 1 },
   { code: 'absent', label: 'Absent', color: '#dc2626', isAbsent: true, sortOrder: 2 },
   { code: 'late', label: 'Late', color: '#f59e0b', isPresent: true, isLate: true, sortOrder: 3 },
-  { code: 'excused', label: 'Excused', color: '#6366f1', isAbsent: true, sortOrder: 4 },
+  { code: 'excused', label: 'Excused', color: '#6366f1', isAbsent: true, isExcused: true, sortOrder: 4 },
 ];
 
 /** UNEB PLE divisions of marks (same as the built-in `defaultBands('PLE')`). */

@@ -1,3 +1,4 @@
+import { summarizeAttendance } from '../../attendance/attendance-rate';
 import { PERMISSIONS } from '@erp/shared';
 import { isReleasedStatus } from '../../assessment/result-status';
 import type { ReportColumn, ReportDefinition } from '../../../core/reporting/report.types';
@@ -92,22 +93,19 @@ export function teacherReports(deps: SchoolReportDeps): ReportDefinition<any>[] 
 
         const byCode = new Map<string, any>(report.statuses.map((c: any) => [c.code, c]));
         const rows = report.byDate.map((d: any) => {
-          let present = 0; let late = 0; let absent = 0;
-          for (const [code, n] of Object.entries(d.counts as Record<string, number>)) {
-            const cfg = byCode.get(code);
-            if (cfg?.isPresent) present += n;
-            else if (cfg?.isLate) late += n;
-            else if (cfg?.isAbsent) absent += n;
-          }
-          const attending = present + late;
+          const sm = summarizeAttendance(
+            Object.entries(d.counts as Record<string, number>),
+            Object.fromEntries(byCode),
+            report.policy,
+          );
           return {
             date: d.date,
             day: d.day,
             marked: d.total,
-            present,
-            late,
-            absent,
-            attendanceRate: d.total > 0 ? (attending / d.total) * 100 : 0,
+            present: sm.present,
+            late: sm.late,
+            absent: sm.absent,
+            attendanceRate: sm.rate,
           };
         });
 

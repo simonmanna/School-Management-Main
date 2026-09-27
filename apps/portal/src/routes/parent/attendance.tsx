@@ -27,9 +27,9 @@ export default function ParentAttendance() {
 
       <Stat
         label="Attendance rate"
-        value={`${a.rate}%`}
-        tone={a.rate >= 90 ? 'good' : a.rate >= 75 ? 'default' : 'bad'}
-        sub="Late arrivals count as half a day present"
+        value={a.rate == null ? '—' : `${a.rate}%`}
+        tone={a.rate == null ? 'default' : a.rate >= 90 ? 'good' : a.rate >= 75 ? 'default' : 'bad'}
+        sub={a.policyMissing ? 'The school has not yet set how late arrivals count' : 'Late arrivals count as the school has set'}
       />
 
       <Card>

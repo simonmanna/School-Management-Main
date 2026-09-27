@@ -26,6 +26,8 @@ export class CreateAttendanceStatusConfigDto {
   @IsOptional() @IsBoolean() isPresent?: boolean;
   @IsOptional() @IsBoolean() isLate?: boolean;
   @IsOptional() @IsBoolean() isAbsent?: boolean;
+  /** Excused absence — its denominator treatment is the school's choice (ADR-032 P1). */
+  @IsOptional() @IsBoolean() isExcused?: boolean;
 }
 
 export class UpdateAttendanceStatusConfigDto {
@@ -42,4 +44,6 @@ export class UpdateAttendanceStatusConfigDto {
   @IsOptional() @IsBoolean() isPresent?: boolean;
   @IsOptional() @IsBoolean() isLate?: boolean;
   @IsOptional() @IsBoolean() isAbsent?: boolean;
+  /** Excused absence — its denominator treatment is the school's choice (ADR-032 P1). */
+  @IsOptional() @IsBoolean() isExcused?: boolean;
 }

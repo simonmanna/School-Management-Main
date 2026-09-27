@@ -13709,6 +13709,9 @@ model AttendanceStatusConfig {
   isLate         Boolean  @default(false)
   /// Counts as an absence (triggers absence alerts / below-threshold maths).
   isAbsent       Boolean  @default(false)
+  /// Audit F08: an excused absence, kept apart from an unexplained one so the
+  /// school's ADR-032 P1 choice (in or out of the denominator) can apply.
+  isExcused      Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

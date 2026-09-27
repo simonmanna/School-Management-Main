@@ -60,8 +60,8 @@ export default function ParentHome() {
         />
         <Stat
           label="Attendance"
-          value={`${row.attendance.rate}%`}
-          tone={row.attendance.rate >= 90 ? 'good' : row.attendance.rate >= 75 ? 'default' : 'bad'}
+          value={row.attendance.rate == null ? '—' : `${row.attendance.rate}%`}
+          tone={row.attendance.rate == null ? 'default' : row.attendance.rate >= 90 ? 'good' : row.attendance.rate >= 75 ? 'default' : 'bad'}
           sub={`${row.attendance.present} of ${row.attendance.total} days`}
         />
       </div>

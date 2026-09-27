@@ -1,3 +1,4 @@
+import { summarizeAttendance } from '../../attendance/attendance-rate';
 import { PERMISSIONS } from '@erp/shared';
 import type { ReportDefinition } from '../../../core/reporting/report.types';
 import type { SchoolReportDeps } from '../school-report-deps';
@@ -84,32 +85,28 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
 
         // Reuse the service's own status catalogue rather than re-deciding what
         // "present" means. isLate counts as attending — a late pupil is at school.
-        const byCode = new Map<string, any>(report.statuses.map((c: any) => [c.code, c]));
+        const byCode = Object.fromEntries(report.statuses.map((c: any) => [c.code, c]));
+        // Audit F08: the shared calculation and the school's late policy.
         const rows = report.byDate.map((d: any) => {
-          let present = 0; let late = 0; let absent = 0;
-          for (const [code, n] of Object.entries(d.counts as Record<string, number>)) {
-            const cfg = byCode.get(code);
-            if (cfg?.isPresent) present += n;
-            else if (cfg?.isLate) late += n;
-            else if (cfg?.isAbsent) absent += n;
-          }
-          const attending = present + late;
+          const s = summarizeAttendance(Object.entries(d.counts as Record<string, number>), byCode, report.policy);
           return {
             date: d.date,
             day: d.day,
             marked: d.total,
-            present,
-            late,
-            absent,
-            attendanceRate: d.total > 0 ? (attending / d.total) * 100 : 0,
+            present: s.present,
+            late: s.late,
+            absent: s.absent,
+            attendanceRate: s.rate,
           };
         });
 
         const s = report.summary;
-        const overall = s.total > 0 ? ((s.present + s.late) / s.total) * 100 : 0;
+        const overall = s.rate;
         return {
           rows,
-          caption: `Overall attendance ${Math.round(overall * 10) / 10}% across ${s.total} marks`,
+          caption: overall == null
+            ? (s.policyMissing ? `Attendance % not shown: the school has not chosen how late marks count (School settings).` : `No attendance marked`)
+            : `Overall attendance ${Math.round(overall * 10) / 10}% across ${s.total} marks`,
         };
       },
     },
@@ -323,19 +320,8 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
             const report = await deps.attendance.report(classId, term.startDate, term.endDate);
 
             // Reuse the service's own status catalogue
-            const byCode = new Map<string, any>(report.statuses.map((c: any) => [c.code, c]));
-            let present = 0, late = 0, absent = 0, total = 0;
-            for (const d of report.byDate) {
-              for (const [code, n] of Object.entries(d.counts as Record<string, number>)) {
-                const cfg = byCode.get(code);
-                if (cfg?.isPresent) present += n;
-                else if (cfg?.isLate) late += n;
-                else if (cfg?.isAbsent) absent += n;
-                total += n;
-              }
-            }
-            const attending = present + late;
-            const rate = total > 0 ? (attending / total) * 100 : 0;
+            const { present, late, absent, total, rate: summaryRate } = report.summary;
+            const rate = summaryRate ?? 0;
             const prev = prevRate[classId];
             let trend = '→';
             if (prev !== undefined) {

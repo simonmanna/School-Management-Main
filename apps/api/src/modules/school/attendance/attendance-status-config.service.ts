@@ -44,6 +44,7 @@ export class AttendanceStatusConfigService {
     isPresent?: boolean;
     isLate?: boolean;
     isAbsent?: boolean;
+    isExcused?: boolean;
   }) {
     const code = dto.code.trim().toLowerCase();
     if (!/^[a-z0-9_]+$/.test(code)) {
@@ -67,6 +68,7 @@ export class AttendanceStatusConfigService {
         isPresent: dto.isPresent ?? false,
         isLate: dto.isLate ?? false,
         isAbsent: dto.isAbsent ?? false,
+        isExcused: dto.isExcused ?? false,
       },
     });
   }
@@ -82,6 +84,7 @@ export class AttendanceStatusConfigService {
       isPresent: boolean;
       isLate: boolean;
       isAbsent: boolean;
+      isExcused: boolean;
     }>,
   ) {
     const existing = await this.get(id);
@@ -109,6 +112,7 @@ export class AttendanceStatusConfigService {
         ...(dto.isPresent !== undefined ? { isPresent: dto.isPresent } : {}),
         ...(dto.isLate !== undefined ? { isLate: dto.isLate } : {}),
         ...(dto.isAbsent !== undefined ? { isAbsent: dto.isAbsent } : {}),
+        ...(dto.isExcused !== undefined ? { isExcused: dto.isExcused } : {}),
       },
     });
 

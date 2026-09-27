@@ -46,6 +46,7 @@ describe('D1 · the parent portal reports received money, not forgiven money', (
           ]),
         },
         studentAttendance: { findMany: jest.fn().mockResolvedValue([]) },
+        schoolProfile: { findFirst: jest.fn().mockResolvedValue(null) },
         announcement: { findMany: jest.fn().mockResolvedValue([]) },
         // The portal resolves the class row a pupil is placed in (ADR-027).
         schoolClass: { findMany: jest.fn().mockResolvedValue([{ id: 'c1', name: 'P1', gradeLevel: null }]) },
