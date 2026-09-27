@@ -27,7 +27,8 @@ const NAV: Record<'parent' | 'student' | 'teacher', NavItem[]> = {
   ],
   student: [
     { to: '/student', label: 'Today', icon: Home },
-    { to: '/student/courses', label: 'Courses', icon: BookOpen },
+    // Audit F14: only when the school runs the LMS (same flag as the API's ENABLE_ADVANCED_LMS).
+    ...(import.meta.env.VITE_ENABLE_ADVANCED_LMS === 'true' ? [{ to: '/student/courses', label: 'Courses', icon: BookOpen }] : []),
     { to: '/student/results', label: 'Results', icon: GraduationCap },
     { to: '/student/attendance', label: 'Attendance', icon: CalendarCheck },
     { to: '/student/notices', label: 'Messages', icon: Bell },

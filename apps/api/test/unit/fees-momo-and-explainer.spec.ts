@@ -95,6 +95,10 @@ describe('mobile money · phone numbers', () => {
 });
 
 describe('mobile money · callback safety', () => {
+  // ADR-032 P6: live collection is off by default; these cases test the
+  // adapter as an operator would run it once enabled.
+  beforeAll(() => { process.env.ENABLE_LIVE_MOBILE_MONEY = 'true'; });
+  afterAll(() => { delete process.env.ENABLE_LIVE_MOBILE_MONEY; });
   const raw = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '300000', currency: 'UGX' });
 
   it('rejects a callback with no signature', async () => {
@@ -200,6 +204,17 @@ describe('mobile money · callback safety', () => {
 });
 
 /* ───────────────────── Balance explainer ───────────────────── */
+
+describe('mobile money · disabled at launch (ADR-032 P6, audit F13)', () => {
+  it('offers no provider and refuses requests and callbacks while live collection is off', async () => {
+    delete process.env.ENABLE_LIVE_MOBILE_MONEY;
+    const { MobileMoneyService } = await import('../../src/modules/school/fees/mobile-money.service');
+    const svc = Object.create(MobileMoneyService.prototype) as any;
+    await expect(svc.availability()).resolves.toEqual({ mtn: false, airtel: false, liveCollection: false });
+    await expect(svc.requestPayment('mtn', {} as any)).rejects.toThrow(/not enabled/);
+    await expect(svc.handleCallback('mtn', '{}', 'sig')).rejects.toThrow(/not enabled/);
+  });
+});
 
 describe('"why does this pupil owe this?"', () => {
   function makeService(balance: any, rows: any[]) {

@@ -106,6 +106,44 @@ function RostersTab() {
 }
 
 /* ── Rubrics ── */
+interface DraftLevel { label: string; score: string }
+interface DraftCriterion { name: string; maxScore: string; weight: string; levels: DraftLevel[] }
+
+/** Nursery descriptors (ADR-031 ECD built-ins) as the starting point. */
+const blankCriterion = (): DraftCriterion => ({
+  name: '',
+  maxScore: '4',
+  weight: '1',
+  levels: [
+    { label: 'Support', score: '1' },
+    { label: 'Beginning', score: '2' },
+    { label: 'Developing', score: '3' },
+    { label: 'Confident', score: '4' },
+  ],
+});
+
+/** Field-level problems, in words a teacher can act on (audit F15). */
+function rubricProblems(name: string, criteria: DraftCriterion[]): string[] {
+  const out: string[] = [];
+  if (!name.trim()) out.push('Give the rubric a name.');
+  if (criteria.length === 0) out.push('Add at least one criterion.');
+  criteria.forEach((c, i) => {
+    const n = `Criterion ${i + 1}${c.name.trim() ? ` (${c.name.trim()})` : ''}`;
+    const max = Number(c.maxScore);
+    if (!c.name.trim()) out.push(`${n}: needs a name.`);
+    if (!(max > 0)) out.push(`${n}: the top score must be above 0.`);
+    if (!(Number(c.weight) > 0)) out.push(`${n}: the weight must be above 0.`);
+    if (c.levels.length < 2) out.push(`${n}: needs at least two levels.`);
+    c.levels.forEach((l, j) => {
+      const sc = Number(l.score);
+      if (!l.label.trim()) out.push(`${n}, level ${j + 1}: needs a descriptor.`);
+      if (l.score === '' || Number.isNaN(sc) || sc < 0) out.push(`${n}, level ${j + 1}: score must be 0 or more.`);
+      else if (max > 0 && sc > max) out.push(`${n}, level ${j + 1}: score ${sc} is above the top score ${max}.`);
+    });
+  });
+  return out;
+}
+
 function RubricsTab() {
   const { data: rubrics } = useRubrics();
   const [id, setId] = useState('');
@@ -114,14 +152,35 @@ function RubricsTab() {
   const fork = useForkRubric();
   const del = useDeleteRubric();
   const [name, setName] = useState('');
-  const [critJson, setCritJson] = useState('[\n  { "name": "Structure", "maxScore": 10, "weight": 1, "levels": [ { "label": "Poor", "score": 0 }, { "label": "Good", "score": 10 } ] }\n]');
+  const [criteria, setCriteria] = useState<DraftCriterion[]>([blankCriterion()]);
+  const [tried, setTried] = useState(false);
+  const problems = rubricProblems(name, criteria);
+
+  const setCrit = (i: number, patch: Partial<DraftCriterion>) =>
+    setCriteria((cs) => cs.map((c, k) => (k === i ? { ...c, ...patch } : c)));
+  const setLevel = (i: number, j: number, patch: Partial<DraftLevel>) =>
+    setCriteria((cs) => cs.map((c, k) => (k === i ? { ...c, levels: c.levels.map((l, m) => (m === j ? { ...l, ...patch } : l)) } : c)));
 
   const doCreate = async () => {
+    setTried(true);
+    if (problems.length) return;
     try {
-      const criteria = JSON.parse(critJson);
-      await create.mutateAsync({ name, criteria });
-      setName(''); notify.success('Rubric created');
-    } catch { notify.error('Criteria JSON invalid'); }
+      await create.mutateAsync({
+        name: name.trim(),
+        criteria: criteria.map((c) => ({
+          name: c.name.trim(),
+          maxScore: Number(c.maxScore),
+          weight: Number(c.weight),
+          levels: c.levels.map((l) => ({ label: l.label.trim(), score: Number(l.score) })),
+        })),
+      } as any);
+      setName(''); setCriteria([blankCriterion()]); setTried(false);
+      notify.success('Rubric created');
+    } catch (e: any) {
+      // Show what the server said, not a guess about JSON.
+      const msg = e?.response?.data?.message;
+      notify.error(Array.isArray(msg) ? msg.join(' ') : msg ?? 'Could not create the rubric');
+    }
   };
 
   return (
@@ -133,14 +192,39 @@ function RubricsTab() {
             <div key={r.id} className="flex items-center justify-between rounded border p-2 text-sm">
               <button className="text-left" onClick={() => setId(r.id)}>{r.name}</button>
               <div className="flex gap-1">
-                <Button size="sm" variant="ghost" onClick={() => fork.mutate(r.id)}>Fork</Button>
-                <Button size="sm" variant="ghost" onClick={() => del.mutate(r.id)}>×</Button>
+                <Button size="sm" variant="ghost" onClick={() => fork.mutate(r.id)}>Duplicate</Button>
+                <Button size="sm" variant="ghost" aria-label={`Delete ${r.name}`} onClick={() => { if (window.confirm(`Delete the rubric "${r.name}"?`)) del.mutate(r.id); }}>×</Button>
               </div>
             </div>
           ))}
-          <Input placeholder="Rubric name" value={name} onChange={(e) => setName(e.target.value)} />
-          <textarea className={sel + ' h-40 font-mono text-xs'} value={critJson} onChange={(e) => setCritJson(e.target.value)} />
-          <Button size="sm" disabled={!name || create.isPending} onClick={doCreate}><Plus className="h-4 w-4" /> Create rubric</Button>
+          <div className="space-y-3 rounded border p-3">
+            <Input placeholder="Rubric name, e.g. Top Class — Language" value={name} onChange={(e) => setName(e.target.value)} />
+            {criteria.map((c, i) => (
+              <div key={i} className="space-y-2 rounded border p-2">
+                <div className="flex gap-2">
+                  <Input placeholder="What is assessed, e.g. Listening" value={c.name} onChange={(e) => setCrit(i, { name: e.target.value })} />
+                  <Input className="w-24" inputMode="decimal" title="Top score" placeholder="Top" value={c.maxScore} onChange={(e) => setCrit(i, { maxScore: e.target.value })} />
+                  <Input className="w-20" inputMode="decimal" title="Weight" placeholder="Weight" value={c.weight} onChange={(e) => setCrit(i, { weight: e.target.value })} />
+                  <Button size="sm" variant="ghost" aria-label="Remove criterion" onClick={() => setCriteria((cs) => cs.filter((_, k) => k !== i))}>×</Button>
+                </div>
+                {c.levels.map((l, j) => (
+                  <div key={j} className="flex gap-2 pl-4">
+                    <Input placeholder="Descriptor" value={l.label} onChange={(e) => setLevel(i, j, { label: e.target.value })} />
+                    <Input className="w-24" inputMode="decimal" placeholder="Score" value={l.score} onChange={(e) => setLevel(i, j, { score: e.target.value })} />
+                    <Button size="sm" variant="ghost" aria-label="Remove level" onClick={() => setCrit(i, { levels: c.levels.filter((_, m) => m !== j) })}>×</Button>
+                  </div>
+                ))}
+                <Button size="sm" variant="outline" className="ml-4" onClick={() => setCrit(i, { levels: [...c.levels, { label: '', score: '' }] })}>Add level</Button>
+              </div>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setCriteria((cs) => [...cs, blankCriterion()])}><Plus className="h-4 w-4" /> Add criterion</Button>
+            {tried && problems.length > 0 && (
+              <ul className="list-disc space-y-0.5 pl-5 text-xs text-destructive">
+                {problems.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            )}
+            <Button size="sm" disabled={create.isPending} onClick={() => void doCreate()}><Plus className="h-4 w-4" /> Create rubric</Button>
+          </div>
         </CardContent>
       </Card>
       <Card>

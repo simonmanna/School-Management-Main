@@ -20,11 +20,17 @@
 # The family-facing portal. This is the only name that genuinely must be public.
 portal.{$SCHOOL_DOMAIN} {
 	encode gzip zstd
-	reverse_proxy portal:80
+	# Same-origin API (audit F10): the portal bundle calls /api/v1 on its own host.
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		reverse_proxy portal:80
+	}
 }
 
-# The API. Public because the portal is a browser app on another origin and
-# calls it directly.
+# The API on its own name, for integrations (mobile-money callbacks, the
+# health check). The two browser apps reach it through their own origin.
 api.{$SCHOOL_DOMAIN} {
 	encode gzip zstd
 	reverse_proxy api:3000
@@ -39,5 +45,11 @@ api.{$SCHOOL_DOMAIN} {
 # reachable only on the internal docker network.
 admin.{$SCHOOL_DOMAIN} {
 	encode gzip zstd
-	reverse_proxy web:80
+	# Same-origin API (audit F10): the staff bundle calls /api/v1 on its own host.
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		reverse_proxy web:80
+	}
 }

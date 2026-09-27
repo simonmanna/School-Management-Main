@@ -133,6 +133,8 @@ describe('integration: fees ⇄ accounting hardening', () => {
 
     tenant = moduleRef.get(TenantContextService);
     prisma = moduleRef.get(PrismaService);
+    // ADR-032 P6: live collection is off by default; this suite tests it enabled.
+    process.env.ENABLE_LIVE_MOBILE_MONEY = 'true';
     momo = moduleRef.get(MobileMoneyService);
     controls = moduleRef.get(FinanceControlsService);
     finance = moduleRef.get(SchoolFinanceQueryService);

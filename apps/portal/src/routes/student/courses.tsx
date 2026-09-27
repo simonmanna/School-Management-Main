@@ -16,12 +16,24 @@ export default function StudentCourses() {
   // A pupil is their own subject and must not name one; a guardian must.
   const asStudent = kind === 'guardian' ? active?.studentProfileId : undefined;
 
-  const { data: courses, isLoading } = useMyCourses(asStudent);
+  const { data: courses, isLoading, isError, error, refetch } = useMyCourses(asStudent);
   const { data: due } = useDueSoon(asStudent);
 
   const dueItems: DueItem[] = Array.isArray(due) ? due : due?.items ?? [];
 
   if (isLoading) return <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>;
+
+  // Audit F14: "unavailable" and "failed" are not "no courses yet".
+  if (isError) {
+    const status = (error as any)?.response?.status;
+    if (status === 404) return <Empty title="Online courses are not offered by this school" />;
+    return (
+      <div className="space-y-2">
+        <Empty title="Courses could not be loaded" />
+        <button className="text-sm text-primary underline" onClick={() => void refetch()}>Try again</button>
+      </div>
+    );
+  }
 
   const list = courses?.courses ?? [];
 

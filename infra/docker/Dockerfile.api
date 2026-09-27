@@ -37,25 +37,33 @@ COPY packages/shared packages/shared
 COPY apps/api apps/api
 RUN pnpm --filter @erp/shared build
 RUN pnpm --filter @erp/api db:generate
-RUN pnpm --filter @erp/api build
+# The API type-checks ~640 Prisma models; the default Node heap runs out
+# (found building this image in Wave 14). Needs a Docker VM with >= 8 GB.
+RUN NODE_OPTIONS=--max-old-space-size=6144 pnpm --filter @erp/api build
 # Fail the build here, not at container start. An ungenerated stub client has no
 # DMMF; a real one lists every model in schema.prisma.
-RUN node -e "const {Prisma}=require('@prisma/client'); const n=Prisma.dmmf?.datamodel?.models?.length ?? 0; if(!n){console.error('FATAL: @prisma/client is not generated'); process.exit(1);} console.log('prisma client generated:', n, 'models');"
+# Audit F11: resolve @prisma/client the way the API does — from apps/api. The
+# workspace root has no direct dependency on it in this pnpm layout, so a
+# require() from /app fails with MODULE_NOT_FOUND even when the client is fine.
+RUN cd /app/apps/api && node -e "const {Prisma}=require('@prisma/client'); const n=Prisma.dmmf?.datamodel?.models?.length ?? 0; if(!n){console.error('FATAL: @prisma/client is not generated'); process.exit(1);} console.log('prisma client generated:', n, 'models');"
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN corepack enable && \
     addgroup -S cafe-pos && adduser -S cafe-pos -G cafe-pos && \
-    apk add --no-cache tini
+    apk add --no-cache tini postgresql16-client
 COPY --from=build /app /app
 # Drop build-only sources. dist/ is what runs; node_modules must stay intact.
 RUN rm -rf apps/web apps/portal apps/api/src apps/api/test packages/shared/src \
            tsconfig.base.json apps/api/tsconfig*.json && \
-    mkdir -p /app/var/uploads && chown -R cafe-pos:cafe-pos /app
+    mkdir -p /app/var/uploads /app/var/backups && chown -R cafe-pos:cafe-pos /app
 USER cafe-pos
 # Same assertion again: prove the client survived the copy and the prune.
-RUN node -e "const {Prisma}=require('@prisma/client'); if(!(Prisma.dmmf?.datamodel?.models?.length)){console.error('FATAL: @prisma/client is not generated in runtime image'); process.exit(1);} console.log('runtime prisma client ok');"
+RUN cd /app/apps/api && node -e "const {Prisma}=require('@prisma/client'); if(!(Prisma.dmmf?.datamodel?.models?.length)){console.error('FATAL: @prisma/client is not generated in runtime image'); process.exit(1);} console.log('runtime prisma client ok');"
+# Audit F12: the backup service shells out to pg_dump / pg_restore. The client
+# major version must be >= the server's (PostgreSQL 16 in docker-compose).
+RUN pg_dump --version && pg_restore --version && psql --version
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD wget -qO- http://localhost:3000/api/v1/health/live || exit 1

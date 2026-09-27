@@ -169,7 +169,7 @@ interface NavItem {
   /** Optional sub-grouping label rendered as a sub-header above the item (expanded mode only). */
   group?: string;
   /** Per-item feature gate, resolved the same way as section flags. */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS' | 'VITE_ENABLE_LIVE_MOBILE_MONEY';
 }
 
 interface NavSection {
@@ -182,7 +182,7 @@ interface NavSection {
    * here without gating the module server-side would leave its routes, crons
    * and boot hooks live.
    */
-  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS';
+  flag?: 'VITE_ENABLE_BEVERAGE' | 'VITE_ENABLE_ASSETS' | 'VITE_ENABLE_TASKS' | 'VITE_ENABLE_MANUFACTURING' | 'VITE_ENABLE_RENTAL' | 'VITE_ENABLE_REPAIR' | 'VITE_ENABLE_HR' | 'VITE_ENABLE_ORDERS' | 'VITE_ENABLE_COMMUNICATION' | 'VITE_ENABLE_SCHOOL' | 'VITE_ENABLE_ADVANCED_LMS' | 'VITE_ENABLE_LIVE_MOBILE_MONEY';
 }
 
 const flagEnabled = (flag?: string): boolean =>
@@ -469,7 +469,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/fees/collect', label: 'Record Fee Payments', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/bulk-collect', label: 'Bulk Collection', icon: HandCoins, permission: PERMISSIONS.school.collectPayments },
       { to: '/school/fees/receipts', label: 'Receipts & Reprints', icon: Receipt, permission: PERMISSIONS.school.readFees },
-      { to: '/school/fees/mobile-money', label: 'Mobile Money', icon: Smartphone, permission: PERMISSIONS.school.collectPayments },
+      // ADR-032 P6 / audit F13: live collection is off until the provider contract is accepted.
+      { to: '/school/fees/mobile-money', label: 'Mobile Money', icon: Smartphone, permission: PERMISSIONS.school.collectPayments, flag: 'VITE_ENABLE_LIVE_MOBILE_MONEY' },
       { to: '/school/fees/explain', label: 'Explain a Balance', icon: HelpCircle, permission: PERMISSIONS.school.readFees },
       { to: '/school/fees/clearance', label: 'Fee Clearance', icon: ShieldCheck, permission: PERMISSIONS.school.readFees },
       { to: '/school/fees/statement', label: 'Fee Statement', icon: FileText, permission: PERMISSIONS.school.readFees },

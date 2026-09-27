@@ -51,5 +51,5 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-050 | The production artifact builds from a clean clone and boots with NOBYPASSRLS roles | | | D11 | D10 | | open |
-| I-051 | Recovery is proven by a real restore of database and files, not an archive listing | | | D12 | | | open |
+| I-050 | The production artifact builds from a clean clone and boots with NOBYPASSRLS roles | Dockerfile.api (Prisma asserted from apps/api; pg client 16; nested .env excluded from context); prod compose same-origin API + aligned flags | | image build (Phase 4) | D10 external device — Phase 5.2 | | enforced (host boot pending) |
+| I-051 | Recovery is proven by a real restore of database and files, not an archive listing | `BackupService.runScheduledRestoreTest` (scratch restore, manifest + ledger checks, weekly cron); live-DB overwrite guard | | `wave14-restore-drill.spec.ts` | | `docs/operations/backup-and-restore.md` | enforced (host drill pending) |

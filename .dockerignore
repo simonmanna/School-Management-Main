@@ -32,17 +32,23 @@ school-management-feature/
 .claude
 .hermes
 
-# Local runtime state and operator data.
+# Local runtime state and operator data (uploads, backups) at any depth.
 var/
+**/var/
 infra/backups/
 coverage/
 *.log
 api.log
 
-# Environment and secrets — never bake these into an image.
+# Environment and secrets — never bake these into an image. `.env` alone only
+# matches the context root; apps/api/.env (database password, JWT secrets) was
+# being copied into the API image (found in the Wave 14 image build).
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 # Documentation and planning material; irrelevant to a runtime image.
 docs/

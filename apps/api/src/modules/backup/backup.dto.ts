@@ -357,7 +357,7 @@ export class BackupConfigDto {
 // Runtime types (not DTOs)
 // =============================================================================
 
-export type BackupKind = 'full' | 'incremental' | 'differential' | 'files' | 'config' | 'cleanup';
+export type BackupKind = 'full' | 'incremental' | 'differential' | 'files' | 'config' | 'cleanup' | 'restore-drill';
 
 export interface BackupRunResult {
   kind: BackupKind;

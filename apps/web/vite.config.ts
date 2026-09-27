@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
 
+/** Set at build time (Dockerfile.web ARG / docker-compose.prod.yml). */
+const SCHOOL_BUILD = process.env.VITE_ENABLE_SCHOOL === 'true';
+
 export default defineConfig({
   plugins: [
     react(),
@@ -19,15 +22,27 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,woff2}'],
       },
+      // Audit F20: a school build installs as the school app and opens the
+      // school home, in any orientation; the POS identity is for POS builds.
       manifest: {
-        name: 'POS Cafe',
-        short_name: 'POS',
-        description: 'Cafe point of sale — works offline',
+        ...(SCHOOL_BUILD
+          ? {
+              name: 'School Management',
+              short_name: 'School',
+              description: 'School administration — pupils, attendance, fees and results',
+              orientation: 'any' as const,
+              start_url: '/school',
+            }
+          : {
+              name: 'POS Cafe',
+              short_name: 'POS',
+              description: 'Cafe point of sale — works offline',
+              orientation: 'landscape' as const,
+              start_url: '/pos',
+            }),
         theme_color: '#1B1B1F',
         background_color: '#FFFBFE',
         display: 'standalone',
-        orientation: 'landscape',
-        start_url: '/pos',
         scope: '/',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },

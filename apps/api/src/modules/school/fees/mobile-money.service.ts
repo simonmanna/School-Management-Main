@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -398,7 +398,25 @@ export class MobileMoneyService {
   }
 
   /** Which providers have an active, complete gateway, so the UI offers only those. */
+  /**
+   * ADR-032 P6 / audit F13: live collection is OFF unless the operator enables
+   * it after the provider contract (UUID reference, polling, sandbox proof) is
+   * accepted. Recording a receipt the family already paid stays available.
+   */
+  static liveCollectionEnabled(): boolean {
+    return process.env.ENABLE_LIVE_MOBILE_MONEY === 'true';
+  }
+
+  private assertLiveCollectionEnabled(): void {
+    if (!MobileMoneyService.liveCollectionEnabled()) {
+      throw new ForbiddenException(
+        'Live mobile-money collection is not enabled for this school. Record a payment the family has already made with method "mobile money" instead.',
+      );
+    }
+  }
+
   async availability() {
+    if (!MobileMoneyService.liveCollectionEnabled()) return { mtn: false, airtel: false, liveCollection: false };
     const rows = await this.prisma.client.paymentGatewayAccount.findMany({ where: { isActive: true } });
     const ready = (p: MobileMoneyProviderName) => {
       const r = rows.find((x) => x.provider === p);
@@ -406,7 +424,7 @@ export class MobileMoneyService {
       const c = this.decryptCredentials(r);
       return p === 'mtn' ? Boolean(c.subscriptionKey && c.accessToken) : Boolean(c.accessToken);
     };
-    return { mtn: ready('mtn'), airtel: ready('airtel') };
+    return { mtn: ready('mtn'), airtel: ready('airtel'), liveCollection: true };
   }
 
   /** Normalise a Ugandan phone number to the MSISDN providers expect (256XXXXXXXXX). */
@@ -429,6 +447,7 @@ export class MobileMoneyService {
    * here; the money only becomes a Payment when the provider confirms.
    */
   async requestPayment(providerName: string, dto: CollectionRequest) {
+    this.assertLiveCollectionEnabled();
     const organizationId = this.tenant.organizationId;
     const provider = this.providerFor(providerName);
     const gateway = await this.prisma.client.paymentGatewayAccount.findFirst({
@@ -490,6 +509,7 @@ export class MobileMoneyService {
    * tenant and touch money.
    */
   async handleCallback(providerName: string, rawBody: string | undefined, signature: string | undefined) {
+    this.assertLiveCollectionEnabled();
     const provider = this.providerFor(providerName);
     if (typeof rawBody !== 'string' || rawBody.length === 0) {
       // Re-serialising a parsed body changes its bytes; refuse rather than guess.

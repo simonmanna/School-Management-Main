@@ -74,6 +74,13 @@ export class BackupController {
     return this.backups.restore(dto);
   }
 
+  /** Restore the newest full backup into a scratch database and check it (audit F12). */
+  @Post('restore/drill')
+  @RequirePermissions(PERMISSIONS.backup.run)
+  async restoreDrill() {
+    return this.backups.runScheduledRestoreTest();
+  }
+
   @Post('restore/verify')
   @RequirePermissions(PERMISSIONS.backup.read)
   async verifyRestore(@Body() dto: { backupFile: string }) {

@@ -69,7 +69,7 @@ export class FinanceControlsController {
 
   @Post('terms/:termId/reopen')
   @RequirePermissions(PERMISSIONS.school.closePeriod)
-  reopenTerm(@Param('termId') termId: string, @Body() body: { reason?: string }) {
+  reopenTerm(@Param('termId') termId: string, @Body() body: FinanceReasonDto) {
     return this.controls.reopenTerm(termId, body?.reason);
   }
 

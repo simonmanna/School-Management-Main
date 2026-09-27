@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for the React SPA (Vite build, served by nginx).
 
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -11,12 +11,24 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/web apps/web
-ARG VITE_API_URL=http://localhost:3000
+# Audit F10: the API address is compiled into the bundle, so it must be the
+# address a remote browser can reach. Empty = same origin (/api/v1), which is
+# what production uses behind Caddy. Every capability the menu reads is an ARG,
+# so the image can match the API's enabled modules exactly.
+ARG VITE_API_URL=
 ARG VITE_ENABLE_SCHOOL=false
 ARG VITE_ENABLE_ADVANCED_LMS=false
-ENV VITE_API_URL=${VITE_API_URL}
-ENV VITE_ENABLE_SCHOOL=${VITE_ENABLE_SCHOOL}
-ENV VITE_ENABLE_ADVANCED_LMS=${VITE_ENABLE_ADVANCED_LMS}
+ARG VITE_ENABLE_HR=false
+ARG VITE_ENABLE_COMMUNICATION=false
+ARG VITE_ENABLE_ORDERS=false
+ARG VITE_ENABLE_BEVERAGE=false
+ARG VITE_ENABLE_ASSETS=false
+ARG VITE_ENABLE_TASKS=false
+ARG VITE_ENABLE_MANUFACTURING=false
+ARG VITE_ENABLE_RENTAL=false
+ARG VITE_ENABLE_REPAIR=false
+ARG VITE_ENABLE_LIVE_MOBILE_MONEY=false
+ENV VITE_API_URL=${VITE_API_URL}     VITE_ENABLE_SCHOOL=${VITE_ENABLE_SCHOOL}     VITE_ENABLE_ADVANCED_LMS=${VITE_ENABLE_ADVANCED_LMS}     VITE_ENABLE_HR=${VITE_ENABLE_HR}     VITE_ENABLE_COMMUNICATION=${VITE_ENABLE_COMMUNICATION}     VITE_ENABLE_ORDERS=${VITE_ENABLE_ORDERS}     VITE_ENABLE_BEVERAGE=${VITE_ENABLE_BEVERAGE}     VITE_ENABLE_ASSETS=${VITE_ENABLE_ASSETS}     VITE_ENABLE_TASKS=${VITE_ENABLE_TASKS}     VITE_ENABLE_MANUFACTURING=${VITE_ENABLE_MANUFACTURING}     VITE_ENABLE_RENTAL=${VITE_ENABLE_RENTAL}     VITE_ENABLE_REPAIR=${VITE_ENABLE_REPAIR} \n    VITE_ENABLE_LIVE_MOBILE_MONEY=${VITE_ENABLE_LIVE_MOBILE_MONEY}
 RUN pnpm --filter @erp/shared build
 RUN pnpm --filter @erp/web build
 

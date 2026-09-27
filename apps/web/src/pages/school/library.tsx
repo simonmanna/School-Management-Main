@@ -71,7 +71,7 @@ export function SchoolLibraryPage() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <BookOpen className="h-6 w-6" /> Library Management
           </h1>
-          <p className="text-sm text-muted-foreground">Complete library management: catalogue, copies, borrowings, fines & reports.</p>
+          <p className="text-sm text-muted-foreground">Catalogue, copies, borrowings, fines and reports.</p>
         </div>
       </div>
 
@@ -108,15 +108,21 @@ function DashboardTab() {
   const totalCopies = copies.data?.data?.length ?? 0;
   const availableCopies = copies.data?.data?.filter((c: any) => c.status === 'available').length ?? 0;
   const borrowedCopies = copies.data?.data?.filter((c: any) => c.status === 'borrowed').length ?? 0;
+  // These were hard-coded zeros; a head teacher read "no overdue books".
+  const rows: any[] = borrowings.data?.data ?? [];
+  const now = Date.now();
+  const overdue = rows.filter((b) => !b.returnedAt && b.dueAt && new Date(b.dueAt).getTime() < now).length;
+  const activeStudents = new Set(rows.filter((b) => !b.returnedAt && b.studentProfileId).map((b) => b.studentProfileId)).size;
+  const totalFines = rows.reduce((t, b) => t + Number(b.fineAmount ?? 0), 0);
 
   const statCards = [
     { label: 'Total Books', value: totalBooks, icon: BookOpen, color: 'text-blue-600' },
     { label: 'Total Copies', value: totalCopies, icon: Copy, color: 'text-green-600' },
     { label: 'Available', value: availableCopies, icon: CheckCircle2, color: 'text-emerald-600' },
     { label: 'Borrowed', value: borrowedCopies, icon: ArrowLeftRight, color: 'text-blue-600' },
-    { label: 'Overdue', value: 0, icon: AlertTriangle, color: 'text-rose-600' },
-    { label: 'Active Students', value: 0, icon: Users, color: 'text-violet-600' },
-    { label: 'Total Fines', value: money(0), icon: DollarSign, color: 'text-amber-600' },
+    { label: 'Overdue', value: overdue, icon: AlertTriangle, color: 'text-rose-600' },
+    { label: 'Pupils with books out', value: activeStudents, icon: Users, color: 'text-violet-600' },
+    { label: 'Fines charged', value: money(totalFines), icon: DollarSign, color: 'text-amber-600' },
   ];
 
   return (
@@ -643,14 +649,51 @@ function StudentsTab() {
 
 /* ───────────────────────── Fines ───────────────────────── */
 function FinesTab() {
+  // Audit F16: fines are real. Returning an overdue book raises a posted fee
+  // invoice for the pupil; it is collected at the fee desk like any fee, so
+  // it appears on the family's statement and in the cash book.
+  const borrowings = useBorrowings();
+  const fined = (borrowings.data?.data ?? []).filter((b: any) => Number(b.fineAmount ?? 0) > 0);
+  const total = fined.reduce((t: number, b: any) => t + Number(b.fineAmount ?? 0), 0);
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-rose-600" />Outstanding Fines</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-rose-600" />Fines raised · {money(total)}</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-emerald-600 text-center py-8">Fines feature coming soon. Fines are generated when overdue books are returned.</p>
+        <CardContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            A fine is charged when an overdue book comes back, as an invoice on the pupil's fee account. Collect it at the fee desk; it then shows on the family's statement.
+          </p>
+          {borrowings.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {borrowings.isError && <p className="text-sm text-destructive">Could not load fines. Reload to try again.</p>}
+          {!borrowings.isLoading && !borrowings.isError && fined.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">No fines have been charged.</p>
+          )}
+          {fined.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student</TableHead>
+                  <TableHead>Copy</TableHead>
+                  <TableHead className="w-32">Returned</TableHead>
+                  <TableHead className="w-28">Fine</TableHead>
+                  <TableHead className="w-40">Invoice</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {fined.map((b: any) => (
+                  <TableRow key={b.id}>
+                    <TableCell>{b.studentProfile?.partner?.name ?? b.studentProfile?.admissionNo ?? '—'}</TableCell>
+                    <TableCell className="font-mono">{b.bookCopy?.copyNumber ?? '—'}</TableCell>
+                    <TableCell className="text-xs">{b.returnedAt ? fmtDate(b.returnedAt) : '—'}</TableCell>
+                    <TableCell>{money(b.fineAmount)}</TableCell>
+                    <TableCell className="text-xs">{b.fineInvoiceId ? 'On the fee account' : 'No pupil to charge'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

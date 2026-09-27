@@ -4,6 +4,7 @@ import { CronJob } from 'cron';
 import { execFile, exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { SettingsService } from '../../kernel/settings/settings.service';
@@ -139,6 +140,14 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
     if (this.config.cleanup?.deleteExpired) {
       this.addJob('backup-cleanup', '0 5 * * *', async () => { await this.cleanup(); });
     }
+    // Audit F12: a backup nobody has restored is a hope, not a backup. Every
+    // Sunday the newest full backup is restored into a scratch database and
+    // checked; a failure is recorded and notified like a failed backup.
+    if (this.config.types.includes(BackupType.Full)) {
+      this.addJob('backup-restore-drill', process.env.BACKUP_RESTORE_DRILL_CRON || '0 4 * * 0', async () => {
+        await this.runScheduledRestoreTest();
+      });
+    }
   }
 
   private resolveCronExpressions(): { name: string; expr: string }[] {
@@ -199,7 +208,10 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       }
       
       const env = this.buildPgEnv();
+      // What the drill will check the restore against (audit F12).
+      const manifest = await this.captureManifest(env, env.PGDATABASE!).catch((e) => ({ error: this.errText(e) }));
       await this.execPg('pg_dump', ['--format=custom', `--compress=${compress}`, '--no-owner', '--no-password', `--file=${file}`], env);
+      await fs.writeFile(`${file}.manifest.json`, JSON.stringify({ file: path.basename(file), capturedAt: new Date().toISOString(), ...manifest }, null, 2), 'utf8');
       if (this.config.verification?.verifyIntegrity) {
         await this.execPg('pg_restore', ['--list', file], env);
       }
@@ -341,7 +353,8 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
           if (process.platform === 'win32') {
             await execFileAsync('robocopy', [src, target, '/E', '/Z', '/R:2', '/W:5', '/NP', '/NDL', '/NFL', `/LOG+:${log}`], { windowsHide: true });
           } else {
-            await execFileAsync('rsync', ['-avz', '--delete', `${src}/`, `${target}/`]);
+            // No rsync in the runtime image: Node copies the tree.
+            await fs.cp(src, target, { recursive: true, force: true, preserveTimestamps: true });
           }
         } catch (e: any) {
           if (typeof e.code === 'number' && e.code >= 8) throw e;
@@ -417,6 +430,16 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       
       const env = this.buildPgEnv();
       const targetDb = dto.targetDatabase || env.PGDATABASE || 'cafe-pos';
+      // Restoring over the live database drops every school's data written
+      // since the backup. It is never a default; it needs an explicit operator
+      // switch on the host, not just an API call.
+      if (!dto.verifyOnly && targetDb === env.PGDATABASE && process.env.ALLOW_RESTORE_OVER_LIVE !== 'true') {
+        return {
+          success: false,
+          message: `Refusing to restore over the live database "${targetDb}". Restore into a separate database, or set ALLOW_RESTORE_OVER_LIVE=true on the host for a planned recovery.`,
+          durationMs: Date.now() - started,
+        };
+      }
       
       if (dto.verifyOnly) {
         // Just verify the backup can be read
@@ -437,8 +460,8 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       await this.terminateDbConnections(targetDb, env);
       
       // Drop and recreate database
-      await this.execPg('dropdb', ['--if-exists', targetDb], env);
-      await this.execPg('createdb', [targetDb], env);
+      await this.execPg('dropdb', ['--no-password', '--if-exists', targetDb], env);
+      await this.execPg('createdb', ['--no-password', targetDb], env);
       
       // Restore
       await this.execPg('pg_restore', [
@@ -462,28 +485,98 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Scheduled restore test - runs monthly to verify backup integrity
+  /**
+   * The restore drill (audit F12, invariant I-051).
+   *
+   * Restores the newest full backup into a fresh scratch database, then checks
+   * it: the key tables are there with at least the rows the manifest counted at
+   * backup time, and the general ledger balances. Listing the archive
+   * (`pg_restore --list`) proves only that the file is readable — this proves
+   * the school could actually come back from it. The scratch database is
+   * dropped afterwards; the result is recorded and a failure is notified.
+   */
   async runScheduledRestoreTest(): Promise<RestoreResult> {
-    const backups = await this.listBackups('full');
+    const started = Date.now();
+    const backups = (await this.listBackups('full')).filter((b) => b.file.endsWith('.dump'));
     if (backups.length === 0) {
-      return { success: false, message: 'No full backups available for restore test', durationMs: 0 };
+      const res = { success: false, message: 'No full backups available for the restore drill', durationMs: 0 };
+      await this.record({ kind: 'restore-drill', status: 'failed', durationMs: 0, finishedAt: new Date().toISOString(), error: res.message });
+      return res;
     }
-    
-    const latestBackup = backups[0].file;
-    this.logger.log(`Running scheduled restore test on ${latestBackup}`);
-    
-    // Verify only (don't actually restore)
-    return this.restore({
-      scope: RestoreScope.Database,
-      backupFile: latestBackup,
-      verifyOnly: true,
-    });
+    const latest = backups[0].file;
+    const env = this.buildPgEnv();
+    const scratch = `restore_drill_${Date.now()}`;
+    this.logger.log(`Restore drill: ${latest} -> ${scratch}`);
+    try {
+      await this.execPg('createdb', ['--no-password', scratch], env);
+      await this.execPg('pg_restore', ['--no-owner', '--no-password', '--exit-on-error', `--dbname=${scratch}`, latest], env);
+      const restored = await this.captureManifest(env, scratch);
+      const problems: string[] = [];
+      let expected: any = null;
+      try {
+        expected = JSON.parse(await fs.readFile(`${latest}.manifest.json`, 'utf8'));
+      } catch {
+        problems.push('no manifest was written with this backup, so row counts could not be compared');
+      }
+      for (const [table, count] of Object.entries(expected?.counts ?? {})) {
+        const got = restored.counts[table];
+        if (got === undefined) problems.push(`${table} is missing from the restore`);
+        else if (got < (count as number)) problems.push(`${table}: ${got} rows restored, ${count} at backup time`);
+      }
+      if (restored.ledgerImbalance !== 0) problems.push(`general ledger out of balance by ${restored.ledgerImbalance}`);
+      if ((restored.counts['Organization'] ?? 0) === 0) problems.push('no organizations in the restore');
+      const ok = problems.length === 0;
+      const message = ok
+        ? `Restore drill passed: ${path.basename(latest)} restored into a scratch database; ${Object.keys(restored.counts).length} tables checked, ledger balanced.`
+        : `Restore drill FAILED for ${path.basename(latest)}: ${problems.join('; ')}`;
+      await this.record({
+        kind: 'restore-drill', status: ok ? 'success' : 'failed', target: latest,
+        durationMs: Date.now() - started, finishedAt: new Date().toISOString(),
+        ...(ok ? {} : { error: message }),
+      });
+      return { success: ok, message, durationMs: Date.now() - started, ...(ok ? {} : { error: message }) };
+    } catch (err) {
+      const message = `Restore drill FAILED: ${this.errText(err)}`;
+      await this.record({ kind: 'restore-drill', status: 'failed', target: latest, durationMs: Date.now() - started, finishedAt: new Date().toISOString(), error: message });
+      return { success: false, message, durationMs: Date.now() - started, error: message };
+    } finally {
+      await this.terminateDbConnections(scratch, env);
+      await this.execPg('dropdb', ['--no-password', '--if-exists', scratch], env).catch((e) => this.logger.warn(`Could not drop ${scratch}: ${this.errText(e)}`));
+    }
+  }
+
+  /** Tables whose rows a school cannot lose. Checked in every restore drill. */
+  private static readonly DRILL_TABLES = [
+    'Organization', 'User', 'StudentProfile', 'StudentEnrollment', 'EnrollmentPlacement', 'StudentGuardian',
+    'StudentAttendance', 'StudentAssessment', 'Document', 'Payment', 'PaymentAllocation', 'JournalEntry', 'JournalLine',
+    'SchoolFeeInvoice', 'ChildCareLog', 'PickupEvent', 'AuditLog',
+  ];
+
+  /** Row counts of the drill tables and the ledger imbalance, read with row security off. */
+  private async captureManifest(env: NodeJS.ProcessEnv, database: string): Promise<{ counts: Record<string, number>; ledgerImbalance: number }> {
+    const counts: Record<string, number> = {};
+    const unions = BackupService.DRILL_TABLES.map(
+      (t) => `SELECT '${t}' AS t, (SELECT count(*) FROM "${t}")::bigint AS n WHERE to_regclass('public."${t}"') IS NOT NULL`,
+    ).join(' UNION ALL ');
+    const sql = `SET row_security = off; ${unions};`;
+    const { stdout } = await this.execPg('psql', ['--no-psqlrc', '--no-password', '-At', '-F', '|', `--dbname=${database}`, '-c', sql], env);
+    for (const line of stdout.split(/\r?\n/)) {
+      const [t, n] = line.split('|');
+      if (t && n !== undefined && /^\d+$/.test(n.trim())) counts[t] = Number(n);
+    }
+    const { stdout: bal } = await this.execPg(
+      'psql',
+      ['--no-psqlrc', '--no-password', '-At', `--dbname=${database}`, '-c', `SET row_security = off; SELECT COALESCE(SUM("baseDebit" - "baseCredit"), 0) FROM "JournalLine";`],
+      env,
+    );
+    const last = bal.trim().split(/\r?\n/).pop() ?? '0';
+    return { counts, ledgerImbalance: Math.round(Number(last) * 100) / 100 };
   }
 
   private async terminateDbConnections(dbName: string, env: NodeJS.ProcessEnv): Promise<void> {
     try {
       await this.execPg('psql', [
-        '-c', `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid();`
+        '--no-password', '-c', `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${dbName}' AND pid <> pg_backend_pid();`
       ], env);
     } catch {
       // Non-fatal, connections might already be closed
@@ -665,16 +758,13 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
     const cwd = process.cwd();
     // Fix: cwd is already apps/api, don't double-join
     if (this.config.includes?.uploadedImages) {
-      const p = path.join(cwd, 'var', 'uploads');
-      paths.push(p);
+      paths.push(process.env.STORAGE_LOCAL_DIR ? path.resolve(process.env.STORAGE_LOCAL_DIR) : path.join(cwd, 'var', 'uploads'));
     }
     if (this.config.includes?.productImages) {
       const p = path.join(cwd, 'var', 'uploads', 'products');
       paths.push(p);
     }
-    return paths.filter((p) => {
-      try { return fs.stat(p).then(() => true).catch(() => false); } catch { return false; }
-    });
+    return paths.filter((p) => existsSync(p));
   }
 
   private async checkDiskSpace(dir: string): Promise<DiskSpaceInfo> {
@@ -742,28 +832,30 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   private buildPgEnv(): NodeJS.ProcessEnv {
     // Build environment for pg_dump/pg_restore/psql
-    // Priority: explicit env vars > DATABASE_URL > defaults
+    // Priority: BACKUP_DATABASE_URL > SYSTEM_DATABASE_URL > DATABASE_URL > PG* vars
     const env: NodeJS.ProcessEnv = { ...process.env };
     
-    if (process.env.DATABASE_URL && !process.env.PGHOST) {
-      // Parse DATABASE_URL if individual vars not set
+    // Audit F12: dump with a role that sees every school's rows. The runtime
+    // DATABASE_URL is the NOBYPASSRLS application role; with FORCE ROW LEVEL
+    // SECURITY a dump through it is refused or empty. BACKUP_DATABASE_URL must
+    // be a BYPASSRLS role with CREATEDB (for the restore drill).
+    const sourceUrl = process.env.BACKUP_DATABASE_URL || process.env.SYSTEM_DATABASE_URL || process.env.DATABASE_URL;
+    if (sourceUrl) {
+      // The URL is authoritative. Stray PG* variables (an empty PGUSER or
+      // PGPASSWORD in .env) used to win, and psql then sat on a password prompt.
       try {
-        const url = new URL(process.env.DATABASE_URL);
-        env.PGHOST = env.PGHOST || url.hostname;
-        env.PGPORT = env.PGPORT || url.port || '5432';
-        env.PGDATABASE = env.PGDATABASE || url.pathname.slice(1);
-        env.PGUSER = env.PGUSER || url.username;
-        env.PGPASSWORD = env.PGPASSWORD || url.password;
-      } catch { }
+        const url = new URL(sourceUrl);
+        env.PGHOST = url.hostname;
+        env.PGPORT = url.port || '5432';
+        env.PGDATABASE = decodeURIComponent(url.pathname.slice(1));
+        env.PGUSER = decodeURIComponent(url.username);
+        env.PGPASSWORD = decodeURIComponent(url.password);
+      } catch {
+        this.logger.warn('Backup database URL could not be parsed; falling back to PG* variables.');
+      }
     }
-    
-    // Apply explicit backup env vars if set
-    if (process.env.PGHOST) env.PGHOST = process.env.PGHOST;
-    if (process.env.PGPORT) env.PGPORT = process.env.PGPORT;
-    if (process.env.PGDATABASE) env.PGDATABASE = process.env.PGDATABASE;
-    if (process.env.PGUSER) env.PGUSER = process.env.PGUSER;
-    if (process.env.PGPASSWORD) env.PGPASSWORD = process.env.PGPASSWORD;
-    
+    // Never prompt: a missing password must fail the run, not hang it.
+    env.PGCONNECT_TIMEOUT = env.PGCONNECT_TIMEOUT || '15';
     return env;
   }
 
@@ -959,8 +1051,12 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   }
 
   private execPg(tool: string, args: string[], env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
+    // Audit F12: `.exe` only on Windows; on Linux (the container) the tools are
+    // on PATH or under PG_BIN.
     const pgBin = process.env.PG_BIN ?? PG_BIN_DEFAULT;
-    const toolPath = path.join(pgBin, `${tool}.exe`);
+    const exe = process.platform === 'win32' ? `${tool}.exe` : tool;
+    const candidate = path.join(pgBin, exe);
+    const toolPath = existsSync(candidate) ? candidate : exe;
     return execFileAsync(toolPath, args, {
       windowsHide: true,
       maxBuffer: 256 * 1024 * 1024,

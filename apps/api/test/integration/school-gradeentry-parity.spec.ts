@@ -36,7 +36,14 @@ describeDb('integration: GradeEntry → spine parity (B6 gate)', () => {
 
   it('every GradeEntry is mirrored by a spine StudentAssessment with identical score + status', async () => {
     const total = await raw.gradeEntry.count();
-    expect(total).toBeGreaterThan(0); // there is exam history to protect
+    // Audit F19: on a fresh CI database there is no history, and parity is
+    // vacuously true — the suite must still pass there. The upgrade gate on a
+    // real database sets REQUIRE_LEGACY_HISTORY=true, where an empty table
+    // would mean the gate is pointed at the wrong database.
+    if (total === 0) {
+      expect(process.env.REQUIRE_LEGACY_HISTORY).not.toBe('true');
+      return;
+    }
 
     // Resolve each GradeEntry's org via its ExamSchedule → Exam. Prisma can't
     // reach orgId from GradeEntry in one include, so join in SQL.

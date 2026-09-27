@@ -30,6 +30,10 @@ services:
   api:
     container_name: school-api
     ports: !reset []
+    # Backups outlive the container. Copy them off this host too — see
+    # docs/operations/backup-and-restore.md (offsite copy is not optional).
+    volumes:
+      - backups:/app/var/backups
     environment:
       # Non-superuser, NOBYPASSRLS application role. See scripts/setup-rls-role.ts.
       DATABASE_URL: ${APP_DATABASE_URL:?set APP_DATABASE_URL to the non-superuser app role — see scripts/setup-rls-role.ts}
@@ -69,14 +73,48 @@ services:
       ENABLE_ASSETS: "false"
       ENABLE_TASKS: "false"
       ENABLE_ORDERS: "false"
+      # ADR-032 P6 / audit F13: no live MTN/Airtel collection at launch.
+      ENABLE_LIVE_MOBILE_MONEY: "false"
+      # Audit F12: backups and the weekly restore drill need a BYPASSRLS role
+      # with CREATEDB; the app role cannot see every school's rows.
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:?set BACKUP_DATABASE_URL to a BYPASSRLS role with CREATEDB — see docs/operations/backup-and-restore.md}
+      BACKUP_DIR: /app/var/backups
 
+  # Audit F10: the browser bundles are built for THIS deployment. The API
+  # address is compiled in, and a remote user's "localhost" is their own phone,
+  # so both apps call the API on their own origin (/api/v1) and Caddy routes it.
+  # The capability flags mirror ENABLE_* on the api service above exactly —
+  # change one, change both, then rebuild (--build).
   web:
     container_name: school-web
     ports: !reset []
+    build:
+      args:
+        VITE_API_URL: ""
+        VITE_ENABLE_SCHOOL: "true"
+        VITE_ENABLE_HR: "true"
+        VITE_ENABLE_COMMUNICATION: "true"
+        VITE_ENABLE_ADVANCED_LMS: "false"
+        VITE_ENABLE_ORDERS: "false"
+        VITE_ENABLE_BEVERAGE: "false"
+        VITE_ENABLE_ASSETS: "false"
+        VITE_ENABLE_TASKS: "false"
+        VITE_ENABLE_MANUFACTURING: "false"
+        VITE_ENABLE_RENTAL: "false"
+        VITE_ENABLE_REPAIR: "false"
+        VITE_ENABLE_LIVE_MOBILE_MONEY: "false"
 
   portal:
     container_name: school-portal
     ports: !reset []
+    build:
+      args:
+        VITE_API_URL: ""
+        # The school's organization code and display name: the portal login
+        # asks families for nothing else. No demo fallback in production.
+        VITE_ORG_CODE: ${PORTAL_ORG_CODE:?set PORTAL_ORG_CODE to the school's organization code}
+        VITE_SCHOOL_NAME: ${PORTAL_SCHOOL_NAME:?set PORTAL_SCHOOL_NAME to the school's name}
+        VITE_ENABLE_ADVANCED_LMS: "false"
 
   # An unauthenticated database console has no place in a production stack.
   # Start it deliberately, through a tunnel: --profile operator-tools
@@ -88,3 +126,6 @@ services:
   caddy:
     container_name: school-caddy
     profiles: !reset []
+
+volumes:
+  backups:
