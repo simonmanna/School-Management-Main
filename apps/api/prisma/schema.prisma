@@ -11347,6 +11347,8 @@ model StudentGuardian {
   // names. Formalized here.
   guardianContact Contact        @relation("GuardianContact", fields: [guardianContactId], references: [id])
 
+  pickupEvents PickupEvent[]
+
   @@unique([studentProfileId, guardianContactId])
   @@index([organizationId])
   @@index([guardianContactId])
@@ -20253,20 +20255,28 @@ model PickupAuthorization {
 /// staff. An `overrideReason` records a release made without a valid
 /// authorization — which must be possible, and must never be silent.
 model PickupEvent {
-  id               String   @id @default(uuid())
-  organizationId   String
-  studentProfileId String
-  authorizationId  String?
-  collectedByName  String
-  collectedAt      DateTime @default(now())
-  releasedById     String?
-  overrideReason   String?
-  notes            String?
-  createdAt        DateTime @default(now())
+  id                  String   @id @default(uuid())
+  organizationId      String
+  studentProfileId    String
+  authorizationId     String?
+  /// The guardian link that authorised an ordinary handover (audit F06).
+  studentGuardianId   String?
+  /// guardian | authorization | override — the authority for this release.
+  authorizationSource String   @default("override")
+  collectedByName     String
+  collectedAt         DateTime @default(now())
+  releasedById        String?
+  overrideReason      String?
+  notes               String?
+  /// Per-click key from the gate screen; a retry returns the first record.
+  idempotencyKey      String?
+  createdAt           DateTime @default(now())
 
-  studentProfile StudentProfile       @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
-  authorization  PickupAuthorization? @relation(fields: [authorizationId], references: [id])
+  studentProfile  StudentProfile       @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  authorization   PickupAuthorization? @relation(fields: [authorizationId], references: [id])
+  studentGuardian StudentGuardian?     @relation(fields: [studentGuardianId], references: [id])
 
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([studentProfileId, collectedAt])
   @@index([organizationId, collectedAt])

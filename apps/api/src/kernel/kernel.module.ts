@@ -7,6 +7,7 @@ import { TenantContextService } from './tenancy/tenant-context.service';
 import { PortalIdentityService } from './auth/portal-identity.service';
 import { EmployeeIdentityService } from './auth/employee-identity.service';
 import { DataScopeService } from './auth/data-scope.service';
+import { PupilScopeGuard } from './auth/guards/pupil-scope.guard';
 import { PermissionResolverService } from './auth/permission-resolver.service';
 import { PrismaService } from './prisma/prisma.service';
 import { EventBus } from './events/event-bus';
@@ -108,6 +109,8 @@ import { FulfillmentRegistry } from './fulfillment/fulfillment.registry';
     FulfillmentRegistry,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // Audit 2026-09-27 F01/F02: pupil-keyed requests follow the caller's data scope.
+    { provide: APP_GUARD, useClass: PupilScopeGuard },
     { provide: APP_GUARD, useClass: ModuleEnabledGuard },
     { provide: APP_GUARD, useClass: RequireOwnerOrPermissionGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },

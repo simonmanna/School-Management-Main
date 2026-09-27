@@ -7,6 +7,7 @@
     "start": "node --max-http-header-size=65536 dist/main.js",
     "start:dev": "node scripts/start-dev.mjs",
     "start:prod": "node --max-http-header-size=65536 dist/main.js",
+    "authz:check": "node scripts/authz-inventory.mjs --check",
     "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

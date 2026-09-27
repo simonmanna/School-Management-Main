@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import type { CreateIncidentDto, NotifyGuardianDto, ReviewIncidentDto } from './dto.types';
 
 /**
@@ -24,6 +25,7 @@ export class IncidentService {
     private readonly prisma: PrismaService,
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
+    private readonly scope: DataScopeService,
   ) {}
 
   async create(dto: CreateIncidentDto) {
@@ -65,6 +67,7 @@ export class IncidentService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const row = await tx.childIncident.findFirst({ where: { id } });
       if (!row) throw new NotFoundException(`Incident ${id} not found`);
+      await this.scope.assertMayReadStudent(row.studentProfileId);
       const at = dto.at ? new Date(dto.at) : new Date();
       const updated = await tx.childIncident.update({
         where: { id },
@@ -94,6 +97,7 @@ export class IncidentService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const row = await tx.childIncident.findFirst({ where: { id } });
       if (!row) throw new NotFoundException(`Incident ${id} not found`);
+      await this.scope.assertMayReadStudent(row.studentProfileId);
       if (!row.guardianNotifiedAt) {
         throw new BadRequestException(
           'Record that the family has been told before signing this off — that is what the log is for.',
@@ -119,6 +123,7 @@ export class IncidentService {
   }
 
   async forStudent(studentProfileId: string) {
+    await this.scope.assertMayReadStudent(studentProfileId);
     return this.prisma.client.childIncident.findMany({
       where: { studentProfileId },
       orderBy: { occurredAt: 'desc' },
@@ -131,8 +136,14 @@ export class IncidentService {
    * are the two things that need doing rather than reading.
    */
   async outstanding() {
+    // Audit F01: the safeguarding to-do is the whole school's only for a
+    // school-wide reader; a class teacher sees their own pupils' incidents.
+    const seatWhere = await this.scope.studentReadWhere();
     const rows = await this.prisma.client.childIncident.findMany({
-      where: { OR: [{ guardianNotifiedAt: null }, { reviewedAt: null }] },
+      where: {
+        OR: [{ guardianNotifiedAt: null }, { reviewedAt: null }],
+        ...(seatWhere ? { studentProfile: seatWhere } : {}),
+      },
       include: { studentProfile: { include: { partner: true } } },
       orderBy: [{ severity: 'desc' }, { occurredAt: 'desc' }],
       take: 200,

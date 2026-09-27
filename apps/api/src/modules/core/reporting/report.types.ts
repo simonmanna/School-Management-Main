@@ -167,8 +167,17 @@ export const REPORT_DOMAINS: readonly ReportDomain[] = [
 export interface ReportScope {
   /** own | class | department | school, from DataScopeService.effective(). */
   effective: string;
-  /** Class ids the caller may see, or 'all'. From DataScopeService.classIds(). */
+  /**
+   * Class ids the caller may see, or 'all'. Fail closed: a restricted reader
+   * with no assignment gets `[]`, never 'all' (audit F02).
+   */
   classIds: string[] | 'all';
+  /**
+   * Drops rows about pupils the caller may not read (a stream-only reader, a
+   * pupil-level filter). Applied by the runner to every row carrying a
+   * `studentProfileId`, so no definition can forget it. Absent = unrestricted.
+   */
+  filterRows?: <R extends Record<string, unknown>>(rows: R[]) => Promise<R[]>;
 }
 
 /**

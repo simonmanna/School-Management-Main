@@ -148,10 +148,24 @@ export class FilterResolverService implements ReportContextBuilder {
       dateFrom?: string; dateTo?: string; asOf?: string;
     };
 
+    // Fail closed (audit F02): the same seats the pupil screens use. An
+    // unassigned teacher reads nothing, never the whole school.
     const [effective, permitted] = await Promise.all([
       this.scope.effective(),
-      this.scope.classIds(),
+      this.scope.readableClassIds(),
     ]);
+    const pupil = (filters as { studentProfileId?: string }).studentProfileId;
+    if (pupil) await this.scope.assertMayReadStudent(pupil);
+    const filterRows =
+      permitted === 'all'
+        ? undefined
+        : async <R extends Record<string, unknown>>(rows: R[]): Promise<R[]> => {
+            const ids = [...new Set(rows.map((r) => r.studentProfileId).filter((v): v is string => typeof v === 'string'))];
+            if (ids.length === 0) return rows;
+            const visible = await this.scope.visibleStudentIds(ids);
+            if (visible === 'all') return rows;
+            return rows.filter((r) => typeof r.studentProfileId !== 'string' || visible.has(r.studentProfileId));
+          };
 
     const classIds = await this.resolveClassIds(f, permitted);
     const termId = f.termId ?? (def.filters.includes('termId') ? await this.currentTermId() : undefined);
@@ -167,7 +181,7 @@ export class FilterResolverService implements ReportContextBuilder {
     return {
       organizationId: this.tenant.organizationId,
       userId: this.tenant.userId,
-      scope: { effective, classIds: permitted },
+      scope: { effective, classIds: permitted, filterRows },
       resolved: {
         classIds,
         termId,

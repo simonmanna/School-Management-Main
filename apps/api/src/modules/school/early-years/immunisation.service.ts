@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import type { UpsertImmunisationDto } from './dto.types';
 
 /** Date-only, so a due date is a day and not an instant. */
@@ -28,12 +29,14 @@ export class ImmunisationService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly placements: PlacementLookupService,
+    private readonly scope: DataScopeService,
   ) {}
 
   async upsert(dto: UpsertImmunisationDto) {
     if (!dto.administeredOn && !dto.exemptionReason?.trim()) {
       throw new BadRequestException('Record the date the dose was given, or why the child is exempt.');
     }
+    await this.scope.assertMayReadStudent(dto.studentProfileId);
     return this.prisma.client.$transaction(async (tx: any) => {
       const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
@@ -74,6 +77,7 @@ export class ImmunisationService {
   }
 
   async forStudent(studentProfileId: string) {
+    await this.scope.assertMayReadStudent(studentProfileId);
     return this.prisma.client.immunisationRecord.findMany({
       where: { studentProfileId },
       orderBy: [{ vaccine: 'asc' }, { administeredOn: 'asc' }],
@@ -84,6 +88,7 @@ export class ImmunisationService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const row = await tx.immunisationRecord.findFirst({ where: { id } });
       if (!row) throw new NotFoundException(`Immunisation record ${id} not found`);
+      await this.scope.assertMayReadStudent(row.studentProfileId);
       await tx.immunisationRecord.update({ where: { id }, data: { deletedAt: new Date() } });
       await this.audit.recordInTx(tx, { entity: 'ImmunisationRecord', entityId: id, action: 'delete', oldValues: row });
     });
@@ -97,10 +102,13 @@ export class ImmunisationService {
    */
   async dueForClass(classId: string, opts: { withinDays?: number; sectionId?: string } = {}) {
     const withinDays = opts.withinDays ?? 30;
-    const learners = await this.placements.roster({
+    await this.scope.assertMayReadClass(classId, opts.sectionId ?? null);
+    const placed = await this.placements.roster({
       classIds: [classId],
       ...(opts.sectionId ? { sectionIds: [opts.sectionId] } : {}),
     });
+    const visible = await this.scope.visibleStudentIds(placed.map((l: any) => l.student.id));
+    const learners = visible === 'all' ? placed : placed.filter((l: any) => visible.has(l.student.id));
     const ids = learners.map((l: any) => l.student.id);
     if (!ids.length) return { classId, withinDays, due: [], noRecord: [] };
 

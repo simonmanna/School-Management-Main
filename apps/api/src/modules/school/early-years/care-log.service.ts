@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import type { UpsertCareLogDto } from './dto.types';
 
 /** Midnight UTC for a date-only column, so one child has one log per day. */
@@ -28,6 +29,7 @@ export class CareLogService {
     private readonly tenant: TenantContextService,
     private readonly audit: AuditService,
     private readonly placements: PlacementLookupService,
+    private readonly scope: DataScopeService,
   ) {}
 
   /**
@@ -37,6 +39,9 @@ export class CareLogService {
   async upsert(dto: UpsertCareLogDto) {
     const organizationId = this.tenant.organizationId;
     const onDate = careDay(dto.onDate);
+    // Audit F01: a care note is written by the room the child is in, not by
+    // anyone who holds the grant.
+    await this.scope.assertMayReadStudent(dto.studentProfileId);
     return this.prisma.client.$transaction(async (tx: any) => {
       const student = await tx.studentProfile.findFirst({ where: { id: dto.studentProfileId } });
       if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
@@ -84,6 +89,7 @@ export class CareLogService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const row = await tx.childCareLog.findFirst({ where: { id } });
       if (!row) throw new NotFoundException(`Care log ${id} not found`);
+      await this.scope.assertMayReadStudent(row.studentProfileId);
       const updated = await tx.childCareLog.update({
         where: { id },
         data: {
@@ -102,8 +108,21 @@ export class CareLogService {
     });
   }
 
-  /** One child's history, newest first — "has she stopped napping?" */
-  async forStudent(studentProfileId: string, opts: { from?: string; to?: string; sharedOnly?: boolean } = {}) {
+  /** One child's history, newest first — "has she stopped napping?" Staff view, drafts included. */
+  async forStudent(studentProfileId: string, opts: { from?: string; to?: string } = {}) {
+    await this.scope.assertMayReadStudent(studentProfileId);
+    return this.history(studentProfileId, { ...opts, sharedOnly: false });
+  }
+
+  /**
+   * What the family sees: shared days only. The portal route is already bound to
+   * the caller's own child (`@ScopedToStudent`), so no staff seat is needed.
+   */
+  async sharedForStudent(studentProfileId: string, opts: { from?: string; to?: string } = {}) {
+    return this.history(studentProfileId, { ...opts, sharedOnly: true });
+  }
+
+  private history(studentProfileId: string, opts: { from?: string; to?: string; sharedOnly: boolean }) {
     return this.prisma.client.childCareLog.findMany({
       where: {
         studentProfileId,
@@ -129,15 +148,19 @@ export class CareLogService {
    * blank, which is the point of the screen.
    */
   async forClass(classId: string, onDateRaw: string, sectionId?: string) {
+    await this.scope.assertMayReadClass(classId, sectionId ?? null);
     const onDate = careDay(onDateRaw);
     // As at the END of the care day: a child placed at nine in the morning was in
     // the room that day, and asking as at midnight would leave them off the list
     // the room is meant to be filling in.
     const endOfDay = new Date(onDate.getTime() + 24 * 60 * 60 * 1000 - 1);
-    const learners = await this.placements.roster(
+    const placed = await this.placements.roster(
       { classIds: [classId], ...(sectionId ? { sectionIds: [sectionId] } : {}) },
       { asOf: endOfDay },
     );
+    // A stream teacher may open the class, but sees only their own stream.
+    const visible = await this.scope.visibleStudentIds(placed.map((l: any) => l.student.id));
+    const learners = visible === 'all' ? placed : placed.filter((l: any) => visible.has(l.student.id));
     const logs = await this.prisma.client.childCareLog.findMany({
       where: { studentProfileId: { in: learners.map((l: any) => l.student.id) }, onDate },
     });

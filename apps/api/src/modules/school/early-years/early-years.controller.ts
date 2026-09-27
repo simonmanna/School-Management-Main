@@ -144,15 +144,16 @@ export class ChildIncidentController {
 export class ImmunisationController {
   constructor(private readonly service: ImmunisationService) {}
 
+  /** Health history (ADR-032 P2): the medical grant, and data scope limits it to own pupils. */
   @Get('by-student/:studentProfileId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.read, PERMISSIONS.school.readMedical)
   forStudent(@Param('studentProfileId') id: string) {
     return this.service.forStudent(id);
   }
 
   /** Doses due or overdue, and the children with no record at all. */
   @Get('due/:classId')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.read, PERMISSIONS.school.readMedical)
   due(
     @Param('classId') classId: string,
     @Query('withinDays') withinDays?: string,

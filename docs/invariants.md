@@ -18,10 +18,10 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-010 | A teacher reads no pupil outside their assignment, through any entry point (list, detail, report, export, search, history, attachment, notification) | `DataScopeService.readableSeats()` | | D01, D02 | | `docs/audit/authz-inventory.md` | open |
-| I-011 | Removing an assignment removes access on the next request | | | D01 (former teacher) | | | open |
-| I-012 | Health, immunisation and safeguarding records need explicit permission plus own-pupil scope (ADR-032 P2) | | | D01 | | | open |
-| I-013 | No student-data endpoint implements its own interpretation of teacher scope | shared pupil-scope helper | | authz inventory | | `docs/audit/authz-inventory.md` | open |
+| I-010 | A teacher reads no pupil outside their assignment, through any entry point (list, detail, report, export, search, history, attachment, notification) | `PupilScopeGuard` (global), `DataScopeService.readableSeats()`, report `filterRows` | `pupil-scope-guard.spec.ts` | `wave14-child-data-scope.spec.ts` D01/D02 | | `docs/audit/authz-inventory.md` | enforced |
+| I-011 | Removing an assignment removes access on the next request | seats read per request from DB | | `wave14-child-data-scope.spec.ts` (former teacher) | | | enforced |
+| I-012 | Health, immunisation and safeguarding records need explicit permission plus own-pupil scope (ADR-032 P2) | `school:medical:read` / `school:incidents:read` + DataScopeService | | `wave14-child-data-scope.spec.ts` D01 | | | enforced |
+| I-013 | No student-data endpoint implements its own interpretation of teacher scope | `PupilScopeGuard`; `npm run authz:check` | `pupil-scope-guard.spec.ts` | | | `docs/audit/authz-inventory.md` | enforced |
 
 ## Finance
 
@@ -44,8 +44,8 @@ Status: `open` → `enforced` (code) → `proven` (integration + evidence) → `
 
 | ID | Invariant | Enforcing code | Unit | Integration | Browser | Evidence | Status |
 |---|---|---|---|---|---|---|---|
-| I-040 | Every release records who collected, under what authority, which pupil, when, and who released | | | D06 | D06 | | open |
-| I-041 | A current canPickup guardian is released without an override | | | D06 | D06 | | open |
+| I-040 | Every release records who collected, under what authority, which pupil, when, and who released | `PickupService.release`; DB check `PickupEvent_authority_named_check` | | `wave14-child-data-scope.spec.ts` D06 | | | enforced |
+| I-041 | A current canPickup guardian is released without an override | `PickupService.release` (`studentGuardianId`); gate UI passes collector explicitly | | `wave14-child-data-scope.spec.ts` D06 | | | enforced |
 
 ## Operations
 

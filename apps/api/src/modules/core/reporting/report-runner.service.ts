@@ -168,6 +168,14 @@ export class ReportRunnerService {
     };
 
     const result = await def.run(ctx, filters as any, opts);
+    // Pupil-level rows pass the caller's data scope here, whatever the
+    // definition did (audit F02): a report must never show more than the
+    // pupil screens do.
+    if (ctx.scope.filterRows && result.rows?.length) {
+      const before = result.rows.length;
+      result.rows = await ctx.scope.filterRows(result.rows);
+      if (def.paging === 'service' && result.total != null) result.total -= before - result.rows.length;
+    }
     const columns = await this.resolveColumns(def, ctx, filters, result);
     this.validateSort(def, columns, dto.sortBy);
 

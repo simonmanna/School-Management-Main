@@ -108,7 +108,7 @@ export class PortalsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    return this.careLogs.forStudent(studentProfileId, { from, to, sharedOnly: true });
+    return this.careLogs.sharedForStudent(studentProfileId, { from, to });
   }
 
   /* ── Parent self-service payment ── */

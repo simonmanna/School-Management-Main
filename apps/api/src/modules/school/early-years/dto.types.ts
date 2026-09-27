@@ -71,8 +71,12 @@ export class RevokePickupAuthorizationDto {
 
 export class ReleaseChildDto {
   @IsString() @IsNotEmpty() studentProfileId!: string;
-  /** The authorization checked at the gate. Omit only with an override reason. */
+  /** A guardian of this child flagged `canPickup` — the ordinary handover (audit F06). */
+  @IsOptional() @IsString() studentGuardianId?: string;
+  /** The authorization checked at the gate. Omit only with a guardian or an override reason. */
   @IsOptional() @IsString() authorizationId?: string;
+  /** Generated per click by the gate screen, so a retry cannot record a second handover. */
+  @IsOptional() @IsString() idempotencyKey?: string;
   @IsOptional() @IsString() collectedByName?: string;
   @IsOptional() @IsDateString() collectedAt?: string;
   /**

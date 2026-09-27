@@ -380,6 +380,8 @@ export const PERMISSIONS = {
     /// grant to edit classes and terms, and archiving is irreversible.
     manageYearLifecycle: 'school:academicyear:lifecycle',
     manageStudents: 'school:students:write',
+    /** Register a pupil who looks like an existing one, with a reason (ADR-032 P4, audit F07). */
+    overrideDuplicate: 'school:students:override_duplicate',
     // Phase 1 (ADR-018 / ADR-019). Enrollment membership and placement history
     // are deliberately NOT folded into `school:students:write`: moving a
     // learner between classes rewrites who sits in which roster, which is an
@@ -478,6 +480,8 @@ export const PERMISSIONS = {
     reviewIncidents: 'school:incidents:review',
     /** Immunisation rows and their due dates. */
     manageImmunisations: 'school:immunisation:write',
+    /** Release a child to someone not on the pick-up list, with a reason (audit F06). */
+    overridePickup: 'school:pickup:override',
     readStatutory: 'school:statutory:read',
     manageStatutoryTemplates: 'school:statutory:write',
     runStatutoryExports: 'school:statutory:export',
@@ -985,6 +989,8 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:staff:write': { label: 'Manage staff', description: 'CRUD staff profiles.', group: 'School', subgroup: 'Staff' },
   'school:admissions:write': { label: 'Manage admissions', description: 'CRUD admission applications.', group: 'School', subgroup: 'Admissions' },
   'school:admissions:decide': { label: 'Decide admissions', description: 'Accept, reject or waitlist an application.', group: 'School', subgroup: 'Admissions', risk: 'high' },
+  'school:students:override_duplicate': { label: 'Override duplicate pupil check', description: 'Register a pupil who matches an existing name and date of birth, with a written reason.', group: 'School', subgroup: 'Students', risk: 'high' },
+  'school:pickup:override': { label: 'Override pick-up list', description: 'Release a child to an adult who is not on the pick-up list, with a written reason.', group: 'School', subgroup: 'Early years', risk: 'high' },
   'school:medical:read': { label: 'Read medical records', description: 'Open learners medical documents and health records.', group: 'School', subgroup: 'Students', risk: 'high' },
   'school:enrollment:reactivate': { label: 'Reactivate enrollment', description: 'Return a withdrawn or transferred learner to a class roll.', group: 'School', subgroup: 'Enrollment', risk: 'high' },
   'school:attendance:write': { label: 'Take attendance (org-wide)', description: 'Mark registers for any class. Use the own-scoped grant for teachers.', group: 'School', subgroup: 'Attendance' },
@@ -1201,6 +1207,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // not by whoever recorded it.
       'school:incidents:read',
       'school:incidents:review',
+      'school:pickup:override',
       'school:pickup:write',
       'school:statutory:read',
       'school:statutory:export',
@@ -1286,6 +1293,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
     permissions: [
       'school:read',
       'school:students:write',
+      'school:students:override_duplicate',
       // Phase 1: the registrar is the role that moves, transfers, withdraws and
       // repeats learners, so the enrollment/placement grants live here.
       'school:enrollment:write',
@@ -1385,6 +1393,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:carelog:write',
       'school:incidents:write',
       'school:incidents:read',
+      // ADR-032 P2: health history of their own pupils (data scope limits it).
+      'school:medical:read',
     ],
   },
 

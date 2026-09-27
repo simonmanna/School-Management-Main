@@ -247,9 +247,15 @@ function PickupPanel({ classId, onDate }: { classId: string; onDate: string }) {
 
   if (!classId) return <Empty>Choose a class first.</Empty>;
 
-  const doRelease = async (authorizationId?: string) => {
+  // Audit F06: the collector is passed in, never read back from state set in
+  // the same click (that read the previous value). The authority is explicit.
+  const doRelease = async (who: { studentGuardianId?: string; authorizationId?: string; collectedByName?: string; overrideReason?: string }) => {
     try {
-      await release.mutateAsync({ studentProfileId, authorizationId, collectedByName: collectedByName || undefined, overrideReason: override || undefined });
+      await release.mutateAsync({
+        studentProfileId,
+        ...who,
+        idempotencyKey: typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+      });
       notify.success('Collection recorded');
       setOverride('');
       setCollectedByName('');
@@ -278,7 +284,7 @@ function PickupPanel({ classId, onDate }: { classId: string; onDate: string }) {
                 {(may?.guardians ?? []).map((g) => (
                   <div key={g.studentGuardianId} className="flex items-center justify-between rounded border px-2 py-1.5 text-sm">
                     <span>{g.name} <span className="text-muted-foreground">· {g.relationship}{g.phone ? ` · ${g.phone}` : ''}</span></span>
-                    <Button size="sm" variant="outline" onClick={() => { setCollectedByName(g.name); void doRelease(); }}>Released</Button>
+                    <Button size="sm" variant="outline" disabled={release.isPending} onClick={() => void doRelease({ studentGuardianId: g.studentGuardianId })}>Released</Button>
                   </div>
                 ))}
                 {(may?.authorizations ?? []).map((a) => (
@@ -287,7 +293,7 @@ function PickupPanel({ classId, onDate }: { classId: string; onDate: string }) {
                       {a.name} <span className="text-muted-foreground">· {a.relationship ?? 'authorized'}{a.idNumber ? ` · ${a.idType ?? 'ID'} ${a.idNumber}` : ''}{a.kind === 'ONE_OFF' ? ' · one-off' : ''}</span>
                     </span>
                     <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={() => void doRelease(a.authorizationId)}>Released</Button>
+                      <Button size="sm" variant="outline" disabled={release.isPending} onClick={() => void doRelease({ authorizationId: a.authorizationId })}>Released</Button>
                       <button className="px-1 text-xs text-destructive" onClick={() => {
                         const reason = window.prompt('Why is this being withdrawn?');
                         if (reason) void revoke.mutateAsync({ id: a.authorizationId, reason });
@@ -305,7 +311,7 @@ function PickupPanel({ classId, onDate }: { classId: string; onDate: string }) {
                 <p className="mt-1 text-xs text-amber-900">A child can still be released in an emergency. The reason is part of the record.</p>
                 <Input className="mt-2" placeholder="Who is collecting?" value={collectedByName} onChange={(e) => setCollectedByName(e.target.value)} />
                 <Input className="mt-2" placeholder="Why are you releasing the child anyway?" value={override} onChange={(e) => setOverride(e.target.value)} />
-                <Button className="mt-2" size="sm" variant="outline" disabled={!collectedByName || !override} onClick={() => void doRelease()}>Record the release</Button>
+                <Button className="mt-2" size="sm" variant="outline" disabled={!collectedByName || !override || release.isPending} onClick={() => void doRelease({ collectedByName, overrideReason: override })}>Record the release</Button>
               </div>
             </>
           )}
@@ -358,6 +364,9 @@ function PickupPanel({ classId, onDate }: { classId: string; onDate: string }) {
               <div key={r.id} className={`rounded border px-2 py-1.5 text-sm ${r.overrideReason ? 'border-amber-300 bg-amber-50' : ''}`}>
                 <span className="font-medium">{r.studentProfile?.partner?.name ?? r.studentProfileId}</span>
                 <span className="text-muted-foreground"> · {new Date(r.collectedAt).toLocaleTimeString()} · {r.collectedByName}</span>
+                {r.authorizationSource && r.authorizationSource !== 'override' && (
+                  <span className="text-muted-foreground"> · {r.authorizationSource === 'guardian' ? 'guardian' : 'on the list'}</span>
+                )}
                 {r.overrideReason && <p className="text-xs text-amber-900">Released without authorization: {r.overrideReason}</p>}
               </div>
             ))}

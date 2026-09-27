@@ -138,7 +138,11 @@ export function useReleaseChild() {
   return useMutation({
     mutationFn: async (body: {
       studentProfileId: string;
+      /** A guardian of this child on the pick-up list — the ordinary handover. */
+      studentGuardianId?: string;
       authorizationId?: string;
+      /** One per click, so a retry cannot record a second handover. */
+      idempotencyKey?: string;
       collectedByName?: string;
       overrideReason?: string;
       notes?: string;
@@ -153,6 +157,8 @@ export interface PickupRelease {
   collectedByName: string;
   collectedAt: string;
   overrideReason: string | null;
+  /** guardian | authorization | override — the authority the gate relied on. */
+  authorizationSource?: 'guardian' | 'authorization' | 'override';
   studentProfile?: { partner?: { name?: string } | null; admissionNo?: string } | null;
 }
 

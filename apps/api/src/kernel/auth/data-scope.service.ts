@@ -82,16 +82,13 @@ export class DataScopeService {
     );
   }
 
-  /** Class ids the caller may touch under a `class`/`department` scope. */
+  /**
+   * @deprecated Use `readableClassIds()`. Kept as an alias so nothing can reach
+   * the old behaviour, which widened an empty assignment to the whole school
+   * (audit 2026-09-27 F02). Empty now means nothing.
+   */
   async classIds(): Promise<string[] | 'all'> {
-    const scope = await this.effective();
-    if (scope === 'school' || scope === 'own') return 'all';
-
-    const staffProfileId = await this.identity.staffProfileIdForCaller();
-    if (!staffProfileId) return 'all'; // non-teaching staff with wide scope pass
-
-    const ids = await this.taughtClassIds(staffProfileId);
-    return ids.length > 0 ? ids : 'all';
+    return this.readableClassIds();
   }
 
   /**
@@ -236,10 +233,7 @@ export class DataScopeService {
    * The classes this staff member actually teaches — assignments plus timetable.
    *
    * Returns a DEFINITE list: empty means "teaches nothing", never "teaches
-   * everything". `classIds()` above still widens an empty result to `'all'`
-   * because it feeds report filtering, where a head of department with no
-   * personal timetable would otherwise see a blank dashboard. Authorization
-   * must not make that trade, so it reads this instead.
+   * everything".
    */
   private async taughtClassIds(staffProfileId: string): Promise<string[]> {
     const [assigned, timetabled, homeroom, sectionTeacher] = await Promise.all([
