@@ -1,0 +1,11 @@
+{
+  "source": "school_audit_20260927",
+  "restore": "school_audit_restore_final20260927",
+  "format": "custom pg_dump/pg_restore",
+  "tablesCompared": 642,
+  "rowCountMismatches": [],
+  "documentResidualsIdentical": true,
+  "documentRows": 60,
+  "dumpBytes": 5643101,
+  "scope": "fictional audit database only; production backup automation, files and offsite recovery not verified"
+}

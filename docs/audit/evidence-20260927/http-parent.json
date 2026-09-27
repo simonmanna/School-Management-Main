@@ -1,0 +1,185 @@
+[
+  {
+    "name": "parent own context",
+    "status": 200,
+    "data": {
+      "kind": "guardian",
+      "students": [
+        {
+          "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "name": "Atim AuditChild",
+          "admissionNo": "STU-000001",
+          "classId": "3e62b9d8-45ac-4978-bf8a-33c3f25df62e",
+          "className": "Baby Class"
+        }
+      ],
+      "teacher": null,
+      "defaultLanding": "parent"
+    }
+  },
+  {
+    "name": "parent own dashboard",
+    "status": 200,
+    "data": [
+      {
+        "student": {
+          "id": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+          "partnerId": "7979eee8-bba2-410c-b2db-17a721e380dd",
+          "admissionNo": "STU-000001",
+          "enrollmentDate": "2026-09-27T08:00:05.079Z",
+          "status": "active",
+          "dateOfBirth": "2023-03-01T00:00:00.000Z",
+          "gender": "female",
+          "nationality": null,
+          "religion": null,
+          "residenceType": "day",
+          "studentCategoryId": null,
+          "house": null,
+          "customFields": {},
+          "createdAt": "2026-09-27T08:00:05.081Z",
+          "updatedAt": "2026-09-27T08:00:05.081Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "placement": {
+            "enrollmentId": "3f483212-228b-4499-8d82-9128ce08ee84",
+            "placementId": "a0580019-54b6-4406-b9d4-2bce4b7f83ec",
+            "classCohortId": "56238fbb-828a-491d-aa04-3d9790f6f722",
+            "classId": "3e62b9d8-45ac-4978-bf8a-33c3f25df62e",
+            "sectionId": null,
+            "gradeLevelId": "9d9bb0bb-217c-4ce4-9265-10948e3a0322",
+            "academicYearId": "10ac6074-3489-4e4b-88fb-6b6bfe64c437",
+            "termId": "570460ec-b632-454f-ad8f-23c06363cd3b",
+            "rollNumber": null
+          },
+          "currentClass": {
+            "id": "3e62b9d8-45ac-4978-bf8a-33c3f25df62e",
+            "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+            "campusId": null,
+            "gradeLevelId": "9d9bb0bb-217c-4ce4-9265-10948e3a0322",
+            "name": "Baby Class",
+            "code": null,
+            "description": null,
+            "homeroomTeacherId": null,
+            "capacity": null,
+            "allowsStreams": false,
+            "displayOrder": 0,
+            "isActive": true,
+            "customFields": {},
+            "createdAt": "2026-09-27T08:00:04.503Z",
+            "updatedAt": "2026-09-27T08:00:04.503Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null,
+            "gradeLevel": {
+              "id": "9d9bb0bb-217c-4ce4-9265-10948e3a0322",
+              "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+              "name": "Baby Class",
+              "code": "BABY",
+              "description": null,
+              "order": 1,
+              "isActive": true,
+              "academicLevelId": "3e96e77c-cf45-477d-a0e3-cda2be8d72a5",
+              "nextGradeLevelId": "210b1bb7-bb0c-42fe-ac74-ed1994691eb0",
+              "minAgeMonths": 30,
+              "maxAgeMonths": 47,
+              "isTerminal": false,
+              "createdAt": "2026-09-27T08:00:04.501Z",
+              "updatedAt": "2026-09-27T08:00:04.501Z",
+              "createdBy": null,
+              "updatedBy": null,
+              "deletedAt": null
+            }
+          },
+          "placedClassName": "Baby Class",
+          "currentSection": null
+        },
+        "attendance": {
+          "total": 0,
+          "present": 0,
+          "late": 0,
+          "absent": 0,
+          "rate": 0
+        },
+        "fees": {
+          "total": 350000,
+          "collected": 100000,
+          "waived": 0,
+          "credited": 0,
+          "adjusted": 1000,
+          "balance": 251000,
+          "invoiceCount": 1
+        },
+        "announcements": []
+      }
+    ]
+  },
+  {
+    "name": "parent other child finance",
+    "status": 403,
+    "data": {
+      "message": "Not permitted to view this student",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "parent own care draft",
+    "status": 200,
+    "data": []
+  },
+  {
+    "name": "parent other care",
+    "status": 403,
+    "data": {
+      "message": "Not permitted to view this student",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "parent advanced courses disabled",
+    "status": 404,
+    "data": {
+      "message": "Cannot GET /api/v1/school/lms/my/courses?asStudent=f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+      "error": "Not Found",
+      "statusCode": 404
+    }
+  },
+  {
+    "name": "parent own care after share",
+    "status": 200,
+    "data": [
+      {
+        "id": "715c7aff-1816-43fa-965d-18d8abab1d25",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+        "onDate": "2026-09-27T00:00:00.000Z",
+        "arrivalMood": "happy",
+        "departureMood": null,
+        "meals": [],
+        "naps": [],
+        "nappyChanges": null,
+        "usedToiletAlone": null,
+        "activities": null,
+        "teacherNote": "Edited by unassigned teacher",
+        "sharedAt": "2026-09-27T08:07:55.766Z",
+        "sharedById": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "recordedById": "047745ab-61f8-44e9-8d3f-84f0bce16335",
+        "createdAt": "2026-09-27T08:00:05.539Z",
+        "updatedAt": "2026-09-27T08:07:55.768Z",
+        "deletedAt": null
+      }
+    ]
+  },
+  {
+    "name": "parent revoked identity immediately denied",
+    "status": 403,
+    "data": {
+      "message": "Missing required permission(s): school:portal:parent",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  }
+]

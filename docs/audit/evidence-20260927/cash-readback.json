@@ -1,0 +1,43 @@
+[
+  {
+    "route": "/school/finance/reconciliation/operational-cash",
+    "status": 200,
+    "data": {
+      "byMethod": [],
+      "variance": 0
+    }
+  },
+  {
+    "route": "/school/finance/reports/cash-book?date=2026-09-27",
+    "status": 200,
+    "data": {
+      "date": "2026-09-26",
+      "byMethod": [
+        {
+          "method": "cash",
+          "count": 1,
+          "total": 100000
+        }
+      ],
+      "totalCollected": 100000,
+      "receiptCount": 1,
+      "cashTotal": 100000,
+      "refundsPaid": 0,
+      "refundCount": 0,
+      "netCash": 100000,
+      "reversedCount": 0,
+      "reversedTotal": 0,
+      "receipts": [
+        {
+          "id": "5fc25d07-cd89-4186-a564-40d7b9aef8bd",
+          "paymentNumber": "PAY-2026-000001",
+          "time": "2026-09-27T00:00:00.000Z",
+          "payer": "Atim AuditChild",
+          "method": "cash",
+          "reference": null,
+          "amount": 100000
+        }
+      ]
+    }
+  }
+]

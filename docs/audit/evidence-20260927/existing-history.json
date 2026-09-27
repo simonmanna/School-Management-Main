@@ -1,0 +1,15 @@
+{
+  "scope": "existing API-configured local database; aggregate queries in READ ONLY transaction; no records modified or identifying data exported",
+  "migrations": {
+    "history_entries": 168,
+    "applied": 164,
+    "rolled_back": 4,
+    "unfinished": 0
+  },
+  "parity": {
+    "historic_marks": 1788,
+    "missing_projection": 0,
+    "score_mismatch": 0,
+    "status_mismatch": 0
+  }
+}

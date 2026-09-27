@@ -1,0 +1,662 @@
+{
+  "features": [
+    {
+      "module": "Access",
+      "feature": "Staff sign-in",
+      "status": "IMPLEMENTED — VERIFIED",
+      "evidence": "B/H: fictional admin authenticated and school home opened",
+      "severity": "—",
+      "notes": "Limited to successful local staff sign-in; recovery/MFA/deployment not certified"
+    },
+    {
+      "module": "Foundation",
+      "feature": "Operator school bootstrap",
+      "status": "IMPLEMENTED — VERIFIED",
+      "evidence": "H/D: real bootstrap creates school, UGX, programmes and ten classes",
+      "severity": "—",
+      "notes": "Operator API workflow; final client customization needs acceptance"
+    },
+    {
+      "module": "Foundation",
+      "feature": "Academic year and terms",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I/S: 2026 and three terms persisted; academic-year suites passed",
+      "severity": "—",
+      "notes": "Whole browser close/reopen/overlap/history flow NOT VERIFIED"
+    },
+    {
+      "module": "Foundation",
+      "feature": "Nursery/primary programmes and grades",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/S: Nursery ECD, Lower/Upper Primary; Baby/Middle/Top/P1–P7",
+      "severity": "—",
+      "notes": "Client-specific curriculum/subjects/templates NOT VERIFIED"
+    },
+    {
+      "module": "Academics",
+      "feature": "Streams, capacity and overrides",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: enrollment/structure/concurrency suites",
+      "severity": "—",
+      "notes": "Full registrar stream/capacity/override UI and reports NOT VERIFIED"
+    },
+    {
+      "module": "Academics",
+      "feature": "Subjects, curriculum and weight configuration",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: academic foundation/course/assessment modules",
+      "severity": "—",
+      "notes": "School-approved thematic/transition/upper-primary configuration NOT VERIFIED"
+    },
+    {
+      "module": "Teachers",
+      "feature": "Teacher/staff creation and employment profile",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: teacher ownership, HR/people suites",
+      "severity": "—",
+      "notes": "New teacher browser setup through assigned timetable NOT VERIFIED"
+    },
+    {
+      "module": "Teachers",
+      "feature": "Class/subject teacher ownership",
+      "status": "INCONSISTENT",
+      "evidence": "I: core teacher tests pass; H: specialized nursery/report bypasses",
+      "severity": "P0",
+      "notes": "F01/F02; assignment does not consistently constrain every path"
+    },
+    {
+      "module": "Timetable",
+      "feature": "Teacher/class/room conflict and publication",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: timetable/academic modules and constraints",
+      "severity": "—",
+      "notes": "Complete conflict/UI/publication/parent visibility chain NOT VERIFIED"
+    },
+    {
+      "module": "Admissions",
+      "feature": "Application, review, interview, decisions and conversion",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: admissions workflow/concurrency suites",
+      "severity": "—",
+      "notes": "Full parent/registrar application/document/interview UI NOT VERIFIED"
+    },
+    {
+      "module": "Admissions",
+      "feature": "Application fees and payment reconciliation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: admission-fee implementation and workflow tests",
+      "severity": "—",
+      "notes": "Live external payment/receipt/browser conversion chain NOT VERIFIED"
+    },
+    {
+      "module": "Students",
+      "feature": "Quick registration and duplicate handling",
+      "status": "INCONSISTENT",
+      "evidence": "H/D: register persists identity/placement, accepts duplicate child",
+      "severity": "P1",
+      "notes": "F07; alternative create path has a likely-match check"
+    },
+    {
+      "module": "Students",
+      "feature": "Admission identifiers",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/I: generated distinct STU identifiers; sequence tests",
+      "severity": "—",
+      "notes": "Import/custom-number collision UI and all concurrency paths NOT VERIFIED"
+    },
+    {
+      "module": "Guardians",
+      "feature": "Multiple guardians and family relationships",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I/S: real linked guardian and portal identity",
+      "severity": "—",
+      "notes": "Multiple children/guardians/emergency-contact full UI NOT VERIFIED"
+    },
+    {
+      "module": "Guardians",
+      "feature": "Primary/emergency/authorized-collector contact",
+      "status": "INCONSISTENT",
+      "evidence": "H/B/S: guardian listed; normal release fails and teacher reads phone",
+      "severity": "P0",
+      "notes": "F01/F06; ordinary contact maintenance otherwise NOT VERIFIED"
+    },
+    {
+      "module": "Students",
+      "feature": "Pupil 360 profile, edits and photo",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: wave13 atomic registrar/profile/redaction cases passed",
+      "severity": "—",
+      "notes": "Complete all-tabs/upload/refresh lifecycle NOT VERIFIED"
+    },
+    {
+      "module": "Students",
+      "feature": "Medical confidentiality",
+      "status": "INCONSISTENT",
+      "evidence": "I: generic profile redaction; H: immunisation route leaks",
+      "severity": "P0",
+      "notes": "F01; sensitive policy differs between entry points"
+    },
+    {
+      "module": "Enrollment",
+      "feature": "Initial active enrollment and class placement",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/I: registered placed pupils; exclusion/unique preflight",
+      "severity": "—",
+      "notes": "Whole stream-specific UI capacity/history acceptance NOT VERIFIED"
+    },
+    {
+      "module": "Enrollment",
+      "feature": "Class/stream transfer and withdrawal",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: placement/lifecycle cases",
+      "severity": "—",
+      "notes": "One browser transfer/withdraw/history/fees reconciliation NOT VERIFIED"
+    },
+    {
+      "module": "Enrollment",
+      "feature": "Return, re-admission and repeat",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: lifecycle and rollover modules",
+      "severity": "—",
+      "notes": "Same-identity return and repeat whole-role browser chain NOT VERIFIED"
+    },
+    {
+      "module": "Enrollment",
+      "feature": "Promotion, approval and graduation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: rollover/lifecycle suites",
+      "severity": "—",
+      "notes": "Full school bulk exceptions and next-year historical reports NOT VERIFIED"
+    },
+    {
+      "module": "Enrollment",
+      "feature": "Historical placements and academic records",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/D/S: effective placement tests; legacy marks parity matches",
+      "severity": "—",
+      "notes": "All historical report consumers following real transfers NOT VERIFIED"
+    },
+    {
+      "module": "Attendance",
+      "feature": "Daily/bulk attendance and rates",
+      "status": "INCONSISTENT",
+      "evidence": "H/D: late saved; student history returns 150%",
+      "severity": "P1",
+      "notes": "F08; selected membership/concurrency cases otherwise pass"
+    },
+    {
+      "module": "Attendance",
+      "feature": "Roster membership, transfers and duplicate marks",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: attendance/admissions/production invariant suites",
+      "severity": "—",
+      "notes": "All real teacher corrections/withdrawn/term-lock UI cases NOT VERIFIED"
+    },
+    {
+      "module": "Attendance",
+      "feature": "Correction, notes and audit history",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: attendance source and tests",
+      "severity": "—",
+      "notes": "Full correction approval/denial/history/report flow NOT VERIFIED"
+    },
+    {
+      "module": "Attendance",
+      "feature": "Subject/session attendance where contracted",
+      "status": "OPTIONAL",
+      "evidence": "S: teaching/session capability inspected; end-to-end NOT VERIFIED",
+      "severity": "—",
+      "notes": "Separate acceptance if subject attendance is required"
+    },
+    {
+      "module": "Early years",
+      "feature": "Daily care, moods, meals, naps and notes",
+      "status": "BROKEN",
+      "evidence": "H/D: real logs; unassigned teacher reads/edits private draft",
+      "severity": "P0",
+      "notes": "F01; value exists but confidentiality fails"
+    },
+    {
+      "module": "Early years",
+      "feature": "Deliberate sharing with guardian",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D: draft excluded, shared own-child included, other child denied",
+      "severity": "—",
+      "notes": "Actual parent browser/correction notification workflow NOT VERIFIED"
+    },
+    {
+      "module": "Early years",
+      "feature": "Authorized guardian child collection",
+      "status": "BROKEN",
+      "evidence": "B/H/D: guardian button fails; API rejects; zero pickup events",
+      "severity": "P1",
+      "notes": "F06"
+    },
+    {
+      "module": "Early years",
+      "feature": "Third-party pickup authorization and override",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: early-years service/test cases",
+      "severity": "—",
+      "notes": "Expiry/revocation/replay/full gate browser chain NOT VERIFIED"
+    },
+    {
+      "module": "Early years",
+      "feature": "Immunisations and health history",
+      "status": "BROKEN",
+      "evidence": "H: private health returned to unassigned teacher",
+      "severity": "P0",
+      "notes": "F01; full reminder/document browser flow NOT VERIFIED"
+    },
+    {
+      "module": "Early years",
+      "feature": "Incident/safeguarding review and notification",
+      "status": "BROKEN",
+      "evidence": "H: serious incident returned to unassigned teacher",
+      "severity": "P0",
+      "notes": "F01; live notification and designated-access workflow NOT VERIFIED"
+    },
+    {
+      "module": "Assessment",
+      "feature": "Nursery observations and rubric authoring",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: ECD assessment; raw JSON criteria editor",
+      "severity": "P2",
+      "notes": "F15; human-friendly complete rubric/report flow NOT VERIFIED"
+    },
+    {
+      "module": "Assessment",
+      "feature": "Continuous assessment, gradebook and marks",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/U/S: unified/core/roster/gradebook/exam suites",
+      "severity": "—",
+      "notes": "Configured class browser marking/review journey NOT VERIFIED"
+    },
+    {
+      "module": "Assessment",
+      "feature": "Absent/missing/exempt/invalid marks",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/U/S: result/exam/assessment asserted cases",
+      "severity": "—",
+      "notes": "Every school-configured boundary and UI state NOT VERIFIED"
+    },
+    {
+      "module": "Results",
+      "feature": "Stage-compatible grades and decimal boundaries",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/U/S: wave13/current grading tests and resolver",
+      "severity": "—",
+      "notes": "Actual school-scale independent printable sample acceptance NOT VERIFIED"
+    },
+    {
+      "module": "Results",
+      "feature": "Approval, publication and integrity gates",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: result integrity, segregation, freshness/checksum cases",
+      "severity": "—",
+      "notes": "Complete head/teacher/guardian browser release chain NOT VERIFIED"
+    },
+    {
+      "module": "Results",
+      "feature": "Amendment, locked reads and revision history",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: released revision retained until replacement publication",
+      "severity": "—",
+      "notes": "Complete real user correction/print/history journey NOT VERIFIED"
+    },
+    {
+      "module": "Results",
+      "feature": "Nursery/primary report cards and print/export",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: stage-sensitive report template builders",
+      "severity": "—",
+      "notes": "Final PDFs/layout/data/parent delivery NOT VERIFIED"
+    },
+    {
+      "module": "Statutory",
+      "feature": "UNEB continuous assessment/candidate output",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: school-statutory-phase6 passed",
+      "severity": "—",
+      "notes": "Current official submission specification/file acceptance NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Fee structure, versions, schedules and assignments",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/I: tuition publish/schedule/generation; real DB",
+      "severity": "—",
+      "notes": "Full bursar configuration/discount/history UI NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Invoices and repeat generation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/I: invoices persist; already-billed retry skipped",
+      "severity": "—",
+      "notes": "Final invoice print/cancel/rebill/reconciliation workflow NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Partial payment and allocation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/D/I: 350,000 minus 100,000 equals 250,000",
+      "severity": "—",
+      "notes": "Full UI→printed receipt→day close NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Overpayment, advance credit and reconciliation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: fees integrity/concurrency modules",
+      "severity": "—",
+      "notes": "Complete school-configured credit/refund/browser cases NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Discounts, scholarship, waiver and bursary",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: fee policies/assignments",
+      "severity": "—",
+      "notes": "Full approvals and client report effects NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Adjustments and approval",
+      "status": "BROKEN",
+      "evidence": "H/D: wrong-pupil accepted; real scheduled approvals double-post",
+      "severity": "P0",
+      "notes": "F03/F04"
+    },
+    {
+      "module": "Fees",
+      "feature": "Financial close and queued billing",
+      "status": "BROKEN",
+      "evidence": "H/D/S: pending run posts after successful close",
+      "severity": "P1",
+      "notes": "F05"
+    },
+    {
+      "module": "Fees",
+      "feature": "Cash collection and session reconciliation",
+      "status": "INCONSISTENT",
+      "evidence": "H/D/S: payment/GL exists; zero drawer movement",
+      "severity": "P1",
+      "notes": "F09; shared cash-session capability not wired into fee flow"
+    },
+    {
+      "module": "Fees",
+      "feature": "Bank collection and statement matching",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: accounting/payment services",
+      "severity": "—",
+      "notes": "Real bank import/statement/mixed allocation/receipt chain NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Payment reversal/refund and ledger consistency",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: integrity/concurrency/reversal suites",
+      "severity": "—",
+      "notes": "Full authorized bursar browser/receipt/reconcile flow NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Live MTN/Airtel collection and settlement",
+      "status": "BROKEN",
+      "evidence": "S: MTN reference mismatch; provider contract checked",
+      "severity": "P1 if enabled",
+      "notes": "F13; provider acceptance/settlement NOT VERIFIED; defer by disabling"
+    },
+    {
+      "module": "Fees",
+      "feature": "Manual recording of externally confirmed MoMo receipt",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: mobile_money payment method exists",
+      "severity": "—",
+      "notes": "Distinct from initiating live provider charge; full verification/receipt chain NOT VERIFIED"
+    },
+    {
+      "module": "Fees",
+      "feature": "Penalties and period controls",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: penalty generation and term guard",
+      "severity": "—",
+      "notes": "All live schedules, rounding, closed-term UI/report behavior NOT VERIFIED"
+    },
+    {
+      "module": "Portal",
+      "feature": "Parent invitation and account activation",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I/S: invite creates identity; fixture activated for auth test",
+      "severity": "—",
+      "notes": "Actual email delivery/acceptance/reset NOT VERIFIED"
+    },
+    {
+      "module": "Portal",
+      "feature": "Own-child profile/fees/result access",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I: own-child dashboard allowed, foreign child pay quote denied",
+      "severity": "—",
+      "notes": "Every family endpoint/browser export/result/payment NOT VERIFIED"
+    },
+    {
+      "module": "Portal",
+      "feature": "Identity revocation and token permission refresh",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H: revoked guardian existing token gets 403",
+      "severity": "—",
+      "notes": "All identities/session/role changes and complete UI lifecycle NOT VERIFIED"
+    },
+    {
+      "module": "Portal",
+      "feature": "Courses/progress/due items with feature flags",
+      "status": "INCONSISTENT",
+      "evidence": "H/S: advanced-LMS-off endpoint 404; page substitutes empty",
+      "severity": "P2",
+      "notes": "F14"
+    },
+    {
+      "module": "Portal",
+      "feature": "Teacher and student full self-service",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: portal/LMS/teacher ownership assertions",
+      "severity": "—",
+      "notes": "Complete current teacher/student browser journeys NOT VERIFIED"
+    },
+    {
+      "module": "Communication",
+      "feature": "Announcements, templates and recipient selection",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: wave2-notifications/communication modules",
+      "severity": "—",
+      "notes": "Full real recipient/approval/history UI NOT VERIFIED"
+    },
+    {
+      "module": "Communication",
+      "feature": "Email/SMS delivery, failure and emergency messages",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: providers/outbox present; external transport disabled in audit",
+      "severity": "—",
+      "notes": "Real school sender, actual delivery/retry/emergency chain NOT VERIFIED"
+    },
+    {
+      "module": "Reporting",
+      "feature": "Student register, filters and export access",
+      "status": "BROKEN",
+      "evidence": "H: empty teacher roster but report returns school pupils",
+      "severity": "P0",
+      "notes": "F02"
+    },
+    {
+      "module": "Reporting",
+      "feature": "Attendance histories and summary reports",
+      "status": "INCONSISTENT",
+      "evidence": "H/D: pupil attendance rate 150%; reporting suites pass other cases",
+      "severity": "P1",
+      "notes": "F08; every export/portal consumer requires reconciliation"
+    },
+    {
+      "module": "Reporting",
+      "feature": "Fee/payment/GL/cash reports and historical filters",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/H/S: selected amounts and ledger checked",
+      "severity": "P1",
+      "notes": "F03/F09 affect truth/reconciliation; all report totals NOT VERIFIED"
+    },
+    {
+      "module": "Dashboard",
+      "feature": "Current-term pupil/fee/setup/approval overview",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "B/H/D/I: selected real counts and cash collection observed",
+      "severity": "—",
+      "notes": "Every metric, cache, historical/date filter and role variant NOT VERIFIED"
+    },
+    {
+      "module": "Library",
+      "feature": "Catalogue, copies, issue/return/renewal/loss",
+      "status": "OPTIONAL",
+      "evidence": "I/S: library source/tests; full desk workflow NOT VERIFIED",
+      "severity": "—",
+      "notes": "Required only when library service is part of client scope"
+    },
+    {
+      "module": "Library",
+      "feature": "Fine management staff desk",
+      "status": "BACKEND ONLY",
+      "evidence": "I/S: backend fine test passes; UI coming soon",
+      "severity": "P2 if used",
+      "notes": "F16"
+    },
+    {
+      "module": "Transport",
+      "feature": "Routes, drivers, pickup points, allocation, capacity and fees",
+      "status": "OPTIONAL",
+      "evidence": "S: transport modules; complete operations NOT VERIFIED",
+      "severity": "—",
+      "notes": "Client-specific safety/capacity/billing acceptance required if sold"
+    },
+    {
+      "module": "Boarding",
+      "feature": "Rooms/beds/check-in/attendance and boarding charges",
+      "status": "OPTIONAL",
+      "evidence": "S: hostel modules; complete workflow NOT VERIFIED",
+      "severity": "—",
+      "notes": "Separate boarding-client acceptance"
+    },
+    {
+      "module": "Meals",
+      "feature": "Plans, feeding attendance, kitchen and finance",
+      "status": "OPTIONAL",
+      "evidence": "I/S: meal lifecycle/finance-kitchen suites passed",
+      "severity": "—",
+      "notes": "Nursery/day-school meal desk full UI NOT VERIFIED"
+    },
+    {
+      "module": "HR",
+      "feature": "Staff/payroll/leave and school bridge",
+      "status": "OPTIONAL",
+      "evidence": "I/S: Uganda payroll, proration, people, self-service passed",
+      "severity": "—",
+      "notes": "Staff identity needed for scope; payroll full client acceptance separate"
+    },
+    {
+      "module": "LMS/CBT",
+      "feature": "Advanced learning delivery, homework and online exams",
+      "status": "OPTIONAL",
+      "evidence": "I/S: LMS/CBT suites; advanced module default off",
+      "severity": "—",
+      "notes": "Not a basic nursery/primary launch obligation; hide disabled links"
+    },
+    {
+      "module": "Documents",
+      "feature": "Upload, protected download and document history",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: DMS snapshot/lifecycle plus school document source",
+      "severity": "—",
+      "notes": "Actual school upload, outage, malware/tenant download and files restore NOT VERIFIED"
+    },
+    {
+      "module": "Administration",
+      "feature": "Users, roles, settings and audits",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I/S: invite/revoke, per-request permissions and audit infrastructure",
+      "severity": "P0",
+      "notes": "F01/F02 block safe authorization; full role CRUD/action audit coverage NOT VERIFIED"
+    },
+    {
+      "module": "Tenancy",
+      "feature": "School boundary/RLS defense",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "H/I/D: foreign pupil 404, role tests pass, 622 policies",
+      "severity": "—",
+      "notes": "Representative runtime proof; all file/export/search/job paths NOT VERIFIED"
+    },
+    {
+      "module": "Database",
+      "feature": "Fresh migrations and required invariant preflight",
+      "status": "IMPLEMENTED — VERIFIED",
+      "evidence": "D: 164 migrations and executable constraint/RLS/FK checks pass",
+      "severity": "—",
+      "notes": "Local PostgreSQL 18 only; upgraded production PostgreSQL 16 still needs drill"
+    },
+    {
+      "module": "Recovery",
+      "feature": "Manual isolated database dump/restore",
+      "status": "IMPLEMENTED — VERIFIED",
+      "evidence": "D: stable snapshot 642 table counts and 60 residuals match",
+      "severity": "—",
+      "notes": "Fictional logical DB only; app automation/files/offsite not certified"
+    },
+    {
+      "module": "Recovery",
+      "feature": "Scheduled actual restore verification",
+      "status": "MISSING",
+      "evidence": "S: scheduled check only lists archive via verifyOnly",
+      "severity": "P1",
+      "notes": "F12; actual recurring recovery drill is absent from this scheduled path"
+    },
+    {
+      "module": "Deployment",
+      "feature": "Production images, URLs, capabilities and boot",
+      "status": "BROKEN",
+      "evidence": "D/S: merged config and local module resolution expose defects",
+      "severity": "P1",
+      "notes": "F10/F11; Docker daemon unavailable, actual image boot NOT VERIFIED"
+    },
+    {
+      "module": "Reliability",
+      "feature": "Production monitoring, outbox/shutdown and failure recovery",
+      "status": "PARTIALLY IMPLEMENTED",
+      "evidence": "I/S: worker infrastructure; test lifecycle errors/open unit runner",
+      "severity": "P2",
+      "notes": "F19; real outage/alerts/replay/production load NOT VERIFIED"
+    },
+    {
+      "module": "Installed app",
+      "feature": "School PWA/mobile/offline experience",
+      "status": "INCONSISTENT",
+      "evidence": "B/S: mobile-width selected pages; POS Cafe /pos manifest",
+      "severity": "P3",
+      "notes": "F20; full device accessibility and offline school writes NOT VERIFIED"
+    },
+    {
+      "module": "Generic ERP",
+      "feature": "Manufacturing, rental, repair and unrelated retail workflows",
+      "status": "NOT APPLICABLE",
+      "evidence": "S: modules exist and some tests pass",
+      "severity": "—",
+      "notes": "Outside defined nursery/primary school launch scope"
+    }
+  ],
+  "counts": {
+    "IMPLEMENTED — VERIFIED": 4,
+    "PARTIALLY IMPLEMENTED": 49,
+    "INCONSISTENT": 9,
+    "OPTIONAL": 7,
+    "BROKEN": 9,
+    "BACKEND ONLY": 1,
+    "MISSING": 1,
+    "NOT APPLICABLE": 1
+  }
+}

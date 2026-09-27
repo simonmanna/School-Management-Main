@@ -1,0 +1,9 @@
+{
+  "before": "250000",
+  "after": "252000",
+  "expected": "251000",
+  "sameJournal": false,
+  "journalEntries": 2,
+  "journalDebit": "2000",
+  "scheduling": "both pending reads, first posting completes, second posting begins; real PostgreSQL and posting service"
+}

@@ -1,0 +1,166 @@
+{
+  "fixture": "register unbilled pupil, queue normal billing, close term, process existing run: all normal HTTP endpoints; no manual run-item edits",
+  "requests": [
+    {
+      "url": "/api/v1/auth/login",
+      "status": 201
+    },
+    {
+      "url": "/api/v1/school/students/register",
+      "status": 201
+    },
+    {
+      "url": "/api/v1/school/billing-runs",
+      "status": 201
+    },
+    {
+      "url": "/api/v1/school/finance/terms/570460ec-b632-454f-ad8f-23c06363cd3b/close",
+      "status": 201
+    },
+    {
+      "url": "/api/v1/school/billing-runs/624ab186-e771-4c8c-9185-de27129d0500/process",
+      "status": 201
+    }
+  ],
+  "financialStatus": "closed",
+  "closeAt": "2026-09-27T11:29:05.659Z",
+  "invoiceAt": "2026-09-27T11:29:05.885Z",
+  "newInvoicePosted": true,
+  "invoiceAmount": "350000",
+  "run": {
+    "totalStudents": 6,
+    "posted": 1,
+    "skipped": 5,
+    "failed": 0,
+    "status": "completed"
+  },
+  "readback": "First script completed HTTP operations but failed at nonexistent Prisma include; this corrected readback uses invoice.documentId and the actual request log",
+  "auditRows": [
+    {
+      "_count": {
+        "_all": 6
+      },
+      "entity": "StudentProfile",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 6
+      },
+      "entity": "StudentEnrollment",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "entity": "PortalIdentity",
+      "action": "update"
+    },
+    {
+      "_count": {
+        "_all": 3
+      },
+      "entity": "Term",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "ImmunisationRecord",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "AcademicYear",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "entity": "FeeAdjustment",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 6
+      },
+      "entity": "EnrollmentPlacement",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "Payment",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "FeeStructureVersion",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "entity": "FeeAdjustment",
+      "action": "post"
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "entity": "TermFinancialClose",
+      "action": "update"
+    },
+    {
+      "_count": {
+        "_all": 14
+      },
+      "entity": "User",
+      "action": "login"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "ChildIncident",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 2
+      },
+      "entity": "PortalIdentity",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "FeeStructure",
+      "action": "create"
+    },
+    {
+      "_count": {
+        "_all": 5
+      },
+      "entity": "ChildCareLog",
+      "action": "update"
+    },
+    {
+      "_count": {
+        "_all": 1
+      },
+      "entity": "ChildCareLog",
+      "action": "create"
+    }
+  ]
+}

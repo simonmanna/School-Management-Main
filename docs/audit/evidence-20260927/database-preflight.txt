@@ -1,0 +1,26 @@
+✓ constraint EnrollmentPlacement_no_overlap
+✓ constraint AcademicYear_dates_ordered
+✓ constraint Term_dates_ordered
+✓ constraint AdmissionCapacity_counters_nonneg
+✓ constraint AdmissionApplication_parentContactId_fkey
+✓ constraint TimetableOverride_teacherPartnerId_fkey
+✓ constraint Waiver_appliedAmount_range
+✓ trigger term_within_year
+✓ trigger year_contains_terms
+✓ trigger timetable_no_clash
+✓ trigger user_roles_same_org
+✓ index EnrollmentPlacement_one_open_per_enrollment
+✓ index AcademicYear_one_current_per_org
+✓ index Term_one_current_per_org
+✓ index StudentEnrollment_one_active_per_student
+✓ index CourseOffering_one_per_cohort_subject_section
+✓ index AdmissionApplication_applicant_dedupe
+✓ index Notification_org_channel_dedupeKey_key
+✓ index TimetableVersion_unsectioned_version_key
+✓ index AcademicReminderLog_no_user_key
+✓ index ResultSet_one_released_per_scope
+✓ index ResultSet_one_pending_per_scope
+✓ RLS enabled, forced and policed on all 622 org-scoped tables
+✓ same-organization trigger on every tenant-to-tenant foreign key
+
+✓ schema preflight passed

@@ -1,0 +1,85 @@
+[
+  {
+    "name": "bill actual pupils",
+    "response": {
+      "count": 0,
+      "documents": [],
+      "skipped": [
+        {
+          "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "documentId": "a47efd3f-f995-46fa-a674-ee7a3263a545",
+          "reason": "already_billed"
+        },
+        {
+          "studentProfileId": "c25e33ad-d96f-435a-8b74-3baea1b02bde",
+          "documentId": "bafafeb3-c395-4a7b-8b22-e58413a8b70c",
+          "reason": "already_billed"
+        },
+        {
+          "studentProfileId": "735121e6-37d8-468b-937a-7f7d5ad66e11",
+          "documentId": "5d0c2171-6803-42f9-ae89-4e7b452dced3",
+          "reason": "already_billed"
+        },
+        {
+          "studentProfileId": "91f4279e-8ce1-4814-86cd-0ea321a60a2b",
+          "documentId": "7ddf89d4-35f1-4e7c-bbf4-394a39d3c294",
+          "reason": "already_billed"
+        }
+      ],
+      "failed": []
+    }
+  },
+  {
+    "name": "real cash collection",
+    "amount": 100000,
+    "invoiceTotal": "350000",
+    "residual": "250000",
+    "receiptKeys": [
+      "payment",
+      "allocations",
+      "unallocated",
+      "overpaymentCredit",
+      "replayed"
+    ]
+  },
+  {
+    "name": "mismatched adjustment accepted",
+    "status": 201,
+    "invoiceStudentId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+    "namedStudentId": "c25e33ad-d96f-435a-8b74-3baea1b02bde",
+    "adjustmentStudentId": "c25e33ad-d96f-435a-8b74-3baea1b02bde"
+  },
+  {
+    "name": "financial close",
+    "status": 201
+  },
+  {
+    "name": "queued billing after close",
+    "status": 201,
+    "closed": "closed",
+    "lateInvoiceCreated": true,
+    "response": {
+      "run": {
+        "id": "61bac1a2-77c2-4874-9a40-329be9e8d51c",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "termId": "570460ec-b632-454f-ad8f-23c06363cd3b",
+        "classId": null,
+        "status": "completed",
+        "totalStudents": 4,
+        "postedCount": 1,
+        "failedCount": 0,
+        "skippedCount": 4,
+        "startedById": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "startedAt": "2026-09-27T08:02:53.626Z",
+        "completedAt": "2026-09-27T08:02:54.348Z",
+        "createdAt": "2026-09-27T08:02:53.099Z",
+        "updatedAt": "2026-09-27T08:02:54.350Z"
+      },
+      "processed": 5,
+      "posted": 1,
+      "failed": 0,
+      "skipped": 4,
+      "pending": 0
+    }
+  }
+]

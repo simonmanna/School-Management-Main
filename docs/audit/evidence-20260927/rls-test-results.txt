@@ -1,0 +1,13 @@
+Running one project: integration
+ts-jest[config] (WARN) 
+    The "ts-jest" config option "isolatedModules" is deprecated and will be removed in v30.0.0. Please use "isolatedModules: true" in C:/Dev/School-Management/apps/api/tsconfig.json instead, see https://www.typescriptlang.org/tsconfig/#isolatedModules
+  
+PASS integration src/kernel/prisma/rls.spec.ts
+PASS integration test/integration/rls-app-role.spec.ts
+
+Test Suites: 2 passed, 2 total
+Tests:       9 passed, 9 total
+Snapshots:   0 total
+Time:        9.669 s, estimated 233 s
+Ran all test suites matching /rls-app-role.spec.ts|rls.spec.ts/i.
+Temporary audit RLS roles removed

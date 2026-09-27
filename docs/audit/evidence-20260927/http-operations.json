@@ -1,0 +1,43 @@
+[
+  {
+    "name": "mark one late pupil",
+    "status": 201,
+    "data": {
+      "late": 1
+    }
+  },
+  {
+    "name": "late attendance rate",
+    "status": 200,
+    "data": {
+      "total": 1,
+      "present": 1,
+      "late": 1,
+      "absent": 0,
+      "attendanceRate": 150
+    }
+  },
+  {
+    "name": "cash receipt vs drawer",
+    "payments": [
+      {
+        "amount": "100000",
+        "method": "cash"
+      }
+    ],
+    "cashMovements": 0
+  },
+  {
+    "name": "cross tenant pupil direct read",
+    "status": 404,
+    "data": {
+      "message": "StudentProfile 15a973e4-330e-4bcf-84ab-1c748ef6b667 not found",
+      "error": "Not Found",
+      "statusCode": 404
+    }
+  },
+  {
+    "name": "guardian release event count",
+    "events": 0
+  }
+]

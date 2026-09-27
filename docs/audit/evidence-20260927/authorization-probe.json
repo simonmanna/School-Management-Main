@@ -1,0 +1,522 @@
+[
+  {
+    "name": "teacher basic roster",
+    "status": 200,
+    "data": {
+      "data": [],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 0,
+        "totalPages": 1
+      }
+    }
+  },
+  {
+    "name": "teacher other pupil profile",
+    "status": 403,
+    "data": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher other pupil care",
+    "status": 200,
+    "data": [
+      {
+        "id": "715c7aff-1816-43fa-965d-18d8abab1d25",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+        "onDate": "2026-09-27T00:00:00.000Z",
+        "arrivalMood": "happy",
+        "departureMood": null,
+        "meals": [],
+        "naps": [],
+        "nappyChanges": null,
+        "usedToiletAlone": null,
+        "activities": null,
+        "teacherNote": "Edited by unassigned teacher",
+        "sharedAt": null,
+        "sharedById": null,
+        "recordedById": "047745ab-61f8-44e9-8d3f-84f0bce16335",
+        "createdAt": "2026-09-27T08:00:05.539Z",
+        "updatedAt": "2026-09-27T08:00:16.365Z",
+        "deletedAt": null
+      }
+    ]
+  },
+  {
+    "name": "teacher whole other class care",
+    "status": 200,
+    "data": {
+      "onDate": "2026-09-27",
+      "classId": "3e62b9d8-45ac-4978-bf8a-33c3f25df62e",
+      "sectionId": null,
+      "children": [
+        {
+          "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "name": "Atim AuditChild",
+          "admissionNo": "STU-000001",
+          "sectionName": null,
+          "log": {
+            "id": "715c7aff-1816-43fa-965d-18d8abab1d25",
+            "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+            "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+            "onDate": "2026-09-27T00:00:00.000Z",
+            "arrivalMood": "happy",
+            "departureMood": null,
+            "meals": [],
+            "naps": [],
+            "nappyChanges": null,
+            "usedToiletAlone": null,
+            "activities": null,
+            "teacherNote": "Edited by unassigned teacher",
+            "sharedAt": null,
+            "sharedById": null,
+            "recordedById": "047745ab-61f8-44e9-8d3f-84f0bce16335",
+            "createdAt": "2026-09-27T08:00:05.539Z",
+            "updatedAt": "2026-09-27T08:00:16.365Z",
+            "deletedAt": null
+          }
+        },
+        {
+          "studentProfileId": "735121e6-37d8-468b-937a-7f7d5ad66e11",
+          "name": "Atim AuditChild",
+          "admissionNo": "STU-000003",
+          "sectionName": null,
+          "log": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "teacher other pupil vaccination",
+    "status": 200,
+    "data": [
+      {
+        "id": "449af165-284a-4d16-8937-137fef257176",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+        "vaccine": "Audit vaccine",
+        "doseLabel": null,
+        "administeredOn": "2026-01-01T00:00:00.000Z",
+        "nextDueOn": "2026-10-01T00:00:00.000Z",
+        "certificateDocumentId": null,
+        "exemptionReason": null,
+        "notes": "Private health record",
+        "recordedById": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "createdAt": "2026-09-27T08:00:05.585Z",
+        "updatedAt": "2026-09-27T08:00:05.585Z",
+        "deletedAt": null
+      }
+    ]
+  },
+  {
+    "name": "teacher collectors",
+    "status": 200,
+    "data": {
+      "at": "2026-09-27T08:00:48.037Z",
+      "guardians": [
+        {
+          "studentGuardianId": "767162ab-f859-4998-becf-55b5b2cc4a17",
+          "contactId": "dbf4f278-70bd-487e-9a73-4265863a9653",
+          "name": "Akello AuditGuardian",
+          "phone": "0700123456",
+          "relationship": "mother",
+          "source": "guardian"
+        }
+      ],
+      "authorizations": []
+    }
+  },
+  {
+    "name": "teacher whole incident list",
+    "status": 200,
+    "data": [
+      {
+        "id": "21130949-19e7-47d1-b8d0-d59bbd18cc5f",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+        "kind": "SAFEGUARDING",
+        "severity": "SERIOUS",
+        "occurredAt": "2026-09-27T08:00:05.595Z",
+        "location": null,
+        "description": "Fictional confidential safeguarding note",
+        "actionTaken": null,
+        "bodyPart": null,
+        "firstAidById": null,
+        "guardianNotifiedAt": null,
+        "guardianNotifiedById": null,
+        "guardianNotifiedHow": null,
+        "recordedById": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "reviewedAt": null,
+        "reviewedById": null,
+        "reviewNotes": null,
+        "createdAt": "2026-09-27T08:00:05.629Z",
+        "updatedAt": "2026-09-27T08:00:05.629Z",
+        "deletedAt": null,
+        "studentProfile": {
+          "id": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+          "partnerId": "7979eee8-bba2-410c-b2db-17a721e380dd",
+          "admissionNo": "STU-000001",
+          "enrollmentDate": "2026-09-27T08:00:05.079Z",
+          "status": "active",
+          "dateOfBirth": "2023-03-01T00:00:00.000Z",
+          "gender": "female",
+          "nationality": null,
+          "religion": null,
+          "residenceType": "day",
+          "studentCategoryId": null,
+          "house": null,
+          "customFields": {},
+          "createdAt": "2026-09-27T08:00:05.081Z",
+          "updatedAt": "2026-09-27T08:00:05.081Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "partner": {
+            "id": "7979eee8-bba2-410c-b2db-17a721e380dd",
+            "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+            "code": "STU-000001",
+            "name": "Atim AuditChild",
+            "isCompany": false,
+            "isCustomer": true,
+            "isSupplier": false,
+            "isEmployee": false,
+            "email": null,
+            "phone": null,
+            "phoneE164": null,
+            "chatOptIn": false,
+            "website": null,
+            "taxNumber": null,
+            "membershipLevel": null,
+            "discountPercentOverride": "0",
+            "gender": null,
+            "receivableAccountId": null,
+            "payableAccountId": null,
+            "creditLimit": "0",
+            "creditHold": false,
+            "paymentTermId": null,
+            "status": "active",
+            "categoryId": null,
+            "notes": null,
+            "customFields": {
+              "house": null,
+              "gender": "female",
+              "religion": null,
+              "dateOfBirth": "2023-03-01",
+              "nationality": null
+            },
+            "createdAt": "2026-09-27T08:00:05.075Z",
+            "updatedAt": "2026-09-27T08:00:05.075Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          }
+        },
+        "studentName": "Atim AuditChild",
+        "needs": [
+          "tell the family",
+          "head teacher sign-off"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "teacher delete denied",
+    "status": 403,
+    "data": {
+      "message": "Missing required permission(s): school:students:write",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "name": "teacher report register",
+    "status": 201,
+    "data": {
+      "key": "student.register",
+      "title": "Student Register",
+      "columns": [
+        {
+          "key": "admissionNo",
+          "label": "Admission No",
+          "type": "string",
+          "width": 12,
+          "link": {
+            "route": "/school/students/:studentProfileId",
+            "paramFrom": {
+              "studentProfileId": "studentProfileId"
+            }
+          }
+        },
+        {
+          "key": "studentName",
+          "label": "Name",
+          "type": "string",
+          "width": 24
+        },
+        {
+          "key": "gender",
+          "label": "Gender",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "className",
+          "label": "Class",
+          "type": "string",
+          "width": 12
+        },
+        {
+          "key": "sectionName",
+          "label": "Section",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "rollNumber",
+          "label": "Roll No",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "residenceType",
+          "label": "Residence",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "house",
+          "label": "House",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "enum",
+          "width": 10
+        },
+        {
+          "key": "enrolledAt",
+          "label": "Enrolled",
+          "type": "date",
+          "width": 12
+        }
+      ],
+      "data": [
+        {
+          "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+          "admissionNo": "STU-000001",
+          "studentName": "Atim AuditChild",
+          "gender": "female",
+          "className": "Baby Class",
+          "sectionName": "",
+          "rollNumber": "",
+          "residenceType": "day",
+          "house": "",
+          "status": "enrolled",
+          "enrolledAt": "2026-09-27T08:00:05.108Z",
+          "termName": "Term 3"
+        },
+        {
+          "studentProfileId": "c25e33ad-d96f-435a-8b74-3baea1b02bde",
+          "admissionNo": "STU-000002",
+          "studentName": "Okello AuditPrimary",
+          "gender": "male",
+          "className": "P1",
+          "sectionName": "",
+          "rollNumber": "",
+          "residenceType": "day",
+          "house": "",
+          "status": "enrolled",
+          "enrolledAt": "2026-09-27T08:00:05.293Z",
+          "termName": "Term 3"
+        },
+        {
+          "studentProfileId": "735121e6-37d8-468b-937a-7f7d5ad66e11",
+          "admissionNo": "STU-000003",
+          "studentName": "Atim AuditChild",
+          "gender": "female",
+          "className": "Baby Class",
+          "sectionName": "",
+          "rollNumber": "",
+          "residenceType": "day",
+          "house": "",
+          "status": "enrolled",
+          "enrolledAt": "2026-09-27T08:00:16.490Z",
+          "termName": "Term 3"
+        }
+      ],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 3,
+        "totalPages": 1
+      },
+      "caption": "Term: Term 3 · 2026-09-07 to 2026-12-04 · Class basis: enrollment · Generated 2026-09-27 08:00",
+      "notes": []
+    }
+  },
+  {
+    "name": "approved guardian release",
+    "status": 400,
+    "data": {
+      "message": "Akello AuditGuardian is not authorized to collect this child. Add them to the pick-up list, or record why you are releasing the child anyway.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "name": "wrong role care write",
+    "status": 201,
+    "data": {
+      "id": "715c7aff-1816-43fa-965d-18d8abab1d25",
+      "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+      "studentProfileId": "f5c9e2f6-a172-4aa8-82eb-cecb3a4e414d",
+      "onDate": "2026-09-27T00:00:00.000Z",
+      "arrivalMood": "happy",
+      "departureMood": null,
+      "meals": [],
+      "naps": [],
+      "nappyChanges": null,
+      "usedToiletAlone": null,
+      "activities": null,
+      "teacherNote": "Edited by unassigned teacher",
+      "sharedAt": null,
+      "sharedById": null,
+      "recordedById": "047745ab-61f8-44e9-8d3f-84f0bce16335",
+      "createdAt": "2026-09-27T08:00:05.539Z",
+      "updatedAt": "2026-09-27T08:00:48.199Z",
+      "deletedAt": null
+    }
+  },
+  {
+    "name": "care DB after teacher write",
+    "note": "Edited by unassigned teacher"
+  },
+  {
+    "name": "anonymous pupil denied",
+    "status": 401,
+    "data": {
+      "message": "Authentication required",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  },
+  {
+    "name": "duplicate child rejected",
+    "status": 201,
+    "before": 3,
+    "after": 4,
+    "response": {
+      "partner": {
+        "id": "fcb40c3c-9519-4663-8ca1-f5a15c7efb94",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "code": "STU-000004",
+        "name": "Atim AuditChild",
+        "isCompany": false,
+        "isCustomer": true,
+        "isSupplier": false,
+        "isEmployee": false,
+        "email": null,
+        "phone": null,
+        "phoneE164": null,
+        "chatOptIn": false,
+        "website": null,
+        "taxNumber": null,
+        "membershipLevel": null,
+        "discountPercentOverride": "0",
+        "gender": null,
+        "receivableAccountId": null,
+        "payableAccountId": null,
+        "creditLimit": "0",
+        "creditHold": false,
+        "paymentTermId": null,
+        "status": "active",
+        "categoryId": null,
+        "notes": null,
+        "customFields": {
+          "house": null,
+          "gender": "female",
+          "religion": null,
+          "dateOfBirth": "2023-03-01",
+          "nationality": null
+        },
+        "createdAt": "2026-09-27T08:00:48.290Z",
+        "updatedAt": "2026-09-27T08:00:48.290Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "profile": {
+        "id": "91f4279e-8ce1-4814-86cd-0ea321a60a2b",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "partnerId": "fcb40c3c-9519-4663-8ca1-f5a15c7efb94",
+        "admissionNo": "STU-000004",
+        "enrollmentDate": "2026-09-27T08:00:48.293Z",
+        "status": "active",
+        "dateOfBirth": "2023-03-01T00:00:00.000Z",
+        "gender": "female",
+        "nationality": null,
+        "religion": null,
+        "residenceType": "day",
+        "studentCategoryId": null,
+        "house": null,
+        "customFields": {},
+        "createdAt": "2026-09-27T08:00:48.294Z",
+        "updatedAt": "2026-09-27T08:00:48.294Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "enrollment": {
+        "id": "6a9942fd-6602-4d25-85f7-30f0f777f9e4",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "studentProfileId": "91f4279e-8ce1-4814-86cd-0ea321a60a2b",
+        "academicYearId": "10ac6074-3489-4e4b-88fb-6b6bfe64c437",
+        "programmeId": "7b0889e4-f567-4824-8d3f-6e9adc739f56",
+        "gradeLevelId": "9d9bb0bb-217c-4ce4-9265-10948e3a0322",
+        "admissionDate": "2026-09-27T08:00:48.300Z",
+        "completionDate": null,
+        "status": "ACTIVE",
+        "suspendedUntil": null,
+        "enrollmentType": "NEW",
+        "migrationRunId": null,
+        "admissionApplicationId": null,
+        "notes": null,
+        "createdAt": "2026-09-27T08:00:48.317Z",
+        "updatedAt": "2026-09-27T08:00:48.317Z",
+        "createdBy": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "updatedBy": null
+      },
+      "placement": {
+        "id": "7435d0b3-d20e-413b-a22f-84994c557576",
+        "organizationId": "91fb12f3-2a9d-448c-b7ce-a0bbe5a3c03a",
+        "enrollmentId": "6a9942fd-6602-4d25-85f7-30f0f777f9e4",
+        "termId": "570460ec-b632-454f-ad8f-23c06363cd3b",
+        "classCohortId": "56238fbb-828a-491d-aa04-3d9790f6f722",
+        "sectionId": null,
+        "rollNumber": null,
+        "classNameSnapshot": "Baby Class",
+        "sectionNameSnapshot": null,
+        "effectiveFrom": "2026-09-27T08:00:48.300Z",
+        "effectiveTo": null,
+        "movementReason": "INITIAL_PLACEMENT",
+        "endReason": null,
+        "notes": null,
+        "capacityOverriddenById": null,
+        "capacityOverrideReason": null,
+        "changedById": "c5f391c4-64d9-4deb-be89-645b8bd4bc44",
+        "migrationRunId": null,
+        "createdAt": "2026-09-27T08:00:48.334Z",
+        "updatedAt": "2026-09-27T08:00:48.334Z"
+      },
+      "warnings": []
+    }
+  }
+]
