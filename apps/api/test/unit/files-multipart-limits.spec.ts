@@ -1,6 +1,7 @@
 import { Controller, INestApplication, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { dirname } from 'path';
 import request from 'supertest';
 import { UPLOAD_OPTIONS } from '../../src/kernel/files/upload-limits';
 
@@ -33,8 +34,12 @@ describe('multipart upload limits (A04)', () => {
   });
 
   it('resolves a patched multer', () => {
+    // Audit R06: assert the parser Nest actually loads. multer is a dependency
+    // of @nestjs/platform-express, not of this app, so under pnpm a bare
+    // `require('multer')` from here does not resolve — resolve it from there.
+    const platformExpress = dirname(require.resolve('@nestjs/platform-express/package.json'));
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const version: string = require('multer/package.json').version;
+    const version: string = require(require.resolve('multer/package.json', { paths: [platformExpress] })).version;
     const [major, minor] = version.split('.').map(Number);
     expect(major > 2 || (major === 2 && minor >= 3)).toBe(true);
   });
