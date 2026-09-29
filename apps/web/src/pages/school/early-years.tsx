@@ -22,6 +22,8 @@ import {
   useSaveImmunisation,
   useShareCareLog,
   useWhoMayCollect,
+  usePickupRequests,
+  useApprovePickupRequest,
   type CareLog,
 } from '@/features/school/early-years-api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -79,11 +81,56 @@ export function SchoolEarlyYearsPage() {
         </TabsList>
 
         <TabsContent value="day"><CareDayPanel classId={classId} onDate={onDate} /></TabsContent>
-        <TabsContent value="pickup"><PickupPanel classId={classId} onDate={onDate} /></TabsContent>
+        <TabsContent value="pickup" className="space-y-4">
+          <PickupRequestsPanel />
+          <PickupPanel classId={classId} onDate={onDate} />
+        </TabsContent>
         <TabsContent value="incidents"><IncidentsPanel classId={classId} /></TabsContent>
         <TabsContent value="immunisation"><ImmunisationPanel classId={classId} /></TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/* ── Parent requests (Wave 16) ─────────────────────────────────────────────── */
+
+/**
+ * Collectors a parent added on the portal. None is valid at the gate until
+ * approved here; the person approving should have checked the collector with
+ * the family (a phone call to the guardian on record), which is why the
+ * requester can never approve their own request.
+ */
+function PickupRequestsPanel() {
+  const { data: requests } = usePickupRequests();
+  const approve = useApprovePickupRequest();
+  const revoke = useRevokePickupAuthorization();
+  if (!requests?.length) return null;
+  return (
+    <Card>
+      <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Parent requests awaiting approval ({requests.length})</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        {requests.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3 text-sm">
+            <div>
+              <div className="font-medium">{r.personName} <span className="text-muted-foreground">({r.relationship ?? '—'})</span> for {r.studentProfile?.partner?.name ?? r.studentProfile?.admissionNo}</div>
+              <div className="text-xs text-muted-foreground">
+                {[r.personPhone, r.idNumber ? `${r.idType ?? 'ID'} ${r.idNumber}` : null, r.kind === 'ONE_OFF' && r.validTo ? `one day: ${new Date(r.validTo).toLocaleDateString()}` : 'every day', `asked ${new Date(r.pendingSince).toLocaleString()}`].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" disabled={approve.isPending} onClick={async () => {
+                try { await approve.mutateAsync(r.id); notify.success(`${r.personName} may now collect`); }
+                catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not approve'); }
+              }}><CheckCircle2 className="h-4 w-4" /> Approve</Button>
+              <Button size="sm" variant="outline" disabled={revoke.isPending} onClick={() => {
+                const reason = window.prompt('Why is this request declined?');
+                if (reason) revoke.mutate({ id: r.id, reason });
+              }}>Decline</Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

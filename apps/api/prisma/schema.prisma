@@ -20255,6 +20255,11 @@ model PickupAuthorization {
   revokedById      String?
   revokeReason     String?
   notes            String?
+  /// Wave 16: set when a guardian asked for this through the parent portal.
+  /// A pending authorization is NOT valid at the gate until the office
+  /// approves it (clears this and stamps authorizedById).
+  pendingSince     DateTime?
+  requestedByUserId String?
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
 

@@ -12,6 +12,7 @@ import { usePageTitle } from '@/site/site-shell';
 import { PageHero } from '@/site/pages/_hero';
 import { fetchApplication, publicErrorMessage, type ApplicationView } from '@/site/public-api';
 import { cn } from '@/lib/utils';
+import { DocumentUpload, OnlineApplication } from '@/site/pages/_apply-form';
 
 export default function AdmissionsPage() {
   usePageTitle('Admissions');
@@ -24,7 +25,13 @@ export default function AdmissionsPage() {
         lede="Six steps, no mystery. We will tell you early and plainly whether the class you want has room, rather than keeping a family waiting on a list that is already full."
       >
         <div className="flex flex-col gap-3 sm:flex-row">
-          <CtaLink to={`mailto:${SITE.contact.admissionsEmail}`} variant="onDark" className="px-7">
+          <a
+            href="#apply"
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-7 py-3 text-sm font-semibold text-primary shadow-sm transition hover:bg-white/90"
+          >
+            <FileText className="h-4 w-4" /> Apply online
+          </a>
+          <CtaLink to={`mailto:${SITE.contact.admissionsEmail}`} variant="ghost" className="border border-white/25 text-white hover:bg-white/10">
             <Mail className="h-4 w-4" /> Email admissions
           </CtaLink>
           <CtaLink
@@ -36,6 +43,13 @@ export default function AdmissionsPage() {
           </CtaLink>
         </div>
       </PageHero>
+
+      {/* ── Apply online (Wave 16) ── */}
+      <Section>
+        <Container>
+          <OnlineApplication />
+        </Container>
+      </Section>
 
       {/* ── Steps ── */}
       <Section>
@@ -184,7 +198,7 @@ function ApplicationStatusCheck() {
         <SectionHeading
           eyebrow="Already applied?"
           title="Check your application"
-          lede="Paste the link the admissions office emailed you. It shows the stage your application has reached, which documents are still outstanding, and any offer made."
+          lede="Paste the link we emailed you. It shows the stage your application has reached, which documents are still outstanding, and any offer made — and lets you upload documents."
         />
         <p className="pt-6 text-sm text-muted-foreground">
           Lost the email?{' '}
@@ -246,6 +260,11 @@ function ApplicationStatusCheck() {
         )}
 
         {result && <ApplicationResult app={result} />}
+        {result && (
+          <div className="mt-4">
+            <DocumentUpload token={extractToken(raw)} onUploaded={() => check.mutate()} />
+          </div>
+        )}
       </Panel>
     </div>
   );

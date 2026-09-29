@@ -1,3 +1,5 @@
+import { PublicAdmissionsController } from './public-admissions.controller';
+import { PublicAdmissionsService } from './public-admissions.service';
 import { Module } from '@nestjs/common';
 import { AdmissionsService } from './admissions.service';
 import { AdmissionsController } from './admissions.controller';
@@ -24,8 +26,9 @@ import { AdmissionFeeService } from './admission-fee.service';
   // registered before the config/portal controllers, that `:id` param route shadows
   // their static GETs (`requirements`, `offer-templates`, `enquiries`), returning 404.
   // Registering the static-route controllers first lets their paths win over `:id`.
-  controllers: [AdmissionsConfigController, AdmissionsPortalController, AdmissionsController],
+  controllers: [PublicAdmissionsController, AdmissionsConfigController, AdmissionsPortalController, AdmissionsController],
   providers: [
+    PublicAdmissionsService,
     AdmissionsService,
     AdmissionFeeService,
     AdmissionsConfigService,

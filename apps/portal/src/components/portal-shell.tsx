@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Suspense } from 'react';
 import {
   Home, Wallet, CalendarCheck, GraduationCap, BookOpen, ClipboardList,
-  LogOut, ChevronDown, School, Bell,
+  LogOut, ChevronDown, School, Bell, Bus,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { serverLogout } from '@/lib/server-logout';
@@ -23,6 +23,7 @@ const NAV: Record<'parent' | 'student' | 'teacher', NavItem[]> = {
     { to: '/parent/fees', label: 'Fees', icon: Wallet },
     { to: '/parent/attendance', label: 'Attendance', icon: CalendarCheck },
     { to: '/parent/results', label: 'Results', icon: GraduationCap },
+    { to: '/parent/going-home', label: 'Home time', icon: Bus },
     { to: '/parent/notices', label: 'Messages', icon: Bell },
   ],
   student: [

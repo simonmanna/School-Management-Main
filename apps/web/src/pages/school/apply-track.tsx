@@ -27,6 +27,8 @@ export function SchoolApplyTrackPage() {
   const [view, setView] = useState<PortalView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [docType, setDocType] = useState('birth_certificate');
+  const [file, setFile] = useState<File | null>(null);
 
   const load = async () => {
     if (!token) { setError('This link is missing its access token.'); return; }
@@ -49,6 +51,26 @@ export function SchoolApplyTrackPage() {
       await load();
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Could not record your response');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Wave 16: the family adds documents here, by the same token.
+  const upload = async () => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.append('type', docType);
+      body.append('file', file);
+      await api.post('/public/admissions/documents', body, { params: { token }, headers: { 'Content-Type': 'multipart/form-data' } });
+      notify.success('Document uploaded — the school will check it');
+      setFile(null);
+      await load();
+    } catch (e: any) {
+      const m = e?.response?.data?.message;
+      notify.error(Array.isArray(m) ? m.join(' · ') : m ?? 'Could not upload the document');
     } finally {
       setBusy(false);
     }
@@ -98,6 +120,20 @@ export function SchoolApplyTrackPage() {
                   : <Badge className="bg-slate-100 text-slate-700">Pending</Badge>}
               </div>
             ))}
+          </div>
+        )}
+        {!['enrolled', 'rejected', 'withdrawn', 'offer_declined', 'offer_expired'].includes(view.status) && (
+          <div className="mt-4 space-y-2 border-t pt-4">
+            <p className="text-xs font-medium text-muted-foreground">Upload a document (PDF, JPG or PNG, up to 10 MB)</p>
+            <div className="flex flex-wrap gap-2">
+              <select className="rounded-md border bg-card px-3 py-2 text-sm" value={docType} onChange={(e) => setDocType(e.target.value)} aria-label="Document type">
+                {['birth_certificate', 'passport_photo', 'previous_report', 'immunisation_card', 'transfer_letter', 'other'].map((t) => (
+                  <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+              <input type="file" accept="application/pdf,image/jpeg,image/png" aria-label="File" className="text-sm" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <Button size="sm" onClick={upload} disabled={!file || busy}>Upload</Button>
+            </div>
           </div>
         )}
       </CardContent></Card>

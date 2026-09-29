@@ -53,6 +53,7 @@ const ParentHome = lazy(() => import('@/routes/parent/home'));
 const ParentFees = lazy(() => import('@/routes/parent/fees'));
 const ParentAttendance = lazy(() => import('@/routes/parent/attendance'));
 const ParentResults = lazy(() => import('@/routes/parent/results'));
+const ParentGoingHome = lazy(() => import('@/routes/parent/going-home'));
 
 const StudentHome = lazy(() => import('@/routes/student/home'));
 const StudentCourses = lazy(() => import('@/routes/student/courses'));
@@ -109,6 +110,7 @@ export default function App() {
               <Route path="fees" element={<ParentFees />} />
               <Route path="attendance" element={<ParentAttendance />} />
               <Route path="results" element={<ParentResults />} />
+              <Route path="going-home" element={<ParentGoingHome />} />
               <Route path="notices" element={<PortalNotices />} />
             </Route>
           </Route>

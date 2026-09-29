@@ -8,6 +8,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
+  MaxLength,
   Max,
   Min,
   ValidateNested,
@@ -117,4 +119,17 @@ export class UpsertImmunisationDto {
   @IsOptional() @IsString() certificateDocumentId?: string;
   @IsOptional() @IsString() exemptionReason?: string;
   @IsOptional() @IsString() notes?: string;
+}
+
+/** Wave 16: a guardian asks, from the parent portal, for another adult to collect. */
+export class PortalPickupRequestDto {
+  @IsString() @IsNotEmpty() @MaxLength(120) personName!: string;
+  @Matches(/^(\+?256|0)7\d{8}$/, { message: 'personPhone must be a Ugandan mobile number' }) personPhone!: string;
+  @IsString() @IsNotEmpty() @MaxLength(40) relationship!: string;
+  @IsOptional() @IsString() @MaxLength(40) idType?: string;
+  @IsOptional() @IsString() @MaxLength(60) idNumber?: string;
+  @IsOptional() @IsIn(['STANDING', 'ONE_OFF']) kind?: 'STANDING' | 'ONE_OFF';
+  @IsOptional() @IsString() validFrom?: string;
+  @IsOptional() @IsString() validTo?: string;
+  @IsOptional() @IsString() @MaxLength(300) notes?: string;
 }

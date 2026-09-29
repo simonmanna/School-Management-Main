@@ -117,6 +117,146 @@ export class PickupService {
     });
   }
 
+  /* ── Wave 16: guardian requests from the parent portal ─────────────────── */
+
+  /**
+   * A guardian asks for someone else to be allowed to collect their child.
+   * Stored as PENDING: nobody is released on it until the office approves.
+   * The caller's right to act for this pupil is checked by the portal route.
+   */
+  async requestFromPortal(dto: {
+    studentProfileId: string;
+    personName: string;
+    personPhone: string;
+    relationship: string;
+    idType?: string;
+    idNumber?: string;
+    kind?: 'STANDING' | 'ONE_OFF';
+    validFrom?: string;
+    validTo?: string;
+    notes?: string;
+  }) {
+    if (!dto.personName?.trim() || !dto.personPhone?.trim()) {
+      throw new BadRequestException("Give the collector's name and phone number.");
+    }
+    const kind = dto.kind ?? 'STANDING';
+    const validFrom = dto.validFrom ? new Date(dto.validFrom) : new Date();
+    const validTo = dto.validTo ? new Date(dto.validTo) : null;
+    if (kind === 'ONE_OFF' && !validTo) throw new BadRequestException('A one-off authorization needs the day it is good for.');
+    if (validTo && validTo < validFrom) throw new BadRequestException('A pick-up authorization cannot end before it starts.');
+
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const pending = await tx.pickupAuthorization.count({
+        where: { studentProfileId: dto.studentProfileId, pendingSince: { not: null }, revokedAt: null },
+      });
+      if (pending >= 5) throw new BadRequestException('There are already five requests waiting for the office. Please wait for them to be reviewed.');
+      const row = await tx.pickupAuthorization.create({
+        data: {
+          organizationId: this.tenant.organizationId,
+          studentProfileId: dto.studentProfileId,
+          kind,
+          personName: dto.personName.trim(),
+          personPhone: dto.personPhone.trim(),
+          relationship: dto.relationship ?? null,
+          idType: dto.idType ?? null,
+          idNumber: dto.idNumber ?? null,
+          validFrom,
+          validTo,
+          notes: dto.notes ?? null,
+          pendingSince: new Date(),
+          requestedByUserId: this.tenant.userId ?? null,
+        },
+      });
+      await this.audit.recordInTx(tx, { entity: 'PickupAuthorization', entityId: row.id, action: 'create', newValues: { ...row, via: 'parent_portal' } });
+      return row;
+    });
+  }
+
+  /** What a family sees: their child's collectors, live and pending, newest first. */
+  async listForFamily(studentProfileId: string) {
+    const rows = await this.prisma.client.pickupAuthorization.findMany({
+      where: { studentProfileId, revokedAt: null, OR: [{ validTo: null }, { validTo: { gte: new Date() } }] },
+      orderBy: { createdAt: 'desc' },
+      include: { contact: true },
+    });
+    const guardians = await this.prisma.client.studentGuardian.findMany({
+      where: { studentProfileId, canPickup: true },
+      include: { guardianContact: true },
+    });
+    return {
+      guardians: guardians.map((g: any) => ({
+        name: [g.guardianContact?.firstName, g.guardianContact?.lastName].filter(Boolean).join(' ') || 'Guardian',
+        relationship: g.relationship,
+      })),
+      authorizations: rows.map((a: any) => ({
+        id: a.id,
+        name: a.personName ?? [a.contact?.firstName, a.contact?.lastName].filter(Boolean).join(' '),
+        phone: a.personPhone ?? a.contact?.phone ?? null,
+        relationship: a.relationship,
+        kind: a.kind,
+        validFrom: a.validFrom,
+        validTo: a.validTo,
+        status: a.pendingSince ? 'pending' : 'approved',
+      })),
+    };
+  }
+
+  /**
+   * A guardian withdraws a collector. Withdrawal is always safe to allow at
+   * once — it can only make the gate stricter.
+   */
+  async withdrawFromPortal(studentProfileId: string, id: string) {
+    // The portal route has already proved this caller holds the pupil; the staff
+    // data-scope check in revoke() does not apply to a family.
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const row = await tx.pickupAuthorization.findFirst({ where: { id, studentProfileId } });
+      if (!row) throw new NotFoundException('Not found');
+      if (row.revokedAt) return row;
+      const reason = 'Withdrawn by guardian via parent portal';
+      const updated = await tx.pickupAuthorization.update({
+        where: { id },
+        data: { revokedAt: new Date(), revokedById: this.tenant.userId ?? null, revokeReason: reason },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'PickupAuthorization',
+        entityId: id,
+        action: 'update',
+        oldValues: { revokedAt: null },
+        newValues: { revokedAt: updated.revokedAt, reason },
+      });
+      return updated;
+    });
+  }
+
+  /** The office's queue of portal requests. */
+  async pendingRequests() {
+    return this.prisma.client.pickupAuthorization.findMany({
+      where: { pendingSince: { not: null }, revokedAt: null },
+      orderBy: { pendingSince: 'asc' },
+      include: { studentProfile: { select: { id: true, admissionNo: true, partner: { select: { name: true } } } } },
+    });
+  }
+
+  /** The office approves a portal request; from now it is valid at the gate. */
+  async approve(id: string) {
+    return this.prisma.client.$transaction(async (tx: any) => {
+      const row = await tx.pickupAuthorization.findFirst({ where: { id } });
+      if (!row) throw new NotFoundException(`Pick-up authorization ${id} not found`);
+      await this.scope.assertMayReadStudent(row.studentProfileId);
+      if (row.revokedAt) throw new BadRequestException('That request was withdrawn.');
+      if (!row.pendingSince) return row;
+      if (row.requestedByUserId && row.requestedByUserId === this.tenant.userId) {
+        throw new ForbiddenException('The person who requested an authorization cannot approve it.');
+      }
+      const updated = await tx.pickupAuthorization.update({
+        where: { id },
+        data: { pendingSince: null, authorizedById: this.tenant.userId ?? null },
+      });
+      await this.audit.recordInTx(tx, { entity: 'PickupAuthorization', entityId: id, action: 'approve', oldValues: { pendingSince: row.pendingSince }, newValues: { pendingSince: null } });
+      return updated;
+    });
+  }
+
   /**
    * Everyone who may collect this child right now: guardians flagged for
    * pick-up, plus live authorizations. One list, because that is what the person
@@ -133,6 +273,8 @@ export class PickupService {
       where: {
         studentProfileId,
         revokedAt: null,
+        // A portal request the office has not approved is not permission.
+        pendingSince: null,
         validFrom: { lte: at },
         OR: [{ validTo: null }, { validTo: { gte: at } }],
       },
@@ -239,6 +381,9 @@ export class PickupService {
           throw new BadRequestException(
             `That authorization was withdrawn${authorization.revokeReason ? `: ${authorization.revokeReason}` : ''}.`,
           );
+        }
+        if (authorization.pendingSince) {
+          throw new BadRequestException('That authorization was requested by a parent and has not been approved by the office yet.');
         }
         if (authorization.validFrom > collectedAt || (authorization.validTo && authorization.validTo < collectedAt)) {
           throw new BadRequestException('That authorization is not valid today.');

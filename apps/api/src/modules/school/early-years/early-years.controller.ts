@@ -83,6 +83,20 @@ export class PickupController {
     return this.service.create(dto);
   }
 
+  /** Wave 16: portal requests waiting for the office. */
+  @Get('requests')
+  @RequirePermissions(PERMISSIONS.school.managePickup)
+  pendingRequests() {
+    return this.service.pendingRequests();
+  }
+
+  /** Wave 16: approve a portal request; only then is it valid at the gate. */
+  @Patch('authorizations/:id/approve')
+  @RequirePermissions(PERMISSIONS.school.managePickup)
+  approve(@Param('id') id: string) {
+    return this.service.approve(id);
+  }
+
   @Patch('authorizations/:id/revoke')
   @RequirePermissions(PERMISSIONS.school.managePickup)
   revoke(@Param('id') id: string, @Body() dto: RevokePickupAuthorizationDto) {

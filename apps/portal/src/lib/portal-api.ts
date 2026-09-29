@@ -636,3 +636,58 @@ export function useRecordMark() {
     },
   });
 }
+
+/* ── Wave 16: going home — pick-up authorizations and transport ─────────── */
+
+export interface FamilyPickup {
+  guardians: Array<{ name: string; relationship: string }>;
+  authorizations: Array<{
+    id: string; name: string; phone: string | null; relationship: string | null;
+    kind: 'STANDING' | 'ONE_OFF'; validFrom: string; validTo: string | null; status: 'pending' | 'approved';
+  }>;
+}
+export function usePickup(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'pickup', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<FamilyPickup>(`${S}/portals/parent/${studentProfileId}/pickup`)).data,
+  });
+}
+export function useRequestPickup(studentProfileId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { personName: string; personPhone: string; relationship: string; idType?: string; idNumber?: string; kind?: 'STANDING' | 'ONE_OFF'; validTo?: string }) =>
+      (await api.post(`${S}/portals/parent/${studentProfileId}/pickup`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'pickup', studentProfileId] }),
+  });
+}
+export function useWithdrawPickup(studentProfileId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.patch(`${S}/portals/parent/${studentProfileId}/pickup/${id}/withdraw`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'pickup', studentProfileId] }),
+  });
+}
+
+export interface FamilyTransport {
+  date: string;
+  assignments: Array<{
+    id: string; route: string | null; routeCode: string | null; serviceMode: string; daysOfWeek: number[];
+    pickupStop: { name: string; landmark: string | null } | null;
+    dropoffStop: { name: string; landmark: string | null } | null;
+    status: string;
+  }>;
+  today: Array<{
+    direction: string; tripStatus: string; plannedDeparture: string | null; actualDeparture: string | null;
+    actualArrival: string | null; delayMinutes: number; passengerStatus: string;
+    lastEvent: { eventType: string; occurredAt: string } | null;
+  }>;
+}
+export function useTransport(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'transport', studentProfileId],
+    enabled: !!studentProfileId,
+    refetchInterval: 60_000,
+    queryFn: async () => (await api.get<FamilyTransport>(`${S}/portals/parent/${studentProfileId}/transport`)).data,
+  });
+}

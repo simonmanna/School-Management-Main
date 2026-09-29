@@ -81,6 +81,70 @@ export async function fetchApplication(token: string): Promise<ApplicationView> 
   return data;
 }
 
+/* ── Wave 16: online application ─────────────────────────────────────────── */
+
+export interface ApplyOptions {
+  schoolName: string;
+  cycles: Array<{ id: string; name: string; academicYear: string | null; closesAt: string | null }>;
+  classes: Array<{ id: string; name: string }>;
+  documentTypes: string[];
+}
+
+export interface ApplicationSubmission {
+  admissionCycleId: string;
+  applyingForClassId?: string;
+  applicantFirstName: string;
+  applicantLastName: string;
+  applicantDob: string;
+  applicantGender: 'male' | 'female';
+  previousSchool?: string;
+  address?: string;
+  guardian: { firstName: string; lastName: string; relationship: string; phone: string; email: string };
+  /** Honeypot — left empty by people. */
+  website?: string;
+}
+
+export interface ApplicationReceipt {
+  received: boolean;
+  applicationNumber?: string;
+  trackingLinkSentTo?: string;
+}
+
+/** `GET /public/admissions/:orgCode/options` — open intakes and classes. */
+export async function fetchApplyOptions(orgCode: string): Promise<ApplyOptions> {
+  const { data } = await publicApi.get<ApplyOptions>(`/public/admissions/${encodeURIComponent(orgCode)}/options`);
+  return data;
+}
+
+/** `POST /public/admissions/:orgCode/applications` — no account; the tracking link is emailed. */
+export async function submitApplication(orgCode: string, dto: ApplicationSubmission): Promise<ApplicationReceipt> {
+  const { data } = await publicApi.post<ApplicationReceipt>(`/public/admissions/${encodeURIComponent(orgCode)}/applications`, dto);
+  return data;
+}
+
+/** `POST /public/admissions/documents?token=` — attach one document to the token's application. */
+export async function uploadApplicationDocument(token: string, type: string, file: File): Promise<{ id: string; type: string }> {
+  const body = new FormData();
+  body.append('type', type);
+  body.append('file', file);
+  const { data } = await publicApi.post(`/public/admissions/documents`, body, {
+    params: { token: token.trim() },
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+/** The server's own words for a refused submission (validation, closed intake, duplicate). */
+export function submissionErrorMessage(e: unknown): string {
+  const err = e as AxiosError<{ message?: string | string[] }>;
+  if (!err?.response) return 'No connection. Check your internet and try again.';
+  if (err.response.status === 429) return 'Too many attempts from this connection. Please try again later.';
+  const msg = err.response.data?.message;
+  if (Array.isArray(msg)) return msg.join(' · ');
+  if (typeof msg === 'string' && err.response.status < 500) return msg;
+  return 'The school system is not responding. Please try again shortly.';
+}
+
 /**
  * A message for a failed public lookup.
  *

@@ -124,7 +124,12 @@ export function SchoolApplicationsPage() {
                   className="cursor-pointer border-b last:border-0 hover:bg-muted/40"
                   onClick={() => navigate(`/school/applications/${a.id}?mode=view`)}
                 >
-                  <td className="px-4 py-2 font-mono text-xs">{a.applicationNumber}</td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    {a.applicationNumber}
+                    {(a as { sourceOfEnquiry?: string | null }).sourceOfEnquiry === 'online' && (
+                      <span className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 font-sans text-[10px] font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-200">Online</span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 font-medium">{a.applicantFirstName} {a.applicantLastName}</td>
                   <td className="px-4 py-2">{a.applyingForClassId ? classNameByIdExists(classNameById, a.applyingForClassId) : '—'}</td>
                   <td className="px-4 py-2">{yearNameById[a.academicYearId] ?? '—'}</td>

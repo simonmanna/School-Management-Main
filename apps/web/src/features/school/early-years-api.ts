@@ -133,6 +133,34 @@ export function useRevokePickupAuthorization() {
   });
 }
 
+/** Wave 16: collectors requested by parents on the portal, waiting for the office. */
+export interface PickupRequest {
+  id: string;
+  studentProfileId: string;
+  personName: string | null;
+  personPhone: string | null;
+  relationship: string | null;
+  idType: string | null;
+  idNumber: string | null;
+  kind: 'STANDING' | 'ONE_OFF';
+  validTo: string | null;
+  pendingSince: string;
+  studentProfile?: { admissionNo: string; partner?: { name: string } | null } | null;
+}
+export function usePickupRequests() {
+  return useQuery({
+    queryKey: ['school', 'pickup', 'requests'],
+    queryFn: async () => (await api.get<PickupRequest[]>(`${PICKUP}/requests`)).data,
+  });
+}
+export function useApprovePickupRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.patch(`${PICKUP}/authorizations/${id}/approve`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'pickup'] }),
+  });
+}
+
 export function useReleaseChild() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,3 +1,4 @@
+import { PortalTransportService } from './portal-transport.service';
 import { Module } from '@nestjs/common';
 import { PortalsService } from './portals.service';
 import { PortalsController } from './portals.controller';
@@ -20,7 +21,7 @@ import { EarlyYearsModule } from '../early-years/early-years.module';
   // the school's.
   imports: [PlacementLookupModule, AttendanceModule, FeesModule, ExaminationsModule, EarlyYearsModule],
   controllers: [PortalsController, PortalAccountController],
-  providers: [PortalsService, PortalAccountService, PortalDocumentsService],
+  providers: [PortalsService, PortalAccountService, PortalDocumentsService, PortalTransportService],
   exports: [PortalsService, PortalAccountService, PortalDocumentsService],
 })
 export class PortalsModule {}

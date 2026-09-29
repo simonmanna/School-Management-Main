@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res, StreamableFile } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Res, StreamableFile } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
@@ -6,10 +6,13 @@ import { RequirePermissions } from '../../../kernel/auth/decorators/require-perm
 import { ScopedToStudent } from '../../../kernel/auth/guards/scoped-to-student.decorator';
 import { PortalsService } from './portals.service';
 import { PortalDocumentsService } from './portal-documents.service';
+import { PortalTransportService } from './portal-transport.service';
 import { MobileMoneyService } from '../fees/mobile-money.service';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { CareLogService } from '../early-years/care-log.service';
+import { PickupService } from '../early-years/pickup.service';
+import { PortalPickupRequestDto } from '../early-years/dto.types';
 
 @Controller('school/portals')
 export class PortalsController {
@@ -22,6 +25,8 @@ export class PortalsController {
     private readonly documents: PortalDocumentsService,
     private readonly employeeIdentity: EmployeeIdentityService,
     private readonly careLogs: CareLogService,
+    private readonly pickup: PickupService,
+    private readonly transport: PortalTransportService,
   ) {}
 
   /**
@@ -230,6 +235,40 @@ export class PortalsController {
       'Content-Length': String(buffer.length),
     });
     return new StreamableFile(buffer);
+  }
+
+  /** Wave 16: my child's route, stops and today's trips. */
+  @Get('parent/:studentProfileId/transport')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  transportView(@Param('studentProfileId') studentProfileId: string) {
+    return this.transport.forFamily(studentProfileId);
+  }
+
+  /* ── Wave 16: who may collect my child ── */
+
+  @Get('parent/:studentProfileId/pickup')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  pickupList(@Param('studentProfileId') studentProfileId: string) {
+    return this.pickup.listForFamily(studentProfileId);
+  }
+
+  /** Ask for another adult to be allowed to collect. Pending until the office approves. */
+  @Post('parent/:studentProfileId/pickup')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  @Throttle({ default: { limit: 10, ttl: 60 * 60_000 } })
+  pickupRequest(@Param('studentProfileId') studentProfileId: string, @Body() dto: PortalPickupRequestDto) {
+    return this.pickup.requestFromPortal({ ...dto, studentProfileId });
+  }
+
+  /** Withdraw a collector at once — this can only make the gate stricter. */
+  @Patch('parent/:studentProfileId/pickup/:id/withdraw')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  pickupWithdraw(@Param('studentProfileId') studentProfileId: string, @Param('id') id: string) {
+    return this.pickup.withdrawFromPortal(studentProfileId, id);
   }
 
   /** Wave 16: the family's fee receipts. */
