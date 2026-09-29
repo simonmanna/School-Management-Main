@@ -16,13 +16,13 @@ import { expect, test, type Page } from '@playwright/test';
  *
  * Running it (an already-running stack, as in playwright.config.ts):
  *   E2E_ORG=... E2E_EMAIL=... E2E_PASSWORD=...          registrar/admin
- *   E2E_TEACHER_EMAIL=... E2E_TEACHER_PASSWORD=...      optional second role
+ *   E2E_TEACHER_EMAIL=... E2E_TEACHER_PASSWORD=...      required: the marking teacher
  *   E2E_TERM=...                                        optional: a live term
  *   pnpm --filter @erp/web exec playwright test academic-journey
  *
- * Without the teacher credentials the marking leg runs as the registrar and the
- * test says so — the journey is still proved end to end, the segregation of
- * duties is not.
+ * The teacher credentials are REQUIRED and must be a different account (audit
+ * R07 / D07): running the marking leg as the registrar would prove the journey
+ * but not the separation of duties, and a green run must never be read as both.
  *
  * Wave 13 contract (student-flow audit 2026-09-26):
  *   - an application is a form page, not a dialog;
@@ -48,6 +48,17 @@ const COURSE = process.env.E2E_COURSE ?? 'P.1 A Mathematics — Term 3';
 // before each run: it opens a fresh exam sitting once the previous one is closed.
 
 test.skip(!ORG || !EMAIL || !PASSWORD, 'Set E2E_ORG, E2E_EMAIL and E2E_PASSWORD to run the academic journey');
+
+// Configured to run, the journey must not quietly downgrade to one account.
+test.beforeAll(() => {
+  if (!ORG || !EMAIL) return;
+  if (!TEACHER_EMAIL || !TEACHER_PASSWORD) {
+    throw new Error('Set E2E_TEACHER_EMAIL and E2E_TEACHER_PASSWORD: the marking leg must be a different person (D07).');
+  }
+  if (TEACHER_EMAIL.toLowerCase() === EMAIL.toLowerCase()) {
+    throw new Error('E2E_TEACHER_EMAIL must differ from E2E_EMAIL: approver and marker must be different people (D07).');
+  }
+});
 
 test.describe.configure({ mode: 'serial' });
 
@@ -163,8 +174,7 @@ test('application → enrolment → assessment → marks → results → publish
   // Placement reconciles compulsory course rosters, so the teacher's frozen
   // snapshot below includes the pupil enrolled a moment ago.
   const marker = await browser.newPage();
-  const teacherRole = !!(TEACHER_EMAIL && TEACHER_PASSWORD);
-  await signIn(marker, teacherRole ? TEACHER_EMAIL : EMAIL, teacherRole ? TEACHER_PASSWORD : PASSWORD);
+  await signIn(marker, TEACHER_EMAIL, TEACHER_PASSWORD);
 
   /* ── 5. The teacher sets the CAT and the exam paper ────────────────────── */
   // The school weights continuous assessment 40% and the end-of-term exam 60%,

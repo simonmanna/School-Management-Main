@@ -59,6 +59,18 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(PinoLogger));
   app.use(requestIdMiddleware);
 
+  // Wave 17: behind the TLS proxy (Caddy) every request arrives from the proxy's
+  // address. Without trusting it, rate limits keyed by IP — sign-in is 10 per
+  // 5 minutes — were shared by the WHOLE SCHOOL, so a staff room signing in at
+  // 07:45 locked everyone out. TRUST_PROXY names how many proxy hops to trust
+  // ("1" for the Compose deployment); unset trusts none, which is right when the
+  // API is reached directly. Never trust more hops than exist: the client could
+  // then choose its own address.
+  const trustProxy = process.env.TRUST_PROXY?.trim();
+  if (trustProxy) {
+    app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy === 'true' ? true : trustProxy);
+  }
+
   // Security headers via helmet. CSP disabled for the API (no HTML served);
   // crossOriginResourcePolicy loosened for /uploads served from same origin.
   app.use(

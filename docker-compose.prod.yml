@@ -44,6 +44,9 @@ services:
       DIRECT_URL: ${MIGRATOR_DATABASE_URL:?set MIGRATOR_DATABASE_URL to the migration role}
       NODE_ENV: production
       LOG_LEVEL: info
+      # One proxy hop (Caddy) in front of the API: rate limits and audit IPs are
+      # per client, not one shared address for the whole school.
+      TRUST_PROXY: "1"
       CORS_ORIGINS: ${PROD_CORS_ORIGINS:?set PROD_CORS_ORIGINS}
       METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
       # SEC-06: refuse any route without an explicit authorization policy.

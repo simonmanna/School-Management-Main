@@ -15,6 +15,13 @@ import { NoPermissionRequired } from './decorators/no-permission-required.decora
 import { CurrentUser } from './decorators/current-user.decorator';
 import type { AuthUser } from './jwt-token.service';
 
+/**
+ * Sign-in attempts per client IP per 5 minutes. 10 in production; an
+ * isolated acceptance stack that signs its test accounts in and out many times
+ * from one machine may raise it (LOGIN_THROTTLE_LIMIT). Never raised by default.
+ */
+const LOGIN_LIMIT = Math.max(1, Number(process.env.LOGIN_THROTTLE_LIMIT ?? 10) || 10);
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -33,7 +40,7 @@ export class AuthController {
   // store (keyed per organization) threw a 500 whenever a client sent a key,
   // and replaying a cached response would hand out the same tokens twice.
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 5 * 60 * 1000 } })
+  @Throttle({ default: { limit: LOGIN_LIMIT, ttl: 5 * 60 * 1000 } })
   @Post('login')
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto, req);

@@ -464,7 +464,9 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Receipt,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      // Approvers (Head Teacher) reach the refund and correction queues here too;
+      // the page's actions are still gated by the API (wave 17 acceptance).
+      { to: '/school/fees', label: 'Fees & Billing', icon: Receipt, permission: [PERMISSIONS.school.manageFees, PERMISSIONS.school.approveRefunds, PERMISSIONS.school.approveCredits] },
       { to: '/school/fees/categories', label: 'Fee Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/structures', label: 'Fee Structures', icon: Layers, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/optional', label: 'Optional Fees', icon: Ticket, permission: PERMISSIONS.school.manageFees },
@@ -473,7 +475,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/fees/invoices', label: 'Fee Invoices', icon: Receipt, permission: PERMISSIONS.school.readFees },
       { to: '/school/fees/ledger', label: 'Student Ledger', icon: Receipt, permission: PERMISSIONS.school.readFees },
       { to: '/school/fees/billing-runs', label: 'Billing Runs', icon: Receipt, permission: PERMISSIONS.school.manageFees },
-      { to: '/school/fees/adjustments', label: 'Adjustments', icon: Receipt, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/adjustments', label: 'Adjustments', icon: Receipt, permission: [PERMISSIONS.school.manageFees, PERMISSIONS.school.approveAdjustments] },
       { to: '/school/fees/reconciliation', label: 'Payment Reconciliation', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/term-close', label: 'Term Close', icon: Receipt, permission: PERMISSIONS.school.readFees },
       { to: '/school/fees/collect', label: 'Record Fee Payments', icon: HandCoins, permission: PERMISSIONS.school.manageFees },
@@ -488,7 +490,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/fees/discounts', label: 'Discounts', icon: Tag, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/overrides', label: 'Fee Overrides', icon: Ticket, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/waiver-categories', label: 'Waiver Categories', icon: Tag, permission: PERMISSIONS.school.manageFees },
-      { to: '/school/fees/waivers', label: 'Fee Waivers', icon: Ticket, permission: PERMISSIONS.school.manageFees },
+      { to: '/school/fees/waivers', label: 'Fee Waivers', icon: Ticket, permission: [PERMISSIONS.school.manageFees, PERMISSIONS.school.approveWaivers] },
       { to: '/school/fees/defaulters', label: 'Fee Defaulters', icon: AlertTriangle, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/bad-debtors', label: 'Bad Debtors', icon: BadgeDollarSign, permission: PERMISSIONS.school.manageFees },
       { to: '/school/fees/budgeting', label: 'Budgeting', icon: PiggyBank, permission: PERMISSIONS.school.manageFees },
