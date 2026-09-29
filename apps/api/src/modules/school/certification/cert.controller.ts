@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res, StreamableFile } from '@nestjs/common';
+import { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { Public } from '../../../kernel/auth/decorators/public.decorator';
 import { CertificateService, ExternalExamResultService, TranscriptService } from './cert.service';
-import { IssueCertificateDto, RecordExternalResultDto, RevokeCertificateDto } from './cert.dto';
+import { CertificatePdfService } from './certificate-pdf.service';
+import { IssueCertificateDto, IssueLeavingCertificateDto, RecordExternalResultDto, RevokeCertificateDto } from './cert.dto';
 
 @Controller('school/transcripts')
 export class TranscriptController {
@@ -41,7 +43,10 @@ export class ExternalExamResultController {
 
 @Controller('school/certificates')
 export class CertificateController {
-  constructor(private readonly service: CertificateService) {}
+  constructor(
+    private readonly service: CertificateService,
+    private readonly pdf: CertificatePdfService,
+  ) {}
 
   @Get('by-student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.read)
@@ -53,6 +58,22 @@ export class CertificateController {
   @RequirePermissions(PERMISSIONS.school.issueCertificates)
   issue(@Body() dto: IssueCertificateDto) {
     return this.service.issue(dto);
+  }
+
+  /** Wave 16: leaving (transfer) certificate, snapshotted from the record. */
+  @Post('leaving')
+  @RequirePermissions(PERMISSIONS.school.issueCertificates)
+  issueLeaving(@Body() dto: IssueLeavingCertificateDto) {
+    return this.service.issueLeaving(dto);
+  }
+
+  /** Printable copy. Office-only: the id alone would otherwise reach any pupil's record. */
+  @Get(':id/pdf')
+  @RequirePermissions(PERMISSIONS.school.issueCertificates)
+  async printable(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const { filename, pdf } = await this.pdf.generatePdf(id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, 'Content-Length': pdf.length });
+    return new StreamableFile(pdf);
   }
 
   @Post(':id/revoke')

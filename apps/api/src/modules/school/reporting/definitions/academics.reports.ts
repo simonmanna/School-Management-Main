@@ -98,6 +98,67 @@ export function academicsReports(deps: SchoolReportDeps): ReportDefinition<any>[
     },
 
     {
+      // Wave 16: the class promotion list the head teacher signs at year end.
+      key: 'academics.promotion-list',
+      title: 'Promotion List',
+      domain: 'academics',
+      description: 'Each pupil\'s result, recommendation and the decision taken, class by class, for signing.',
+      permission: PERMISSIONS.school.readReports,
+      shape: 'grouped',
+      groupBy: 'fromClassName',
+      filters: ['resultSetId', 'classId'],
+      requiredFilters: ['resultSetId'],
+      asOfMode: 'live',
+      paging: 'memory',
+      defaultSort: { key: 'studentName', order: 'asc' },
+      columns: [
+        { key: 'admissionNo', label: 'Adm No', type: 'string', width: 10 },
+        { key: 'studentName', label: 'Name', type: 'string', width: 24 },
+        { key: 'fromClassName', label: 'Class', type: 'string', width: 10, hideOn: ['pdf'] },
+        { key: 'meanPercent', label: 'Mean', type: 'percent', width: 7 },
+        { key: 'aggregate', label: 'Agg', type: 'int', width: 6 },
+        { key: 'division', label: 'Div', type: 'string', width: 6 },
+        { key: 'classRank', label: 'Pos', type: 'int', width: 5 },
+        { key: 'recommendation', label: 'Recommended', type: 'enum', width: 11 },
+        { key: 'decision', label: 'Decision', type: 'enum', width: 10 },
+        { key: 'toClassName', label: 'Next class', type: 'string', width: 12 },
+        { key: 'status', label: 'Status', type: 'enum', width: 9 },
+      ],
+      async run(ctx, params) {
+        const board: any = await deps.promotions.board(params.resultSetId);
+        const rows = (board.rows as any[])
+          .filter((r) => !params.classId || r.fromClassId === params.classId)
+          .map((r) => ({
+            studentProfileId: r.studentProfileId,
+            admissionNo: r.admissionNo ?? '',
+            studentName: r.studentName ?? r.studentProfileId,
+            fromClassName: r.fromClassName ?? '—',
+            meanPercent: r.basis?.meanPercent ?? null,
+            aggregate: r.basis?.aggregate ?? null,
+            division: r.basis?.division ?? '',
+            classRank: r.basis?.classRank ?? null,
+            recommendation: r.recommendation,
+            decision: r.decision ?? '',
+            toClassName: [r.toClassName, r.toSectionName].filter(Boolean).join(' ') || '',
+            status: r.status,
+          }));
+        const undecided = rows.filter((r) => r.status === 'proposed').length;
+        // One block per class, so each class teacher's list prints on its own.
+        const byClass = new Map<string, typeof rows>();
+        for (const r of rows) byClass.set(r.fromClassName, [...(byClass.get(r.fromClassName) ?? []), r]);
+        const groups = [...byClass.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([label, members]) => ({ key: label, label, rows: members.sort((x, y) => x.studentName.localeCompare(y.studentName)) }));
+        return {
+          rows,
+          groups,
+          caption: `Result set revision ${board.resultSet.revision} · ${rows.length} pupils · Head teacher: ____________________   Date: __________`,
+          notes: undecided ? [`${undecided} pupil(s) still have no decision. This list is not final.`] : [],
+        };
+      },
+    },
+
+    {
       key: 'academics.subject-performance',
       title: 'Subject Performance',
       domain: 'academics',

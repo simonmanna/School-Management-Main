@@ -42,6 +42,7 @@ import { MobileMoneyService } from './mobile-money.service';
 import { DunningCronWorker } from './dunning-cron.worker';
 import { MobileMoneyController } from './mobile-money.controller';
 import { SchoolFinanceQueryController } from './school-finance-query.controller';
+import { FeeReceiptPdfService } from './fee-receipt-pdf.service';
 import { FinanceControlsService } from './finance-controls.service';
 import { FinanceControlsController } from './finance-controls.controller';
 import { BillingRunService } from './billing-run.service';
@@ -93,6 +94,7 @@ import { CashDeskController } from './cash-desk.controller';
     PaymentReconciliationController,
   ],
   providers: [
+    FeeReceiptPdfService,
     CashDeskService,
     FeeStructureService,
     FeeCategoryService,
@@ -127,6 +129,7 @@ import { CashDeskController } from './cash-desk.controller';
     PaymentReconciliationService,
   ],
   exports: [
+    FeeReceiptPdfService,
     FeeStructureService,
     FeeCategoryService,
     FeeScheduleService,

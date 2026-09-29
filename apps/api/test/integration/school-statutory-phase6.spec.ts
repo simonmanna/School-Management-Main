@@ -13,6 +13,7 @@
  *
  * Runs only when DATABASE_URL is set (see _setup.ts).
  */
+import ExcelJS from 'exceljs';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
@@ -405,6 +406,28 @@ describeDb('integration: Phase 6 statutory submissions (ADR-029)', () => {
     expect(run.checksum).toBe(result.checksum);
     expect(run.warnings.length).toBeGreaterThan(0);
     expect(run.status).toBe('generated');
+  });
+
+  it('Wave 16: the same rows as an xlsx workbook, every cell as text, same checksum', async () => {
+    const templates: any[] = await asUser('su', () => exports.listTemplates('uneb_ca'));
+    const template = templates.find((t) => t.code === 'UNEB_UCE_CA')!;
+    const args = {
+      templateId: template.id, termId, level: 'UCE' as const, registrationYear: YEAR,
+      allowIncomplete: true, reason: 'Office review copy.',
+    };
+    const csv = await asUser('su', () => exports.run(args));
+    const xl = await asUser('su', () => exports.run({ ...args, format: 'xlsx' }));
+
+    expect(xl.filename).toMatch(/\.xlsx$/);
+    expect(xl.checksum).toBe(csv.checksum);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(xl.xlsx! as any);
+    const ws = wb.worksheets[0];
+    const cells = (n: number) => (ws.getRow(n).values as any[]).slice(1).map((v) => (v == null ? '' : String(v)));
+    const [header, data] = csv.content.split('\r\n');
+    expect(cells(1)).toEqual(header.split(','));
+    expect(cells(2)).toEqual(data.split(','));
+    expect(ws.getColumn(1).numFmt).toBe('@');
   });
 
   it('refuses an incomplete run with no reason on the record', async () => {

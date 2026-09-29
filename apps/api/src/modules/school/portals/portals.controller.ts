@@ -232,6 +232,28 @@ export class PortalsController {
     return new StreamableFile(buffer);
   }
 
+  /** Wave 16: the family's fee receipts. */
+  @Get('parent/:studentProfileId/receipts')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @ScopedToStudent('studentProfileId')
+  feeReceipts(@Param('studentProfileId') studentProfileId: string) {
+    return this.documents.feeReceipts(studentProfileId);
+  }
+
+  /** One receipt as a PDF (family copy). Ownership is resolved from the payment. */
+  @Get('receipts/:paymentId/pdf')
+  @RequirePermissions(PERMISSIONS.school.parentPortal)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  async feeReceiptPdf(@Param('paymentId') paymentId: string, @Res({ passthrough: true }) res: Response) {
+    const { buffer, filename } = await this.documents.feeReceiptPdf(paymentId);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+    return new StreamableFile(buffer);
+  }
+
   @Get('student/:studentProfileId')
   @RequirePermissions(PERMISSIONS.school.studentPortal)
   @ScopedToStudent('studentProfileId')

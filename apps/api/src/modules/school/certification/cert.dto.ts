@@ -34,3 +34,17 @@ export class RevokeCertificateDto {
   @IsString() @IsNotEmpty() reason!: string;
   @IsOptional() @IsBoolean() void?: boolean;
 }
+
+/**
+ * Wave 16 — the leaving (transfer) certificate. The server snapshots the
+ * pupil's record, last class and fee position at issue; the office supplies
+ * only what it alone knows.
+ */
+export class IssueLeavingCertificateDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsString() @IsNotEmpty() reasonForLeaving!: string;
+  @IsOptional() @IsString() leavingDate?: string;
+  @IsOptional() @IsString() conduct?: string;
+  @IsOptional() @IsString() destinationSchool?: string;
+  @IsOptional() @IsString() remarks?: string;
+}

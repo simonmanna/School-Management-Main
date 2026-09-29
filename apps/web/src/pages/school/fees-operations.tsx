@@ -20,6 +20,7 @@ import {
   FileText,
   Users,
   Wallet,
+  Receipt,
 } from 'lucide-react';
 import {
   useReceiptSearch,
@@ -46,6 +47,7 @@ import {
   type BatchRow,
   type DiscountAppliesTo,
   type ReceiptRow,
+  openFeeReceiptPdf,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -241,6 +243,12 @@ export function SchoolReceiptsPage() {
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Receipt {detail.payment?.paymentNumber}</CardTitle>
             <div className="flex gap-2 print:hidden">
+              {selected && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => openFeeReceiptPdf(selected, 'a4').catch(() => notify.error('Could not produce the receipt PDF'))}><FileText className="mr-1 h-4 w-4" /> PDF</Button>
+              <Button size="sm" variant="outline" onClick={() => openFeeReceiptPdf(selected, 'thermal').catch(() => notify.error('Could not produce the receipt PDF'))}><Receipt className="mr-1 h-4 w-4" /> Thermal</Button>
+                </>
+              )}
               <Button size="sm" onClick={() => window.print()}>
                 <Printer className="h-4 w-4" /> Print
               </Button>

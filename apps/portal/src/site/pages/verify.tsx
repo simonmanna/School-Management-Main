@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { AlertCircle, BadgeCheck, Loader2, Search, ShieldX } from 'lucide-react';
 import { SITE } from '@/site/content';
@@ -24,7 +25,11 @@ import { publicErrorMessage, verifyCertificate, type CertificateVerification } f
 export default function VerifyPage() {
   usePageTitle('Verify a certificate');
 
-  const [code, setCode] = useState('');
+  // Printed certificates link here as /verify?code=… (Wave 16), so a reader who
+  // follows the link sees the answer without retyping the code.
+  const [params] = useSearchParams();
+  const linked = params.get('code')?.trim() ?? '';
+  const [code, setCode] = useState(linked);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CertificateVerification | null>(null);
 
@@ -39,6 +44,12 @@ export default function VerifyPage() {
       setError(publicErrorMessage(e, 'No certificate matches that code.'));
     },
   });
+
+  useEffect(() => {
+    if (linked) check.mutate();
+    // Run once for the linked code; later checks are the visitor's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>

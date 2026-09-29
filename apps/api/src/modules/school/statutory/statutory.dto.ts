@@ -96,6 +96,12 @@ export class UpdateExportTemplateDto {
 
 export class RunExportDto {
   @IsString() @IsNotEmpty() templateId!: string;
+  /**
+   * Wave 16: file container. `csv` (default) is what the board's portal takes;
+   * `xlsx` is for the office to review and correct. Both carry the same rows,
+   * every cell as text so candidate and centre numbers keep their leading zeros.
+   */
+  @IsOptional() @IsIn(['csv', 'xlsx']) format?: 'csv' | 'xlsx';
   @IsOptional() @IsString() termId?: string;
   @IsOptional() @IsString() academicYearId?: string;
   @IsOptional() @IsString() examId?: string;

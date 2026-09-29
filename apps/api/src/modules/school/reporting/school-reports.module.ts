@@ -6,6 +6,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AssessmentModule } from '../assessment/assessment.module';
 import { ResultRunService } from '../assessment/result-run.service';
+import { PromotionDecisionService } from '../assessment/promotion-decision.service';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { StudentAttendanceService } from '../attendance/student-attendance.service';
 import { AdmissionsModule } from '../admissions/admissions.module';
@@ -75,6 +76,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
         advancedFinance: AdvancedFinanceService,
         analytics: AnalyticsService,
         resultRun: ResultRunService,
+        promotions: PromotionDecisionService,
         attendance: StudentAttendanceService,
         enrollment: EnrollmentRosterService,
         admissions: AdmissionsService,
@@ -90,7 +92,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
         fiscalPeriod: FiscalPeriodService,
         lookup: ReportLookupService,
       ): SchoolReportDeps => ({
-        finance, advancedFinance, analytics, resultRun, attendance, enrollment,
+        finance, advancedFinance, analytics, resultRun, promotions, attendance, enrollment,
         admissions, timetable, reportCardPdf, resolver,
         accounting, pnl, balanceSheet, cashFlow, tieOut, fiscalPeriod,
         lookup,
@@ -100,6 +102,7 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
         AdvancedFinanceService,
         AnalyticsService,
         ResultRunService,
+        PromotionDecisionService,
         StudentAttendanceService,
         EnrollmentRosterService,
         AdmissionsService,

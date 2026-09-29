@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { createHash } from 'node:crypto';
@@ -22,6 +23,8 @@ export interface ExportResult {
   templateVersion: number;
   filename: string;
   content: string;
+  /** Wave 16: the same rows as an XLSX workbook, when `format: 'xlsx'` was asked for. */
+  xlsx?: Buffer;
   rowCount: number;
   checksum: string;
   warnings: Array<{ code: string; detail: string; studentProfileId?: string }>;
@@ -263,12 +266,16 @@ export class StatutoryExportService {
       },
     });
 
+    // The checksum is always of the canonical CSV rendering, so it identifies the
+    // data whichever container carried it (a zip-based xlsx is not byte-stable).
+    const xlsx = dto.format === 'xlsx' ? await this.workbook(template.code, rows, columns, template.includeHeader) : undefined;
     return {
       runId: run.id,
       templateCode: template.code,
       templateVersion: template.version,
-      filename: `${template.code}_${new Date().toISOString().slice(0, 10)}.csv`,
+      filename: `${template.code}_${new Date().toISOString().slice(0, 10)}.${xlsx ? 'xlsx' : 'csv'}`,
       content,
+      xlsx,
       rowCount: rows.length,
       checksum,
       warnings: [...warnings, ...(dto.allowIncomplete ? blocking : [])],
@@ -522,5 +529,21 @@ export class StatutoryExportService {
 
   private render(rows: Array<Record<string, unknown>>, columns: TemplateColumn[], delimiter: string, includeHeader: boolean): string {
     return renderCsv(rows, columns, delimiter, includeHeader);
+  }
+
+  /** Same cells as the CSV, as text, one sheet, header frozen. */
+  private async workbook(code: string, rows: Array<Record<string, unknown>>, columns: TemplateColumn[], includeHeader: boolean): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(code.slice(0, 31));
+    if (includeHeader) {
+      ws.addRow(columns.map((c) => c.header)).font = { bold: true };
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+    }
+    for (const row of rows) ws.addRow(columns.map((c) => this.cell(row, c)));
+    ws.columns.forEach((col, i) => {
+      col.numFmt = '@';
+      col.width = Math.min(40, Math.max(10, String(columns[i]?.header ?? '').length + 2));
+    });
+    return Buffer.from(await wb.xlsx.writeBuffer());
   }
 }

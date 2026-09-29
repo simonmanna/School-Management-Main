@@ -1,6 +1,6 @@
 import { summarizeAttendance } from '../../attendance/attendance-rate';
 import { PERMISSIONS } from '@erp/shared';
-import type { ReportDefinition } from '../../../core/reporting/report.types';
+import type { ReportColumn, ReportDefinition } from '../../../core/reporting/report.types';
 import type { SchoolReportDeps } from '../school-report-deps';
 
 /**
@@ -54,6 +54,63 @@ export function attendanceReports(deps: SchoolReportDeps): ReportDefinition<any>
           notes: rows.length === 0
             ? ['No register has been marked for this class on this date.']
             : [],
+        };
+      },
+    },
+
+    {
+      // Wave 16: the printed monthly register, signed by the class teacher.
+      key: 'attendance.monthly-register',
+      title: 'Monthly Class Register',
+      domain: 'attendance',
+      description: 'Every pupil against every school day of a month — P, L, E, A — with totals for the month.',
+      permission: PERMISSIONS.school.readReports,
+      shape: 'matrix',
+      filters: ['classId', 'dateFrom'],
+      requiredFilters: ['classId'],
+      classBasisDefault: 'current',
+      asOfMode: 'live',
+      paging: 'memory',
+      defaultSort: { key: 'studentName', order: 'asc' },
+      // Day columns depend on the month (and on make-up Saturdays).
+      columns: async () => [],
+      async run(ctx, params) {
+        const classList = await deps.resolver.studentIdsFor(ctx);
+        const reg = await deps.attendance.monthlyRegister(params.classId, params.dateFrom ?? new Date(), classList);
+        const directory = await deps.resolver.studentDirectory(reg.pupils.map((p: any) => p.studentProfileId));
+
+        const rows = reg.pupils.map((p: any) => {
+          const d = directory.get(p.studentProfileId);
+          const row: Record<string, unknown> = {
+            studentProfileId: p.studentProfileId,
+            admissionNo: d?.admissionNo ?? '',
+            studentName: d?.name ?? p.studentProfileId,
+            present: p.present,
+            late: p.late,
+            excused: p.excused,
+            absent: p.absent,
+            rate: p.rate,
+          };
+          for (const day of reg.days) row[`d${day.day}`] = p.marks[day.day] ?? '';
+          return row;
+        });
+
+        const columns: ReportColumn[] = [
+          { key: 'studentName', label: 'Name', type: 'string', width: 20 },
+          ...reg.days.map((day: any): ReportColumn => ({ key: `d${day.day}`, label: `${day.day}`, type: 'string', align: 'center', width: 2.4 })),
+          { key: 'present', label: 'P', type: 'int', width: 3, total: 'sum' },
+          { key: 'late', label: 'L', type: 'int', width: 3, total: 'sum' },
+          { key: 'absent', label: 'A', type: 'int', width: 3, total: 'sum' },
+          { key: 'rate', label: '%', type: 'percent', width: 5, total: 'avg' },
+        ];
+        return {
+          rows,
+          columns,
+          caption: `Register for ${reg.month} · P present · L late · E excused · A absent · blank not marked`,
+          notes: [
+            ...(rows.length === 0 ? ['No pupils or marks for this class in this month.'] : []),
+            ...(reg.policyMissing ? ['Some rates are blank: the school has not chosen how late marks count (School settings).'] : []),
+          ],
         };
       },
     },

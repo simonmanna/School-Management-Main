@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { GraduationCap, ListChecks, PlayCircle } from 'lucide-react';
+import { GraduationCap, ListChecks, PlayCircle, Printer } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import {
   useApplyPromotions, useDecidePromotions, usePromotionBoard, useProposePromotions,
 } from '@/features/school/results-phase5-api';
@@ -113,6 +114,11 @@ export function PromotionDecisionsPanel({
             >
               <ListChecks className="h-4 w-4" /> Draw up from these results
             </Button>
+            {(board?.rows?.length ?? 0) > 0 && (
+              <Button size="sm" variant="outline" asChild>
+                <Link to={`/school/reports/academics.promotion-list?resultSetId=${resultSetId}`}><Printer className="h-4 w-4" /> Promotion list</Link>
+              </Button>
+            )}
             <select className={`${selectClass} w-48`} value={toTermId} onChange={(e) => setToTermId(e.target.value)}>
               <option value="">Move into term…</option>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}

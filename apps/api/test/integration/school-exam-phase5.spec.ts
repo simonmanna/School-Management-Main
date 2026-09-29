@@ -30,6 +30,8 @@ import { MarkingService } from '../../src/modules/school/assessment/marking.serv
 import { ResultRunService } from '../../src/modules/school/assessment/result-run.service';
 import { ResultIntegrityService } from '../../src/modules/school/assessment/result-integrity.service';
 import { PromotionDecisionService } from '../../src/modules/school/assessment/promotion-decision.service';
+import { ReportRunnerService } from '../../src/modules/core/reporting/report-runner.service';
+import { PermissionResolverService } from '../../src/kernel/auth/permission-resolver.service';
 import { placeInClass, upsertEnrollment } from './_placement';
 
 describeDb('Phase 5 examination and result integrity', () => {
@@ -558,6 +560,18 @@ describeDb('Phase 5 examination and result integrity', () => {
     expect(placement.movementReason).toBe('PROMOTION');
     expect(placement.sectionId).toBe(section.id);
     expect(placement.termId).toBe(nextTermId);
+    // Wave 16: the signed promotion list reads the same board, class by class.
+    // The spec's synthetic user has no role rows; grant for this read only.
+    const grants = jest.spyOn(moduleRef.get(PermissionResolverService), 'grantedForCaller').mockResolvedValue(['*']);
+    const list: any = await run(() => moduleRef.get(ReportRunnerService).run('academics.promotion-list', {
+      page: 1, pageSize: 100, filters: { resultSetId: setId },
+    } as any)).finally(() => grants.mockRestore());
+    expect(list.data).toHaveLength(board.rows.length);
+    const printed = list.data.find((r: any) => r.studentProfileId === one.studentProfileId);
+    expect(printed).toMatchObject({ decision: 'promote', status: 'applied', toClassName: `S4 East ${section.name}` });
+    expect(list.groups.length).toBeGreaterThan(0);
+    expect(list.groups.flatMap((g: any) => g.rows)).toHaveLength(board.rows.length);
+
     // A decision already applied cannot be quietly re-decided.
     await expect(run(() => promotion.decide({ rows: [{ id: one.id, status: 'rejected', reason: 'Changed our minds' }] })))
       .rejects.toThrow('already been applied');

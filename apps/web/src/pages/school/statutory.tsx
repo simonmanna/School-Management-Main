@@ -5,7 +5,7 @@ import { useClasses, useTerms } from '@/features/school/api';
 import {
   downloadExport, useAssignCandidateNumbers, useCaReadiness, useCandidateReferences,
   useExportRuns, useExportTemplates, useImportIndexNumbers, useMarkExportSubmitted,
-  useMissingReferences, usePreviewExport, useRunExport, useSeedDefaultTemplates,
+  useMissingReferences, usePreviewExport, useRunExport, useSeedDefaultTemplates, downloadExportXlsx,
   type CaCandidate, type ExamLevel,
 } from '@/features/school/statutory-api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -483,6 +483,20 @@ function ExportsPanel({ termId, level, year }: { termId: string; level: ExamLeve
             <Button variant="outline" onClick={doPreview} disabled={!templateId || preview.isPending}>Preview</Button>
             <Button onClick={() => doRun(false)} disabled={!templateId || run.isPending}>
               <Download className="mr-1 h-4 w-4" /> Produce and download
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!templateId || run.isPending}
+              onClick={async () => {
+                try {
+                  await downloadExportXlsx(dto);
+                  notify.success('Excel copy produced', 'Same rows and checksum as the CSV. Send the CSV to the board.');
+                } catch (err) {
+                  notify.error('Export refused', apiMessage(err, 'Clear the readiness findings first.'));
+                }
+              }}
+            >
+              <FileSpreadsheet className="mr-1 h-4 w-4" /> Excel copy
             </Button>
           </div>
 

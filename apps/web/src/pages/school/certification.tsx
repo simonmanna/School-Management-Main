@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Plus, FileBadge, ShieldX, Globe, GraduationCap } from 'lucide-react';
+import { Plus, FileBadge, ShieldX, Globe, GraduationCap, Printer, LogOut } from 'lucide-react';
 import {
   useStudents,
   useTranscript, useBuildTranscript,
   useExternalResults, useRecordExternalResult,
   useCertificates, useIssueCertificate, useRevokeCertificate,
+  useIssueLeavingCertificate, downloadCertificatePdf,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -108,23 +109,78 @@ function CertsTab({ studentId }: { studentId: string }) {
           <div key={c.id} className="flex items-center justify-between rounded border p-2 text-sm">
             <div>
               <div>{c.title} <Badge>{c.type}</Badge></div>
-              <div className="text-xs text-muted-foreground">serial {c.serial ?? '—'} · code <span className="font-mono">{c.code ?? '—'}</span> · {c.status}</div>
+              <div className="text-xs text-muted-foreground">serial {c.serialNumber ?? '—'} · code <span className="font-mono">{c.verificationCode ?? '—'}</span> · {c.status}</div>
             </div>
+            <div className="flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => printCertificate(c.id)}><Printer className="h-4 w-4" /> Print</Button>
             {c.status === 'issued' && (
-              <div className="flex gap-1">
+              <>
                 <Button size="sm" variant="ghost" onClick={() => revoke.mutate({ id: c.id, studentProfileId: studentId, reason: reason || 'error', void: false })}><ShieldX className="h-4 w-4" /> Revoke</Button>
                 <Button size="sm" variant="ghost" onClick={() => revoke.mutate({ id: c.id, studentProfileId: studentId, reason: reason || 'error', void: true })}>Void</Button>
-              </div>
+              </>
             )}
+            </div>
           </div>
         ))}
         <Input placeholder="Certificate title" value={title} onChange={(e) => setTitle(e.target.value)} />
         <select className={sel + ' w-44'} value={type} onChange={(e) => setType(e.target.value)}>
-          {['completion','leaving','testimonial','merit','award'].map((t) => <option key={t} value={t}>{t}</option>)}
+          {['completion','testimonial','merit','award'].map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
         <Button size="sm" disabled={!title || issue.isPending} onClick={async () => { await issue.mutateAsync({ studentProfileId: studentId, type, title }); setTitle(''); notify.success('Issued'); }}><FileBadge className="h-4 w-4" /> Issue certificate</Button>
+        <LeavingCertificateForm studentId={studentId} />
       </CardContent>
     </Card>
+  );
+}
+
+async function printCertificate(id: string) {
+  try {
+    const url = URL.createObjectURL(await downloadCertificatePdf(id));
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch {
+    notify.error('Could not produce the certificate PDF');
+  }
+}
+
+/**
+ * Wave 16: the leaving (transfer) certificate. Identity, dates, last class and
+ * fee position come from the record; the office adds only the judgement calls.
+ */
+function LeavingCertificateForm({ studentId }: { studentId: string }) {
+  const issue = useIssueLeavingCertificate();
+  const [f, setF] = useState({ reasonForLeaving: '', leavingDate: '', conduct: '', destinationSchool: '', remarks: '' });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const submit = async () => {
+    try {
+      const cert = await issue.mutateAsync({
+        studentProfileId: studentId,
+        reasonForLeaving: f.reasonForLeaving,
+        leavingDate: f.leavingDate || undefined,
+        conduct: f.conduct || undefined,
+        destinationSchool: f.destinationSchool || undefined,
+        remarks: f.remarks || undefined,
+      });
+      notify.success(`Leaving certificate ${cert.serialNumber ?? ''} issued`);
+      setF({ reasonForLeaving: '', leavingDate: '', conduct: '', destinationSchool: '', remarks: '' });
+      printCertificate(cert.id);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not issue the leaving certificate');
+    }
+  };
+  return (
+    <div className="mt-4 space-y-2 rounded border p-3">
+      <div className="flex items-center gap-2 text-sm font-medium"><LogOut className="h-4 w-4" /> Leaving / transfer certificate</div>
+      <p className="text-xs text-muted-foreground">Record the pupil as withdrawn, transferred or graduated first. Name, dates, last class and fee clearance are taken from the record.</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1"><Label className="text-xs">Reason for leaving *</Label><Input value={f.reasonForLeaving} onChange={set('reasonForLeaving')} /></div>
+        <div className="space-y-1"><Label className="text-xs">Date of leaving (default: date recorded)</Label><Input type="date" value={f.leavingDate} onChange={set('leavingDate')} /></div>
+        <div className="space-y-1"><Label className="text-xs">Conduct</Label><Input value={f.conduct} onChange={set('conduct')} placeholder="e.g. Very good" /></div>
+        <div className="space-y-1"><Label className="text-xs">School joining</Label><Input value={f.destinationSchool} onChange={set('destinationSchool')} /></div>
+      </div>
+      <div className="space-y-1"><Label className="text-xs">Remarks</Label><Input value={f.remarks} onChange={set('remarks')} /></div>
+      <Button size="sm" disabled={!f.reasonForLeaving || issue.isPending} onClick={submit}><FileBadge className="h-4 w-4" /> Issue &amp; print</Button>
+    </div>
   );
 }
 
@@ -153,9 +209,9 @@ function VerifyTab({ studentId }: { studentId: string }) {
         {result && (
           <pre className="rounded bg-muted p-2 text-xs">{JSON.stringify(result, null, 2)}</pre>
         )}
-        {(certs ?? []).filter((c) => c.code).length > 0 && (
+        {(certs ?? []).filter((c) => c.verificationCode).length > 0 && (
           <div className="flex flex-wrap gap-2">
-            {(certs ?? []).filter((c) => c.code).map((c) => <Button key={c.id} size="sm" variant="outline" onClick={() => { setCode(c.code!); verify(c.code!); }}>verify {c.code!.slice(0,8)}…</Button>)}
+            {(certs ?? []).filter((c) => c.verificationCode).map((c) => <Button key={c.id} size="sm" variant="outline" onClick={() => { setCode(c.verificationCode!); verify(c.verificationCode!); }}>verify {c.verificationCode!.slice(0,9)}…</Button>)}
           </div>
         )}
       </CardContent>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2, Printer } from 'lucide-react';
+import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2, Printer, FileText, Receipt } from 'lucide-react';
 import {
   useCollectPayment,
   useCashDesk,
@@ -23,6 +23,7 @@ import {
   useDeleteBudget,
   type WaiverCategory,
   type CollectResult,
+  openFeeReceiptPdf,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -445,6 +446,12 @@ export function SchoolFeesCollectPage() {
             <h2 className="text-base font-semibold">Receipt</h2>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setReceipt(null)}>Close</Button>
+              {receipt.payment?.id && (
+                <>
+                  <Button size="sm" variant="outline" onClick={() => openFeeReceiptPdf(receipt.payment!.id, 'a4').catch(() => notify.error('Could not produce the receipt PDF'))}><FileText className="mr-1 h-4 w-4" /> PDF</Button>
+              <Button size="sm" variant="outline" onClick={() => openFeeReceiptPdf(receipt.payment!.id, 'thermal').catch(() => notify.error('Could not produce the receipt PDF'))}><Receipt className="mr-1 h-4 w-4" /> Thermal</Button>
+                </>
+              )}
               <Button onClick={() => window.print()}><Printer className="mr-1 h-4 w-4" /> Print Receipt</Button>
             </div>
           </div>

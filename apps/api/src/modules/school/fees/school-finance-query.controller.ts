@@ -1,8 +1,10 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, StreamableFile } from '@nestjs/common';
+import { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { ScopedToStudent } from '../../../kernel/auth/guards/scoped-to-student.decorator';
 import { SchoolFinanceQueryService } from './school-finance-query.service';
+import { FeeReceiptPdfService } from './fee-receipt-pdf.service';
 
 /**
  * Read-side finance endpoints backed by the canonical query service (A1/A6/B1).
@@ -11,7 +13,10 @@ import { SchoolFinanceQueryService } from './school-finance-query.service';
  */
 @Controller('school/finance')
 export class SchoolFinanceQueryController {
-  constructor(private readonly finance: SchoolFinanceQueryService) {}
+  constructor(
+    private readonly finance: SchoolFinanceQueryService,
+    private readonly receipts: FeeReceiptPdfService,
+  ) {}
 
   @Get('students/:id/balance')
   @RequirePermissions(PERMISSIONS.school.readFees)
@@ -110,6 +115,19 @@ export class SchoolFinanceQueryController {
   @RequirePermissions(PERMISSIONS.school.readFees)
   getReceipt(@Param('id') id: string) {
     return this.finance.getReceipt(id);
+  }
+
+  /**
+   * Wave 16: printable receipt — `format=a4` (A5 landscape, for the parent and
+   * the file) or `format=thermal` (80 mm roll). Every print after the first is
+   * stamped as a copy on the paper.
+   */
+  @Get('receipts/:id/pdf')
+  @RequirePermissions(PERMISSIONS.school.readFees)
+  async receiptPdf(@Param('id') id: string, @Res({ passthrough: true }) res: Response, @Query('format') format?: string) {
+    const { filename, pdf } = await this.receipts.generate(id, format === 'thermal' ? 'thermal' : 'a4');
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, 'Content-Length': pdf.length });
+    return new StreamableFile(pdf);
   }
 
   /* ── C1 · fee clearance before exams ── */

@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Smartphone, Info, Clock, CheckCircle2, XCircle, FileText, AlertTriangle } from 'lucide-react';
+import { Smartphone, Info, Clock, CheckCircle2, XCircle, FileText, AlertTriangle, Download } from 'lucide-react';
 import { useActiveStudent } from '@/stores/auth.store';
 import {
   useBalanceExplainer, usePayQuote, usePayments, usePay, useOutstanding, useStatement,
+  useFeeReceipts, downloadFeeReceipt,
 } from '@/lib/portal-api';
 import { formatCurrency } from '@/lib/utils';
 import { apiErrorMessage } from '@/lib/api';
@@ -252,7 +253,46 @@ export default function ParentFees() {
           ))}
         </CardContent>
       </Card>
+
+      <ReceiptsCard studentProfileId={id} />
     </div>
+  );
+}
+
+/** Wave 16: every posted receipt, downloadable as a family copy. */
+function ReceiptsCard({ studentProfileId }: { studentProfileId: string }) {
+  const { data: receipts } = useFeeReceipts(studentProfileId);
+  const [busy, setBusy] = useState<string | null>(null);
+  const download = async (id: string, number: string) => {
+    setBusy(id);
+    try {
+      await downloadFeeReceipt(id, `${number}.pdf`);
+    } catch (e) {
+      notify.error(apiErrorMessage(e) || 'Could not download the receipt');
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Receipts</CardTitle></CardHeader>
+      <CardContent className="space-y-2 pt-0">
+        {(receipts ?? []).length === 0 && <p className="text-sm text-muted-foreground">No receipts yet.</p>}
+        {(receipts ?? []).map((r) => (
+          <div key={r.id} className="flex items-center gap-3 rounded-lg border p-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">{formatCurrency(Number(r.amount))}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {r.paymentNumber} · {new Date(r.paymentDate).toLocaleDateString()} · {r.paymentMethod.replace('_', ' ')}
+              </div>
+            </div>
+            <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => download(r.id, r.paymentNumber)}>
+              <Download className="h-4 w-4" /> PDF
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -276,9 +316,25 @@ function StatementCard({ studentProfileId }: { studentProfileId: string }) {
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No transactions in this term yet.</p>
         ) : (
-          // Wide content scrolls inside its own box; the page itself never
-          // scrolls sideways on a phone.
-          <div className="-mx-1 overflow-x-auto">
+          <>
+          {/* Phones: one card per transaction, no sideways scrolling (Wave 16). */}
+          <ul className="divide-y sm:hidden">
+            {rows.map((r, i) => (
+              <li key={i} className="py-2 text-sm">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate">{r.description || r.ledgerType}</span>
+                  <span className={`shrink-0 tabular-nums ${r.credit ? 'text-emerald-700 dark:text-emerald-400' : ''}`}>
+                    {r.debit ? formatCurrency(r.debit) : `−${formatCurrency(r.credit)}`}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{new Date(r.date).toLocaleDateString()}</span>
+                  <span className="tabular-nums">Balance {formatCurrency(r.balance)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="-mx-1 hidden overflow-x-auto sm:block">
             <table className="w-full min-w-[30rem] text-sm">
               <thead className="border-b text-left text-muted-foreground">
                 <tr>
@@ -302,6 +358,7 @@ function StatementCard({ studentProfileId }: { studentProfileId: string }) {
               </tbody>
             </table>
           </div>
+          </>
         )}
         <p className="pt-3 text-xs text-muted-foreground">
           Generated {new Date(data.generatedAt).toLocaleString()}.

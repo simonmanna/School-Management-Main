@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { CertificateService, ExternalExamResultService, TranscriptService } from './cert.service';
+import { CertificatePdfService } from './certificate-pdf.service';
+import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
+import { FeesModule } from '../fees/fees.module';
 import {
   CertificateController,
   CertificateVerifyController,
@@ -13,8 +16,9 @@ import {
  * SequenceService is global (KernelModule) so certificate serials need no extra import.
  */
 @Module({
+  imports: [PlacementLookupModule, FeesModule],
   controllers: [TranscriptController, ExternalExamResultController, CertificateController, CertificateVerifyController],
-  providers: [TranscriptService, ExternalExamResultService, CertificateService],
+  providers: [TranscriptService, ExternalExamResultService, CertificateService, CertificatePdfService],
   exports: [TranscriptService, ExternalExamResultService, CertificateService],
 })
 export class CertificationModule {}

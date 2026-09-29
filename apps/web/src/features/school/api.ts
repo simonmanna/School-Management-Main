@@ -2087,6 +2087,18 @@ export function useGenerateBilling() {
   });
 }
 
+/**
+ * Wave 16: the server-rendered receipt (`a4` = A5 landscape, `thermal` = 80 mm).
+ * Opens it in a new tab for printing; every office print after the first comes
+ * back stamped as a copy.
+ */
+export async function openFeeReceiptPdf(paymentId: string, format: 'a4' | 'thermal' = 'a4'): Promise<void> {
+  const blob = (await api.get(`${S}/finance/receipts/${paymentId}/pdf`, { params: { format }, responseType: 'blob' })).data as Blob;
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export interface CollectResult {
   payment: { id: string; paymentNumber?: string; amount: string; paymentMethod?: string; paymentDate?: string } | null;
   allocations: Array<{ documentId: string; amount: number }>;
@@ -4940,7 +4952,7 @@ export function useSubmitAttempt() {
 
 export interface Transcript { id: string; studentProfileId: string; builtAt: string; cumulativeGpa?: number | null; generatedUrl?: string | null }
 export interface ExternalResult { id: string; studentProfileId: string; board?: string | null; level: string; year: number; indexNumber?: string | null; aggregate?: number | null; division?: string | null; verified?: boolean; subjects?: Array<{ subject: string; grade: string; mark?: string | null; result?: string | null }> }
-export interface Certificate { id: string; studentProfileId: string; type: string; title: string; serial?: string | null; code?: string | null; status: string; issuedAt: string; revokedAt?: string | null; voidedAt?: string | null }
+export interface Certificate { id: string; studentProfileId: string; type: string; title: string; serialNumber?: string | null; verificationCode?: string | null; status: string; issuedAt: string; revokedAt?: string | null; voidedAt?: string | null; payload?: Record<string, unknown> }
 
 export function useTranscript(studentProfileId: string | undefined) {
   return useQuery({ queryKey: ['school', 'transcript', studentProfileId], enabled: !!studentProfileId, queryFn: async () => (await api.get<Transcript>(`${TR}/by-student/${studentProfileId}`)).data });
@@ -4972,6 +4984,19 @@ export function useIssueCertificate() {
     mutationFn: async (dto: { studentProfileId: string; type: string; title: string; payload?: unknown }) => (await api.post<Certificate>(`${CERT}/issue`, dto)).data,
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'certificates', v.studentProfileId] }),
   });
+}
+/** Wave 16: leaving (transfer) certificate — the server snapshots the record. */
+export function useIssueLeavingCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { studentProfileId: string; reasonForLeaving: string; leavingDate?: string; conduct?: string; destinationSchool?: string; remarks?: string }) =>
+      (await api.post<Certificate>(`${CERT}/leaving`, dto)).data,
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'certificates', v.studentProfileId] }),
+  });
+}
+/** Printable certificate (PDF). */
+export async function downloadCertificatePdf(id: string): Promise<Blob> {
+  return (await api.get(`${CERT}/${id}/pdf`, { responseType: 'blob' })).data as Blob;
 }
 export function useRevokeCertificate() {
   const qc = useQueryClient();

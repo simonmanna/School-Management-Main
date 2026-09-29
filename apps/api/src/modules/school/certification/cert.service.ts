@@ -8,7 +8,12 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { EVENTS } from '@erp/shared';
-import type { IssueCertificateDto, RecordExternalResultDto } from './cert.dto';
+import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
+import type { IssueCertificateDto, IssueLeavingCertificateDto, RecordExternalResultDto } from './cert.dto';
+
+/** A leaving certificate records a departure that has happened, not one planned. */
+const DEPARTED_STATUSES = ['withdrawn', 'transferred', 'graduated', 'alumni'];
 
 // Crockford-ish base32 without ambiguous chars (no I, L, O, U).
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -135,7 +140,75 @@ export class CertificateService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly sequence: SequenceService,
+    private readonly placements: PlacementLookupService,
+    private readonly finance: SchoolFinanceQueryService,
   ) {}
+
+  /**
+   * Wave 16 — the leaving (transfer) certificate a Ugandan school hands a
+   * departing pupil and the receiving school asks for.
+   *
+   * Everything checkable is snapshotted from the record at issue, so the paper
+   * cannot say something the system does not: identity, admission and leaving
+   * dates, the class last sat in, and whether fees were cleared. Only the
+   * judgement calls (reason, conduct, remarks) come from the office. One live
+   * leaving certificate per pupil — revoke the old one to reissue.
+   */
+  async issueLeaving(dto: IssueLeavingCertificateDto) {
+    const student = await this.prisma.client.studentProfile.findFirst({
+      where: { id: dto.studentProfileId },
+      include: { partner: true },
+    });
+    if (!student) throw new NotFoundException(`Student ${dto.studentProfileId} not found`);
+    if (!DEPARTED_STATUSES.includes(student.status)) {
+      throw new BadRequestException(
+        `A leaving certificate records a departure. Record ${student.partner?.name ?? 'the pupil'} as withdrawn, transferred or graduated first (current status: ${student.status}).`,
+      );
+    }
+    const live = await this.prisma.client.certificate.findFirst({
+      where: { studentProfileId: student.id, type: 'leaving', status: 'issued' },
+      select: { serialNumber: true },
+    });
+    if (live) {
+      throw new BadRequestException(`Leaving certificate ${live.serialNumber} is already issued. Revoke it to issue a corrected one.`);
+    }
+
+    const departure = await this.prisma.client.studentStatusHistory.findFirst({
+      where: { studentProfileId: student.id, toStatus: student.status },
+      orderBy: { changedAt: 'desc' },
+    });
+    const leavingDate = dto.leavingDate ? new Date(dto.leavingDate) : (departure?.changedAt ?? new Date());
+    if (Number.isNaN(leavingDate.getTime())) throw new BadRequestException('leavingDate is not a valid date.');
+
+    // The class they last sat in: the placement in force the day before they left.
+    const lastSeat = (
+      await this.placements.describe([student.id], { asOf: new Date(leavingDate.getTime() - 86_400_000), includeInactive: true })
+    ).get(student.id);
+    const balance = await this.finance.studentBalance(student.id).catch(() => null);
+    const outstanding = balance ? Math.max(0, Math.round(balance.balance)) : null;
+
+    return this.issue({
+      studentProfileId: student.id,
+      type: 'leaving',
+      title: 'Leaving Certificate',
+      payload: {
+        admissionNo: student.admissionNo,
+        dateOfBirth: student.dateOfBirth?.toISOString() ?? null,
+        gender: student.gender ?? null,
+        nationality: student.nationality ?? null,
+        admissionDate: student.enrollmentDate?.toISOString() ?? null,
+        leavingDate: leavingDate.toISOString(),
+        lastClass: [lastSeat?.className, lastSeat?.sectionName].filter(Boolean).join(' ') || null,
+        departureStatus: student.status,
+        reasonForLeaving: dto.reasonForLeaving,
+        conduct: dto.conduct ?? null,
+        destinationSchool: dto.destinationSchool ?? null,
+        remarks: dto.remarks ?? null,
+        feesCleared: outstanding === null ? null : outstanding === 0,
+        feesOutstanding: outstanding,
+      },
+    });
+  }
 
   async issue(dto: IssueCertificateDto) {
     const organizationId = this.tenant.organizationId;

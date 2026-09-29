@@ -1,5 +1,6 @@
 import type { AnalyticsService } from '../analytics/analytics.service';
 import type { ResultRunService } from '../assessment/result-run.service';
+import type { PromotionDecisionService } from '../assessment/promotion-decision.service';
 import type { StudentAttendanceService } from '../attendance/student-attendance.service';
 import type { AdmissionsService } from '../admissions/admissions.service';
 import type { TimetableAdvancedService } from '../academics/timetable-advanced.service';
@@ -39,6 +40,8 @@ export interface SchoolReportDeps {
   analytics: AnalyticsService;
   /** The result spine. Broadsheets read a ResultSet, never GradeEntry. */
   resultRun: ResultRunService;
+  /** Promotion boards: the human decisions taken from a published result set. */
+  promotions: PromotionDecisionService;
   /** Registers, class summaries, threshold breaches. */
   attendance: StudentAttendanceService;
   /** Per-term enrollment truth. */

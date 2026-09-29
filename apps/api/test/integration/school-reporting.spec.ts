@@ -338,6 +338,33 @@ describeDb('integration: school reporting', () => {
     expect(out.data.map((r) => r.admissionNo).sort()).toEqual(['ADM-001', 'ADM-002', 'ADM-003']);
   });
 
+  it('Wave 16: the monthly register grids every pupil against the school days', async () => {
+    // Mon 2 Mar – Wed 4 Mar 2026, plus a make-up Saturday 7 Mar for one pupil.
+    const [a, b, c] = students.slice(0, 3);
+    const mark = (studentProfileId: string, day: number, status: string) =>
+      raw.studentAttendance.create({ data: { organizationId, studentProfileId, classId: classAId, date: new Date(Date.UTC(2026, 2, day)), status } });
+    await mark(a.id, 2, 'present');
+    await mark(a.id, 3, 'absent');
+    await mark(a.id, 4, 'present');
+    await mark(a.id, 7, 'present');
+    await mark(b.id, 2, 'absent');
+
+    const out = await asUser(() => runner.run('attendance.monthly-register', {
+      page: 1, pageSize: 100, filters: { classId: classAId, dateFrom: '2026-03-15' },
+    } as any));
+    const dayCols = out.columns.filter((col) => /^d\d+$/.test(col.key)).map((col) => col.label);
+    // 22 weekdays in March 2026, plus the one Saturday that was marked; empty weekends are omitted.
+    expect(dayCols).toHaveLength(23);
+    expect(dayCols).toContain('7');
+    expect(dayCols).not.toContain('8');
+
+    const rowA = out.data.find((r) => r.admissionNo === a.admissionNo)!;
+    expect([rowA.d2, rowA.d3, rowA.d4, rowA.d5, rowA.d7]).toEqual(['P', 'A', 'P', '', 'P']);
+    expect(rowA).toMatchObject({ present: 3, absent: 1, rate: 75 });
+    // A pupil on the class list with no marks still has a row.
+    expect(out.data.map((r) => r.admissionNo)).toContain(c.admissionNo);
+  });
+
   it('the enrolment summary reports capacity and flags an over-subscribed class', async () => {
     const out = await asUser(() => runner.run('enrollment.by-class', {
       page: 1, pageSize: 100, filters: { termId },

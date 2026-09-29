@@ -235,6 +235,23 @@ export interface RunExportDto {
   registrationYear?: number;
   allowIncomplete?: boolean;
   reason?: string;
+  /** Wave 16: 'xlsx' for the office's review copy; the board's portal takes CSV. */
+  format?: 'csv' | 'xlsx';
+}
+
+/** Wave 16: produce the run as an Excel workbook (same rows, same checksum) and save it. */
+export async function downloadExportXlsx(dto: RunExportDto): Promise<{ runId: string | null }> {
+  const res = await api.post(`${ROOT}/exports/download`, { ...dto, format: 'xlsx' }, { responseType: 'blob' });
+  const name = /filename="([^"]+)"/.exec(String(res.headers['content-disposition'] ?? ''))?.[1] ?? 'export.xlsx';
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return { runId: (res.headers['x-export-run-id'] as string | undefined) ?? null };
 }
 
 export function usePreviewExport() {

@@ -211,6 +211,35 @@ export async function downloadReportCard(reportCardId: string, filename: string)
   URL.revokeObjectURL(url);
 }
 
+/** Wave 16: posted fee receipts for the pupil, newest first. */
+export interface PortalReceipt {
+  id: string;
+  paymentNumber: string;
+  paymentDate: string;
+  amount: string;
+  paymentMethod: string;
+}
+export function useFeeReceipts(studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'receipts', studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () => (await api.get<PortalReceipt[]>(`${S}/portals/parent/${studentProfileId}/receipts`)).data,
+  });
+}
+
+/** Download a receipt (family copy). Blob, for the same reason as report cards. */
+export async function downloadFeeReceipt(paymentId: string, filename: string): Promise<void> {
+  const res = await api.get(`${S}/portals/receipts/${paymentId}/pdf`, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function useBalanceExplainer(studentProfileId?: string) {
   return useQuery({
     queryKey: ['portal', 'explain', studentProfileId],

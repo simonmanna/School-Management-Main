@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Param, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Res, StreamableFile } from '@nestjs/common';
 import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { PERMISSIONS } from '@erp/shared';
@@ -160,7 +160,9 @@ export class StatutoryController {
     // API caller both end up holding the provenance, not just the bytes.
     res.setHeader('X-Export-Run-Id', result.runId);
     res.setHeader('X-Export-Checksum', result.checksum);
-    return result;
+    // The JSON response carries the CSV text; the workbook is served by /download.
+    const { xlsx: _xlsx, ...json } = result;
+    return json;
   }
 
   @Get('exports/runs')
@@ -178,12 +180,16 @@ export class StatutoryController {
   @Throttle({ default: { limit: 12, ttl: 60_000 } })
   @Post('exports/download')
   @RequirePermissions(PERMISSIONS.school.runStatutoryExports)
-  @Header('Content-Type', 'text/csv; charset=utf-8')
   async download(@Body() dto: RunExportDto, @Res({ passthrough: true }) res: Response) {
     const result = await this.exports.run(dto);
     res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
     res.setHeader('X-Export-Run-Id', result.runId);
     res.setHeader('X-Export-Checksum', result.checksum);
+    if (result.xlsx) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      return new StreamableFile(result.xlsx);
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     return result.content;
   }
 }

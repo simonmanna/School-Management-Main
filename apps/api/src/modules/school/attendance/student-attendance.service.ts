@@ -8,7 +8,7 @@ import type { BulkMarkAttendanceDto, CorrectAttendanceDto } from './dto.types';
 import { AttendanceStatusConfigService } from './attendance-status-config.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
-import { countCodes, loadAttendancePolicy, summarizeAttendance } from './attendance-rate';
+import { bucketOf, countCodes, loadAttendancePolicy, summarizeAttendance } from './attendance-rate';
 
 /**
  * StudentAttendanceService — bulk-mark a class's daily attendance in one tx.
@@ -199,6 +199,71 @@ export class StudentAttendanceService {
       include: { studentProfile: { include: { partner: true } }, statusConfig: true },
       orderBy: { studentProfile: { admissionNo: 'asc' } } as any,
     });
+  }
+
+  /**
+   * Wave 16 — the monthly class register a class teacher prints and the head
+   * signs: every pupil against every school day of the month, one mark per
+   * cell, with the month's totals.
+   *
+   * Days are Monday to Friday plus any weekend day on which this class was
+   * actually marked (a Saturday make-up day appears; an empty Saturday does
+   * not). A cell's letter comes from the status config's meaning, never from
+   * the code's spelling: P present, L late, E excused, A absent. Totals and the
+   * rate use the one shared calculation (attendance-rate.ts).
+   *
+   * `studentProfileIds` is the class list the caller resolved (the report
+   * passes its class basis); pupils marked in this class during the month are
+   * added so a pupil who moved mid-month still shows the days they were here.
+   */
+  async monthlyRegister(classId: string, anyDayInMonth: Date | string, studentProfileIds: string[] = []) {
+    const at = new Date(anyDayInMonth);
+    if (isNaN(at.getTime())) throw new BadRequestException('Invalid month');
+    const year = at.getUTCFullYear();
+    const month = at.getUTCMonth();
+    const start = new Date(Date.UTC(year, month, 1));
+    const end = new Date(Date.UTC(year, month + 1, 1));
+
+    const [rows, catalog, policy] = await Promise.all([
+      this.prisma.client.studentAttendance.findMany({
+        where: { classId, periodId: null, date: { gte: start, lt: end } },
+        select: { studentProfileId: true, date: true, status: true },
+      }),
+      this.statusConfig.catalogByCode(),
+      loadAttendancePolicy(this.prisma.client),
+    ]);
+
+    const markedDays = new Set(rows.map((r) => r.date.getUTCDate()));
+    const days: Array<{ day: number; date: string; weekday: string }> = [];
+    for (let d = new Date(start); d < end; d = new Date(d.getTime() + 86_400_000)) {
+      const wd = d.getUTCDay();
+      if ((wd === 0 || wd === 6) && !markedDays.has(d.getUTCDate())) continue;
+      days.push({ day: d.getUTCDate(), date: d.toISOString().slice(0, 10), weekday: 'SMTWTFS'[wd] });
+    }
+
+    const letter = (code: string) => {
+      const b = bucketOf(catalog[code], code);
+      return b === 'present' ? 'P' : b === 'late' ? 'L' : b === 'excused' ? 'E' : b === 'absent' ? 'A' : code.slice(0, 2).toUpperCase();
+    };
+    const byPupil = new Map<string, { marks: Record<number, string>; codes: string[] }>();
+    for (const id of studentProfileIds) byPupil.set(id, { marks: {}, codes: [] });
+    for (const r of rows) {
+      const p = byPupil.get(r.studentProfileId) ?? { marks: {}, codes: [] };
+      p.marks[r.date.getUTCDate()] = letter(r.status);
+      p.codes.push(r.status);
+      byPupil.set(r.studentProfileId, p);
+    }
+
+    const pupils = [...byPupil.entries()].map(([studentProfileId, p]) => {
+      const sum = summarizeAttendance(countCodes(p.codes), catalog, policy);
+      return { studentProfileId, marks: p.marks, present: sum.present, late: sum.late, excused: sum.excused, absent: sum.absent, rate: sum.rate };
+    });
+    return {
+      month: `${year}-${String(month + 1).padStart(2, '0')}`,
+      days,
+      pupils,
+      policyMissing: pupils.some((p) => p.rate == null && p.late > 0),
+    };
   }
 
   /** Reports: weekly summary (Mon..Sun) for a class, bucketed by configured code. */

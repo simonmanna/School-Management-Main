@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { PortalIdentityService } from '../../../kernel/auth/portal-identity.service';
 import { ReportCardPdfService } from '../examinations/report-card-pdf.service';
+import { FeeReceiptPdfService } from '../fees/fee-receipt-pdf.service';
 
 /**
  * Documents a family may download for themselves.
@@ -25,7 +26,42 @@ export class PortalDocumentsService {
     private readonly tenant: TenantContextService,
     private readonly portalIdentity: PortalIdentityService,
     private readonly pdf: ReportCardPdfService,
+    private readonly receipts: FeeReceiptPdfService,
   ) {}
+
+  /** Wave 16: the pupil's posted fee receipts, newest first. */
+  async feeReceipts(studentProfileId: string) {
+    const student = await this.prisma.client.studentProfile.findFirst({
+      where: { id: studentProfileId, organizationId: this.org },
+      select: { partnerId: true },
+    });
+    if (!student) throw new NotFoundException('Student not found');
+    return this.prisma.client.payment.findMany({
+      where: { organizationId: this.org, partnerId: student.partnerId, direction: 'inbound', status: 'posted' },
+      orderBy: { paymentDate: 'desc' },
+      take: 50,
+      select: { id: true, paymentNumber: true, paymentDate: true, amount: true, paymentMethod: true },
+    });
+  }
+
+  /**
+   * One receipt as a PDF, for a family. Ownership is resolved from the payment's
+   * payer, never from the URL; a receipt that is not theirs is "not found".
+   */
+  async feeReceiptPdf(paymentId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const payment = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, organizationId: this.org, direction: 'inbound' },
+      select: { partnerId: true },
+    });
+    const student = payment
+      ? await this.prisma.client.studentProfile.findFirst({ where: { organizationId: this.org, partnerId: payment.partnerId }, select: { id: true } })
+      : null;
+    if (!student || !(await this.portalIdentity.canAccessStudent(student.id))) {
+      throw new NotFoundException('Receipt not found');
+    }
+    const { pdf, filename } = await this.receipts.generate(paymentId, 'a4', 'family');
+    return { buffer: pdf, filename };
+  }
 
   private get org() {
     return this.tenant.organizationId;
