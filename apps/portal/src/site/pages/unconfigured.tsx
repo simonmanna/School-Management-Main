@@ -8,7 +8,8 @@ const NAME = (import.meta.env.VITE_SCHOOL_NAME as string | undefined) ?? 'School
  * content (VITE_SITE_CONTENT_READY=true). The site shipped with a fictional
  * "Sunrise Academy" — invented statistics, term dates, leaders and phone
  * numbers — and would have published them under a real school's name
- * (E2E audit Wave 7). Sign-in and certificate verification stay available.
+ * (E2E audit Wave 7). Sign-in, online application and certificate
+ * verification stay available: they show live data only.
  */
 export default function UnconfiguredSitePage() {
   return (
@@ -23,6 +24,9 @@ export default function UnconfiguredSitePage() {
       <div className="flex flex-wrap justify-center gap-3">
         <Link to="/login" className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground">
           Sign in
+        </Link>
+        <Link to="/apply" className="rounded-lg border px-5 py-2.5 text-sm font-medium">
+          Apply online
         </Link>
         <Link to="/verify" className="rounded-lg border px-5 py-2.5 text-sm font-medium">
           Verify a certificate

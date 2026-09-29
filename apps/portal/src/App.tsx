@@ -40,6 +40,7 @@ const NewsItemPage = lazy(() => import('@/site/pages/news-item'));
 const ContactPage = lazy(() => import('@/site/pages/contact'));
 const PortalsPage = lazy(() => import('@/site/pages/portals'));
 const VerifyPage = lazy(() => import('@/site/pages/verify'));
+const ApplyPage = lazy(() => import('@/site/pages/apply'));
 const UnconfiguredSitePage = lazy(() => import('@/site/pages/unconfigured'));
 /** Set once site/content.ts holds the school's real details. */
 const SITE_READY = import.meta.env.VITE_SITE_CONTENT_READY === 'true';
@@ -85,6 +86,8 @@ export default function App() {
           <Route path="/contact" element={SITE_READY ? <ContactPage /> : <UnconfiguredSitePage />} />
           <Route path="/portals" element={<PortalsPage />} />
           <Route path="/verify" element={<VerifyPage />} />
+          {/* Wave 16: live data only, so available before the site copy is written. */}
+          <Route path="/apply" element={<ApplyPage />} />
         </Route>
 
         {/* Signed-out account screens. `accept-invite` and `reset-password` are

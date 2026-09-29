@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Check, Save } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import {
-  useTeacherDashboard, useAttendanceStatuses, useClassRoster, useRegister, useMarkRegister,
+  teacherClasses, useTeacherDashboard, useAttendanceStatuses, useClassRoster, useRegister, useMarkRegister,
 } from '@/lib/portal-api';
 import { apiErrorMessage } from '@/lib/api';
 import { notify } from '@/lib/notify';
@@ -27,10 +27,8 @@ export default function TeacherRegister() {
   const { data: dashboard, isLoading: loadingClasses } = useTeacherDashboard(teacher?.staffProfileId);
 
   const classes = useMemo(
-    () =>
-      (dashboard?.classes ?? [])
-        .map((c) => ({ id: c.id ?? c.classId ?? '', name: c.name ?? 'Class' }))
-        .filter((c) => c.id),
+    // The register is per class: several subjects in one class are one register.
+    () => [...new Map(teacherClasses(dashboard).map((c) => [c.id, { id: c.id, name: c.name }])).values()],
     [dashboard],
   );
 

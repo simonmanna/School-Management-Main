@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Clock, PencilLine, ChevronRight, FileCheck2, ClipboardCheck, ClipboardList } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { useMyAssessments, useRegister, useTeacherDashboard } from '@/lib/portal-api';
+import { teacherClasses, useMyAssessments, useRegister, useTeacherDashboard } from '@/lib/portal-api';
 import { Badge, Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, Stat } from '@/components/ui';
 
 /**
@@ -63,7 +63,7 @@ export default function TeacherHome() {
         </CardContent>
       </Card>
 
-      <RegistersToday classes={(data?.classes ?? []).map((c) => ({ id: c.id ?? c.classId ?? '', name: c.name ?? 'Class' })).filter((c) => c.id)} />
+      <RegistersToday classes={teacherClasses(data)} />
       <MarkingDue />
 
       <div className="grid gap-2">

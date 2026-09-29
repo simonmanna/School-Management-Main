@@ -412,7 +412,19 @@ export function useDueSoon(asStudent?: string, days = 14) {
 /* ────────────────────────────── Teacher ────────────────────────────── */
 
 export interface TeacherDashboard {
-  classes: Array<{ id?: string; name?: string; classId?: string }>;
+  /**
+   * Teaching ASSIGNMENTS (one per class × subject), not classes: `id` is the
+   * assignment's id. Use `teacherClasses()` to get the classes themselves.
+   */
+  classes: Array<{
+    id?: string;
+    name?: string;
+    classId?: string;
+    sectionId?: string | null;
+    schoolClass?: { name: string } | null;
+    section?: { name: string } | null;
+    subject?: { name: string } | null;
+  }>;
   todaySchedule: Array<{
     id: string;
     subject?: { name: string } | null;
@@ -422,6 +434,25 @@ export interface TeacherDashboard {
   }>;
   pendingGrades: number | Array<unknown>;
   marking: { pendingApprovals: number; draftMarks: number };
+}
+
+/**
+ * The distinct classes (and streams) a teacher teaches, with the subjects they
+ * take there. The dashboard lists assignments, and reading an assignment's `id`
+ * as a class id sent the register to an empty roster (Wave 16).
+ */
+export function teacherClasses(dashboard?: TeacherDashboard): Array<{ id: string; sectionId: string | null; name: string; subjects: string[] }> {
+  const byKey = new Map<string, { id: string; sectionId: string | null; name: string; subjects: string[] }>();
+  for (const a of dashboard?.classes ?? []) {
+    const id = a.classId ?? '';
+    if (!id) continue;
+    const key = `${id}:${a.sectionId ?? ''}`;
+    const name = [a.schoolClass?.name ?? a.name ?? 'Class', a.section?.name].filter(Boolean).join(' ');
+    const entry = byKey.get(key) ?? { id, sectionId: a.sectionId ?? null, name, subjects: [] };
+    if (a.subject?.name && !entry.subjects.includes(a.subject.name)) entry.subjects.push(a.subject.name);
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()].sort((x, y) => x.name.localeCompare(y.name));
 }
 
 export function useTeacherDashboard(staffProfileId?: string) {
