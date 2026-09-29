@@ -85,3 +85,33 @@ export function formatBytes(n: number | null | undefined): string {
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
+
+/** The school's zone when the session has none — every current school is Ugandan. */
+export const DEFAULT_SCHOOL_TIME_ZONE = 'Africa/Kampala';
+
+/**
+ * Today's calendar date (YYYY-MM-DD) in the school's own time zone.
+ *
+ * `new Date().toISOString().slice(0, 10)` is today in UTC, which in Kampala is
+ * yesterday until 03:00 — a register opened for an early boarding roll call
+ * defaulted to the previous day (audit R09).
+ */
+export function schoolToday(timeZone?: string | null, now: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timeZone || DEFAULT_SCHOOL_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now);
+  } catch {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: DEFAULT_SCHOOL_TIME_ZONE }).format(now);
+  }
+}
+
+/** `schoolToday` bound to the signed-in school's zone. */
+export function useSchoolToday(): string {
+  const tz = useAuthStore((s) => s.organization?.timezone);
+  return schoolToday(tz);
+}
+

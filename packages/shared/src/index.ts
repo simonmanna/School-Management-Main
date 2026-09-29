@@ -5,3 +5,4 @@ export * from './events';
 export * from './workflow';
 export * from './pagination';
 export * from './terminology';
+export * from './school-attendance';

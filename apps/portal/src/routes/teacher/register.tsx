@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { pickPresentStatus } from '@erp/shared';
 import { useSearchParams } from 'react-router-dom';
 import { Check, Save } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
@@ -8,7 +9,7 @@ import {
 import { apiErrorMessage } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { Button, Card, CardContent, Skeleton, Empty, PageTitle, Badge } from '@/components/ui';
-import { cn } from '@/lib/utils';
+import { cn, schoolToday } from '@/lib/utils';
 
 /**
  * Taking the register, from home.
@@ -19,7 +20,9 @@ import { cn } from '@/lib/utils';
  *
  * Everything is marked present by default, because that is what a register
  * usually says and typing forty "present" taps on a phone is how a teacher stops
- * bothering. Absences are the exception the teacher actively records.
+ * bothering. Absences are the exception the teacher actively records. "Present"
+ * is the status the school flags as present — not whichever is listed first
+ * (R10); with no such status nobody is pre-marked.
  */
 export default function TeacherRegister() {
   const teacher = useAuthStore((s) => s.portal?.teacher);
@@ -32,7 +35,8 @@ export default function TeacherRegister() {
     [dashboard],
   );
 
-  const today = new Date().toISOString().slice(0, 10);
+  // R09: the school's calendar day, not UTC's.
+  const today = schoolToday(useAuthStore((s) => s.organization?.timezone));
   const classId = params.get('classId') ?? classes[0]?.id ?? '';
   const date = params.get('date') ?? today;
 
@@ -41,24 +45,40 @@ export default function TeacherRegister() {
   const { data: existing } = useRegister(classId || undefined, date);
   const save = useMarkRegister();
 
-  const [marks, setMarks] = useState<Record<string, string>>({});
+  const [marks, setMarksState] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  const seededKey = useRef<string | null>(null);
+  const registerKey = `${classId}|${date}`;
+  const setMarks = (fn: (m: Record<string, string>) => Record<string, string>) => {
+    setMarksState(fn);
+    setDirty(true);
+  };
 
-  const presentCode = useMemo(() => {
-    const codes = statuses ?? [];
-    return codes.find((s) => s.category === 'present')?.code ?? codes[0]?.code ?? 'present';
-  }, [statuses]);
+  const presentCode = useMemo(() => pickPresentStatus(statuses)?.code ?? null, [statuses]);
 
   // Seed from what is already recorded, so re-opening the register shows what
-  // was marked rather than silently resetting everyone to present.
+  // was marked rather than silently resetting everyone to present. A refetch
+  // never overwrites marks the teacher has changed but not saved (R09).
   useEffect(() => {
-    if (!roster) return;
+    if (!roster || !statuses) return;
+    if (dirty && seededKey.current === registerKey) return;
     const seeded: Record<string, string> = {};
     for (const pupil of roster) {
       const already = existing?.find((r) => r.studentProfileId === pupil.id);
-      seeded[pupil.id] = already?.status ?? presentCode;
+      const status = already?.status ?? presentCode;
+      if (status) seeded[pupil.id] = status;
     }
-    setMarks(seeded);
-  }, [roster, existing, presentCode]);
+    setMarksState(seeded);
+    setDirty(false);
+    seededKey.current = registerKey;
+  }, [roster, existing, presentCode, statuses, registerKey, dirty]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   if (!teacher) return <Empty title="No teaching record linked" />;
   if (loadingClasses) return <Skeleton className="h-40 w-full" />;
@@ -70,18 +90,27 @@ export default function TeacherRegister() {
   const alreadyTaken = (existing?.length ?? 0) > 0;
 
   const setParam = (key: string, value: string) => {
+    if (dirty && !window.confirm('You have unsaved register marks. Discard them?')) return;
+    setDirty(false);
     const next = new URLSearchParams(params);
     next.set(key, value);
     setParams(next, { replace: true });
   };
 
+  const unmarked = (roster ?? []).filter((p) => !marks[p.id]).length;
+
   const submit = async () => {
+    if (unmarked > 0) {
+      notify.error(`${unmarked} pupil${unmarked === 1 ? ' has' : 's have'} no mark yet`);
+      return;
+    }
     try {
       await save.mutateAsync({
         classId,
         date,
         entries: Object.entries(marks).map(([studentProfileId, status]) => ({ studentProfileId, status })),
       });
+      setDirty(false);
       notify.success('Register saved');
     } catch (e) {
       notify.error(apiErrorMessage(e, 'Could not save the register.'));

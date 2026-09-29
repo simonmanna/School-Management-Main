@@ -515,8 +515,12 @@ export interface AttendanceStatusOption {
   id: string;
   code: string;
   label: string;
-  /** present | absent | late | excused — how the code rolls up in reports. */
-  category?: string | null;
+  /** The school's own flags — these, not the list order, say what a status means (R10). */
+  isDefault?: boolean | null;
+  isPresent?: boolean | null;
+  isLate?: boolean | null;
+  isAbsent?: boolean | null;
+  isExcused?: boolean | null;
   sortOrder?: number | null;
   active?: boolean;
 }

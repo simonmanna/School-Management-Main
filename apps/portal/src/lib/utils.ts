@@ -34,3 +34,17 @@ export function formatCurrency(n: number | string | null | undefined, currency: 
   const safe = Number.isNaN(v) ? 0 : v;
   return `${currency} ${safe.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: digits })}`;
 }
+
+/**
+ * Today's calendar date (YYYY-MM-DD) in the school's own time zone. UTC's
+ * `toISOString()` is yesterday in Kampala until 03:00 (audit R09).
+ */
+export function schoolToday(timeZone?: string | null, now: Date = new Date()): string {
+  const fmt = (tz: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  try {
+    return fmt(timeZone || 'Africa/Kampala');
+  } catch {
+    return fmt('Africa/Kampala');
+  }
+}

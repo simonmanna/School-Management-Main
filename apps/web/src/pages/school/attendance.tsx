@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Save, Clock, ShieldCheck, BarChart3 } from 'lucide-react';
 import {
   useClasses, useClassRoster, usePeriods,
@@ -14,6 +14,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
+import { useSchoolToday } from '@/lib/format';
+import { pickPresentStatus } from '@erp/shared';
 import { enqueue } from '@/features/school/offline-queue';
 import { OfflineBanner } from './_components/offline-banner';
 
@@ -54,7 +56,7 @@ export function SchoolAttendancePage() {
   const [tab, setTab] = useState<'take' | 'correct' | 'thresholds' | 'analytics'>('take');
   const { data: classes } = useClasses();
   const [classId, setClassId] = useState('');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = useSchoolToday();
   const [date, setDate] = useState(today);
   const [periodId, setPeriodId] = useState('');
   const { data: periods } = usePeriods();
@@ -73,11 +75,12 @@ export function SchoolAttendancePage() {
           <TabsTrigger value="thresholds">Alert settings</TabsTrigger>
           <TabsTrigger value="analytics">Analytics</TabsTrigger>
         </TabsList>
-        <TabsContent value="take" className="pt-4">
+        {/* Kept mounted so unsaved register marks survive a look at another tab (R09). */}
+        <TabsContent value="take" forceMount className="pt-4 data-[state=inactive]:hidden">
           <TakeTab classId={classId} setClassId={setClassId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
         </TabsContent>
         <TabsContent value="correct" className="pt-4">
-          <CorrectTab classId={classId} setClassId={setClassId} date={date} classes={classes} />
+          <CorrectTab classId={classId} setClassId={setClassId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
         </TabsContent>
         <TabsContent value="thresholds" className="pt-4">
           <ThresholdsTab classId={classId} setClassId={setClassId} classes={classes} />
@@ -93,16 +96,46 @@ export function SchoolAttendancePage() {
 /* ── Take attendance (P0: daily + period, late, early, reasons) ── */
 function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
   const { STATUS_LIST, STATUS_CODES, labelOf, badgeStyle } = useStatusCatalog();
+  // R10: "All present" means the status the school flags as present, not the first listed.
+  const presentCode = pickPresentStatus(STATUS_LIST)?.code ?? null;
   const { data: roster } = useClassRoster(classId || undefined);
-  const { data: register } = useAttendanceRegister(classId || undefined, date || undefined);
+  // R01: the selected period is part of the read, not only the write — the
+  // daily register and each lesson register are loaded and cached separately.
+  const { data: register, isLoading: loadingRegister, isFetching: fetchingRegister } =
+    useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined);
   const mark = useMarkAttendance();
-  const [marks, setMarks] = useState<Record<string, { status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string }>>({});
+  const [marks, setMarksState] = useState<Record<string, { status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string }>>({});
+  // R09: unsaved marks belong to one register. A background refetch must not
+  // overwrite them, and switching register asks before throwing them away.
+  const registerKey = `${classId}|${date}|${periodId || 'daily'}`;
+  const [dirty, setDirty] = useState(false);
+  const seededKey = useRef<string | null>(null);
+  const setMarks = (next: typeof marks) => { setMarksState(next); setDirty(true); };
 
   useEffect(() => {
+    if (!register || fetchingRegister && seededKey.current !== registerKey) return;
+    if (dirty && seededKey.current === registerKey) return;
     const next: any = {};
-    for (const r of register ?? []) next[r.studentProfileId] = { status: r.status, minutesLate: r.minutesLate, earlyDepartureMinutes: r.earlyDepartureMinutes, reason: r.reason };
-    setMarks(next);
-  }, [register, classId, date, periodId]);
+    for (const r of register) next[r.studentProfileId] = { status: r.status, minutesLate: r.minutesLate, earlyDepartureMinutes: r.earlyDepartureMinutes, reason: r.reason };
+    setMarksState(next);
+    setDirty(false);
+    seededKey.current = registerKey;
+  }, [register, registerKey, fetchingRegister, dirty]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const guarded = (apply: () => void) => {
+    if (dirty && !window.confirm('You have unsaved register marks. Discard them and open another register?')) return;
+    setDirty(false);
+    seededKey.current = null;
+    apply();
+  };
+  const ready = !!classId && !loadingRegister && seededKey.current === registerKey;
 
   const students = useMemo(() => roster ?? [], [roster]);
   const summary = useMemo(() => {
@@ -117,6 +150,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
     const payload = { date, classId, periodId: periodId || undefined, entries };
     try {
       await mark.mutateAsync(payload);
+      setDirty(false);
       notify.success(`Register saved · ${entries.length} pupil${entries.length === 1 ? '' : 's'}${periodId ? ' (period)' : ''}`);
     } catch (e: any) {
       // A register taken on a dropped connection is an hour of a teacher's day.
@@ -124,6 +158,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
       // 4xx is a real refusal and is reported instead.
       const status = e?.response?.status;
       if (!status || status >= 500) {
+        setDirty(false);
         await enqueue({
           key: `attendance:${classId}:${date}:${periodId || 'daily'}`,
           kind: 'attendance',
@@ -147,22 +182,22 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label className="text-xs">Class</Label>
-          <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}>
+          <select className={sel} value={classId} onChange={(e) => { const v = e.target.value; guarded(() => setClassId(v)); }}>
             <option value="">Select class…</option>{(classes?.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Date</Label>
-          <input type="date" className={sel} value={date} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" className={sel} value={date} onChange={(e) => { const v = e.target.value; guarded(() => setDate(v)); }} />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Period (optional)</Label>
-          <select className={sel} value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
+          <select className={sel} value={periodId} onChange={(e) => { const v = e.target.value; guarded(() => setPeriodId(v)); }}>
             <option value="">Daily register</option>{(periods?.data ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
-        {classId && students.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => setAll(STATUS_LIST.find((s) => s.isDefault)?.code ?? STATUS_CODES[0])}><CheckCircle2 className="h-4 w-4" /> All present</Button>
+        {ready && students.length > 0 && (
+          <Button variant="ghost" size="sm" disabled={!presentCode} title={presentCode ? undefined : 'No status is configured as present'} onClick={() => presentCode && setAll(presentCode)}><CheckCircle2 className="h-4 w-4" /> All present</Button>
         )}
       </div>
       {!classId && <p className="text-sm text-muted-foreground">Pick a class to load its roster.</p>}
@@ -172,7 +207,10 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
             <CardTitle className="text-base">{students.length} students ·{' '}
               {STATUS_CODES.filter((s) => summary[s]).map((s) => <span key={s} className="mr-2">{summary[s]} {labelOf(s).toLowerCase()}</span>)}
             </CardTitle>
-            <Button onClick={save} disabled={mark.isPending}><Save className="h-4 w-4" /> Save</Button>
+            <div className="flex items-center gap-2">
+              {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
+              <Button onClick={save} disabled={mark.isPending || !ready}><Save className="h-4 w-4" /> Save</Button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
@@ -185,7 +223,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
                       <td className="px-4 py-2 font-mono text-xs">{s.admissionNo}</td>
                       <td className="px-4 py-2">{s.partner?.name ?? '—'}</td>
                       <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUS_LIST.map((st) => (
-                        <button key={st.code} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
+                        <button key={st.code} disabled={!ready} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
                           className={`rounded px-2 py-1 text-xs capitalize ${m.status === st.code ? '' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`} style={m.status === st.code ? badgeStyle(st.code) : undefined}>{st.label}</button>
                       ))}</div></td>
                       <td className="px-4 py-2">
@@ -208,9 +246,9 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
 }
 
 /* ── Corrections (P0d) ── */
-function CorrectTab({ classId, setClassId, date, classes }: any) {
+function CorrectTab({ classId, setClassId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
   const { STATUS_LIST, labelOf, badgeStyle } = useStatusCatalog();
-  const { data: register } = useAttendanceRegister(classId || undefined, date || undefined);
+  const { data: register } = useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined);
   const correct = useCorrectAttendance();
   const [target, setTarget] = useState<any>(null);
   const rows = register ?? [];
@@ -230,7 +268,11 @@ function CorrectTab({ classId, setClassId, date, classes }: any) {
           <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}>
             <option value="">Select class…</option>{(classes?.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
-        <div className="space-y-1"><Label className="text-xs">Date</Label><input type="date" className={sel} value={date} onChange={() => {}} /></div>
+        <div className="space-y-1"><Label className="text-xs">Date</Label><input type="date" className={sel} value={date} onChange={(e) => { setTarget(null); setDate(e.target.value); }} /></div>
+        <div className="space-y-1"><Label className="text-xs">Register</Label>
+          <select className={sel} value={periodId} onChange={(e) => { setTarget(null); setPeriodId(e.target.value); }}>
+            <option value="">Daily register</option>{(periods?.data ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select></div>
       </div>
       {classId && (
         <Card>

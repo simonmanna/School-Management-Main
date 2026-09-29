@@ -1253,7 +1253,7 @@ export interface EnrollAdmissionInput {
   termId: string;
   rollNumber: string;
   /** Overrides of what the application says; omitted fields come from the application (F13). */
-  student?: { name?: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string; residenceType?: 'day' | 'boarder'; studentCategoryId?: string };
+  student?: { name?: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string; residenceType?: 'day' | 'boarder'; studentCategoryId?: string; customFields?: Record<string, unknown> };
   /** Required when `student` contradicts the application. */
   confirmOverrides?: boolean;
 }
@@ -1419,6 +1419,8 @@ export interface RegisterStudentInput {
   /** ADR-032 P4: a different child who matches an existing pupil, with the reason. */
   allowDuplicate?: boolean;
   duplicateReason?: string;
+  /** The school's own pupil fields — required ones are enforced by the API (R03). */
+  customFields?: Record<string, unknown>;
 }
 export function useRegisterStudent() {
   const qc = useQueryClient();
@@ -3302,11 +3304,18 @@ export interface AttendanceRow {
   studentProfile?: { partner?: { name?: string } };
 }
 
-export function useAttendanceRegister(classId: string | undefined, date: string | undefined) {
+/**
+ * The register for one class on one date — the daily register when `periodId`
+ * is empty, otherwise that lesson's register (audit R01). The period is part
+ * of the query key: a daily register and a lesson register are different
+ * documents and must never share a cache entry or seed each other's marks.
+ */
+export function useAttendanceRegister(classId: string | undefined, date: string | undefined, periodId?: string) {
   return useQuery({
-    queryKey: ['school', 'register', classId, date],
+    queryKey: ['school', 'register', classId, date, periodId || 'daily'],
     enabled: !!classId && !!date,
-    queryFn: async () => (await api.get<AttendanceRow[]>(`${S}/attendance/register`, { params: { classId, date } })).data,
+    queryFn: async () =>
+      (await api.get<AttendanceRow[]>(`${S}/attendance/register`, { params: { classId, date, periodId: periodId || undefined } })).data,
   });
 }
 
@@ -3320,7 +3329,7 @@ export function useMarkAttendance() {
       periodId?: string;
       entries: Array<{ studentProfileId: string; status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string }>;
     }) => (await api.post(`${S}/attendance/mark`, dto)).data,
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'register', v.classId, v.date] }),
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'register', v.classId, v.date, v.periodId || 'daily'] }),
   });
 }
 
