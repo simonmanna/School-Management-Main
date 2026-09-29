@@ -146,6 +146,8 @@ export class EnrollStudentInput {
   @IsOptional() @IsIn([...RESIDENCE]) residenceType?: (typeof RESIDENCE)[number];
   @IsOptional() @IsString() studentCategoryId?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => GuardianDto) guardians?: GuardianDto[];
+  /** The school's own pupil fields, completed at enrolment when the application lacks them (R03). */
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
 export class GuardianDto {
@@ -237,6 +239,8 @@ export class TransferInDto {
   /** A different child who shares a name and birthday with an existing pupil (ADR-032 P4). */
   @IsOptional() @IsBoolean() allowDuplicate?: boolean;
   @IsOptional() @IsString() duplicateReason?: string;
+  /** The school's own pupil fields (R03). */
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
 export class WithdrawStudentDto {

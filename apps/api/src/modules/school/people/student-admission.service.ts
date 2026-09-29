@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { loadCustomFieldDefinitions, validateCustomFieldValues } from '../foundation/custom-field-values';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -117,6 +118,8 @@ export class RegisterStudentDto {
   /** A different child who shares a name and birthday with an existing pupil (ADR-032 P4). */
   @IsOptional() @IsBoolean() allowDuplicate?: boolean;
   @IsOptional() @IsString() @MaxLength(500) duplicateReason?: string;
+  /** The school's own pupil fields (R03) — required ones are enforced here too. */
+  @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
 /**
@@ -175,6 +178,19 @@ export class StudentAdmissionService {
       // (confirm or dismiss each candidate) is that decision, already made.
       const duplicateOverride = input.applicationId ? null : await this.assertNotLikelyDuplicate(tx, input);
 
+      // Audit R03: the school's own pupil fields are checked on EVERY route
+      // that creates a pupil — the student form, the front desk, CSV import and
+      // application conversion — not only the one that remembered to. Required
+      // fields are enforced; system keys in the bag pass through untouched.
+      // A returning pupil (`existingStudentProfileId`, above) keeps the record
+      // they already have: fields added after they were admitted are completed
+      // through the normal edit, not demanded at re-admission.
+      const customFields = validateCustomFieldValues(
+        await loadCustomFieldDefinitions(tx, 'student'),
+        input.customFields,
+        { requireAll: true },
+      );
+
       const code = await this.sequence.next(
         `student:${new Date().getUTCFullYear()}`,
         { prefix: 'STU-', padding: 6 },
@@ -213,7 +229,7 @@ export class StudentAdmissionService {
           house: input.house ?? null,
           studentCategoryId: input.studentCategoryId ?? null,
           status: 'active',
-          customFields: (input.customFields ?? {}) as any,
+          customFields: customFields as any,
         },
       });
 
@@ -457,6 +473,7 @@ export class StudentAdmissionService {
       },
       allowDuplicate: dto.allowDuplicate ?? false,
       duplicateReason: dto.duplicateReason ?? null,
+      customFields: dto.customFields,
     });
   }
 

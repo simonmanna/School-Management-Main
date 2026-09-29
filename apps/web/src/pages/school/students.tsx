@@ -135,6 +135,7 @@ export function SchoolStudentsPage() {
 
   // ── Quick "register & place" — one action creates the student AND enrolls them. ──
   const [quick, setQuick] = useState<Record<string, string>>({});
+  const [quickCf, setQuickCf] = useState<Record<string, unknown>>({});
   const quickSubmit = async (override?: { duplicateReason: string }) => {
     try {
       if (!quick.name?.trim() || !quick.classId || !quick.termId || !quick.rollNumber?.trim()) {
@@ -143,6 +144,11 @@ export function SchoolStudentsPage() {
       }
       if (!quick.sectionId && (sections?.data ?? []).some((x: { classId: string; isActive?: boolean }) => x.classId === quick.classId && x.isActive !== false)) {
         notify.error(`This class is divided — choose a ${vocab.section.toLowerCase()}`);
+        return;
+      }
+      const quickMissing = missingRequired(cfDefs, quickCf);
+      if (quickMissing.length) {
+        notify.error(`Also required: ${quickMissing.join(', ')}`);
         return;
       }
       await register.mutateAsync({
@@ -157,11 +163,13 @@ export function SchoolStudentsPage() {
         guardianName: quick.guardianName?.trim() || undefined,
         guardianPhone: quick.guardianPhone?.trim() || undefined,
         guardianRelationship: quick.guardianRelationship?.trim() || undefined,
+        customFields: pickCustomFieldValues(cfDefs, quickCf),
         ...(override ? { allowDuplicate: true, duplicateReason: override.duplicateReason } : {}),
       });
       notify.success('Student registered and placed');
       setQuickOpen(false);
       setQuick({});
+      setQuickCf({});
       setDupes(null);
     } catch (e: any) {
       const matches = likelyDuplicatesFrom(e);
@@ -337,6 +345,8 @@ export function SchoolStudentsPage() {
         terms={terms?.data ?? []}
         classes={classes?.data ?? []}
         sections={sections?.data ?? []}
+        customFields={quickCf}
+        setCustomFields={setQuickCf}
         onSubmit={() => void quickSubmit()}
         busy={register.isPending}
       />
@@ -477,11 +487,12 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'ro
  * a Contact is created and linked inline.
  */
 function QuickRegisterDialog({
-  open, onOpenChange, form, setForm, terms, classes, sections, onSubmit, busy,
+  open, onOpenChange, form, setForm, terms, classes, sections, customFields, setCustomFields, onSubmit, busy,
 }: {
   open: boolean; onOpenChange: (v: boolean) => void;
   form: Record<string, string>; setForm: (v: Record<string, string>) => void;
   terms: any[]; classes: any[]; sections: any[];
+  customFields: Record<string, unknown>; setCustomFields: (v: Record<string, unknown>) => void;
   onSubmit: () => void; busy: boolean;
 }) {
   const labels = useTerminology();
@@ -492,7 +503,7 @@ function QuickRegisterDialog({
   const classSections = (sections ?? []).filter((x: any) => x.classId === form.classId && x.isActive !== false);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Zap className="h-4 w-4" /> Quick register &amp; place</DialogTitle>
         </DialogHeader>
@@ -570,6 +581,8 @@ function QuickRegisterDialog({
               </select>
             </div>
           </div>
+          {/* R03: the school's own pupil fields, the same as the full admission form. */}
+          <CustomFieldsSection entityType="student" values={customFields} onChange={setCustomFields} className="grid grid-cols-2 gap-3 border-t pt-3" />
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>

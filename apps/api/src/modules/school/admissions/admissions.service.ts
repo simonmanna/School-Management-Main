@@ -1018,7 +1018,12 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
     const name = pick('name');
     if (!name) throw new BadRequestException('The applicant has no name on the application.');
 
-    const customFields: Record<string, unknown> = {};
+    // R03: the family's answers to the school's own questions on the
+    // application are carried to the pupil record, then anything the clerk
+    // completes at enrolment. `admit` checks the result against the school's
+    // field definitions, so a required field missing from both stops here.
+    const { source: _src, applicationId: _aid, ...appAnswers } = (app.customFields ?? {}) as Record<string, unknown>;
+    const customFields: Record<string, unknown> = { ...appAnswers, ...(s.customFields ?? {}) };
     if (app.address) customFields.address = app.address;
     if (app.entryStatus) customFields.entryStatus = app.entryStatus;
     if (app.admissionCycleId) customFields.admissionCycleId = app.admissionCycleId;
@@ -1347,7 +1352,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       residenceType: dto.residenceType ?? 'day',
       studentCategoryId: dto.studentCategoryId ?? null,
       admissionNo: dto.admissionNo ?? undefined,
-      customFields: { transferredFrom: dto.transferredFrom ?? null },
+      customFields: { ...(dto.customFields ?? {}), transferredFrom: dto.transferredFrom ?? null },
       placement: {
         termId: dto.termId,
         classId: dto.classId,

@@ -444,6 +444,17 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
     const created: StudentProfile[] = [];
     const skipped: Array<{ row: number; reason: string; admissionNo?: string }> = [];
     const val = (row: Record<string, string>, key: string) => (row[key.toLowerCase()] ?? row[key] ?? '').trim();
+    // R03: the school's own pupil fields import from a column of the same name
+    // (or `cf_<name>`); `admit` enforces the required ones per row.
+    const schoolFields = await loadCustomFieldDefinitions(this.prisma.client, 'student');
+    const customFieldsOf = (row: Record<string, string>) => {
+      const out: Record<string, unknown> = {};
+      for (const f of schoolFields) {
+        const v = val(row, f.name) || val(row, `cf_${f.name}`);
+        if (v) out[f.name] = v;
+      }
+      return out;
+    };
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -480,6 +491,7 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
           classId,
           sectionId,
           termId: val(row, 'termId') || undefined,
+          customFields: customFieldsOf(row),
           allowDuplicate: val(row, 'allowDuplicate').toLowerCase() === 'true',
           duplicateReason: val(row, 'duplicateReason') || 'Marked as a different child in the import file',
         });

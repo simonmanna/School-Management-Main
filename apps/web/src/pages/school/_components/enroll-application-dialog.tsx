@@ -18,6 +18,7 @@ import {
   type AdmissionApplication,
 } from '@/features/school/api';
 import { STAGE_LABELS } from './admission-status';
+import { CustomFieldsSection, missingRequired, pickCustomFieldValues, useCustomFieldDefs } from '@/features/school/custom-fields';
 import { ApplicationFeeDialog } from '../fees-integrity';
 
 /**
@@ -41,6 +42,10 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
   const enroll = useEnrollAdmission();
   const [feeFor, setFeeFor] = useState<AdmissionApplication | null>(null);
   const [form, setForm] = useState({ classId: '', sectionId: '', termId: '', rollNumber: '' });
+  // R03: the school's own pupil fields. Answers the family gave on the
+  // application are pre-filled; anything required and still blank is asked here.
+  const { data: cfDefs } = useCustomFieldDefs('student');
+  const [cf, setCf] = useState<Record<string, unknown>>({});
 
   // Only terms of the year the family applied for — the API refuses any other,
   // so the picker never offers one.
@@ -59,6 +64,7 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
       termId: (yearTerms.find((t) => t.isCurrent) ?? yearTerms[0])?.id ?? '',
       rollNumber: '',
     });
+    setCf({ ...((app as any).customFields ?? {}) });
   }, [app?.id, yearTerms.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!app) return null;
@@ -72,7 +78,8 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
     ['Nationality', a.nationality ?? '—'],
   ];
   const blocked = eligibility?.status === 'BLOCKED';
-  const ready = !!form.classId && !!form.termId && !!form.rollNumber.trim() && !blocked;
+  const cfMissing = missingRequired(cfDefs, cf);
+  const ready = !!form.classId && !!form.termId && !!form.rollNumber.trim() && !blocked && cfMissing.length === 0;
 
   const submit = async () => {
     try {
@@ -82,6 +89,7 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
         sectionId: form.sectionId || undefined,
         termId: form.termId,
         rollNumber: form.rollNumber.trim(),
+        ...(cfDefs?.length ? { student: { customFields: pickCustomFieldValues(cfDefs, cf) } } : {}),
       });
       const placed = [
         (classes?.data ?? []).find((c) => c.id === form.classId)?.name,
@@ -102,7 +110,7 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
   return (
     <>
       <Dialog open onOpenChange={(v) => { if (!v && !enroll.isPending) onClose(); }}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Enroll {app.applicantFirstName} {app.applicantLastName}</DialogTitle>
             <DialogDescription>The pupil record is created from the application. Choose where they sit.</DialogDescription>
@@ -158,6 +166,9 @@ export function EnrollApplicationDialog({ app, onClose }: { app: AdmissionApplic
               </select>
             </div>
           </div>
+
+          <CustomFieldsSection entityType="student" values={cf} onChange={setCf} className="grid gap-3 border-t pt-3 sm:grid-cols-2" />
+          {cfMissing.length > 0 && <p className="text-xs text-rose-600">Still required: {cfMissing.join(', ')}</p>}
 
           <DialogFooter>
             <Button variant="ghost" onClick={onClose} disabled={enroll.isPending}>Cancel</Button>
