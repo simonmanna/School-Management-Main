@@ -1,23 +1,44 @@
 import { useAuthStore } from '@/stores/auth.store';
 
-/** Org base currency, set in Settings → Company. Falls back to IDR. */
+/**
+ * Org base currency, set in Settings → Company.
+ *
+ * Audit P3: this fell back to IDR (the café-POS origin), so a Ugandan school
+ * whose session had not loaded its organisation briefly showed "IDR" amounts.
+ * Every school this ships to is Ugandan; UGX is the only honest default.
+ */
+export const DEFAULT_CURRENCY = 'UGX';
 export function useOrgCurrency(): string {
-  return useAuthStore((s) => s.organization?.currencyCode ?? 'IDR');
+  return useAuthStore((s) => s.organization?.currencyCode || DEFAULT_CURRENCY);
+}
+
+/**
+ * The minor units a currency actually uses (UGX 0, USD 2, KWD 3), from the
+ * ISO 4217 data the browser ships. "UGX 350,000.00" invents cents that do not
+ * exist and makes a fee look a hundred times larger at a glance.
+ */
+export function currencyFractionDigits(currency: string): number {
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    return 2;
+  }
 }
 
 export function money(value?: string | number | null, currency?: string): string {
   if (value === null || value === undefined || value === '') return '-';
   const n = typeof value === 'string' ? Number(value) : value;
   if (Number.isNaN(n)) return '-';
+  const digits = currency ? currencyFractionDigits(currency) : 2;
   try {
     return new Intl.NumberFormat(undefined, {
       style: currency ? 'currency' : 'decimal',
       currency: currency || undefined,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
     }).format(n);
   } catch {
-    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   }
 }
 
@@ -107,6 +128,11 @@ export function schoolToday(timeZone?: string | null, now: Date = new Date()): s
   } catch {
     return new Intl.DateTimeFormat('en-CA', { timeZone: DEFAULT_SCHOOL_TIME_ZONE }).format(now);
   }
+}
+
+/** `schoolToday` for the signed-in school, outside React (default form values, helpers). */
+export function schoolTodayNow(): string {
+  return schoolToday(useAuthStore.getState().organization?.timezone);
 }
 
 /** `schoolToday` bound to the signed-in school's zone. */
