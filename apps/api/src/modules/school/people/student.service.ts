@@ -1,3 +1,4 @@
+import { loadCustomFieldDefinitions, validateCustomFieldValues } from '../foundation/custom-field-values';
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { ConflictException, Injectable, BadRequestException, NotFoundException, ForbiddenException, Optional } from '@nestjs/common';
 import type { StudentProfile, Partner } from '@prisma/client';
@@ -202,6 +203,12 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       }
       termId = term.id;
     }
+    // Wave 16: the school's own custom fields are checked, and required ones enforced.
+    dto.customFields = validateCustomFieldValues(
+      await loadCustomFieldDefinitions(this.prisma.client, 'student'),
+      dto.customFields,
+      { requireAll: true },
+    );
     // The likely-duplicate check lives in `admit` for every path (audit F07).
     const { profile } = await this.admission.admit({
       organizationId: this.tenant.organizationId,
@@ -340,7 +347,13 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       // The national ID is never stored in the clear (F08): whether it arrives
       // as `nin` or inside customFields, it is encrypted and only its last four
       // characters stay readable.
-      const { nin: cfNin, ninEncrypted: _e, ninOnFile: _o, ninLast4: _l, ...incomingCf } = (dto.customFields ?? {}) as any;
+      const { nin: cfNin, ninEncrypted: _e, ninOnFile: _o, ninLast4: _l, ...rawIncomingCf } = (dto.customFields ?? {}) as any;
+      // Wave 16: defined custom fields are type-checked; a required one cannot be cleared.
+      const incomingCf = validateCustomFieldValues(
+        await loadCustomFieldDefinitions(tx, 'student'),
+        rawIncomingCf,
+        { requireAll: false },
+      );
       const nin = dto.nin !== undefined ? dto.nin : cfNin;
       if (hasNewCf || dto.customFields !== undefined || nin !== undefined) {
         const merged: any = { ...(before.customFields ?? {}) };

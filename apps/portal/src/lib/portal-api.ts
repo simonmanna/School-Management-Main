@@ -572,6 +572,8 @@ export interface MarkSheetRow {
   effectiveScore: number | string | null;
   approvalStatus: string;
   participation: string;
+  /** Optimistic-concurrency token for rubric grading. */
+  version?: number;
 }
 
 /** An assessment the signed-in teacher may mark (audit 2026-09-29 A07). */
@@ -689,5 +691,49 @@ export function useTransport(studentProfileId?: string) {
     enabled: !!studentProfileId,
     refetchInterval: 60_000,
     queryFn: async () => (await api.get<FamilyTransport>(`${S}/portals/parent/${studentProfileId}/transport`)).data,
+  });
+}
+
+/* ── Wave 16: rubric grading from the teacher portal ─────────────────────── */
+
+export interface RubricCriterion {
+  id: string;
+  name: string;
+  description: string | null;
+  maxScore: number;
+  weight: number;
+  levels: Array<{ id: string; label: string; score: number }>;
+}
+export interface AssignmentInbox {
+  assignment: { id: string; gradingMode: 'points' | 'rubric' | 'complete_incomplete' | string } | null;
+  rubric: { id: string; name: string; criteria: RubricCriterion[] } | null;
+}
+/** The assignment behind an assessment, and its rubric when it is marked by one. */
+export function useAssignmentInbox(assessmentId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'assignment-inbox', assessmentId],
+    enabled: !!assessmentId,
+    queryFn: async () => (await api.get<AssignmentInbox>(`${S}/assessment-board/${assessmentId}/inbox`)).data,
+  });
+}
+export function useEvidence(assessmentId: string, studentProfileId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'evidence', assessmentId, studentProfileId],
+    enabled: !!studentProfileId,
+    queryFn: async () =>
+      (await api.get<{ rubricScores?: Array<{ criterionId: string; score: number }> }>(`${S}/assessment-board/${assessmentId}/evidence/${studentProfileId}`)).data,
+  });
+}
+/** Save a rubric grade as a draft; the server checks the teacher owns the paper. */
+export function useGradeRubric(assessmentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { assignmentId: string; studentProfileId: string; expectedVersion?: number; rubricScores: Array<{ criterionId: string; score: number }>; feedback?: string }) =>
+      (await api.post(`${S}/assignments/grade`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['portal', 'marksheet', assessmentId] });
+      qc.invalidateQueries({ queryKey: ['portal', 'my-assessments'] });
+      qc.invalidateQueries({ queryKey: ['portal', 'evidence', assessmentId] });
+    },
   });
 }

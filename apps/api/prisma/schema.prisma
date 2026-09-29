@@ -13730,18 +13730,18 @@ model AttendanceStatusConfig {
 /// `notifyEarly` toggle the per-event parent alerts; `notifyBelowThreshold`
 /// toggles the rolling roll-up alert.
 model AttendanceThreshold {
-  id                   String   @id @default(uuid())
-  organizationId       String
-  classId              String? // null = org default
-  minAttendancePct     Float    @default(75)
-  notifyAbsent         Boolean  @default(true)
-  notifyLate           Boolean  @default(true)
-  notifyEarly          Boolean  @default(true)
-  notifyBelowThreshold Boolean  @default(true)
+  id                      String   @id @default(uuid())
+  organizationId          String
+  classId                 String? // null = org default
+  minAttendancePct        Float    @default(75)
+  notifyAbsent            Boolean  @default(true)
+  notifyLate              Boolean  @default(true)
+  notifyEarly             Boolean  @default(true)
+  notifyBelowThreshold    Boolean  @default(true)
   /// Wave 16: alert guardians on the Nth absent school day in a row. Null = off.
   consecutiveAbsenceAlert Int?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   @@index([organizationId])
   @@index([organizationId, classId])
@@ -18119,8 +18119,10 @@ model Bed {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  room       Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  allocation HostelAllocation?
+  room        Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  /// Wave 16: history, not one row. "One ACTIVE allocation per bed" is the
+  /// partial unique index HostelAllocation_one_active_per_bed.
+  allocations HostelAllocation[]
 
   @@unique([organizationId, roomId, number])
   @@index([organizationId])
@@ -18130,7 +18132,9 @@ model Bed {
 model HostelAllocation {
   id               String    @id @default(uuid())
   organizationId   String
-  bedId            String    @unique
+  /// Not @unique: a bed is re-used term after term. Active-only uniqueness is
+  /// enforced by partial indexes (per bed, and per pupil) — Wave 16.
+  bedId            String
   studentProfileId String
   termId           String?
   startDate        DateTime
@@ -18144,6 +18148,7 @@ model HostelAllocation {
   bed     Bed            @relation(fields: [bedId], references: [id])
   student StudentProfile @relation(fields: [studentProfileId], references: [id])
 
+  @@index([bedId])
   @@index([organizationId])
   @@index([studentProfileId])
 }
@@ -20232,38 +20237,38 @@ model ChildCareLog {
 /// releasing a child to the wrong adult is the one mistake a nursery cannot
 /// undo.
 model PickupAuthorization {
-  id               String                  @id @default(uuid())
-  organizationId   String
-  studentProfileId String
-  kind             PickupAuthorizationKind @default(STANDING)
+  id                String                  @id @default(uuid())
+  organizationId    String
+  studentProfileId  String
+  kind              PickupAuthorizationKind @default(STANDING)
   /// The Contact, where the collector is already on record.
-  contactId        String?
+  contactId         String?
   /// A collector who is not a contact. One of `contactId` or `personName` is
   /// always set; the service enforces it.
-  personName       String?
-  personPhone      String?
-  relationship     String?
+  personName        String?
+  personPhone       String?
+  relationship      String?
   /// What the office checks at the gate.
-  idType           String?
-  idNumber         String?
-  photoDocumentId  String?
-  validFrom        DateTime
+  idType            String?
+  idNumber          String?
+  photoDocumentId   String?
+  validFrom         DateTime
   /// Null on a standing authorization; the single day on a one-off.
-  validTo          DateTime?
-  authorizedById   String?
+  validTo           DateTime?
+  authorizedById    String?
   /// Withdrawn rather than deleted: who was allowed to collect a child last term
   /// is part of the record, especially after a custody change.
-  revokedAt        DateTime?
-  revokedById      String?
-  revokeReason     String?
-  notes            String?
+  revokedAt         DateTime?
+  revokedById       String?
+  revokeReason      String?
+  notes             String?
   /// Wave 16: set when a guardian asked for this through the parent portal.
   /// A pending authorization is NOT valid at the gate until the office
   /// approves it (clears this and stamps authorizedById).
-  pendingSince     DateTime?
+  pendingSince      DateTime?
   requestedByUserId String?
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
   studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
   contact        Contact?       @relation("PickupContact", fields: [contactId], references: [id])

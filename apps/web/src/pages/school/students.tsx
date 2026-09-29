@@ -1,3 +1,4 @@
+import { CustomFieldsSection, missingRequired, pickCustomFieldValues, useCustomFieldDefs } from '@/features/school/custom-fields';
 import { formatCurrency } from '@/lib/utils';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -47,6 +48,8 @@ export function SchoolStudentsPage() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [cf, setCf] = useState<Record<string, unknown>>({});
+  const { data: cfDefs } = useCustomFieldDefs('student');
   const [detail, setDetail] = useState<Student | null>(null);
 
   const PAGE_SIZE = 50;
@@ -78,6 +81,7 @@ export function SchoolStudentsPage() {
   const openCreate = () => {
     setEditing(null);
     setForm({ enrollmentDate: new Date().toISOString().slice(0, 10) });
+    setCf({});
     setOpen(true);
   };
 
@@ -112,6 +116,7 @@ export function SchoolStudentsPage() {
           gender: (form.gender || undefined) as 'male' | 'female' | 'other' | undefined,
           classId: form.currentClassId || undefined,
           residenceType: (form.residenceType || undefined) as 'day' | 'boarder' | undefined,
+          customFields: pickCustomFieldValues(cfDefs, cf),
           ...(override ? { allowDuplicate: true, duplicateReason: override.duplicateReason } : {}),
         });
         notify.success('Student admitted');
@@ -312,9 +317,10 @@ export function SchoolStudentsPage() {
             <Field label="Email"><Input value={form.email ?? ''} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="Phone"><Input value={form.phone ?? ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
           </div>
+          {!editing && <CustomFieldsSection entityType="student" values={cf} onChange={setCf} className="grid grid-cols-2 gap-3 border-t pt-3" />}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={() => void submit()} disabled={create.isPending || update.isPending || !form.name || (!editing && (!form.admissionNo || !form.enrollmentDate))}>
+            <Button onClick={() => void submit()} disabled={create.isPending || update.isPending || !form.name || (!editing && (!form.admissionNo || !form.enrollmentDate || missingRequired(cfDefs, cf).length > 0))}>
               {editing ? 'Save' : 'Admit'}
             </Button>
           </DialogFooter>

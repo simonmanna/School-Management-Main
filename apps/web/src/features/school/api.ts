@@ -1386,6 +1386,8 @@ export interface CreateStudentInput {
   house?: string;
   nationality?: string;
   religion?: string;
+  /** Wave 16: the school's own fields, validated by the API against their definitions. */
+  customFields?: Record<string, unknown>;
 }
 
 export function useCreateStudent() {

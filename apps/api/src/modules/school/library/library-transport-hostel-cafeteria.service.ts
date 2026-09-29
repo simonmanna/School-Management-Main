@@ -457,20 +457,27 @@ export class HostelAllocationService extends BaseCrudService<HostelAllocation, P
     super(prisma.client.hostelAllocation as unknown as CrudDelegate);
   }
 
+  /**
+   * Put a pupil in a bed. The bed is claimed atomically (only an `available`
+   * bed flips to `occupied`), and the partial unique indexes refuse a second
+   * active allocation for the same bed or the same pupil even under a race.
+   */
   async allocate(bedId: string, studentProfileId: string, startDate: Date) {
     return this.prisma.client.$transaction(async (tx: any) => {
       const bed = await tx.bed.findFirst({ where: { id: bedId } });
       if (!bed) throw new NotFoundException(`Bed ${bedId} not found`);
-      if (bed.status !== 'available') throw new BadRequestException(`Bed is ${bed.status}`);
-      await tx.bed.updateMany({ where: { id: bedId }, data: { status: 'occupied' } });
-      const alloc = await tx.hostelAllocation.create({
-        data: {
-          organizationId: this.tenant.organizationId,
-          bedId,
-          studentProfileId,
-          startDate,
-        },
-      });
+      const student = await tx.studentProfile.findFirst({ where: { id: studentProfileId }, select: { id: true } });
+      if (!student) throw new NotFoundException(`Student ${studentProfileId} not found`);
+      const current = await tx.hostelAllocation.findFirst({ where: { studentProfileId, status: 'active' }, select: { id: true } });
+      if (current) throw new BadRequestException('This pupil already has a bed. Check them out of it first.');
+      const claimed = await tx.bed.updateMany({ where: { id: bedId, status: 'available' }, data: { status: 'occupied' } });
+      if (claimed.count !== 1) throw new BadRequestException(`Bed is ${bed.status}`);
+      const alloc = await tx.hostelAllocation
+        .create({ data: { organizationId: this.tenant.organizationId, bedId, studentProfileId, startDate } })
+        .catch((err: any) => {
+          if (err?.code === 'P2002') throw new BadRequestException('That bed or pupil was just allocated by someone else.');
+          throw err;
+        });
       this.events.publish(EVENTS.SchoolHostelAllocated, {
         organizationId: this.tenant.organizationId,
         allocationId: alloc.id,
@@ -485,12 +492,66 @@ export class HostelAllocationService extends BaseCrudService<HostelAllocation, P
     return this.prisma.client.$transaction(async (tx: any) => {
       const alloc = await tx.hostelAllocation.findFirst({ where: { id: allocationId } });
       if (!alloc) throw new NotFoundException(`Allocation ${allocationId} not found`);
+      if (alloc.status !== 'active') throw new BadRequestException('This pupil has already been checked out.');
       await tx.hostelAllocation.updateMany({
-        where: { id: allocationId },
+        where: { id: allocationId, status: 'active' },
         data: { status: 'ended', checkOutDate, endDate: checkOutDate },
       });
       await tx.bed.updateMany({ where: { id: alloc.bedId }, data: { status: 'available' } });
-      return alloc;
+      return { ...alloc, status: 'ended', checkOutDate, endDate: checkOutDate };
+    });
+  }
+
+  /**
+   * Wave 16: the house view — every dormitory, room and bed with who is in it.
+   * One call for the hostel screen instead of four lists stitched in the browser.
+   */
+  async occupancy() {
+    const dorms = await this.prisma.client.dormitory.findMany({
+      where: { deletedAt: null },
+      orderBy: { name: 'asc' },
+      include: {
+        rooms: {
+          where: { deletedAt: null },
+          orderBy: { number: 'asc' },
+          include: {
+            beds: {
+              orderBy: { number: 'asc' },
+              include: {
+                allocations: {
+                  where: { status: 'active' },
+                  include: { student: { select: { id: true, admissionNo: true, partner: { select: { name: true } } } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    return dorms.map((d: any) => {
+      const beds = d.rooms.flatMap((r: any) => r.beds);
+      return {
+        id: d.id,
+        name: d.name,
+        gender: d.gender,
+        capacity: d.capacity,
+        beds: beds.length,
+        occupied: beds.filter((b: any) => b.allocations.length > 0).length,
+        rooms: d.rooms.map((r: any) => ({
+          id: r.id,
+          number: r.number,
+          type: r.type,
+          beds: r.beds.map((b: any) => {
+            const a = b.allocations[0];
+            return {
+              id: b.id,
+              number: b.number,
+              status: b.status,
+              allocation: a ? { id: a.id, startDate: a.startDate, studentProfileId: a.studentProfileId, name: a.student?.partner?.name ?? null, admissionNo: a.student?.admissionNo ?? null } : null,
+            };
+          }),
+        })),
+      };
     });
   }
 }

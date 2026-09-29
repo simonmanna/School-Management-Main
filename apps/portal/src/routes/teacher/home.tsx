@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { Clock, PencilLine, ChevronRight, FileCheck2 } from 'lucide-react';
+import { Clock, PencilLine, ChevronRight, FileCheck2, ClipboardCheck, ClipboardList } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { useTeacherDashboard } from '@/lib/portal-api';
-import { Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, Stat } from '@/components/ui';
+import { useMyAssessments, useRegister, useTeacherDashboard } from '@/lib/portal-api';
+import { Badge, Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, Stat } from '@/components/ui';
 
 /**
  * The teacher's day, from home.
@@ -63,11 +63,72 @@ export default function TeacherHome() {
         </CardContent>
       </Card>
 
+      <RegistersToday classes={(data?.classes ?? []).map((c) => ({ id: c.id ?? c.classId ?? '', name: c.name ?? 'Class' })).filter((c) => c.id)} />
+      <MarkingDue />
+
       <div className="grid gap-2">
         <Row to="/teacher/marking" icon={<PencilLine className="h-5 w-5" />} label="Marks to enter" />
         <Row to="/teacher/classes" icon={<FileCheck2 className="h-5 w-5" />} label="My classes" />
       </div>
     </div>
+  );
+}
+
+/**
+ * Wave 16: has each of my classes had today's register taken? One line per
+ * class, straight into the register for the ones still open.
+ */
+function RegistersToday({ classes }: { classes: Array<{ id: string; name: string }> }) {
+  if (classes.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><ClipboardCheck className="h-4 w-4" /> Registers today</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 pt-0">
+        {classes.map((c) => <RegisterLine key={c.id} classId={c.id} name={c.name} />)}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RegisterLine({ classId, name }: { classId: string; name: string }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, isLoading } = useRegister(classId, today);
+  const taken = (data?.length ?? 0) > 0;
+  return (
+    <Link to={`/teacher/register?classId=${classId}`} className="tap flex items-center justify-between rounded-lg border p-3 text-sm hover:bg-muted">
+      <span className="font-medium">{name}</span>
+      {isLoading ? <Skeleton className="h-5 w-16" /> : taken ? <Badge variant="success">Taken</Badge> : <Badge variant="outline">Not taken</Badge>}
+    </Link>
+  );
+}
+
+/** Wave 16: papers with marks still to enter, fewest done first. */
+function MarkingDue() {
+  const { data } = useMyAssessments();
+  const due = (data ?? [])
+    .filter((a) => a.entered < a.total)
+    .sort((a, b) => a.entered / Math.max(1, a.total) - b.entered / Math.max(1, b.total))
+    .slice(0, 5);
+  if (due.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="h-4 w-4" /> Marks to enter</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 pt-0">
+        {due.map((a) => (
+          <Link key={a.id} to="/teacher/marking" className="tap flex items-center justify-between gap-3 rounded-lg border p-3 text-sm hover:bg-muted">
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{a.title}</span>
+              <span className="block truncate text-xs text-muted-foreground">{[a.className, a.subjectName].filter(Boolean).join(' · ')}</span>
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">{a.entered}/{a.total}</span>
+          </Link>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -1,3 +1,4 @@
+import { CustomFieldsSection, pickCustomFieldValues, useCustomFieldDefs } from '@/features/school/custom-fields';
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Save, Send, ArrowLeft, User, Plus, Trash2, Clock, ShieldCheck, ChevronRight, ChevronLeft, Pencil } from 'lucide-react';
@@ -70,6 +71,9 @@ export function SchoolApplicationFormPage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [guardians, setGuardians] = useState<AdmissionGuardianInput[]>([emptyGuardian()]);
   const [revealed, setRevealed] = useState<string | null>(null);
+  // Wave 16: the school's own pupil fields, collected at application and carried to the record.
+  const { data: cfDefs } = useCustomFieldDefs('student');
+  const [ownCf, setOwnCf] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     if (!existing) {
@@ -113,6 +117,7 @@ export function SchoolApplicationFormPage() {
       address,
       studentCategoryId,
     });
+    setOwnCf({ ...cf });
   }, [existing]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -122,7 +127,7 @@ export function SchoolApplicationFormPage() {
   const collectExtras = (): Record<string, unknown> => {
     const extras: Record<string, unknown> = {};
     for (const k of CF_KEYS) if (form[k]) extras[k] = form[k];
-    return extras;
+    return { ...extras, ...pickCustomFieldValues(cfDefs, ownCf) };
   };
 
   const validGuardians = () => guardians.filter((g) => g.firstName.trim() || (g.lastName ?? '').trim());
@@ -361,6 +366,7 @@ export function SchoolApplicationFormPage() {
                 <Input value={form.schoolPayCode ?? ''} onChange={(e) => set('schoolPayCode', e.target.value)} placeholder="Enter student's school pay code" />
               </Field>
             </div>
+            <CustomFieldsSection entityType="student" values={ownCf} onChange={setOwnCf} className="mt-4 grid grid-cols-1 gap-3 border-t pt-4 md:grid-cols-2" />
           </CardContent></Card>
 
           {/* Guardian 1 */}

@@ -39,6 +39,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   BookOpen,
+  BedDouble,
   GraduationCap,
   BookText,
   Bus,
@@ -430,6 +431,14 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/documents', label: 'Documents', icon: FileText, permission: PERMISSIONS.school.read },
+    ],
+  },
+  {
+    title: 'Boarding',
+    icon: BedDouble,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/hostel', label: 'Dormitories & beds', icon: BedDouble, permission: PERMISSIONS.school.read },
     ],
   },
   {

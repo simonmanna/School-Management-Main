@@ -15,6 +15,13 @@ export class CustomFieldController {
     return this.fields.list(q);
   }
 
+  /** Wave 16: the active fields a form for this entity should render, in order. */
+  @Get('for/:entityType')
+  @RequirePermissions(PERMISSIONS.school.read)
+  forEntity(@Param('entityType') entityType: string) {
+    return this.fields.definitionsFor(entityType);
+  }
+
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
   findOne(@Param('id') id: string) {

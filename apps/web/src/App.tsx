@@ -72,6 +72,7 @@ import { StudentTimetablePage } from '@/pages/school/timetable-student';
 import { SchoolTripsPage } from '@/pages/school/trips';
 import { SchoolTransportPage } from '@/pages/school/transport';
 import { SchoolLibraryPage } from '@/pages/school/library';
+import { SchoolHostelPage } from '@/pages/school/hostel';
 import { FrontDeskPage } from '@/pages/school/front-desk';
 import { SchoolEarlyYearsPage } from '@/pages/school/early-years';
 import { PhoneCallsPage } from '@/pages/school/phone-calls';
@@ -606,6 +607,7 @@ export function App() {
           <Route path="/school/timetable/events" element={<SchoolEventsPage />} />
           <Route path="/school/timetable/trips" element={<SchoolTripsPage />} />
           <Route path="/school/transport" element={<SchoolTransportPage />} />
+          <Route path="/school/hostel" element={<SchoolHostelPage />} />
           <Route path="/school/library" element={<SchoolLibraryPage />} />
           <Route path="/school/library/catalogue" element={<SchoolLibraryPage />} />
           <Route path="/school/library/copies" element={<SchoolLibraryPage />} />

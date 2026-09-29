@@ -5,6 +5,10 @@ import {
   useTeacherOverview,
   useMarkSheet,
   useRecordMark,
+  useAssignmentInbox,
+  useEvidence,
+  useGradeRubric,
+  type RubricCriterion,
   useMyAssessments,
   useSubmitMarks,
   type MyAssessment,
@@ -158,6 +162,10 @@ function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: (
   const record = useRecordMark();
   const submit = useSubmitMarks();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Wave 16: an assignment marked against a rubric is scored criterion by criterion.
+  const { data: inbox } = useAssignmentInbox(assessmentId);
+  const rubric = inbox?.assignment?.gradingMode === 'rubric' ? inbox.rubric : null;
+  const [openRubric, setOpenRubric] = useState<string | null>(null);
 
   const header = (
     <div className="flex items-center gap-2">
@@ -224,7 +232,8 @@ function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: (
           const approved = row.approvalStatus === 'approved';
           const current = drafts[row.id] ?? (row.effectiveScore != null ? String(row.effectiveScore) : '');
           return (
-            <div key={row.id} className="flex items-center gap-2 rounded-lg border p-3">
+            <div key={row.id} className="space-y-2 rounded-lg border p-3">
+            <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{row.studentName ?? 'Unnamed pupil'}</div>
                 {row.admissionNo && <div className="truncate text-xs text-muted-foreground">{row.admissionNo}</div>}
@@ -238,6 +247,10 @@ function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: (
                   <Lock className="h-4 w-4 text-muted-foreground" />
                   {row.effectiveScore ?? '—'} / {row.maxScore}
                 </div>
+              ) : rubric && inbox?.assignment ? (
+                <Button size="sm" variant="outline" onClick={() => setOpenRubric(openRubric === row.id ? null : row.id)}>
+                  {row.effectiveScore != null ? `${row.effectiveScore} / ${row.maxScore}` : 'Score'}
+                </Button>
               ) : (
                 <div className="flex items-center gap-2">
                   <Input
@@ -260,6 +273,17 @@ function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: (
                 </div>
               )}
             </div>
+            {rubric && inbox?.assignment && openRubric === row.id && !approved && (
+              <RubricGrid
+                assessmentId={assessmentId}
+                assignmentId={inbox.assignment.id}
+                studentProfileId={row.studentProfileId}
+                version={row.version}
+                criteria={rubric.criteria}
+                onSaved={() => setOpenRubric(null)}
+              />
+            )}
+            </div>
           );
         })}
         {openRows.length > 0 && (
@@ -273,6 +297,74 @@ function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: (
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Wave 16: score one pupil against each rubric criterion. The server works out
+ * the mark from the levels, checks the paper is yours, and keeps it a draft
+ * until the whole sheet is submitted for approval.
+ */
+function RubricGrid({ assessmentId, assignmentId, studentProfileId, version, criteria, onSaved }: {
+  assessmentId: string;
+  assignmentId: string;
+  studentProfileId: string;
+  version?: number;
+  criteria: RubricCriterion[];
+  onSaved: () => void;
+}) {
+  const grade = useGradeRubric(assessmentId);
+  const { data: evidence } = useEvidence(assessmentId, studentProfileId);
+  const initial = Object.fromEntries((evidence?.rubricScores ?? []).map((r) => [r.criterionId, String(r.score)]));
+  const [scores, setScores] = useState<Record<string, string>>({});
+  const value = (id: string) => scores[id] ?? initial[id] ?? '';
+  const complete = criteria.every((c) => value(c.id) !== '');
+  const save = async () => {
+    try {
+      await grade.mutateAsync({
+        assignmentId,
+        studentProfileId,
+        expectedVersion: version,
+        rubricScores: criteria.map((c) => ({ criterionId: c.id, score: Number(value(c.id)) })),
+      });
+      notify.success('Rubric saved as a draft');
+      onSaved();
+    } catch (e) {
+      notify.error(apiErrorMessage(e, 'Could not save the rubric.'));
+    }
+  };
+  return (
+    <div className="space-y-2 rounded-md bg-muted/40 p-2">
+      {criteria.map((c) => (
+        <label key={c.id} className="block space-y-1 text-sm">
+          <span className="font-medium">{c.name}</span>
+          {c.description && <span className="block text-xs text-muted-foreground">{c.description}</span>}
+          {c.levels.length ? (
+            <select
+              className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+              value={value(c.id)}
+              onChange={(e) => setScores((s) => ({ ...s, [c.id]: e.target.value }))}
+            >
+              <option value="">Choose a level…</option>
+              {c.levels.map((l) => <option key={l.id} value={String(l.score)}>{l.label} ({l.score})</option>)}
+            </select>
+          ) : (
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={c.maxScore}
+              className="h-10 w-24"
+              value={value(c.id)}
+              onChange={(e) => setScores((s) => ({ ...s, [c.id]: e.target.value }))}
+            />
+          )}
+        </label>
+      ))}
+      <Button size="sm" className="w-full" disabled={!complete || grade.isPending} onClick={save}>
+        {complete ? 'Save rubric' : 'Score every criterion'}
+      </Button>
+    </div>
   );
 }
 

@@ -45,6 +45,8 @@ const REQUIRED_INDEXES = [
   { name: 'StudentAttendance_daily_unique', why: 'one daily register row per pupil per date' },
   { name: 'StudentAttendance_period_unique', why: 'one period register row per pupil per date per period' },
   { name: 'Document_org_partner_source_reference_key', why: 'one fee invoice per pupil per schedule per term, across fee-structure versions' },
+  { name: 'HostelAllocation_one_active_per_bed', why: 'a bed holds one pupil at a time, and can be re-used after checkout' },
+  { name: 'HostelAllocation_one_active_per_student', why: 'a pupil holds one bed at a time' },
 ];
 
 // Wave 4 — constraints and triggers created by migrations 20260924150000-155000.

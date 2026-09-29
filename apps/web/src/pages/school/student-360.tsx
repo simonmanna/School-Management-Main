@@ -1,3 +1,4 @@
+import { CustomFieldsSection, pickCustomFieldValues, useCustomFieldDefs } from '@/features/school/custom-fields';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useState, useEffect, type ChangeEvent, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -88,6 +89,9 @@ export function SchoolStudent360Page() {
   const [phone, setPhone] = useState('');
   const [bioBusy, setBioBusy] = useState(false);
   const [placementOpen, setPlacementOpen] = useState(false);
+  // Wave 16: the school's own fields, edited alongside the fixed ones.
+  const { data: cfDefs } = useCustomFieldDefs('student');
+  const [ownCf, setOwnCf] = useState<Record<string, unknown>>({});
 
   const cf = ((student as any)?.customFields ?? {}) as any;
   const photo = (student?.partner as any)?.customFields?.photoUrl as string | undefined;
@@ -117,6 +121,7 @@ export function SchoolStudent360Page() {
     setSchoolPayCode(cf.schoolPayCode ?? '');
     setEmail(p.email ?? '');
     setPhone(p.phone ?? '');
+    setOwnCf({ ...(s.customFields ?? {}) });
   }, [student]);
 
   const onPhotoFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -173,6 +178,7 @@ export function SchoolStudent360Page() {
         address: address || undefined,
         learnerId: learnerId || undefined,
         schoolPayCode: schoolPayCode || undefined,
+        ...pickCustomFieldValues(cfDefs, ownCf),
       };
       await updateStudent.mutateAsync({
         id: student.id,
@@ -407,6 +413,7 @@ export function SchoolStudent360Page() {
                     <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+256…" />
                   </EditField>
                 </div>
+                <CustomFieldsSection entityType="student" values={ownCf} onChange={setOwnCf} className="mt-4 grid grid-cols-1 gap-3 border-t pt-4 md:grid-cols-2 lg:grid-cols-4" />
               </CardContent>
             </Card>
 

@@ -169,6 +169,8 @@ export class BedController {
 export class HostelAllocationController {
   constructor(private readonly service: HostelAllocationService) {}
   @Get() @RequirePermissions(PERMISSIONS.school.read) list(@Query() q: PaginationDto) { return this.service.list(q); }
+  /** Wave 16: dormitories → rooms → beds with current occupants. */
+  @Get('occupancy') @RequirePermissions(PERMISSIONS.school.read) occupancy() { return this.service.occupancy(); }
   @Post('allocate') @RequirePermissions(PERMISSIONS.school.manageHostel) allocate(@Body() dto: HostelAllocateDto) {
     return this.service.allocate(dto.bedId, dto.studentProfileId, new Date(dto.startDate));
   }
