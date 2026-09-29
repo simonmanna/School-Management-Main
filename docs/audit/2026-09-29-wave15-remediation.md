@@ -1,0 +1,21 @@
+# Wave 15 — remediation of audit 2026-09-29 (A01–A08)
+
+Branch `wave15-audit-remediation`. Owner decisions: A01 retire legacy homework reads; A03 backup is operator-only; scope A01–A08. Host/deployment acceptance (D05 real image boot on a host, D06–D09) is **not** part of this wave and remains NOT VERIFIED.
+
+| Finding | Change | Proof |
+|---|---|---|
+| **A01 (P0)** legacy homework discloses pupil work | Every `/school/homework*` and `/school/submissions*` route answers **410 Gone**; `HomeworkService`/`SubmissionService` deleted; orphan web page, hooks and nav removed. Rows kept as provenance. | `test/unit/legacy-homework-retired.spec.ts`; live re-probe: unassigned teacher 410 on list/detail/by-class/submission, admin 410, pupil record still 403 (`evidence-20260929/wave15-reprobe-http.json`). |
+| **A02 (P1)** staff list exposes compensation | `STAFF_DIRECTORY_SELECT` allow-list (`BaseCrudService.defaultSelect`) on list/detail/by-campus/by-department/create/update; **Prisma global `omit`** of `StaffProfile.compensation` on the tenant client, so no `include: { teacher: true }` can leak it. HR opts in explicitly (`hr-reconciliation.service.ts`). Stored values untouched. | `test/integration/wave15-staff-confidential-and-marking.spec.ts` (A02 block); live re-probe: teacher `/school/staff` has no `compensation`/bank/salary. |
+| **A03 (P1)** backup config crosses schools | `/admin/backups/*` is `@Public()` + `OperatorSecretGuard` (`X-Operator-Secret` = host `OPERATOR_SECRET`, closed when unset); config is a host file (`BACKUP_CONFIG_PATH`, 0600), not a tenant setting; stored secrets returned as `********`; `backup:*` removed from the catalogue, presets and stored roles (migration `20260929100000_wave15_backup_operator_only`); cron jobs stopped on reschedule. Tenant backup page removed. Runbook: `docs/operations/backup-and-restore.md`. | `test/backup/*.spec.ts`; live re-probe: School A and School B admins 403 on read/update, anonymous 403, operator 200 with no audit destination. |
+| **A04 (P1)** multipart parser advisories | `multer` 2.4.0 only (override; unused direct 1.x removed); shared `UPLOAD_LIMITS` on all three upload routes (documents had none); nodemailer 9, axios, adm-zip, nanoid, lodash, js-yaml, postcss, brace-expansion patched; unused `mjml` removed. Audit highs 30 → 2 (accepted, see `evidence-20260929/dependency-disposition.md`). | `test/unit/files-multipart-limits.spec.ts`; `pnpm why multer -r`; `pnpm audit --prod`. |
+| **A05 (P1)** CI production gate | Prisma assertion runs with `-w /app/apps/api`; image job boots **NODE_ENV=production** on PostgreSQL 16 with migrations, constraint preflight, `app`/`app_system` roles, and requires `/health/ready`, backup API 403 and anonymous legacy 401; compose job has fixtures for every required variable and renders prod + staging with `--env-file /dev/null`. | Local: both overlays render with CI fixtures only, and fail when one is removed; port policy satisfied. Image boot runs on the CI runner (no local Docker daemon). |
+| **A06 (P2)** submission list 500 | Retired with A01. | As A01. |
+| **A07 (P2)** teacher marking needs a raw UUID | `GET /school/marking/mine` (scoped by `MarkingService.readScope()`); portal lists the teacher's assessments by class/stream, shows pupil name + admission no, and submits for approval. | Integration A07 block (own only, colleague only theirs, no-staff refused); portal typecheck + build. Browser walk-through with a real teacher account NOT VERIFIED. |
+| **A08 (P2)** test shutdown | Backup `CronJob`s are stopped (not only unregistered) — the handle that kept the unit runner alive; outbox worker waits for an in-flight batch before Prisma disconnects. | Full unit project 138 suites / 2,442 tests exit 0 naturally with `--detectOpenHandles`; integration subset (restore drill, scope, HR bridge, LMS e2e, wave 3, wave 15) exits naturally, no teardown errors. |
+
+## Still open (operator / acceptance)
+
+- D05 on a real host: TLS, persistent volumes, restart, rollback drill.
+- D06–D09 browser acceptance journeys, offsite restore, real SMS/email delivery.
+- Legacy `StaffProfile.compensation` values remain stored (hidden). Redaction or migration to HR needs an approved data migration.
+- Full integration project not re-run in this wave; CI runs it.

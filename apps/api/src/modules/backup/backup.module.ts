@@ -1,5 +1,4 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { PERMISSIONS } from '@erp/shared';
 import { ModuleRegistry } from '../../kernel/module-loader/module-registry.service';
 import { BackupController } from './backup.controller';
 import { BackupService } from './backup.service';
@@ -17,7 +16,8 @@ export class BackupModule implements OnModuleInit {
       name: 'backup',
       version: '1.0.0',
       dependencies: [],
-      permissions: Object.values(PERMISSIONS.backup),
+      // Operator-only (OPERATOR_SECRET); grants no tenant permission.
+      permissions: [],
     });
   }
 }

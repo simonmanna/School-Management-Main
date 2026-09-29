@@ -7,8 +7,7 @@ import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { SettingsService } from '../../kernel/settings/settings.service';
-import { BACKUP_DEFAULTS, BACKUP_SETTING_KEY, PG_BIN_DEFAULT } from './backup.constants';
+import { BACKUP_DEFAULTS, PG_BIN_DEFAULT } from './backup.constants';
 import { BackupFrequency, BackupType, CompressionLevel, DestinationType, EncryptionType, InternetBehaviour, RetentionMode, RestoreScope, RestoreScopeType, NotifyOn, NotifyChannel } from './backup.dto';
 import type { BackupConfigDto, BackupDestinationDto, BackupKind, BackupRunResult, RestoreDto as RestoreDtoType } from './backup.dto';
 
@@ -50,12 +49,25 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   private history: BackupRunResult[] = [];
   private busy = new Set<BackupKind>();
   private config: BackupConfigDto = structuredClone(BACKUP_DEFAULTS) as any;
-  private cronJobNames: string[] = [];
+  private cronJobs = new Map<string, CronJob>();
 
-  constructor(
-    private readonly settingsService: SettingsService,
-    private readonly schedulerRegistry: SchedulerRegistry,
-  ) {}
+  constructor(private readonly schedulerRegistry: SchedulerRegistry) {}
+
+  /** Stands in for a stored secret in every response; sending it back keeps the stored value. */
+  static readonly REDACTED = '********';
+
+  /**
+   * Where the operator's backup configuration lives (audit 2026-09-29 A03).
+   *
+   * The config drives one process-wide scheduler over a whole-database dump,
+   * so it is host state, not a tenant setting: it used to be saved under the
+   * calling school's settings while one shared in-memory copy served every
+   * school. It is fixed by the host environment — not by the config's own
+   * destination, which the config can change.
+   */
+  static configPath(): string {
+    return path.resolve(process.env.BACKUP_CONFIG_PATH || path.join(process.env.BACKUP_DIR || 'backup', 'backup-config.json'));
+  }
 
   // ==========================================================================
   // Config
@@ -75,25 +87,46 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   private async loadConfig(): Promise<void> {
     try {
-      const setting = await this.settingsService.get(BACKUP_SETTING_KEY);
-      if (setting?.value && typeof setting.value === 'object') {
-        this.config = this.deepMerge(structuredClone(BACKUP_DEFAULTS), setting.value) as BackupConfigDto;
+      const raw = JSON.parse(await fs.readFile(BackupService.configPath(), 'utf8'));
+      if (raw && typeof raw === 'object') {
+        this.config = this.deepMerge(structuredClone(BACKUP_DEFAULTS), raw) as BackupConfigDto;
       }
-    } catch {
-      this.logger.warn('Failed to load backup config from DB, using defaults');
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') this.logger.warn(`Failed to read backup config ${BackupService.configPath()}: ${this.errText(err)}; using defaults`);
     }
   }
 
+  private async saveConfig(): Promise<void> {
+    const file = BackupService.configPath();
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(this.config, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await fs.rename(tmp, file);
+  }
+
+  /** The config as an operator sees it: stored secrets are never echoed back. */
   getConfig(): BackupConfigDto {
-    return structuredClone(this.config) as BackupConfigDto;
+    const out = structuredClone(this.config) as BackupConfigDto;
+    const mask = (v?: string) => (v ? BackupService.REDACTED : v);
+    out.destinations = (out.destinations ?? []).map((d) => ({ ...d, accessKey: mask(d.accessKey), secretKey: mask(d.secretKey) }));
+    if (out.encryption) out.encryption = { ...out.encryption, password: mask(out.encryption.password) };
+    return out;
   }
 
   async updateConfig(partial: Partial<BackupConfigDto>): Promise<BackupConfigDto> {
     const merged = this.deepMerge(structuredClone(BACKUP_DEFAULTS), { ...this.config, ...partial });
     merged.types = partial.types ?? this.config.types;
-    merged.destinations = partial.destinations ?? this.config.destinations;
+    // A redacted placeholder coming back means "unchanged", never "set the
+    // secret to asterisks".
+    const keep = (incoming: string | undefined, stored: string | undefined) =>
+      incoming === BackupService.REDACTED ? stored : incoming;
+    merged.destinations = (partial.destinations ?? this.config.destinations).map((d, i) => {
+      const prev = this.config.destinations?.[i];
+      return { ...d, accessKey: keep(d.accessKey, prev?.accessKey), secretKey: keep(d.secretKey, prev?.secretKey) };
+    });
+    if (merged.encryption) merged.encryption.password = keep(merged.encryption.password, this.config.encryption?.password);
     this.config = merged as BackupConfigDto;
-    await this.settingsService.set(BACKUP_SETTING_KEY, this.config as unknown as Record<string, unknown>);
+    await this.saveConfig();
     this.reschedule();
     return this.getConfig();
   }
@@ -103,17 +136,20 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   // ==========================================================================
 
   private clearCronJobs(): void {
-    for (const name of this.cronJobNames) {
+    for (const [name, job] of this.cronJobs) {
+      // Stop the job we started, whatever the registry does: an un-stopped
+      // CronJob keeps its timer alive and the process never exits (A08).
+      job.stop();
       try { this.schedulerRegistry.deleteCronJob(name); } catch { }
     }
-    this.cronJobNames = [];
+    this.cronJobs.clear();
   }
 
   private addJob(name: string, cronExpr: string, fn: () => Promise<void>): void {
     const job = new CronJob(cronExpr, fn);
     this.schedulerRegistry.addCronJob(name, job);
     job.start();
-    this.cronJobNames.push(name);
+    this.cronJobs.set(name, job);
   }
 
   reschedule(): void {

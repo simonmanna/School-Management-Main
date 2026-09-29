@@ -27,6 +27,9 @@ import { tenancyExtension } from './tenancy.extension';
  * NOSUPERUSER/NOBYPASSRLS, so RLS applies to `client`; `raw` has its own role.
  * Provision both with `pnpm rls:setup-role`.
  */
+/** Columns the tenant client never returns unless a query opts back in (`omit: { x: false }`). */
+export const STAFF_CONFIDENTIAL_OMIT = { staffProfile: { compensation: true } } as const;
+
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private readonly base: PrismaClient;
@@ -36,7 +39,14 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   constructor(tenant: TenantContextService) {
     // Bound explicitly at construction rather than resolved from the environment
     // at connect time, so the role a service was built for is the role it uses.
-    this.base = new PrismaClient(process.env.DATABASE_URL ? { datasourceUrl: process.env.DATABASE_URL } : undefined);
+    //
+    // `omit` (audit 2026-09-29 A02): the legacy StaffProfile.compensation blob
+    // holds salary and bank details. It is never returned unless a query asks
+    // for it by name, so no `include: { teacher: true }` anywhere can leak it.
+    this.base = new PrismaClient({
+      ...(process.env.DATABASE_URL ? { datasourceUrl: process.env.DATABASE_URL } : {}),
+      omit: STAFF_CONFIDENTIAL_OMIT,
+    }) as unknown as PrismaClient;
     const systemUrl = process.env.SYSTEM_DATABASE_URL;
     this.system = systemUrl ? new PrismaClient({ datasourceUrl: systemUrl }) : this.base;
 

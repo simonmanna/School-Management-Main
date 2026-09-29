@@ -1,0 +1,11 @@
+{
+  "method": "BEGIN READ ONLY; counts only; ROLLBACK",
+  "counts": {
+    "HomeworkAssignment": 45,
+    "HomeworkSubmission": 44,
+    "StaffProfile": 511,
+    "StudentProfile": 9913,
+    "SchoolFeeInvoice": 1850
+  },
+  "staffWithCompensation": 50
+}

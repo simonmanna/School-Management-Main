@@ -160,7 +160,6 @@ import { SchoolLmsAdminPage } from '@/pages/school/lms/admin';
 import { SchoolLmsGradingWorkbenchPage } from '@/pages/school/lms/grading-workbench';
 import { DealsPage } from '@/pages/crm/deals';
 import { DealDetailPage } from '@/pages/crm/deal-detail';
-import { BackupPage } from '@/pages/settings/BackupPage';
 import { AssetDashboardPage } from '@/pages/fixed-asset/AssetDashboardPage';
 import { AssetCategoriesPage } from '@/pages/fixed-asset/AssetCategoriesPage';
 import { AssetsPage } from '@/pages/fixed-asset/AssetsPage';
@@ -429,7 +428,6 @@ export function App() {
           <Route path="/settings/developer" element={<DevCompanySettingsPage />} />
           <Route path="/settings/company" element={<CompanySettingsPage />} />
           <Route path="/settings/receipt" element={<ReceiptSettingsPage />} />
-          <Route path="/settings/backup" element={<BackupPage />} />
           <Route path="/settings/devices" element={<DevicesPage />} />
           <Route path="/settings/devices/rejected" element={<DeadLettersPage />} />
           <Route path="/inventory/posting-monitor" element={<PostingMonitorPage />} />

@@ -634,6 +634,78 @@ export class MarkingService {
       .sort((a, b) => (a.studentName ?? '').localeCompare(b.studentName ?? ''));
   }
 
+  /**
+   * The assessments the caller may mark, in terms of an open year (audit
+   * 2026-09-29 A07). The teacher portal used to ask for a pasted assessment id;
+   * this is the list it now picks from. Same `readScope()` as every marking
+   * read, so a teacher sees only their own and allocated papers.
+   */
+  async myAssessments(termId?: string) {
+    const scope = await this.readScope();
+    const openTerms = await this.prisma.client.term.findMany({
+      where: { ...(termId ? { id: termId } : {}), academicYear: { status: { in: ['PLANNING', 'ACTIVE'] } } } as any,
+      select: { id: true, name: true },
+    });
+    if (openTerms.length === 0) return [];
+    const assessments = await this.prisma.client.assessment.findMany({
+      where: { ...scope, termId: { in: openTerms.map((t: any) => t.id) }, status: { not: 'archived' } } as any,
+      select: { id: true, title: true, kind: true, status: true, maxScore: true, dueAt: true, classId: true, sectionId: true, subjectId: true, termId: true },
+      orderBy: [{ dueAt: 'asc' }, { title: 'asc' }],
+    });
+    if (assessments.length === 0) return [];
+
+    const ids = assessments.map((a: any) => a.id);
+    const uniq = (xs: Array<string | null>) => [...new Set(xs.filter((x): x is string => !!x))];
+    const [classes, sections, subjects, counts] = await Promise.all([
+      this.prisma.client.schoolClass.findMany({ where: { id: { in: uniq(assessments.map((a: any) => a.classId)) } }, select: { id: true, name: true } }),
+      this.prisma.client.section.findMany({ where: { id: { in: uniq(assessments.map((a: any) => a.sectionId)) } }, select: { id: true, name: true } }),
+      this.prisma.client.subject.findMany({ where: { id: { in: uniq(assessments.map((a: any) => a.subjectId)) } }, select: { id: true, name: true } }),
+      this.prisma.client.studentAssessment.groupBy({
+        by: ['assessmentId', 'approvalStatus'],
+        where: { assessmentId: { in: ids } },
+        _count: { _all: true },
+      } as any),
+    ]);
+    const entered = await this.prisma.client.studentAssessment.groupBy({
+      by: ['assessmentId'],
+      where: { assessmentId: { in: ids }, OR: [{ effectiveScore: { not: null } }, { participation: { not: 'present' } }] },
+      _count: { _all: true },
+    } as any);
+    const name = (rows: any[]) => new Map(rows.map((r) => [r.id, r.name as string]));
+    const [className, sectionName, subjectName, termName] = [name(classes), name(sections), name(subjects), name(openTerms)];
+    const enteredBy = new Map((entered as any[]).map((r) => [r.assessmentId, r._count._all as number]));
+    const statusBy = new Map<string, Record<string, number>>();
+    for (const r of counts as any[]) {
+      const m = statusBy.get(r.assessmentId) ?? {};
+      m[r.approvalStatus] = r._count._all;
+      statusBy.set(r.assessmentId, m);
+    }
+
+    return assessments.map((a: any) => {
+      const byStatus = statusBy.get(a.id) ?? {};
+      const total = Object.values(byStatus).reduce((n, c) => n + c, 0);
+      return {
+        id: a.id,
+        title: a.title,
+        kind: a.kind,
+        status: a.status,
+        maxScore: Number(a.maxScore),
+        dueAt: a.dueAt,
+        termId: a.termId,
+        termName: termName.get(a.termId) ?? null,
+        classId: a.classId,
+        className: a.classId ? className.get(a.classId) ?? null : null,
+        sectionName: a.sectionId ? sectionName.get(a.sectionId) ?? null : null,
+        subjectName: a.subjectId ? subjectName.get(a.subjectId) ?? null : null,
+        total,
+        entered: enteredBy.get(a.id) ?? 0,
+        draft: (byStatus.draft ?? 0) + (byStatus.rejected ?? 0),
+        submitted: byStatus.submitted ?? 0,
+        approved: byStatus.approved ?? 0,
+      };
+    });
+  }
+
   async byStudent(studentProfileId: string, termId?: string) {
     return this.prisma.client.studentAssessment.findMany({
       where: { studentProfileId, ...(termId ? { termId } : {}), assessment: await this.readScope() },

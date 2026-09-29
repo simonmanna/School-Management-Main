@@ -52,7 +52,6 @@ import {
   Link2,
   CalendarX2,
   Landmark,
-  HardDrive,
   Ruler,
   ArrowUpDown,
   TrendingUp,
@@ -298,7 +297,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades },
       { to: '/school/approvals', label: 'Approvals', icon: ShieldCheck, permission: PERMISSIONS.school.approveGrades },
 
-      { to: '/school/homework', label: 'Homework Submissions', icon: ClipboardList, permission: PERMISSIONS.school.manageAssignments, group: 'Tools' },
       { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
 
       { to: '/school/assessment', label: 'Assessment Structure', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
@@ -630,7 +628,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/staff', label: 'Staff', icon: UserCog, permission: PERMISSIONS.user.read },
       { to: '/staff/roles', label: 'Roles & Permissions', icon: Shield, permission: PERMISSIONS.role.read },
       { to: '/settings/devices', label: 'Offline devices', icon: Smartphone, permission: PERMISSIONS.organization.read },
-      { to: '/settings/backup', label: 'Backup', icon: HardDrive, permission: PERMISSIONS.backup.read },
       { to: '/settings/company', label: 'Company Settings', icon: Landmark, permission: PERMISSIONS.setting.read },
       { to: '/settings/developer', label: 'Developer Settings', icon: SettingsIcon, permission: PERMISSIONS.setting.read },
     ],

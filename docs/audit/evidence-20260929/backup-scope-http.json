@@ -1,0 +1,339 @@
+[
+  {
+    "label": "Create separate fictional School B",
+    "route": "/organizations/bootstrap",
+    "status": 201,
+    "response": {
+      "organization": {
+        "id": "16355d6b-048a-45e9-b858-d5d8daedddd6",
+        "code": "AUDIT29B",
+        "name": "Fictional Separate School B"
+      },
+      "adminUser": {
+        "id": "499adf9d-05f8-4253-8cf4-db207998dd0d",
+        "email": "head@audit29b.test"
+      }
+    }
+  },
+  {
+    "label": "School A backup settings before change",
+    "route": "/admin/backups/settings",
+    "status": 200,
+    "response": {
+      "frequency": "daily",
+      "dailyConfig": {
+        "times": [
+          "02:00"
+        ]
+      },
+      "weeklyConfig": {
+        "days": [
+          0
+        ],
+        "time": "03:00"
+      },
+      "customCronExpression": "",
+      "customIntervalMinutes": 60,
+      "types": [
+        "full"
+      ],
+      "includes": {
+        "database": true,
+        "schemaOnly": false,
+        "databaseData": true,
+        "uploadedImages": true,
+        "productImages": true,
+        "customerDocuments": true,
+        "generatedReports": false,
+        "attachments": false,
+        "envFile": true,
+        "configFiles": true,
+        "posSettings": true,
+        "orgSettings": true,
+        "printerConfig": true,
+        "receiptTemplates": true,
+        "kitchenPrinterSettings": true,
+        "logs": false,
+        "auditLogs": false,
+        "scheduledTasks": false
+      },
+      "destinations": [
+        {
+          "type": "local",
+          "path": "D:\\\\backups\\\\pos-cafe",
+          "label": "Local Backup",
+          "enabled": true
+        }
+      ],
+      "retention": {
+        "mode": "keep_last",
+        "keepLastCount": 14,
+        "keepDays": 30,
+        "smartDaily": 30,
+        "smartWeekly": 12,
+        "smartMonthly": 12
+      },
+      "compression": 6,
+      "encryption": {
+        "type": "none",
+        "password": "[REDACTED]"
+      },
+      "verification": {
+        "verifyIntegrity": true,
+        "testRestore": false,
+        "sha256Checksum": true
+      },
+      "notifications": {
+        "on": [
+          "failed"
+        ],
+        "channels": [
+          "desktop"
+        ],
+        "emailAddress": "admin@example.com",
+        "phoneNumber": ""
+      },
+      "cleanup": {
+        "deleteExpired": true,
+        "deleteTempFiles": true,
+        "removeFailedFiles": true
+      },
+      "internetBehaviour": "local_only",
+      "namingFormat": "POS-CAFE_{TYPE}_{DATE}_{TIME}",
+      "schedule": {
+        "time": "02:00",
+        "dayOfWeek": 7,
+        "timezone": "UTC",
+        "customIntervalMinutes": 60,
+        "cronExpression": ""
+      },
+      "advanced": {
+        "maxThreads": 1,
+        "compressionLevel": 6,
+        "pauseBusinessHours": false,
+        "businessHoursStart": "08:00",
+        "businessHoursEnd": "22:00",
+        "skipIfBusy": false,
+        "retryCount": 3,
+        "retryDelayMinutes": 5,
+        "backupTimeoutMinutes": 60,
+        "maxDiskUsageGb": 999999,
+        "autoDiskSpaceCheck": true
+      }
+    }
+  },
+  {
+    "label": "School A sets its private backup destination and manual schedule",
+    "route": "/admin/backups/settings",
+    "status": 200,
+    "response": {
+      "frequency": "manual",
+      "dailyConfig": {
+        "times": [
+          "02:00"
+        ]
+      },
+      "weeklyConfig": {
+        "days": [
+          0
+        ],
+        "time": "03:00"
+      },
+      "customCronExpression": "",
+      "customIntervalMinutes": 60,
+      "types": [
+        "full"
+      ],
+      "includes": {
+        "database": true,
+        "schemaOnly": false,
+        "databaseData": true,
+        "uploadedImages": true,
+        "productImages": true,
+        "customerDocuments": true,
+        "generatedReports": false,
+        "attachments": false,
+        "envFile": true,
+        "configFiles": true,
+        "posSettings": true,
+        "orgSettings": true,
+        "printerConfig": true,
+        "receiptTemplates": true,
+        "kitchenPrinterSettings": true,
+        "logs": false,
+        "auditLogs": false,
+        "scheduledTasks": false
+      },
+      "destinations": [
+        {
+          "type": "local",
+          "path": "C:/Dev/School-Management/var/audit-20260929-backup-school-A",
+          "label": "AUDIT29_PRIVATE_BACKUP_DESTINATION",
+          "enabled": true
+        }
+      ],
+      "retention": {
+        "mode": "keep_last",
+        "keepLastCount": 14,
+        "keepDays": 30,
+        "smartDaily": 30,
+        "smartWeekly": 12,
+        "smartMonthly": 12
+      },
+      "compression": 6,
+      "encryption": {
+        "type": "none",
+        "password": "[REDACTED]"
+      },
+      "verification": {
+        "verifyIntegrity": true,
+        "testRestore": false,
+        "sha256Checksum": true
+      },
+      "notifications": {
+        "on": [
+          "failed"
+        ],
+        "channels": [
+          "desktop"
+        ],
+        "emailAddress": "admin@example.com",
+        "phoneNumber": ""
+      },
+      "cleanup": {
+        "deleteExpired": true,
+        "deleteTempFiles": true,
+        "removeFailedFiles": true
+      },
+      "internetBehaviour": "local_only",
+      "namingFormat": "POS-CAFE_{TYPE}_{DATE}_{TIME}",
+      "schedule": {
+        "time": "02:00",
+        "dayOfWeek": 7,
+        "timezone": "UTC",
+        "customIntervalMinutes": 60,
+        "cronExpression": ""
+      },
+      "advanced": {
+        "maxThreads": 1,
+        "compressionLevel": 6,
+        "pauseBusinessHours": false,
+        "businessHoursStart": "08:00",
+        "businessHoursEnd": "22:00",
+        "skipIfBusy": false,
+        "retryCount": 3,
+        "retryDelayMinutes": 5,
+        "backupTimeoutMinutes": 60,
+        "maxDiskUsageGb": 999999,
+        "autoDiskSpaceCheck": true
+      }
+    }
+  },
+  {
+    "label": "School B reads backup settings after School A changed them",
+    "route": "/admin/backups/settings",
+    "status": 200,
+    "response": {
+      "frequency": "manual",
+      "dailyConfig": {
+        "times": [
+          "02:00"
+        ]
+      },
+      "weeklyConfig": {
+        "days": [
+          0
+        ],
+        "time": "03:00"
+      },
+      "customCronExpression": "",
+      "customIntervalMinutes": 60,
+      "types": [
+        "full"
+      ],
+      "includes": {
+        "database": true,
+        "schemaOnly": false,
+        "databaseData": true,
+        "uploadedImages": true,
+        "productImages": true,
+        "customerDocuments": true,
+        "generatedReports": false,
+        "attachments": false,
+        "envFile": true,
+        "configFiles": true,
+        "posSettings": true,
+        "orgSettings": true,
+        "printerConfig": true,
+        "receiptTemplates": true,
+        "kitchenPrinterSettings": true,
+        "logs": false,
+        "auditLogs": false,
+        "scheduledTasks": false
+      },
+      "destinations": [
+        {
+          "type": "local",
+          "path": "C:/Dev/School-Management/var/audit-20260929-backup-school-A",
+          "label": "AUDIT29_PRIVATE_BACKUP_DESTINATION",
+          "enabled": true
+        }
+      ],
+      "retention": {
+        "mode": "keep_last",
+        "keepLastCount": 14,
+        "keepDays": 30,
+        "smartDaily": 30,
+        "smartWeekly": 12,
+        "smartMonthly": 12
+      },
+      "compression": 6,
+      "encryption": {
+        "type": "none",
+        "password": "[REDACTED]"
+      },
+      "verification": {
+        "verifyIntegrity": true,
+        "testRestore": false,
+        "sha256Checksum": true
+      },
+      "notifications": {
+        "on": [
+          "failed"
+        ],
+        "channels": [
+          "desktop"
+        ],
+        "emailAddress": "admin@example.com",
+        "phoneNumber": ""
+      },
+      "cleanup": {
+        "deleteExpired": true,
+        "deleteTempFiles": true,
+        "removeFailedFiles": true
+      },
+      "internetBehaviour": "local_only",
+      "namingFormat": "POS-CAFE_{TYPE}_{DATE}_{TIME}",
+      "schedule": {
+        "time": "02:00",
+        "dayOfWeek": 7,
+        "timezone": "UTC",
+        "customIntervalMinutes": 60,
+        "cronExpression": ""
+      },
+      "advanced": {
+        "maxThreads": 1,
+        "compressionLevel": 6,
+        "pauseBusinessHours": false,
+        "businessHoursStart": "08:00",
+        "businessHoursEnd": "22:00",
+        "skipIfBusy": false,
+        "retryCount": 3,
+        "retryDelayMinutes": 5,
+        "backupTimeoutMinutes": 60,
+        "maxDiskUsageGb": 999999,
+        "autoDiskSpaceCheck": true
+      }
+    }
+  }
+]

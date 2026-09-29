@@ -41,6 +41,17 @@ export abstract class BaseCrudService<T = any, CreateInput = any, UpdateInput = 
   protected readonly searchFields: string[] = [];
   protected readonly defaultInclude: Record<string, unknown> | undefined = undefined;
   /**
+   * An explicit field allow-list for reads. When set it replaces
+   * `defaultInclude`, so a column added later is not served until it is named
+   * here — the way confidential fields stay out of broad directory reads.
+   */
+  protected readonly defaultSelect: Record<string, unknown> | undefined = undefined;
+
+  /** The Prisma `select`/`include` shape every read uses. */
+  protected readShape(): { select: Record<string, unknown> } | { include: Record<string, unknown> | undefined } {
+    return this.defaultSelect ? { select: this.defaultSelect } : { include: this.defaultInclude };
+  }
+  /**
    * Prisma accepts an array for multi-key ordering (e.g. sortOrder then code),
    * which the chart of accounts needs to render in statement order.
    */
@@ -71,7 +82,7 @@ export abstract class BaseCrudService<T = any, CreateInput = any, UpdateInput = 
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: this.defaultInclude,
+        ...this.readShape(),
       }),
       this.delegate.count({ where }),
     ]);
@@ -83,14 +94,14 @@ export abstract class BaseCrudService<T = any, CreateInput = any, UpdateInput = 
   }
 
   async findOne(id: string): Promise<T> {
-    const row = await this.delegate.findFirst({ where: { id }, include: this.defaultInclude });
+    const row = await this.delegate.findFirst({ where: { id }, ...this.readShape() });
     if (!row) throw new NotFoundException(`${this.entityName} ${id} not found`);
     return row as T;
   }
 
   async create(data: CreateInput): Promise<T> {
     try {
-      return (await this.delegate.create({ data, include: this.defaultInclude })) as T;
+      return (await this.delegate.create({ data, ...this.readShape() })) as T;
     } catch (err) {
       // A duplicate unique value (e.g. reusing an existing code) must surface as
       // a clean 409, not an unhandled 500. This mirrors the handling in update().

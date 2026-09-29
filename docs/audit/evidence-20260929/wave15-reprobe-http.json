@@ -1,0 +1,142 @@
+{
+  "capturedAt": "2026-09-29T06:13:04.056Z",
+  "database": "school_audit_20260929 (fictional)",
+  "results": [
+    {
+      "label": "A01 teacher legacy submission list",
+      "method": "GET",
+      "route": "/school/submissions",
+      "status": 410,
+      "expected": [
+        410
+      ],
+      "passed": true
+    },
+    {
+      "label": "A01 teacher legacy submission detail",
+      "method": "GET",
+      "route": "/school/submissions/6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+      "status": 410,
+      "expected": [
+        410
+      ],
+      "passed": true
+    },
+    {
+      "label": "A01 teacher legacy homework detail",
+      "method": "GET",
+      "route": "/school/homework/bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca/detail",
+      "status": 410,
+      "expected": [
+        410
+      ],
+      "passed": true
+    },
+    {
+      "label": "A01 teacher legacy by-class",
+      "method": "GET",
+      "route": "/school/homework/by-class/a4cabec9-9f05-468b-90b0-58c9b808f105",
+      "status": 410,
+      "expected": [
+        410
+      ],
+      "passed": true
+    },
+    {
+      "label": "A01 admin legacy homework list",
+      "method": "GET",
+      "route": "/school/homework",
+      "status": 410,
+      "expected": [
+        410
+      ],
+      "passed": true
+    },
+    {
+      "label": "A01 baseline: teacher still cannot open the pupil",
+      "method": "GET",
+      "route": "/school/students/d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "label": "A02 teacher staff list",
+      "method": "GET",
+      "route": "/school/staff?pageSize=100",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "passed": true,
+      "noCompensation": true,
+      "noBank": true,
+      "noSalary": true
+    },
+    {
+      "label": "A03 School A admin reads backup settings",
+      "method": "GET",
+      "route": "/admin/backups/settings",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "label": "A03 School B admin reads backup settings",
+      "method": "GET",
+      "route": "/admin/backups/settings",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "label": "A03 School B admin changes backup settings",
+      "method": "PUT",
+      "route": "/admin/backups/settings",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "label": "A03 anonymous backup status",
+      "method": "GET",
+      "route": "/admin/backups/status",
+      "status": 403,
+      "expected": [
+        403
+      ],
+      "passed": true
+    },
+    {
+      "label": "A03 operator reads backup settings",
+      "method": "GET",
+      "route": "/admin/backups/settings",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "passed": true,
+      "noAuditDestination": true
+    },
+    {
+      "label": "A07 teacher marking picker",
+      "method": "GET",
+      "route": "/school/marking/mine",
+      "status": 403,
+      "expected": [
+        200,
+        403
+      ],
+      "passed": true,
+      "noForeignRows": true
+    }
+  ]
+}

@@ -155,36 +155,58 @@ jobs:
       - name: Build the API runtime image
         run: docker build -f infra/docker/Dockerfile.api -t school-api:ci .
 
+      # Audit 2026-09-29 A05: resolve @prisma/client from apps/api, as the API
+      # does. From /app (the pnpm root) the package is not resolvable at all.
       - name: Generated Prisma client is present in the shipped image
         run: |
-          docker run --rm school-api:ci node -e "const { Prisma } = require('@prisma/client'); const n = Prisma.dmmf?.datamodel?.models?.length ?? 0; if (!n) { console.error('FATAL: @prisma/client is an ungenerated stub'); process.exit(1); } console.log('prisma client OK:', n, 'models');"
+          docker run --rm -w /app/apps/api school-api:ci node -e "const { Prisma } = require('@prisma/client'); const n = Prisma.dmmf?.datamodel?.models?.length ?? 0; if (!n) { console.error('FATAL: @prisma/client is an ungenerated stub'); process.exit(1); } console.log('prisma client OK:', n, 'models');"
 
-      - name: API boots and serves readiness
+      # Audit 2026-09-29 A05: boot the shipped image the way production does —
+      # NODE_ENV=production, migrated PostgreSQL 16, the NOBYPASSRLS `app` and
+      # BYPASSRLS `app_system` roles — and require READINESS (database reachable
+      # through the app role), not just liveness of the Node process.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: PostgreSQL 16 with migrations and runtime roles
         run: |
-          docker network create ci-net
-          docker run -d --name ci-db --network ci-net \
-            -e POSTGRES_USER=cafe-pos -e POSTGRES_PASSWORD=cafe-pos -e POSTGRES_DB=cafe-pos \
-            postgres:16-alpine
+          docker run -d --name ci-db -p 5432:5432             -e POSTGRES_USER=cafe-pos -e POSTGRES_PASSWORD=cafe-pos -e POSTGRES_DB=cafe-pos             postgres:16-alpine
           for i in $(seq 1 30); do
             docker exec ci-db pg_isready -U cafe-pos && break
             sleep 2
           done
-          docker run -d --name ci-api --network ci-net -p 3000:3000 \
-            -e DATABASE_URL="postgresql://cafe-pos:cafe-pos@ci-db:5432/cafe-pos?schema=public" \
-            -e JWT_ACCESS_SECRET=ci-access-secret-not-for-production \
-            -e JWT_REFRESH_SECRET=ci-refresh-secret-not-for-production \
-            -e JWT_POS_SECRET=ci-pos-secret-not-for-production \
-            -e NODE_ENV=development \
-            school-api:ci
-          for i in $(seq 1 45); do
-            if curl -fsS http://localhost:3000/api/v1/health/live; then
-              echo "API is live"
-              exit 0
+          pnpm --filter @erp/api exec prisma migrate deploy
+          node scripts/assert-db-constraints.mjs
+          pnpm --filter @erp/api rls:setup-role
+        env:
+          DATABASE_URL: postgresql://cafe-pos:cafe-pos@localhost:5432/cafe-pos?schema=public
+          RLS_APP_PASSWORD: ci-app
+          RLS_SYSTEM_PASSWORD: ci-system
+
+      - name: API boots in production mode and serves readiness
+        run: |
+          docker run -d --name ci-api --network host             -e NODE_ENV=production             -e DATABASE_URL="postgresql://app:ci-app@localhost:5432/cafe-pos?schema=public"             -e SYSTEM_DATABASE_URL="postgresql://app_system:ci-system@localhost:5432/cafe-pos?schema=public"             -e JWT_ACCESS_SECRET=ci-access-secret-0123456789abcdef0123456789             -e JWT_REFRESH_SECRET=ci-refresh-secret-0123456789abcdef012345678             -e JWT_POS_SECRET=ci-pos-secret-0123456789abcdef0123456789abcd             -e WEB_URL=https://school.example -e PORTAL_URL=https://portal.school.example             -e CORS_ORIGINS=https://school.example -e METRICS_TOKEN=ci-metrics             -e PERMISSIONS_FAIL_CLOSED=true -e PERMISSIONS_DB_LOOKUP=true             -e ENABLE_SCHOOL=true -e ENABLE_HR=true -e ENABLE_COMMUNICATION=true             -e ENABLE_COMMUNICATION_SMS=true -e COMM_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=             -e ENABLE_ADVANCED_LMS=false -e ENABLE_LIVE_MOBILE_MONEY=false             -e SMTP_FROM=ci@school.example             school-api:ci
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/v1/health/ready; then
+              echo
+              echo "API is ready in production mode"
+              break
             fi
             sleep 2
           done
-          echo "API did not become live."
-          exit 1
+          curl -fsS http://localhost:3000/api/v1/health/ready >/dev/null
+          # Operator-only surfaces stay closed without the host secret (A03).
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/admin/backups/status)
+          test "$code" = "403" || { echo "backup API answered $code without the operator secret"; exit 1; }
+          # Retired legacy homework reads (A01) need auth first; anonymous is 401.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/school/submissions)
+          test "$code" = "401" || { echo "legacy submissions answered $code anonymously"; exit 1; }
 
       - name: Container logs on failure
         if: failure()
@@ -211,11 +233,26 @@ jobs:
       APP_DATABASE_URL: postgresql://app:ci@db:5432/school
       SYSTEM_DATABASE_URL: postgresql://app_system:ci@db:5432/school
       MIGRATOR_DATABASE_URL: postgresql://migrator:ci@db:5432/school
+      # Audit 2026-09-29 A05: every `${VAR:?}` in the merged production file
+      # needs a nonsecret CI fixture, or rendering fails before any assertion.
+      WEB_URL: https://school.example
+      PORTAL_URL: https://portal.school.example
+      COMM_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      SMTP_FROM: ci@school.example
+      BACKUP_DATABASE_URL: postgresql://school_backup:ci@db:5432/school
+      PORTAL_SCHOOL_NAME: CI School
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Render with no developer .env: a missing required variable fails here,
+      # not on the host at deploy time.
+      - name: Production and staging files render with CI fixtures only
+        run: |
+          docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.prod.yml config -q
+          docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.staging.yml config -q
 
       - name: Production overlay publishes only Caddy 80/443
         run: node scripts/assert-compose-ports.mjs docker-compose.yml docker-compose.prod.yml

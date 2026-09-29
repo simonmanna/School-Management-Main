@@ -45,6 +45,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { UPLOAD_OPTIONS } from '../../kernel/files/upload-limits';
 import type { Prisma } from '@prisma/client';
 import type { AuthUser } from '../../kernel/auth/jwt-token.service';
 import { PrismaService } from '../../kernel/prisma/prisma.service';
@@ -523,7 +524,7 @@ export class DocumentsController {
   // ---------------------------------------------------------------------------
 
   @Post(':id/attachments')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
   async attach(
     @Param('id') id: string,
     @UploadedFile() file: { originalname: string; mimetype: string; buffer: Buffer; size: number } | undefined,

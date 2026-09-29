@@ -537,10 +537,52 @@ export function useClassAssessments(classId?: string, termId?: string) {
 export interface MarkSheetRow {
   id: string;
   studentProfileId: string;
+  studentName: string | null;
+  admissionNo: string | null;
   maxScore: number | string;
   effectiveScore: number | string | null;
   approvalStatus: string;
   participation: string;
+}
+
+/** An assessment the signed-in teacher may mark (audit 2026-09-29 A07). */
+export interface MyAssessment {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  maxScore: number;
+  dueAt: string | null;
+  termId: string;
+  termName: string | null;
+  classId: string | null;
+  className: string | null;
+  sectionName: string | null;
+  subjectName: string | null;
+  total: number;
+  entered: number;
+  draft: number;
+  submitted: number;
+  approved: number;
+}
+
+export function useMyAssessments() {
+  return useQuery({
+    queryKey: ['portal', 'my-assessments'],
+    queryFn: async () => (await api.get<MyAssessment[]>(`${S}/marking/mine`)).data,
+  });
+}
+
+/** Hand a finished mark sheet to the approver. Whoever enters does not approve. */
+export function useSubmitMarks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (assessmentId: string) => (await api.post(`${S}/marking/submit`, { assessmentId })).data,
+    onSuccess: (_d, assessmentId) => {
+      qc.invalidateQueries({ queryKey: ['portal', 'marksheet', assessmentId] });
+      qc.invalidateQueries({ queryKey: ['portal', 'my-assessments'] });
+    },
+  });
 }
 
 export function useMarkSheet(assessmentId?: string) {
@@ -559,6 +601,9 @@ export function useRecordMark() {
       const { assessmentId: _a, ...body } = dto;
       return (await api.post(`${S}/marking/mark`, body)).data;
     },
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['portal', 'marksheet', v.assessmentId] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['portal', 'marksheet', v.assessmentId] });
+      qc.invalidateQueries({ queryKey: ['portal', 'my-assessments'] });
+    },
   });
 }

@@ -1,0 +1,6 @@
+{
+  "command": "docker compose --env-file empty -f docker-compose.yml -f docker-compose.prod.yml config --format json",
+  "environment": "exact values declared by CI compose-ports job, no local .env",
+  "exit": 1,
+  "stderr": "error while interpolating services.api.environment.COMM_ENCRYPTION_KEY: required variable COMM_ENCRYPTION_KEY is missing a value: set COMM_ENCRYPTION_KEY (openssl rand -base64 32)\n"
+}

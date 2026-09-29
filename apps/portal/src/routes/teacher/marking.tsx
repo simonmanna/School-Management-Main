@@ -1,7 +1,14 @@
 import { useState } from 'react';
-import { PencilLine, Lock } from 'lucide-react';
+import { PencilLine, Lock, ChevronLeft, Send } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { useTeacherOverview, useMarkSheet, useRecordMark } from '@/lib/portal-api';
+import {
+  useTeacherOverview,
+  useMarkSheet,
+  useRecordMark,
+  useMyAssessments,
+  useSubmitMarks,
+  type MyAssessment,
+} from '@/lib/portal-api';
 import { apiErrorMessage } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton, Empty, PageTitle, Badge } from '@/components/ui';
@@ -16,11 +23,16 @@ import { Button, Card, CardContent, CardHeader, CardTitle, Input, Skeleton, Empt
  *
  * An approved mark is read-only here: reopening it is an act for the department,
  * not something to do accidentally on a phone.
+ *
+ * The teacher picks from their own assessments (audit 2026-09-29 A07) — the
+ * page used to ask them to paste an assessment id they had no way to find.
  */
 export default function TeacherMarking() {
   const teacher = useAuthStore((s) => s.portal?.teacher);
   const { data, isLoading } = useTeacherOverview(teacher?.staffProfileId);
+  const { data: mine, isLoading: mineLoading } = useMyAssessments();
   const [openAssessmentId, setOpenAssessmentId] = useState<string | null>(null);
+  const open = mine?.find((a) => a.id === openAssessmentId) ?? null;
 
   if (!teacher) return <Empty title="No teaching record linked" />;
   if (isLoading) return <Skeleton className="h-40 w-full" />;
@@ -63,25 +75,11 @@ export default function TeacherMarking() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Enter marks</CardTitle></CardHeader>
-        <CardContent className="space-y-2 pt-0">
-          <label className="space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">Assessment ID</span>
-            <Input
-              placeholder="Paste an assessment id"
-              value={openAssessmentId ?? ''}
-              onChange={(e) => setOpenAssessmentId(e.target.value.trim() || null)}
-            />
-          </label>
-          <p className="text-xs text-muted-foreground">
-            The mark sheet loads below. You can only open assessments that are yours — the
-            server refuses anybody else&apos;s.
-          </p>
-        </CardContent>
-      </Card>
-
-      {openAssessmentId && <MarkSheet assessmentId={openAssessmentId} />}
+      {open ? (
+        <MarkSheet assessment={open} onBack={() => setOpenAssessmentId(null)} />
+      ) : (
+        <AssessmentPicker assessments={mine ?? []} loading={mineLoading} onOpen={setOpenAssessmentId} />
+      )}
 
       {plans && (
         <Card>
@@ -97,21 +95,105 @@ export default function TeacherMarking() {
   );
 }
 
-function MarkSheet({ assessmentId }: { assessmentId: string }) {
+/** The teacher's own assessments, grouped by class and stream. */
+function AssessmentPicker({
+  assessments,
+  loading,
+  onOpen,
+}: {
+  assessments: MyAssessment[];
+  loading: boolean;
+  onOpen: (id: string) => void;
+}) {
+  if (loading) return <Skeleton className="h-40 w-full" />;
+  const groups = new Map<string, MyAssessment[]>();
+  for (const a of assessments) {
+    const key = [a.className ?? 'No class', a.sectionName].filter(Boolean).join(' · ');
+    groups.set(key, [...(groups.get(key) ?? []), a]);
+  }
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Enter marks</CardTitle></CardHeader>
+      <CardContent className="space-y-4 pt-0">
+        {assessments.length === 0 && (
+          <p className="text-sm text-muted-foreground">No assessments to mark in the current term.</p>
+        )}
+        {[...groups.entries()].map(([klass, rows]) => (
+          <div key={klass} className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{klass}</div>
+            {rows.map((a) => {
+              const approved = a.total > 0 && a.approved === a.total;
+              const complete = a.total > 0 && a.entered >= a.total;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => onOpen(a.id)}
+                  className="w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{a.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {[a.subjectName, a.termName, a.kind].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <Badge variant={approved ? 'success' : complete ? 'secondary' : 'warning'}>
+                      {a.entered}/{a.total}
+                    </Badge>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MarkSheet({ assessment, onBack }: { assessment: MyAssessment; onBack: () => void }) {
+  const assessmentId = assessment.id;
   const { data, isLoading, isError } = useMarkSheet(assessmentId);
   const record = useRecordMark();
+  const submit = useSubmitMarks();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  if (isLoading) return <Skeleton className="h-40 w-full" />;
+  const header = (
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={onBack} aria-label="Back to assessments">
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
+      <div className="min-w-0">
+        <div className="truncate font-medium">{assessment.title}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          {[assessment.className, assessment.subjectName, assessment.termName].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isLoading) return <div className="space-y-2">{header}<Skeleton className="h-40 w-full" /></div>;
   if (isError) {
     return (
-      <Empty
-        title="That assessment is not yours"
-        hint="You can only enter marks for assessments you are the teacher of."
-      />
+      <div className="space-y-2">
+        {header}
+        <Empty title="That assessment is not yours" hint="You can only enter marks for assessments you are the teacher of." />
+      </div>
     );
   }
-  if (!data || data.length === 0) return <Empty title="No pupils on this assessment" />;
+  if (!data || data.length === 0) return <div className="space-y-2">{header}<Empty title="No pupils on this assessment" /></div>;
+
+  const openRows = data.filter((r) => r.approvalStatus === 'draft' || r.approvalStatus === 'rejected');
+  const unmarked = openRows.filter((r) => r.effectiveScore == null && r.participation === 'present').length;
+  const submitAll = async () => {
+    try {
+      await submit.mutateAsync(assessmentId);
+      notify.success('Marks submitted for approval');
+    } catch (e) {
+      notify.error(apiErrorMessage(e, 'Could not submit these marks.'));
+    }
+  };
 
   const saveOne = async (row: { id: string; maxScore: number | string }) => {
     const raw = drafts[row.id];
@@ -136,7 +218,7 @@ function MarkSheet({ assessmentId }: { assessmentId: string }) {
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Mark sheet</CardTitle></CardHeader>
+      <CardHeader>{header}</CardHeader>
       <CardContent className="space-y-2 pt-0">
         {data.map((row) => {
           const approved = row.approvalStatus === 'approved';
@@ -144,9 +226,8 @@ function MarkSheet({ assessmentId }: { assessmentId: string }) {
           return (
             <div key={row.id} className="flex items-center gap-2 rounded-lg border p-3">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-xs text-muted-foreground">
-                  {row.studentProfileId.slice(0, 8)}
-                </div>
+                <div className="truncate text-sm font-medium">{row.studentName ?? 'Unnamed pupil'}</div>
+                {row.admissionNo && <div className="truncate text-xs text-muted-foreground">{row.admissionNo}</div>}
                 <div className="flex items-center gap-1 pt-1">
                   <Badge variant={approved ? 'success' : 'secondary'}>{row.approvalStatus}</Badge>
                   {row.participation !== 'present' && <Badge variant="outline">{row.participation}</Badge>}
@@ -181,6 +262,12 @@ function MarkSheet({ assessmentId }: { assessmentId: string }) {
             </div>
           );
         })}
+        {openRows.length > 0 && (
+          <Button className="w-full" disabled={submit.isPending || unmarked > 0} onClick={submitAll}>
+            <Send className="h-4 w-4" />
+            {unmarked > 0 ? `${unmarked} still to mark` : 'Submit for approval'}
+          </Button>
+        )}
         <p className="pt-1 text-xs text-muted-foreground">
           Approved marks are locked. Ask the head of department to reopen them.
         </p>

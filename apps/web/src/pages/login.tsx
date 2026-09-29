@@ -12,13 +12,11 @@ import { useAuthStore } from '@/stores/auth.store';
 // CSS Styles
 const styles = `
   .login-root {
-    --amber: 38 92% 50%;
-    --amber-lite: 43 96% 56%;
     background:
-      radial-gradient(1200px 600px at 15% -10%, hsl(230 70% 22% / 0.55), transparent 60%),
-      radial-gradient(1000px 700px at 110% 20%, hsl(20 90% 30% / 0.35), transparent 55%),
-      radial-gradient(900px 900px at 50% 120%, hsl(260 70% 25% / 0.45), transparent 60%),
-      #070b18;
+      radial-gradient(1200px 600px at 20% -10%, hsl(200 70% 28% / 0.55), transparent 60%),
+      radial-gradient(1000px 700px at 110% 110%, hsl(30 60% 25% / 0.25), transparent 55%),
+      radial-gradient(900px 900px at 50% 120%, hsl(230 70% 22% / 0.45), transparent 60%),
+      #081a2c;
     color: #e7ecf5;
   }
 
@@ -26,9 +24,9 @@ const styles = `
   .aurora {
     position: absolute; inset: -20%;
     background:
-      conic-gradient(from 120deg at 30% 30%, hsl(217 91% 60% / 0.30), transparent 40%),
-      conic-gradient(from 300deg at 70% 60%, hsl(38 92% 50% / 0.28), transparent 45%),
-      conic-gradient(from 200deg at 50% 80%, hsl(275 80% 60% / 0.25), transparent 40%);
+      conic-gradient(from 120deg at 30% 30%, hsl(200 85% 45% / 0.22), transparent 40%),
+      conic-gradient(from 300deg at 70% 60%, hsl(215 80% 45% / 0.18), transparent 45%),
+      conic-gradient(from 200deg at 50% 80%, hsl(240 70% 50% / 0.20), transparent 40%);
     filter: blur(60px);
     animation: aurora-spin 24s linear infinite;
   }
@@ -46,11 +44,11 @@ const styles = `
   }
 
   .glass-card {
-    background: linear-gradient(160deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+    background: linear-gradient(170deg, hsl(203 70% 38% / 0.55), hsl(215 65% 30% / 0.45) 45%, hsl(235 70% 30% / 0.60));
     backdrop-filter: blur(22px) saturate(140%);
     -webkit-backdrop-filter: blur(22px) saturate(140%);
-    border: 1px solid rgba(255,255,255,0.14);
-    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.15);
+    border: 1px solid hsl(205 80% 75% / 0.22);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12);
   }
 
   /* animated glowing border ring behind the card */
@@ -60,10 +58,10 @@ const styles = `
     border-radius: 1.6rem;
     padding: 1px;
     background: conic-gradient(from var(--a, 0deg),
-      hsl(217 91% 60%), hsl(38 92% 55%), hsl(275 80% 62%), hsl(217 91% 60%));
+      hsl(200 90% 60%), hsl(230 80% 65%), hsl(205 80% 45%), hsl(200 90% 60%));
     -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite: xor; mask-composite: exclude;
-    opacity: 0.55;
+    opacity: 0.3;
     animation: ring-rotate 8s linear infinite;
   }
 
@@ -78,13 +76,13 @@ const styles = `
   .float-slow { animation: float 9s ease-in-out infinite; }
 
   .text-gradient {
-    background: linear-gradient(135deg, hsl(217 91% 68%), hsl(38 96% 60%));
+    background: linear-gradient(90deg, hsl(205 90% 62%), hsl(235 85% 72%));
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
   }
 
-  /* rising coffee steam / spark particles */
-  .steam { position: absolute; bottom: -12px; width: 8px; height: 8px; border-radius: 999px;
-    background: radial-gradient(circle, hsl(38 96% 62% / 0.9), transparent 70%);
+  /* rising spark particles */
+  .steam { position: absolute; bottom: -12px; width: 6px; height: 6px; border-radius: 999px;
+    background: radial-gradient(circle, hsl(205 90% 65% / 0.8), transparent 70%);
     animation: rise linear infinite; }
 
   .field-in { animation: field-in 0.5s cubic-bezier(.2,.8,.2,1) both; }
@@ -189,7 +187,7 @@ export function LoginPage() {
           <div className="aurora" />
           <div className="grid-floor" />
           <div className="absolute -left-24 top-12 h-64 w-64 rounded-full bg-blue-500/20 blur-3xl float-slow" />
-          <div className="absolute -right-24 bottom-12 h-72 w-72 rounded-full bg-amber-500/20 blur-3xl float-slow" style={{ animationDelay: '2s' }} />
+          <div className="absolute -right-24 bottom-12 h-72 w-72 rounded-full bg-orange-400/10 blur-3xl float-slow" style={{ animationDelay: '2s' }} />
           <div className="absolute right-1/3 top-1/4 h-48 w-48 rounded-full bg-indigo-500/15 blur-3xl float-slow" style={{ animationDelay: '4s' }} />
         </div>
 
@@ -198,7 +196,7 @@ export function LoginPage() {
           <div className="hidden md:flex flex-col justify-between p-10 rounded-3xl text-white overflow-hidden relative min-h-[600px] glass-card">
             {/* inner gradient + steam */}
             <div className="absolute inset-0 opacity-90 pointer-events-none"
-                 style={{ background: 'radial-gradient(at 85% 0%, hsl(217 91% 55% / 0.35) 0%, transparent 55%), radial-gradient(at 5% 100%, hsl(38 92% 50% / 0.30) 0%, transparent 55%)' }} />
+                 style={{ background: 'radial-gradient(at 85% 0%, hsl(200 90% 50% / 0.30) 0%, transparent 55%), radial-gradient(at 5% 100%, hsl(240 75% 45% / 0.35) 0%, transparent 55%)' }} />
             <div className="absolute inset-x-0 bottom-0 h-1/2 pointer-events-none overflow-hidden">
               {[12, 28, 44, 60, 76, 88].map((left, i) => (
                 <span key={left} className="steam"
@@ -208,7 +206,7 @@ export function LoginPage() {
 
             <div className="relative flex items-center gap-3">
               <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md border border-white/25">
-                <GraduationCap className="h-6 w-6 text-amber-300" />
+                <GraduationCap className="h-6 w-6 text-sky-200" />
               </div>
               <div className="text-xl font-extrabold tracking-tight">School Management</div>
               <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-400/15 border border-emerald-300/30 px-3 py-1 text-xs font-bold text-emerald-300">
@@ -245,7 +243,7 @@ export function LoginPage() {
           <div className="glass-card glow-ring relative p-8 md:p-12 rounded-3xl">
             {/* Mobile-only brand row */}
             <div className="md:hidden flex items-center gap-2 mb-6">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 border border-white/20 text-amber-300">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 border border-white/20 text-sky-300">
                 <GraduationCap className="h-4 w-4" />
               </div>
               <div className="font-extrabold text-base text-gradient">School Management</div>
@@ -280,7 +278,7 @@ export function LoginPage() {
                     onChange={(e) => setOrgCode(e.target.value)}
                     autoComplete="organization"
                     required
-                    className="h-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40"
+                    className="h-12 rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/30 focus:border-sky-400 focus:ring-sky-400/40"
                     placeholder="e.g. GVPS"
                   />
                 </Field>
@@ -291,7 +289,7 @@ export function LoginPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="email"
                     required
-                    className="h-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40"
+                    className="h-12 rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/30 focus:border-sky-400 focus:ring-sky-400/40"
                     placeholder="your@email.com"
                   />
                 </Field>
@@ -303,7 +301,7 @@ export function LoginPage() {
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="current-password"
                       required
-                      className="h-12 pr-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40"
+                      className="h-12 pr-12 rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/30 focus:border-sky-400 focus:ring-sky-400/40"
                       placeholder="••••••••"
                     />
                     <button
@@ -318,7 +316,7 @@ export function LoginPage() {
                 </Field>
                 <Button
                   type="submit"
-                  className="w-full h-12 font-bold btn-shine shadow-lg shadow-amber-500/25 rounded-xl bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-500 hover:from-blue-600 hover:via-indigo-600 hover:to-amber-600 text-white border-0"
+                  className="w-full h-12 font-bold btn-shine shadow-lg shadow-sky-500/25 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-600 hover:from-sky-600 hover:via-indigo-600 hover:to-sky-700 text-white border-0"
                   disabled={login.isPending}
                 >
                   {login.isPending
@@ -329,7 +327,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setView('forgot')}
-                  className="block w-full text-center text-sm text-amber-300/90 hover:text-amber-200 font-medium transition-colors"
+                  className="block w-full text-center text-sm text-sky-300 hover:text-sky-200 font-medium transition-colors"
                 >
                   Forgot password?
                 </button>
@@ -350,12 +348,12 @@ export function LoginPage() {
                     pattern="\d{6}"
                     autoFocus
                     required
-                    className="h-14 text-center text-2xl tracking-[0.4em] font-extrabold rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/25 focus:border-amber-400 focus:ring-amber-400/40"
+                    className="h-14 text-center text-2xl tracking-[0.4em] font-extrabold rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/25 focus:border-sky-400 focus:ring-sky-400/40"
                   />
                 </Field>
                 <Button
                   type="submit"
-                  className="w-full h-12 font-bold btn-shine rounded-xl bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-500 hover:from-blue-600 hover:via-indigo-600 hover:to-amber-600 text-white border-0"
+                  className="w-full h-12 font-bold btn-shine rounded-xl bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-600 hover:from-sky-600 hover:via-indigo-600 hover:to-sky-700 text-white border-0"
                   disabled={mfa.isPending || mfaCode.length !== 6}
                 >
                   {mfa.isPending
@@ -379,14 +377,14 @@ export function LoginPage() {
                 onSubmit={(e) => { e.preventDefault(); forgot.mutate(); }}
               >
                 <Field label="Organization code">
-                  <Input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} required className="h-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40" />
+                  <Input value={orgCode} onChange={(e) => setOrgCode(e.target.value)} required className="h-12 rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/30 focus:border-sky-400 focus:ring-sky-400/40" />
                 </Field>
                 <Field label="Email">
-                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="h-12 rounded-xl bg-white/5 border-white/15 text-white placeholder:text-white/30 focus:border-amber-400 focus:ring-amber-400/40" />
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="h-12 rounded-xl bg-slate-950/25 border-white/15 text-white placeholder:text-white/30 focus:border-sky-400 focus:ring-sky-400/40" />
                 </Field>
                 <Button
                   type="submit"
-                  className="w-full h-12 font-bold btn-shine rounded-xl bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-500 hover:from-blue-600 hover:via-indigo-600 hover:to-amber-600 text-white border-0"
+                  className="w-full h-12 font-bold btn-shine rounded-xl bg-gradient-to-r from-sky-500 via-indigo-500 to-sky-600 hover:from-sky-600 hover:via-indigo-600 hover:to-sky-700 text-white border-0"
                   disabled={forgot.isPending}
                 >
                   {forgot.isPending
@@ -444,8 +442,8 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
 );
 
 const Feature: React.FC<{ icon: React.ReactNode; label: string }> = ({ icon, label }) => (
-  <div className="rounded-xl bg-white/10 backdrop-blur-md border border-white/15 px-4 py-3 flex items-center gap-2 text-sm font-bold hover:bg-white/15 transition-colors">
-    <div className="text-amber-300">{icon}</div>
+  <div className="rounded-xl bg-indigo-400/20 backdrop-blur-md border border-indigo-200/25 px-4 py-3 flex items-center gap-2 text-sm font-bold hover:bg-indigo-400/30 transition-colors">
+    <div className="text-sky-200">{icon}</div>
     <span>{label}</span>
   </div>
 );

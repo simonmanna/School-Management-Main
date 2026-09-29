@@ -1,0 +1,315 @@
+[
+  {
+    "label": "Admin login",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Set explicit school attendance policy",
+    "route": "/school/profile",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "id": "d4f5a11c-9b90-4f40-9664-c2132a145541",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "name": "Green Valley Audit Nursery and Primary",
+      "motto": null,
+      "logoUrl": null,
+      "address": null,
+      "phone": null,
+      "email": null,
+      "website": null,
+      "country": "UG",
+      "currencyCode": "UGX",
+      "educationLevel": "mixed",
+      "gradingSystem": "UCE",
+      "attendanceMode": "daily",
+      "terminology": {},
+      "capacityPolicy": "ENFORCE",
+      "resultAbsencePolicy": "ABSENT_AS_ZERO",
+      "classTeacherScope": "STREAM",
+      "attendanceLateContribution": "1",
+      "attendanceExcusedInDenominator": false,
+      "cashCustodyMode": "drawer",
+      "contacts": {},
+      "customFields": {},
+      "createdAt": "2026-09-29T04:43:16.581Z",
+      "updatedAt": "2026-09-29T04:49:22.999Z",
+      "timezone": "Africa/Kampala",
+      "labels": {
+        "academicLevel": "Level",
+        "academicLevelPlural": "Levels",
+        "gradeLevel": "Grade",
+        "gradeLevelPlural": "Grades",
+        "class": "Class",
+        "classPlural": "Classes",
+        "section": "Stream",
+        "sectionPlural": "Streams",
+        "academicYear": "Academic Year",
+        "academicYearPlural": "Academic Years",
+        "term": "Term",
+        "termPlural": "Terms",
+        "learner": "Pupil",
+        "learnerPlural": "Pupils"
+      }
+    }
+  },
+  {
+    "label": "One late day contributes exactly once",
+    "route": "/school/attendance/by-student/57adf79f-bfd2-48d1-adfd-18749fe7a43b?from=2026-09-29&to=2026-09-29",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "total": 1,
+      "present": 0,
+      "late": 1,
+      "excused": 0,
+      "absent": 0,
+      "denominator": 1,
+      "attendanceRate": 100,
+      "policyMissing": false
+    }
+  },
+  {
+    "label": "AR ledger tie-out after adjustment",
+    "route": "/school/finance/reconciliation/ar-gl",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "arControlAccountId": "230f0be2-b36e-448a-9647-dd4cb2f21e5f",
+      "subledgerTotal": 251000,
+      "unallocatedTotal": 0,
+      "expectedGlTotal": 251000,
+      "glTotal": 251000,
+      "variance": 0,
+      "perStudent": []
+    }
+  },
+  {
+    "label": "Register pupil awaiting billing",
+    "route": "/school/students/register",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "partner": {
+        "id": "bc099e4a-80e1-4ab9-af48-7b9a687dd936",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "code": "STU-000003",
+        "name": "Nabirye Fictional Queue",
+        "isCompany": false,
+        "isCustomer": true,
+        "isSupplier": false,
+        "isEmployee": false,
+        "email": null,
+        "phone": null,
+        "phoneE164": null,
+        "chatOptIn": false,
+        "website": null,
+        "taxNumber": null,
+        "membershipLevel": null,
+        "discountPercentOverride": "0",
+        "gender": null,
+        "receivableAccountId": null,
+        "payableAccountId": null,
+        "creditLimit": "0",
+        "creditHold": false,
+        "paymentTermId": null,
+        "status": "active",
+        "categoryId": null,
+        "notes": null,
+        "customFields": {
+          "house": null,
+          "gender": null,
+          "religion": null,
+          "dateOfBirth": "2022-04-04",
+          "nationality": null
+        },
+        "createdAt": "2026-09-29T04:49:23.090Z",
+        "updatedAt": "2026-09-29T04:49:23.090Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "profile": {
+        "id": "43f048e2-9d8f-4a1b-b5ba-2dbc33371555",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "partnerId": "bc099e4a-80e1-4ab9-af48-7b9a687dd936",
+        "admissionNo": "STU-000003",
+        "enrollmentDate": "2026-09-29T04:49:23.092Z",
+        "status": "active",
+        "dateOfBirth": "2022-04-04T00:00:00.000Z",
+        "gender": null,
+        "nationality": null,
+        "religion": null,
+        "residenceType": "day",
+        "studentCategoryId": null,
+        "house": null,
+        "customFields": {},
+        "createdAt": "2026-09-29T04:49:23.093Z",
+        "updatedAt": "2026-09-29T04:49:23.093Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "enrollment": {
+        "id": "f70d1c2a-3d75-4463-9632-b4476933f2db",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "studentProfileId": "43f048e2-9d8f-4a1b-b5ba-2dbc33371555",
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "programmeId": "ac31d628-c474-41b2-add2-a3d2212892b4",
+        "gradeLevelId": "b0cfe67f-847b-4bd5-b08d-206e69eb2522",
+        "admissionDate": "2026-09-29T04:49:23.097Z",
+        "completionDate": null,
+        "status": "ACTIVE",
+        "suspendedUntil": null,
+        "enrollmentType": "NEW",
+        "migrationRunId": null,
+        "admissionApplicationId": null,
+        "notes": null,
+        "createdAt": "2026-09-29T04:49:23.129Z",
+        "updatedAt": "2026-09-29T04:49:23.129Z",
+        "createdBy": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "updatedBy": null
+      },
+      "placement": {
+        "id": "cf56c986-0513-4c77-889b-b97fb6bd4f29",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "enrollmentId": "f70d1c2a-3d75-4463-9632-b4476933f2db",
+        "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+        "classCohortId": "964b707d-c460-4b77-8e68-7f11f5e9f415",
+        "sectionId": null,
+        "rollNumber": null,
+        "classNameSnapshot": "Baby Class",
+        "sectionNameSnapshot": null,
+        "effectiveFrom": "2026-09-29T04:49:23.097Z",
+        "effectiveTo": null,
+        "movementReason": "INITIAL_PLACEMENT",
+        "endReason": null,
+        "notes": null,
+        "capacityOverriddenById": null,
+        "capacityOverrideReason": null,
+        "changedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "migrationRunId": null,
+        "createdAt": "2026-09-29T04:49:23.162Z",
+        "updatedAt": "2026-09-29T04:49:23.162Z"
+      },
+      "warnings": [
+        "Older than Baby Class admits: 4 years 4 months at the start of term, against a maximum of 3 years 11 months."
+      ]
+    }
+  },
+  {
+    "label": "Queue billing while term open",
+    "route": "/school/billing-runs",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "515256e8-f42c-4f78-9ef3-5415f5182b16",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+      "classId": "d9130c82-bcea-4552-b7d4-748184791a6f",
+      "status": "queued",
+      "totalStudents": 2,
+      "postedCount": 0,
+      "failedCount": 0,
+      "skippedCount": 0,
+      "startedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "startedAt": null,
+      "completedAt": null,
+      "createdAt": "2026-09-29T04:49:23.218Z",
+      "updatedAt": "2026-09-29T04:49:23.218Z"
+    }
+  },
+  {
+    "label": "Head approver login",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Close term through normal authorized route",
+    "route": "/school/finance/terms/43c9d8ca-620a-475c-95c1-3673bd37f7ec/close",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "72def8a9-2711-4ab2-b4f6-a07a509a9031",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+      "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+      "status": "closed",
+      "closedById": "40279623-6ce5-4610-9141-7e16ab2ce7d8",
+      "closedAt": "2026-09-29T04:49:23.368Z",
+      "reopenedById": null,
+      "reopenedAt": null,
+      "reopenReason": null,
+      "snapshotAt": "2026-09-29T04:49:23.368Z",
+      "snapshot": {
+        "billed": 350000,
+        "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+        "waived": 0,
+        "balance": 251000,
+        "adjusted": 1000,
+        "bySource": {
+          "school_fee": {
+            "billed": 350000,
+            "invoices": 1,
+            "outstanding": 251000
+          }
+        },
+        "credited": 0,
+        "residual": 251000,
+        "termName": "Term 3",
+        "collected": 100000,
+        "computedAt": "2026-09-29T04:49:23.368Z",
+        "invoiceCount": 1,
+        "studentCount": 1,
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "residualVariance": 0
+      },
+      "createdAt": "2026-09-29T04:49:23.370Z",
+      "updatedAt": "2026-09-29T04:49:23.370Z"
+    }
+  },
+  {
+    "label": "Process queued billing after term close",
+    "route": "/school/billing-runs/515256e8-f42c-4f78-9ef3-5415f5182b16/process",
+    "status": 400,
+    "expected": [
+      201,
+      400
+    ],
+    "passed": true,
+    "response": {
+      "message": "Term 43c9d8ca-620a-475c-95c1-3673bd37f7ec is financially closed. Reopen it (maker-checker) before posting fee transactions.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "label": "Direct billing after close must reject",
+    "route": "/school/billing/generate",
+    "status": 400,
+    "expected": 400,
+    "passed": true,
+    "response": {
+      "message": "Term 43c9d8ca-620a-475c-95c1-3673bd37f7ec is financially closed. Reopen it (maker-checker) before posting fee transactions.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  }
+]

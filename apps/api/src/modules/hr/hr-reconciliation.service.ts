@@ -176,6 +176,8 @@ export class HrReconciliationService {
     const profile = await this.prisma.client.staffProfile.findFirst({
       where: { id: staffProfileId, organizationId: orgId, deletedAt: null },
       include: { partner: true, position: true, department: true },
+      // Opt back in to the globally omitted legacy pay blob: HR seeds baseSalary from it.
+      omit: { compensation: false },
     });
     if (!profile) throw new NotFoundException('Staff profile not found');
 

@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { UPLOAD_OPTIONS } from '../../kernel/files/upload-limits';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../kernel/auth/decorators/current-user.decorator';
@@ -1350,7 +1351,7 @@ export class HrController {
   /** Multipart upload — the file plus metadata form fields. */
   @Post('documents/upload')
   @RequirePermissions('hr:document')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
   uploadDocument(@UploadedFile() file: any, @Body() meta: UploadDocumentMetaDto) {
     return this.people.uploadDocument({ ...meta, file });
   }

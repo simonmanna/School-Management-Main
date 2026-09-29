@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BackupService } from '../../src/modules/backup/backup.service';
-import { SettingsService } from '../../src/kernel/settings/settings.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { BackupFrequency, BackupType, DestinationType, EncryptionType, InternetBehaviour, RetentionMode, RestoreScope } from '../../src/modules/backup/backup.dto';
 import { BACKUP_DEFAULTS } from '../../src/modules/backup/backup.constants';
@@ -14,16 +13,12 @@ jest.setTimeout(30_000);
 
 describe('BackupService', () => {
   let service: BackupService;
-  let mockSettingsService: Partial<SettingsService>;
   let mockSchedulerRegistry: Partial<SchedulerRegistry>;
   let backupDir: string;
 
   beforeEach(async () => {
-    mockSettingsService = {
-      get: jest.fn().mockResolvedValue(null),
-      set: jest.fn().mockResolvedValue({}),
-    };
-
+    backupDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pos-backup-spec-'));
+    process.env.BACKUP_CONFIG_PATH = path.join(backupDir, 'backup-config.json');
     mockSchedulerRegistry = {
       addCronJob: jest.fn(),
       deleteCronJob: jest.fn(),
@@ -35,7 +30,6 @@ describe('BackupService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BackupService,
-        { provide: SettingsService, useValue: mockSettingsService },
         { provide: SchedulerRegistry, useValue: mockSchedulerRegistry },
       ],
     }).compile();
@@ -46,7 +40,6 @@ describe('BackupService', () => {
     // `apps/api/backup`, the developer's real backup folder — so "no backups
     // exist" asserted against whatever dumps happened to be on that machine and
     // failed for anyone who had ever run a backup.
-    backupDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pos-backup-spec-'));
     (service as any).config = {
       ...(service as any).config,
       destinations: [
@@ -56,6 +49,9 @@ describe('BackupService', () => {
   });
 
   afterEach(async () => {
+    // Stop any cron job updateConfig() scheduled, or it holds the process open (A08).
+    service?.onModuleDestroy();
+    delete process.env.BACKUP_CONFIG_PATH;
     if (backupDir) await fs.rm(backupDir, { recursive: true, force: true }).catch(() => undefined);
   });
 
@@ -84,9 +80,37 @@ describe('BackupService', () => {
       expect(newConfig.types).toContain(BackupType.Full); // should preserve default
     });
 
-    it('should persist to settings service', async () => {
+    // Audit 2026-09-29 A03: host file, never a tenant setting.
+    it('persists to the operator config file on the host', async () => {
       await service.updateConfig({ frequency: BackupFrequency.Manual });
-      expect(mockSettingsService.set).toHaveBeenCalled();
+      const saved = JSON.parse(await fs.readFile(process.env.BACKUP_CONFIG_PATH!, 'utf8'));
+      expect(saved.frequency).toBe(BackupFrequency.Manual);
+    });
+
+    it('never echoes stored secrets, and a redacted placeholder keeps them', async () => {
+      await service.updateConfig({
+        destinations: [
+          { type: DestinationType.Local, path: backupDir, label: 'Local', enabled: true },
+          { type: DestinationType.S3, path: 'x', label: 'Offsite', enabled: true, bucket: 'b', accessKey: 'AKIA-FICTIONAL', secretKey: 'FICTIONAL-SECRET' },
+        ],
+        encryption: { type: EncryptionType.AES256, password: 'FICTIONAL-PASS' },
+      } as any);
+      const shown = service.getConfig();
+      expect(JSON.stringify(shown)).not.toMatch(/FICTIONAL/);
+      expect(JSON.stringify(service.getStatus())).not.toMatch(/FICTIONAL/);
+      expect(shown.destinations[1].secretKey).toBe(BackupService.REDACTED);
+
+      // Round-trip what the operator was shown: secrets must survive unchanged.
+      await service.updateConfig({ destinations: shown.destinations, encryption: shown.encryption } as any);
+      const saved = JSON.parse(await fs.readFile(process.env.BACKUP_CONFIG_PATH!, 'utf8'));
+      expect(saved.destinations[1].secretKey).toBe('FICTIONAL-SECRET');
+      expect(saved.encryption.password).toBe('FICTIONAL-PASS');
+    });
+
+    it('loads the host file at start-up', async () => {
+      await fs.writeFile(process.env.BACKUP_CONFIG_PATH!, JSON.stringify({ frequency: BackupFrequency.Weekly }));
+      await (service as any).loadConfig();
+      expect(service.getConfig().frequency).toBe(BackupFrequency.Weekly);
     });
   });
 

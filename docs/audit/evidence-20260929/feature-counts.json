@@ -1,0 +1,11 @@
+{
+  "total": 81,
+  "classifications": {
+    "IMPLEMENTED — VERIFIED": 6,
+    "PARTIALLY IMPLEMENTED": 60,
+    "INCONSISTENT": 2,
+    "OPTIONAL": 8,
+    "BROKEN": 4,
+    "NOT APPLICABLE": 1
+  }
+}

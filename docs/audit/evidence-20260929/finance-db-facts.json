@@ -1,0 +1,14 @@
+{
+  "invoiceBeforeAdjustment": {
+    "total": "undefined",
+    "residual": "250000"
+  },
+  "invoiceAfterAdjustment": {
+    "total": "undefined",
+    "residual": "251000"
+  },
+  "adjustmentJournalCount": 1,
+  "legacyHomeworkId": "bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca",
+  "legacySubmissionId": "6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+  "privatePupilId": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345"
+}

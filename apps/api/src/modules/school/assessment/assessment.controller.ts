@@ -187,6 +187,13 @@ export class AssessmentController {
 export class MarkingController {
   constructor(private readonly service: MarkingService) {}
 
+  /** The caller's own markable assessments — the teacher's picker (audit 2026-09-29 A07). */
+  @Get('mine')
+  @RequirePermissions(PERMISSIONS.school.ownGrades)
+  mine(@Query('termId') termId?: string) {
+    return this.service.myAssessments(termId);
+  }
+
   @Get('by-assessment/:assessmentId')
   @RequirePermissions(PERMISSIONS.school.read)
   byAssessment(@Param('assessmentId') assessmentId: string) {

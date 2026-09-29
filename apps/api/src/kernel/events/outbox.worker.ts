@@ -21,6 +21,8 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger('OutboxWorker');
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
+  /** The tick currently talking to the database, if any. Shutdown waits for it. */
+  private inflight: Promise<unknown> | null = null;
   private readonly intervalMs = Number(process.env.OUTBOX_POLL_MS ?? '1000');
   private readonly batchSize = Number(process.env.OUTBOX_BATCH ?? '50');
   private readonly staleClaimMs = 30_000;
@@ -37,7 +39,7 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     this.scheduleNext();
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     // Set the guard before clearing: a tick may already be awaiting I/O and its
     // finally block must not schedule a fresh timer after shutdown.
     this.stopped = true;
@@ -45,6 +47,10 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    // Audit 2026-09-29 A08: let a claimed batch finish before Prisma
+    // disconnects. Cutting it off mid-flight logged "client disconnected"
+    // errors and left rows 'claimed' until the stale-claim window reclaimed them.
+    await this.inflight?.catch(() => undefined);
   }
 
   /** Drain a batch of pending outbox rows. Returns the number shipped. */
@@ -125,10 +131,12 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.stopped) return;
     this.timer = setTimeout(async () => {
       try {
-        await this.tick();
+        this.inflight = this.tick();
+        await this.inflight;
       } catch (err) {
-        this.logger.error(`Outbox worker tick failed: ${String(err)}`);
+        if (!this.stopped) this.logger.error(`Outbox worker tick failed: ${String(err)}`);
       } finally {
+        this.inflight = null;
         if (!this.stopped) this.scheduleNext();
       }
     }, this.intervalMs);

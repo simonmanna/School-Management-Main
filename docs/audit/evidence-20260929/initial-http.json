@@ -1,0 +1,1067 @@
+[
+  {
+    "label": "Bootstrap independent fictional school",
+    "method": "POST",
+    "route": "/organizations/bootstrap",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "organization": {
+        "id": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "code": "AUDIT29",
+        "name": "Green Valley Audit Nursery and Primary"
+      },
+      "adminUser": {
+        "id": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "email": "head@audit29.test"
+      }
+    }
+  },
+  {
+    "label": "Admin login",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Invalid empty student payload",
+    "method": "POST",
+    "route": "/school/students/register",
+    "status": 400,
+    "expected": 400,
+    "passed": true,
+    "response": {
+      "message": [
+        "name should not be empty",
+        "name must be a string",
+        "classId should not be empty",
+        "classId must be a string",
+        "termId should not be empty",
+        "termId must be a string"
+      ],
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "label": "List seeded nursery and primary classes",
+    "method": "GET",
+    "route": "/school/classes?pageSize=100",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "data": [
+        {
+          "id": "d9130c82-bcea-4552-b7d4-748184791a6f",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "b0cfe67f-847b-4bd5-b08d-206e69eb2522",
+          "name": "Baby Class",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.874Z",
+          "updatedAt": "2026-09-29T04:40:54.874Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "b0cfe67f-847b-4bd5-b08d-206e69eb2522",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "Baby Class",
+            "code": "BABY",
+            "description": null,
+            "order": 1,
+            "isActive": true,
+            "academicLevelId": "7d6a26a8-36f0-4709-af23-cef5f43bbd73",
+            "nextGradeLevelId": "91de28fe-5232-4030-be3a-4e0c619d54dc",
+            "minAgeMonths": 30,
+            "maxAgeMonths": 47,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.873Z",
+            "updatedAt": "2026-09-29T04:40:54.873Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "e7b6ed1b-0e54-48ff-ac21-c0c04d039839",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "91de28fe-5232-4030-be3a-4e0c619d54dc",
+          "name": "Middle Class",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.872Z",
+          "updatedAt": "2026-09-29T04:40:54.872Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "91de28fe-5232-4030-be3a-4e0c619d54dc",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "Middle Class",
+            "code": "MIDDLE",
+            "description": null,
+            "order": 2,
+            "isActive": true,
+            "academicLevelId": "7d6a26a8-36f0-4709-af23-cef5f43bbd73",
+            "nextGradeLevelId": "c9f514b9-f0a2-49cf-b6e5-a511551c3929",
+            "minAgeMonths": 36,
+            "maxAgeMonths": 59,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.871Z",
+            "updatedAt": "2026-09-29T04:40:54.871Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "a4cabec9-9f05-468b-90b0-58c9b808f105",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "ace71438-72a5-41b7-b056-e5ccd07a010d",
+          "name": "P1",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.867Z",
+          "updatedAt": "2026-09-29T04:40:54.867Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "ace71438-72a5-41b7-b056-e5ccd07a010d",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P1",
+            "code": "P1",
+            "description": null,
+            "order": 4,
+            "isActive": true,
+            "academicLevelId": "c59603a5-f533-42e8-9b0a-646873c3992a",
+            "nextGradeLevelId": "5e3eda8f-8225-469f-a509-7f23ce632352",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.866Z",
+            "updatedAt": "2026-09-29T04:40:54.866Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "23be76fe-34ac-490d-ac05-19e89f91a517",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "5e3eda8f-8225-469f-a509-7f23ce632352",
+          "name": "P2",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.866Z",
+          "updatedAt": "2026-09-29T04:40:54.866Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "5e3eda8f-8225-469f-a509-7f23ce632352",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P2",
+            "code": "P2",
+            "description": null,
+            "order": 5,
+            "isActive": true,
+            "academicLevelId": "c59603a5-f533-42e8-9b0a-646873c3992a",
+            "nextGradeLevelId": "e4d16760-e370-41f3-b90b-d3cce2eb43ca",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.864Z",
+            "updatedAt": "2026-09-29T04:40:54.864Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "c21d2d20-396f-4bdb-8576-d41f322d3464",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "e4d16760-e370-41f3-b90b-d3cce2eb43ca",
+          "name": "P3",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.863Z",
+          "updatedAt": "2026-09-29T04:40:54.863Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "e4d16760-e370-41f3-b90b-d3cce2eb43ca",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P3",
+            "code": "P3",
+            "description": null,
+            "order": 6,
+            "isActive": true,
+            "academicLevelId": "c59603a5-f533-42e8-9b0a-646873c3992a",
+            "nextGradeLevelId": "640fcc9c-0047-4786-b553-553ec87266d3",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.862Z",
+            "updatedAt": "2026-09-29T04:40:54.862Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "96494172-0917-4143-956d-e506e69496dd",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "640fcc9c-0047-4786-b553-553ec87266d3",
+          "name": "P4",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.861Z",
+          "updatedAt": "2026-09-29T04:40:54.861Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "640fcc9c-0047-4786-b553-553ec87266d3",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P4",
+            "code": "P4",
+            "description": null,
+            "order": 7,
+            "isActive": true,
+            "academicLevelId": "89277805-d493-46d5-a6e1-1beaec57f50b",
+            "nextGradeLevelId": "4a0433e5-5e9c-4cc7-9fd6-5f875de1d780",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.860Z",
+            "updatedAt": "2026-09-29T04:40:54.860Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "8f918caa-1974-46e4-a3f5-cb6a693f8953",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "4a0433e5-5e9c-4cc7-9fd6-5f875de1d780",
+          "name": "P5",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.859Z",
+          "updatedAt": "2026-09-29T04:40:54.859Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "4a0433e5-5e9c-4cc7-9fd6-5f875de1d780",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P5",
+            "code": "P5",
+            "description": null,
+            "order": 8,
+            "isActive": true,
+            "academicLevelId": "89277805-d493-46d5-a6e1-1beaec57f50b",
+            "nextGradeLevelId": "9058df29-3958-41f6-b1c6-787024281438",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.858Z",
+            "updatedAt": "2026-09-29T04:40:54.858Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "6abf0a4c-8283-491d-9787-a218042ef6d3",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "9058df29-3958-41f6-b1c6-787024281438",
+          "name": "P6",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.857Z",
+          "updatedAt": "2026-09-29T04:40:54.857Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "9058df29-3958-41f6-b1c6-787024281438",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P6",
+            "code": "P6",
+            "description": null,
+            "order": 9,
+            "isActive": true,
+            "academicLevelId": "89277805-d493-46d5-a6e1-1beaec57f50b",
+            "nextGradeLevelId": "f4ddc2c6-6100-4d03-bba9-a881d49db4a2",
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.856Z",
+            "updatedAt": "2026-09-29T04:40:54.856Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "2c1d0fb4-f4be-41e4-a1a3-dbf190403c7c",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "f4ddc2c6-6100-4d03-bba9-a881d49db4a2",
+          "name": "P7",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.845Z",
+          "updatedAt": "2026-09-29T04:40:54.845Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "f4ddc2c6-6100-4d03-bba9-a881d49db4a2",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "P7",
+            "code": "P7",
+            "description": null,
+            "order": 10,
+            "isActive": true,
+            "academicLevelId": "89277805-d493-46d5-a6e1-1beaec57f50b",
+            "nextGradeLevelId": null,
+            "minAgeMonths": null,
+            "maxAgeMonths": null,
+            "isTerminal": true,
+            "createdAt": "2026-09-29T04:40:54.836Z",
+            "updatedAt": "2026-09-29T04:40:54.836Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        },
+        {
+          "id": "f5f409aa-41a8-45a7-b3da-64253532f4e5",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "campusId": null,
+          "gradeLevelId": "c9f514b9-f0a2-49cf-b6e5-a511551c3929",
+          "name": "Top Class",
+          "code": null,
+          "description": null,
+          "homeroomTeacherId": null,
+          "capacity": null,
+          "allowsStreams": false,
+          "displayOrder": 0,
+          "isActive": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:54.869Z",
+          "updatedAt": "2026-09-29T04:40:54.869Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "gradeLevel": {
+            "id": "c9f514b9-f0a2-49cf-b6e5-a511551c3929",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "name": "Top Class",
+            "code": "TOP",
+            "description": null,
+            "order": 3,
+            "isActive": true,
+            "academicLevelId": "7d6a26a8-36f0-4709-af23-cef5f43bbd73",
+            "nextGradeLevelId": "ace71438-72a5-41b7-b056-e5ccd07a010d",
+            "minAgeMonths": 48,
+            "maxAgeMonths": 71,
+            "isTerminal": false,
+            "createdAt": "2026-09-29T04:40:54.868Z",
+            "updatedAt": "2026-09-29T04:40:54.868Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          },
+          "campus": null,
+          "sections": []
+        }
+      ],
+      "meta": {
+        "page": 1,
+        "pageSize": 100,
+        "total": 10,
+        "totalPages": 1
+      }
+    }
+  },
+  {
+    "label": "Create 2026 academic year",
+    "method": "POST",
+    "route": "/school/academic-years",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "name": "2026",
+      "startDate": "2026-01-01T00:00:00.000Z",
+      "endDate": "2026-12-31T00:00:00.000Z",
+      "isCurrent": true,
+      "status": "ACTIVE",
+      "closedAt": null,
+      "closedById": null,
+      "createdAt": "2026-09-29T04:40:55.317Z",
+      "updatedAt": "2026-09-29T04:40:55.317Z",
+      "createdBy": null,
+      "updatedBy": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "label": "Create term 3",
+    "method": "POST",
+    "route": "/school/terms",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+      "name": "Term 3",
+      "kind": "term",
+      "startDate": "2026-09-01T00:00:00.000Z",
+      "endDate": "2026-12-05T00:00:00.000Z",
+      "isCurrent": true,
+      "createdAt": "2026-09-29T04:40:55.350Z",
+      "updatedAt": "2026-09-29T04:40:55.350Z",
+      "createdBy": null,
+      "updatedBy": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "label": "Register nursery pupil and guardian and placement",
+    "method": "POST",
+    "route": "/school/students/register",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "partner": {
+        "id": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "code": "STU-000001",
+        "name": "Atim Fictional Nursery",
+        "isCompany": false,
+        "isCustomer": true,
+        "isSupplier": false,
+        "isEmployee": false,
+        "email": null,
+        "phone": null,
+        "phoneE164": null,
+        "chatOptIn": false,
+        "website": null,
+        "taxNumber": null,
+        "membershipLevel": null,
+        "discountPercentOverride": "0",
+        "gender": null,
+        "receivableAccountId": null,
+        "payableAccountId": null,
+        "creditLimit": "0",
+        "creditHold": false,
+        "paymentTermId": null,
+        "status": "active",
+        "categoryId": null,
+        "notes": null,
+        "customFields": {
+          "house": null,
+          "gender": "female",
+          "religion": null,
+          "dateOfBirth": "2022-02-02",
+          "nationality": null
+        },
+        "createdAt": "2026-09-29T04:40:55.417Z",
+        "updatedAt": "2026-09-29T04:40:55.417Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "profile": {
+        "id": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "partnerId": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+        "admissionNo": "STU-000001",
+        "enrollmentDate": "2026-09-29T04:40:55.422Z",
+        "status": "active",
+        "dateOfBirth": "2022-02-02T00:00:00.000Z",
+        "gender": "female",
+        "nationality": null,
+        "religion": null,
+        "residenceType": "day",
+        "studentCategoryId": null,
+        "house": null,
+        "customFields": {},
+        "createdAt": "2026-09-29T04:40:55.423Z",
+        "updatedAt": "2026-09-29T04:40:55.423Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "enrollment": {
+        "id": "13432029-cc26-42e2-b062-88ee1d2a745d",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "programmeId": "ac31d628-c474-41b2-add2-a3d2212892b4",
+        "gradeLevelId": "b0cfe67f-847b-4bd5-b08d-206e69eb2522",
+        "admissionDate": "2026-09-29T04:40:55.460Z",
+        "completionDate": null,
+        "status": "ACTIVE",
+        "suspendedUntil": null,
+        "enrollmentType": "NEW",
+        "migrationRunId": null,
+        "admissionApplicationId": null,
+        "notes": null,
+        "createdAt": "2026-09-29T04:40:55.493Z",
+        "updatedAt": "2026-09-29T04:40:55.493Z",
+        "createdBy": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "updatedBy": null
+      },
+      "placement": {
+        "id": "23288874-38ba-4396-a2ec-2a7b93ab6b69",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "enrollmentId": "13432029-cc26-42e2-b062-88ee1d2a745d",
+        "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+        "classCohortId": "964b707d-c460-4b77-8e68-7f11f5e9f415",
+        "sectionId": null,
+        "rollNumber": null,
+        "classNameSnapshot": "Baby Class",
+        "sectionNameSnapshot": null,
+        "effectiveFrom": "2026-09-29T04:40:55.460Z",
+        "effectiveTo": null,
+        "movementReason": "INITIAL_PLACEMENT",
+        "endReason": null,
+        "notes": null,
+        "capacityOverriddenById": null,
+        "capacityOverrideReason": null,
+        "changedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "migrationRunId": null,
+        "createdAt": "2026-09-29T04:40:55.556Z",
+        "updatedAt": "2026-09-29T04:40:55.556Z"
+      },
+      "warnings": [
+        "Older than Baby Class admits: 4 years 6 months at the start of term, against a maximum of 3 years 11 months."
+      ]
+    }
+  },
+  {
+    "label": "Duplicate quick registration must fail",
+    "method": "POST",
+    "route": "/school/students/register",
+    "status": 409,
+    "expected": [
+      400,
+      409
+    ],
+    "passed": true,
+    "response": {
+      "code": "LIKELY_DUPLICATE",
+      "message": "Atim Fictional Nursery looks like a pupil already on the register (STU-000001). Open that record instead, or confirm this is a different child and say why.",
+      "duplicates": [
+        {
+          "id": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+          "admissionNo": "STU-000001",
+          "status": "active",
+          "name": "Atim Fictional Nursery",
+          "dateOfBirth": "2022-02-02"
+        }
+      ]
+    }
+  },
+  {
+    "label": "Reload pupil detail",
+    "method": "GET",
+    "route": "/school/students/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "id": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "partnerId": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+      "admissionNo": "STU-000001",
+      "enrollmentDate": "2026-09-29T04:40:55.422Z",
+      "status": "active",
+      "dateOfBirth": "2022-02-02T00:00:00.000Z",
+      "gender": "female",
+      "nationality": null,
+      "religion": null,
+      "residenceType": "day",
+      "studentCategoryId": null,
+      "house": null,
+      "customFields": {
+        "ninOnFile": false,
+        "ninLast4": null
+      },
+      "createdAt": "2026-09-29T04:40:55.423Z",
+      "updatedAt": "2026-09-29T04:40:55.423Z",
+      "createdBy": null,
+      "updatedBy": null,
+      "deletedAt": null,
+      "partner": {
+        "id": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "code": "STU-000001",
+        "name": "Atim Fictional Nursery",
+        "isCompany": false,
+        "isCustomer": true,
+        "isSupplier": false,
+        "isEmployee": false,
+        "email": null,
+        "phone": null,
+        "phoneE164": null,
+        "chatOptIn": false,
+        "website": null,
+        "taxNumber": null,
+        "membershipLevel": null,
+        "discountPercentOverride": "0",
+        "gender": null,
+        "receivableAccountId": null,
+        "payableAccountId": null,
+        "creditLimit": "0",
+        "creditHold": false,
+        "paymentTermId": null,
+        "status": "active",
+        "categoryId": null,
+        "notes": null,
+        "customFields": {
+          "house": null,
+          "gender": "female",
+          "religion": null,
+          "dateOfBirth": "2022-02-02",
+          "nationality": null
+        },
+        "createdAt": "2026-09-29T04:40:55.417Z",
+        "updatedAt": "2026-09-29T04:40:55.417Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "guardians": [
+        {
+          "id": "95195d2c-bae4-42f0-bb70-fcd32453212e",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+          "guardianContactId": "667bfb0b-7bfe-4c9c-bc2b-ea52d0d08060",
+          "relationship": "guardian",
+          "isPrimary": true,
+          "canPickup": true,
+          "receivesStatements": true,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:40:55.455Z",
+          "updatedAt": "2026-09-29T04:40:55.455Z",
+          "deletedAt": null
+        }
+      ],
+      "medicalRecord": null,
+      "currentClass": {
+        "id": "d9130c82-bcea-4552-b7d4-748184791a6f",
+        "name": "Baby Class",
+        "gradeLevel": {
+          "id": "b0cfe67f-847b-4bd5-b08d-206e69eb2522",
+          "name": "Baby Class"
+        }
+      },
+      "currentSection": null
+    }
+  },
+  {
+    "label": "Create private care log",
+    "method": "POST",
+    "route": "/school/care-logs",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "6b280244-c196-4d6d-a0cc-b873e1e1972d",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "onDate": "2026-09-29T00:00:00.000Z",
+      "arrivalMood": "happy",
+      "departureMood": null,
+      "meals": [],
+      "naps": [],
+      "nappyChanges": null,
+      "usedToiletAlone": null,
+      "activities": null,
+      "teacherNote": "PRIVATE FICTIONAL CARE NOTE",
+      "sharedAt": null,
+      "sharedById": null,
+      "recordedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "createdAt": "2026-09-29T04:40:55.695Z",
+      "updatedAt": "2026-09-29T04:40:55.695Z",
+      "deletedAt": null
+    }
+  },
+  {
+    "label": "Record late attendance",
+    "method": "POST",
+    "route": "/school/attendance/mark",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "late": 1
+    }
+  },
+  {
+    "label": "Read attendance percentage",
+    "method": "GET",
+    "route": "/school/attendance/by-student/57adf79f-bfd2-48d1-adfd-18749fe7a43b?from=2026-09-29&to=2026-09-29",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "total": 1,
+      "present": 0,
+      "late": 1,
+      "excused": 0,
+      "absent": 0,
+      "denominator": 1,
+      "attendanceRate": null,
+      "policyMissing": true
+    }
+  },
+  {
+    "label": "Unassigned class teacher login",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Unassigned teacher ordinary pupil detail denied",
+    "method": "GET",
+    "route": "/school/students/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unassigned teacher care log denied",
+    "method": "GET",
+    "route": "/school/care-logs/by-student/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unassigned teacher pickup contacts denied",
+    "method": "GET",
+    "route": "/school/pickup/who-may-collect/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unassigned teacher report register empty",
+    "method": "POST",
+    "route": "/school/reports/v2/student.register/run",
+    "status": 201,
+    "expected": [
+      200,
+      403,
+      404
+    ],
+    "passed": false,
+    "response": {
+      "key": "student.register",
+      "title": "Student Register",
+      "columns": [
+        {
+          "key": "admissionNo",
+          "label": "Admission No",
+          "type": "string",
+          "width": 12,
+          "link": {
+            "route": "/school/students/:studentProfileId",
+            "paramFrom": {
+              "studentProfileId": "studentProfileId"
+            }
+          }
+        },
+        {
+          "key": "studentName",
+          "label": "Name",
+          "type": "string",
+          "width": 24
+        },
+        {
+          "key": "gender",
+          "label": "Gender",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "className",
+          "label": "Class",
+          "type": "string",
+          "width": 12
+        },
+        {
+          "key": "sectionName",
+          "label": "Section",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "rollNumber",
+          "label": "Roll No",
+          "type": "string",
+          "width": 8
+        },
+        {
+          "key": "residenceType",
+          "label": "Residence",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "house",
+          "label": "House",
+          "type": "string",
+          "width": 10
+        },
+        {
+          "key": "status",
+          "label": "Status",
+          "type": "enum",
+          "width": 10
+        },
+        {
+          "key": "enrolledAt",
+          "label": "Enrolled",
+          "type": "date",
+          "width": 12
+        }
+      ],
+      "data": [],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 0,
+        "totalPages": 1
+      },
+      "caption": "Term: Term 3 · 2026-09-01 to 2026-12-05 · Class basis: enrollment · Generated 2026-09-29 04:40",
+      "notes": []
+    }
+  },
+  {
+    "label": "Authorized guardian handover",
+    "method": "POST",
+    "route": "/school/pickup/release",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "6f602bca-4d7f-4df1-b3e2-45d46225e938",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "authorizationId": null,
+      "studentGuardianId": "95195d2c-bae4-42f0-bb70-fcd32453212e",
+      "authorizationSource": "guardian",
+      "collectedByName": "Fictional Guardian",
+      "collectedAt": "2026-09-29T12:00:00.000Z",
+      "releasedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "overrideReason": null,
+      "notes": null,
+      "idempotencyKey": "audit29-handover",
+      "createdAt": "2026-09-29T04:40:56.314Z"
+    }
+  },
+  {
+    "label": "Guardian handover replay",
+    "method": "POST",
+    "route": "/school/pickup/release",
+    "status": 201,
+    "expected": [
+      200,
+      201,
+      409
+    ],
+    "passed": true,
+    "response": {
+      "id": "6f602bca-4d7f-4df1-b3e2-45d46225e938",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "authorizationId": null,
+      "studentGuardianId": "95195d2c-bae4-42f0-bb70-fcd32453212e",
+      "authorizationSource": "guardian",
+      "collectedByName": "Fictional Guardian",
+      "collectedAt": "2026-09-29T12:00:00.000Z",
+      "releasedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "overrideReason": null,
+      "notes": null,
+      "idempotencyKey": "audit29-handover",
+      "createdAt": "2026-09-29T04:40:56.314Z"
+    }
+  },
+  {
+    "label": "Unassigned teacher analytics trend must deny",
+    "method": "GET",
+    "route": "/school/analytics/student-trend/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "Missing required permission(s): school:analytics:read",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unassigned teacher named at-risk register must deny",
+    "method": "GET",
+    "route": "/school/analytics/at-risk/fd4d7d50-8935-4f20-b795-e572b688e1a0",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "Missing required permission(s): school:analytics:read",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unauthenticated pupil read denied",
+    "method": "GET",
+    "route": "/school/students/57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+    "status": 401,
+    "expected": 401,
+    "passed": true,
+    "response": {
+      "message": "Authentication required",
+      "error": "Unauthorized",
+      "statusCode": 401
+    }
+  }
+]

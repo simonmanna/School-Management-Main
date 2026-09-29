@@ -708,11 +708,8 @@ export const PERMISSIONS = {
     edit: 'menu_categories.edit',
     delete: 'menu_categories.delete',
   },
-  backup: {
-    read: 'backup:read',
-    update: 'backup:update',
-    run: 'backup:run',
-  },
+  // `backup:*` retired (audit 2026-09-29 A03): whole-database backup is an
+  // operator surface behind the host's OPERATOR_SECRET, not a tenant grant.
   featureFlag: {
     read: 'feature_flag:read',
     write: 'feature_flag:write',
@@ -974,8 +971,6 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'user:create': { label: 'Create user', description: 'Provision a login.', group: 'Administration', subgroup: 'Users', risk: 'high' },
   'user:update': { label: 'Edit user', description: 'Change a user\'s roles/account.', group: 'Administration', subgroup: 'Users', risk: 'high' },
   'user:delete': { label: 'Delete user', description: 'Remove a login.', group: 'Administration', subgroup: 'Users', risk: 'high' },
-  'backup:run': { label: 'Run backup', description: 'Trigger a data export/backup.', group: 'Administration', subgroup: 'System', risk: 'high' },
-  'backup:update': { label: 'Manage backup config', description: 'Alter backup retention/location.', group: 'Administration', subgroup: 'System', risk: 'high' },
   'school:portal:accounts:write': { label: 'Manage portal accounts', description: 'Invite/revoke family & pupil logins — mints credentials that see grades and balances.', group: 'School', subgroup: 'Portal', risk: 'high' },
   'school:certificates:revoke': { label: 'Revoke certificates', description: 'Void an issued certificate.', group: 'School', subgroup: 'Certificates', risk: 'high' },
 
@@ -1585,9 +1580,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'role:delete',
       'setting:read',
       'setting:update',
-      'backup:read',
-      'backup:update',
-      'backup:run',
+      // backup:* removed (audit 2026-09-29 A03): backup is operator-only.
       'feature_flag:read',
       'feature_flag:write',
       'webhooks:read',

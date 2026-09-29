@@ -15,6 +15,36 @@ import { assertStaffTransition, endTeachingAccess, LEAVING_STATUSES, type StaffS
  * Same pattern as StudentService: the universal Partner model is reused,
  * and the StaffProfile table adds school-specific fields.
  */
+/**
+ * What a school reader may see of a colleague (audit 2026-09-29 A02).
+ *
+ * `school:read` is held by every teacher, so the directory is an explicit
+ * allow-list rather than the whole row. `compensation` (legacy salary and bank
+ * details — pay lives in HrEmployee behind HR grants) and free-form
+ * `customFields` are deliberately absent; a new column stays private until it
+ * is named here.
+ */
+export const STAFF_DIRECTORY_SELECT = {
+  id: true,
+  organizationId: true,
+  partnerId: true,
+  employeeNo: true,
+  departmentId: true,
+  positionId: true,
+  campusId: true,
+  joinDate: true,
+  contractType: true,
+  contractEndDate: true,
+  status: true,
+  staffCategory: true,
+  createdAt: true,
+  updatedAt: true,
+  department: true,
+  position: true,
+  campus: true,
+  partner: { select: { id: true, name: true, email: true, phone: true } },
+} as const;
+
 @Injectable()
 export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, UpdateStaffDto> {
   protected readonly entityName = 'StaffProfile';
@@ -24,12 +54,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
    * none of them. Omitting it was the root cause of the staff list rendering
    * the employee number in the Name column for every row.
    */
-  protected readonly defaultInclude = {
-    department: true,
-    position: true,
-    campus: true,
-    partner: { select: { id: true, name: true, email: true, phone: true } },
-  };
+  protected readonly defaultSelect = STAFF_DIRECTORY_SELECT;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -95,7 +120,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
         employeeNo: profile.employeeNo,
       });
 
-      return profile;
+      return tx.staffProfile.findFirst({ where: { id: profile.id }, select: STAFF_DIRECTORY_SELECT });
     });
   }
 
@@ -173,7 +198,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
         oldValues: before,
         newValues: { ...after, ...(ended ? { employmentEnded: ended } : {}) },
       });
-      return after as StaffProfile;
+      return (await tx.staffProfile.findFirst({ where: { id }, select: STAFF_DIRECTORY_SELECT })) as StaffProfile;
     });
   }
 
@@ -211,6 +236,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
   async listByCampus(campusId: string) {
     return this.prisma.client.staffProfile.findMany({
       where: { campusId, status: 'active' },
+      select: STAFF_DIRECTORY_SELECT,
       orderBy: { employeeNo: 'asc' },
     });
   }
@@ -218,6 +244,7 @@ export class StaffService extends BaseCrudService<StaffProfile, CreateStaffDto, 
   async listByDepartment(departmentId: string) {
     return this.prisma.client.staffProfile.findMany({
       where: { departmentId, status: 'active' },
+      select: STAFF_DIRECTORY_SELECT,
       orderBy: { employeeNo: 'asc' },
     });
   }

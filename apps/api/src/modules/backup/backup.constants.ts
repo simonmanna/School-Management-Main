@@ -1,7 +1,5 @@
 import { BackupFrequency, BackupType, CompressionLevel, DestinationType, EncryptionType, InternetBehaviour, RetentionMode } from './backup.dto';
 
-export const BACKUP_SETTING_KEY = 'backup.config';
-
 // Auto-detect PostgreSQL bin directory on Windows
 function detectPgBin(): string {
   if (process.platform !== 'win32') return '/usr/bin';

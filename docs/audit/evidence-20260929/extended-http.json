@@ -1,0 +1,990 @@
+[
+  {
+    "label": "Admin login",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Teacher login",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Register primary pupil",
+    "method": "POST",
+    "route": "/school/students/register",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "partner": {
+        "id": "580feec5-32a9-4d16-b387-71546534d305",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "code": "STU-000002",
+        "name": "Okello Fictional P1",
+        "isCompany": false,
+        "isCustomer": true,
+        "isSupplier": false,
+        "isEmployee": false,
+        "email": null,
+        "phone": null,
+        "phoneE164": null,
+        "chatOptIn": false,
+        "website": null,
+        "taxNumber": null,
+        "membershipLevel": null,
+        "discountPercentOverride": "0",
+        "gender": null,
+        "receivableAccountId": null,
+        "payableAccountId": null,
+        "creditLimit": "0",
+        "creditHold": false,
+        "paymentTermId": null,
+        "status": "active",
+        "categoryId": null,
+        "notes": null,
+        "customFields": {
+          "house": null,
+          "gender": null,
+          "religion": null,
+          "dateOfBirth": "2020-03-03",
+          "nationality": null
+        },
+        "createdAt": "2026-09-29T04:43:16.123Z",
+        "updatedAt": "2026-09-29T04:43:16.123Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "profile": {
+        "id": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "partnerId": "580feec5-32a9-4d16-b387-71546534d305",
+        "admissionNo": "STU-000002",
+        "enrollmentDate": "2026-09-29T04:43:16.125Z",
+        "status": "active",
+        "dateOfBirth": "2020-03-03T00:00:00.000Z",
+        "gender": null,
+        "nationality": null,
+        "religion": null,
+        "residenceType": "day",
+        "studentCategoryId": null,
+        "house": null,
+        "customFields": {},
+        "createdAt": "2026-09-29T04:43:16.126Z",
+        "updatedAt": "2026-09-29T04:43:16.126Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "enrollment": {
+        "id": "9c78d7f4-f36f-4a7c-900b-4f783957c09d",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "studentProfileId": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "programmeId": "1cde0e23-8a19-47f8-a536-0ed1bfda2a17",
+        "gradeLevelId": "ace71438-72a5-41b7-b056-e5ccd07a010d",
+        "admissionDate": "2026-09-29T04:43:16.145Z",
+        "completionDate": null,
+        "status": "ACTIVE",
+        "suspendedUntil": null,
+        "enrollmentType": "NEW",
+        "migrationRunId": null,
+        "admissionApplicationId": null,
+        "notes": null,
+        "createdAt": "2026-09-29T04:43:16.169Z",
+        "updatedAt": "2026-09-29T04:43:16.169Z",
+        "createdBy": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "updatedBy": null
+      },
+      "placement": {
+        "id": "e1411ba8-7a3b-4011-aa81-abea1fc6087b",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "enrollmentId": "9c78d7f4-f36f-4a7c-900b-4f783957c09d",
+        "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+        "classCohortId": "4bc58f77-5c27-4ea5-9aaa-80c2f9d988dc",
+        "sectionId": null,
+        "rollNumber": null,
+        "classNameSnapshot": "P1",
+        "sectionNameSnapshot": null,
+        "effectiveFrom": "2026-09-29T04:43:16.145Z",
+        "effectiveTo": null,
+        "movementReason": "INITIAL_PLACEMENT",
+        "endReason": null,
+        "notes": null,
+        "capacityOverriddenById": null,
+        "capacityOverrideReason": null,
+        "changedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+        "migrationRunId": null,
+        "createdAt": "2026-09-29T04:43:16.208Z",
+        "updatedAt": "2026-09-29T04:43:16.208Z"
+      },
+      "warnings": []
+    }
+  },
+  {
+    "label": "Unassigned teacher cannot open P1 pupil",
+    "method": "GET",
+    "route": "/school/students/d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+    "status": 403,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": true,
+    "response": {
+      "message": "You may only open the records of pupils in classes you teach",
+      "error": "Forbidden",
+      "statusCode": 403
+    }
+  },
+  {
+    "label": "Unassigned teacher legacy submission list must hide foreign pupils",
+    "method": "GET",
+    "route": "/school/submissions",
+    "status": 500,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": false,
+    "response": {
+      "message": "Internal Server Error",
+      "statusCode": 500,
+      "requestId": "3c32fafc-6172-45fc-b88c-246e51c9815d",
+      "error": "\nInvalid `this.delegate.findMany()` invocation in\nC:\\Dev\\School-Management\\apps\\api\\src\\kernel\\common\\base-crud.service.ts:69:21\n\n  66   : this.defaultOrderBy;\n  67 \n  68 const [data, total] = await Promise.all([\n→ 69   this.delegate.findMany({\n         where: {\n           organizationId: \"6d15f2f3-6ebd-47f5-a899-00663df05665\"\n         },\n         orderBy: {\n           createdAt: \"desc\",\n           ~~~~~~~~~\n       ?   id?: SortOrder,\n       ?   organizationId?: SortOrder,\n       ?   assignmentId?: SortOrder,\n       ?   studentProfileId?: SortOrder,\n       ?   submittedAt?: SortOrder | SortOrderInput,\n       ?   content?: SortOrder | SortOrderInput,\n       ?   attachments?: SortOrder,\n       ?   score?: SortOrder | SortOrderInput,\n       ?   gradedById?: SortOrder | SortOrderInput,\n       ?   gradedAt?: SortOrder | SortOrderInput,\n       ?   feedback?: SortOrder | SortOrderInput,\n       ?   status?: SortOrder,\n       ?   studentAssessmentId?: SortOrder | SortOrderInput,\n       ?   assignment?: HomeworkAssignmentOrderByWithRelationInput,\n       ?   studentProfile?: StudentProfileOrderByWithRelationInput\n         },\n         skip: 0,\n         take: 25,\n         include: undefined\n       })\n\nUnknown argument `createdAt`. Did you mean `gradedAt`? Available options are marked with ?.",
+      "name": "PrismaClientValidationError",
+      "stack": [
+        "PrismaClientValidationError: ",
+        "Invalid `this.delegate.findMany()` invocation in",
+        "C:\\Dev\\School-Management\\apps\\api\\src\\kernel\\common\\base-crud.service.ts:69:21",
+        "",
+        "  66   : this.defaultOrderBy;",
+        "  67 ",
+        "  68 const [data, total] = await Promise.all([",
+        "→ 69   this.delegate.findMany({",
+        "         where: {",
+        "           organizationId: \"6d15f2f3-6ebd-47f5-a899-00663df05665\"",
+        "         },",
+        "         orderBy: {"
+      ]
+    }
+  },
+  {
+    "label": "Unassigned teacher legacy submission detail must deny",
+    "method": "GET",
+    "route": "/school/submissions/6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+    "status": 200,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": false,
+    "response": {
+      "id": "6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "assignmentId": "bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca",
+      "studentProfileId": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+      "submittedAt": null,
+      "content": "PRIVATE FICTIONAL PUPIL SUBMISSION",
+      "attachments": [
+        {
+          "url": "https://fictional.invalid/private-pupil-file.pdf"
+        }
+      ],
+      "score": "23",
+      "gradedById": null,
+      "gradedAt": null,
+      "feedback": "PRIVATE FICTIONAL TEACHER FEEDBACK",
+      "status": "graded",
+      "studentAssessmentId": null
+    }
+  },
+  {
+    "label": "Unassigned teacher legacy homework detail must deny",
+    "method": "GET",
+    "route": "/school/homework/bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca/detail",
+    "status": 200,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": false,
+    "response": {
+      "homework": {
+        "id": "bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca",
+        "title": "Retained P1 private work",
+        "description": null,
+        "dueDate": "2026-09-28T00:00:00.000Z",
+        "maxScore": 100,
+        "subject": "Mathematics",
+        "className": "P1",
+        "classId": "a4cabec9-9f05-468b-90b0-58c9b808f105",
+        "subjectId": "3d551a93-790d-4ae0-acfc-31633df3bdcf",
+        "termId": null
+      },
+      "students": [
+        {
+          "studentProfileId": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+          "name": "Okello Fictional P1",
+          "admissionNo": "STU-000002",
+          "submissionId": "6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+          "submittedAt": null,
+          "content": "PRIVATE FICTIONAL PUPIL SUBMISSION",
+          "score": 23,
+          "feedback": "PRIVATE FICTIONAL TEACHER FEEDBACK",
+          "status": "graded"
+        }
+      ],
+      "total": 1,
+      "submitted": 1,
+      "graded": 1
+    }
+  },
+  {
+    "label": "Unassigned teacher legacy by-class submissions must deny",
+    "method": "GET",
+    "route": "/school/homework/by-class/a4cabec9-9f05-468b-90b0-58c9b808f105",
+    "status": 200,
+    "expected": [
+      403,
+      404
+    ],
+    "passed": false,
+    "response": [
+      {
+        "id": "bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "teacherPartnerId": "d7ae5207-b2aa-4e2e-9990-a98b23ecf7a6",
+        "classId": "a4cabec9-9f05-468b-90b0-58c9b808f105",
+        "sectionId": null,
+        "subjectId": "3d551a93-790d-4ae0-acfc-31633df3bdcf",
+        "termId": null,
+        "assessmentId": null,
+        "courseOfferingId": null,
+        "lessonPlanId": null,
+        "learningObjectiveId": null,
+        "title": "Retained P1 private work",
+        "description": null,
+        "dueDate": "2026-09-28T00:00:00.000Z",
+        "attachments": [],
+        "maxScore": "100",
+        "createdAt": "2026-09-29T04:43:16.292Z",
+        "updatedAt": "2026-09-29T04:43:16.292Z",
+        "deletedAt": null,
+        "subject": {
+          "id": "3d551a93-790d-4ae0-acfc-31633df3bdcf",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "code": "AUDIT-MATH",
+          "name": "Mathematics",
+          "departmentId": null,
+          "subjectCategoryId": null,
+          "isCore": true,
+          "isActive": true,
+          "displayOrder": 0,
+          "academicLevelId": null,
+          "customFields": {},
+          "createdAt": "2026-09-29T04:43:16.281Z",
+          "updatedAt": "2026-09-29T04:43:16.281Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null
+        },
+        "submissions": [
+          {
+            "id": "6a1cf184-66ca-4851-a49a-c2d8b64aae5a",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "assignmentId": "bd2a15ac-d24a-43fc-8af7-f7bb3ab542ca",
+            "studentProfileId": "d22ea25e-a3fa-4c10-9d7f-fd458e1de345",
+            "submittedAt": null,
+            "content": "PRIVATE FICTIONAL PUPIL SUBMISSION",
+            "attachments": [
+              {
+                "url": "https://fictional.invalid/private-pupil-file.pdf"
+              }
+            ],
+            "score": "23",
+            "gradedById": null,
+            "gradedAt": null,
+            "feedback": "PRIVATE FICTIONAL TEACHER FEEDBACK",
+            "status": "graded",
+            "studentAssessmentId": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "label": "Teacher staff list exposes compensation check",
+    "method": "GET",
+    "route": "/school/staff",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "data": [
+        {
+          "id": "d7ae5207-b2aa-4e2e-9990-a98b23ecf7a6",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "partnerId": "e3ccf6b7-b64e-435c-85c3-4a13eefd836c",
+          "employeeNo": "T-OTHER",
+          "departmentId": null,
+          "positionId": null,
+          "campusId": null,
+          "joinDate": "2026-01-01T00:00:00.000Z",
+          "contractType": "permanent",
+          "contractEndDate": null,
+          "status": "active",
+          "compensation": {
+            "bankAccount": "FICTIONAL-PRIVATE-BANK",
+            "basicSalary": 900000
+          },
+          "staffCategory": "teaching",
+          "customFields": {},
+          "createdAt": "2026-09-29T04:43:16.273Z",
+          "updatedAt": "2026-09-29T04:43:16.273Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "deletedAt": null,
+          "department": null,
+          "position": null,
+          "campus": null,
+          "partner": {
+            "id": "e3ccf6b7-b64e-435c-85c3-4a13eefd836c",
+            "name": "Fictional Other Teacher",
+            "email": null,
+            "phone": null
+          }
+        }
+      ],
+      "meta": {
+        "page": 1,
+        "pageSize": 25,
+        "total": 1,
+        "totalPages": 1
+      }
+    }
+  },
+  {
+    "label": "Configure drawer cash custody",
+    "method": "PATCH",
+    "route": "/school/profile",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "id": "d4f5a11c-9b90-4f40-9664-c2132a145541",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "name": "Green Valley Audit Nursery and Primary",
+      "motto": null,
+      "logoUrl": null,
+      "address": null,
+      "phone": null,
+      "email": null,
+      "website": null,
+      "country": "UG",
+      "currencyCode": "UGX",
+      "educationLevel": "mixed",
+      "gradingSystem": "UCE",
+      "attendanceMode": "daily",
+      "terminology": {},
+      "capacityPolicy": "ENFORCE",
+      "resultAbsencePolicy": "ABSENT_AS_ZERO",
+      "classTeacherScope": "STREAM",
+      "attendanceLateContribution": null,
+      "attendanceExcusedInDenominator": false,
+      "cashCustodyMode": "drawer",
+      "contacts": {},
+      "customFields": {},
+      "createdAt": "2026-09-29T04:43:16.581Z",
+      "updatedAt": "2026-09-29T04:43:16.588Z",
+      "timezone": "Africa/Kampala",
+      "labels": {
+        "academicLevel": "Level",
+        "academicLevelPlural": "Levels",
+        "gradeLevel": "Grade",
+        "gradeLevelPlural": "Grades",
+        "class": "Class",
+        "classPlural": "Classes",
+        "section": "Stream",
+        "sectionPlural": "Streams",
+        "academicYear": "Academic Year",
+        "academicYearPlural": "Academic Years",
+        "term": "Term",
+        "termPlural": "Terms",
+        "learner": "Pupil",
+        "learnerPlural": "Pupils"
+      }
+    }
+  },
+  {
+    "label": "Create nursery fee structure",
+    "method": "POST",
+    "route": "/school/fee-structures",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "d429a388-3c81-486c-9d2b-67e3bf3ca5ea",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "name": "Audit Nursery Term Tuition",
+      "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+      "components": [
+        {
+          "code": "TUITION",
+          "name": "Tuition",
+          "amount": 350000,
+          "isOptional": false
+        }
+      ],
+      "applicableTo": {
+        "classIds": [
+          "d9130c82-bcea-4552-b7d4-748184791a6f"
+        ]
+      },
+      "isActive": true,
+      "status": "published",
+      "currentVersionId": null,
+      "createdAt": "2026-09-29T04:43:16.619Z",
+      "updatedAt": "2026-09-29T04:43:16.619Z",
+      "createdBy": null,
+      "updatedBy": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "label": "Publish nursery fee structure",
+    "method": "POST",
+    "route": "/school/fee-structures/d429a388-3c81-486c-9d2b-67e3bf3ca5ea/publish",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "9b8c809f-9421-4ea9-ae03-2ecd85f2f46a",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "feeStructureId": "d429a388-3c81-486c-9d2b-67e3bf3ca5ea",
+      "versionNo": 1,
+      "isImmutable": true,
+      "publishedAt": "2026-09-29T04:43:16.643Z",
+      "publishedById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "createdAt": "2026-09-29T04:43:16.644Z"
+    }
+  },
+  {
+    "label": "Create term fee schedule",
+    "method": "POST",
+    "route": "/school/fee-schedules",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "9b0d3b34-dcf6-46d9-995e-81427b7311dd",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "feeStructureId": "d429a388-3c81-486c-9d2b-67e3bf3ca5ea",
+      "termId": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+      "dueDate": "2026-09-01T00:00:00.000Z",
+      "lateFeePolicy": {},
+      "createdAt": "2026-09-29T04:43:16.670Z",
+      "updatedAt": "2026-09-29T04:43:16.670Z",
+      "term": {
+        "id": "43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "name": "Term 3",
+        "kind": "term",
+        "startDate": "2026-09-01T00:00:00.000Z",
+        "endDate": "2026-12-05T00:00:00.000Z",
+        "isCurrent": true,
+        "createdAt": "2026-09-29T04:40:55.350Z",
+        "updatedAt": "2026-09-29T04:40:55.350Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      },
+      "feeStructure": {
+        "id": "d429a388-3c81-486c-9d2b-67e3bf3ca5ea",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "name": "Audit Nursery Term Tuition",
+        "academicYearId": "7c57b4a7-f00b-4155-a7c2-82c29dee6cee",
+        "components": [
+          {
+            "code": "TUITION",
+            "name": "Tuition",
+            "amount": 350000,
+            "isOptional": false
+          }
+        ],
+        "applicableTo": {
+          "classIds": [
+            "d9130c82-bcea-4552-b7d4-748184791a6f"
+          ]
+        },
+        "isActive": true,
+        "status": "published",
+        "currentVersionId": "9b8c809f-9421-4ea9-ae03-2ecd85f2f46a",
+        "createdAt": "2026-09-29T04:43:16.619Z",
+        "updatedAt": "2026-09-29T04:43:16.652Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "deletedAt": null
+      }
+    }
+  },
+  {
+    "label": "Generate nursery invoice",
+    "method": "POST",
+    "route": "/school/billing/generate",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "count": 1,
+      "documents": [
+        {
+          "id": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+          "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+          "documentNumber": "INV-2026-000001",
+          "documentType": "sales_invoice",
+          "documentTypeId": "7b1522f5-ff75-4475-9187-1d5fef1fb249",
+          "partnerId": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+          "currencyId": null,
+          "exchangeRate": "1",
+          "issueDate": "2026-09-29T04:43:16.914Z",
+          "dueDate": "2026-09-01T00:00:00.000Z",
+          "paymentTermId": null,
+          "paymentTermName": null,
+          "fiscalPositionId": null,
+          "fiscalPositionName": null,
+          "invoicingJournalId": null,
+          "invoicingJournalName": null,
+          "salespersonId": null,
+          "salespersonName": null,
+          "deliveryDate": null,
+          "deliveryAddress": null,
+          "incoterm": null,
+          "incotermLocation": null,
+          "sourceDocument": null,
+          "status": "posted",
+          "reference": "TERM-43c9d8ca-620a-475c-95c1-3673bd37f7ec",
+          "notes": "Term fee for STU-000001",
+          "data": {},
+          "subtotal": "350000",
+          "discountTotal": "0",
+          "taxAmount": "0",
+          "totalAmount": "350000",
+          "amountPaid": "0",
+          "amountResidual": "350000",
+          "amountWaived": "0",
+          "paymentStatus": "not_paid",
+          "paymentMode": null,
+          "settlementStatus": "unsettled",
+          "journalEntryId": "d9c08cd6-4a4e-4eb6-958a-ba8fa5f9d5a3",
+          "reversedDocumentId": null,
+          "branchId": null,
+          "sourceType": "school_fee",
+          "sourceId": "9b0d3b34-dcf6-46d9-995e-81427b7311dd",
+          "tableId": null,
+          "postedAt": "2026-09-29T04:43:17.057Z",
+          "postedBy": null,
+          "createdAt": "2026-09-29T04:43:16.961Z",
+          "updatedAt": "2026-09-29T04:43:17.058Z",
+          "createdBy": null,
+          "updatedBy": null,
+          "version": 1,
+          "billPrintCount": 0,
+          "billLastPrintedAt": null,
+          "receiptPrintCount": 0,
+          "receiptLastPrintedAt": null,
+          "lastPrintedById": null,
+          "kotPrintCount": 0,
+          "lines": [
+            {
+              "id": "cafa18e4-6438-4778-a0b6-344e3b3caf59",
+              "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+              "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+              "productId": null,
+              "menuItemId": null,
+              "accountId": null,
+              "description": "Tuition",
+              "quantity": "1",
+              "unitPrice": "350000",
+              "discountPercent": "0",
+              "taxId": null,
+              "subtotal": "350000",
+              "taxAmount": "0",
+              "total": "350000",
+              "lineNumber": 1,
+              "lineType": "product",
+              "taxInclusive": false,
+              "kitchenPrintCount": 0,
+              "kitchenLastPrintedAt": null,
+              "kitchenPrintedQty": null,
+              "cancelPrintCount": 0,
+              "cancelLastPrintedAt": null,
+              "lastKitchenPrintedById": null,
+              "billPrintedAt": null
+            }
+          ],
+          "partner": {
+            "id": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "code": "STU-000001",
+            "name": "Atim Fictional Nursery",
+            "isCompany": false,
+            "isCustomer": true,
+            "isSupplier": false,
+            "isEmployee": false,
+            "email": null,
+            "phone": null,
+            "phoneE164": null,
+            "chatOptIn": false,
+            "website": null,
+            "taxNumber": null,
+            "membershipLevel": null,
+            "discountPercentOverride": "0",
+            "gender": null,
+            "receivableAccountId": null,
+            "payableAccountId": null,
+            "creditLimit": "0",
+            "creditHold": false,
+            "paymentTermId": null,
+            "status": "active",
+            "categoryId": null,
+            "notes": null,
+            "customFields": {
+              "house": null,
+              "gender": "female",
+              "religion": null,
+              "dateOfBirth": "2022-02-02",
+              "nationality": null
+            },
+            "createdAt": "2026-09-29T04:40:55.417Z",
+            "updatedAt": "2026-09-29T04:40:55.417Z",
+            "createdBy": null,
+            "updatedBy": null,
+            "deletedAt": null
+          }
+        }
+      ],
+      "skipped": [],
+      "failed": []
+    }
+  },
+  {
+    "label": "Cash collection without drawer denied",
+    "method": "POST",
+    "route": "/school/payments/collect",
+    "status": 400,
+    "expected": 400,
+    "passed": true,
+    "response": {
+      "message": "This school keeps cash in a cash drawer. Open your drawer on the fee desk before taking or paying out cash.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "label": "Open fee desk drawer",
+    "method": "POST",
+    "route": "/school/fees/cash-desk/open",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "mode": "drawer",
+      "mustOpenDrawer": false,
+      "session": {
+        "id": "b62400bb-c446-4117-87b4-681ec0ba7a2a",
+        "openedAt": "2026-09-29T04:43:17.175Z",
+        "openingFloat": "10000",
+        "register": {
+          "id": "896c30f5-c901-4b6e-8675-10f39cd08aa9",
+          "name": "Fee desk",
+          "code": "FEE-DESK"
+        },
+        "expectedCash": "10000"
+      }
+    }
+  },
+  {
+    "label": "Collect partial cash payment",
+    "method": "POST",
+    "route": "/school/payments/collect",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "payment": {
+        "id": "8d276572-a196-4164-903d-7ec480078445",
+        "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+        "paymentNumber": "PAY-2026-000001",
+        "direction": "inbound",
+        "partnerId": "71064e57-2ad5-405a-afb9-b2f15e5a83b5",
+        "paymentDate": "2026-09-29T04:43:17.209Z",
+        "paymentMethod": "cash",
+        "journalId": null,
+        "accountId": "d9ede011-cccb-42e1-9d00-7a86069edb62",
+        "currencyId": null,
+        "exchangeRate": "1",
+        "amount": "100000",
+        "allocatedAmount": "100000",
+        "unallocatedAmount": "0",
+        "reference": "Audit29 cash",
+        "externalReference": null,
+        "externalReferenceType": null,
+        "status": "posted",
+        "branchId": null,
+        "journalEntryId": "37c1f82e-2a49-43a6-b29d-a078c80d3307",
+        "createdAt": "2026-09-29T04:43:17.230Z",
+        "updatedAt": "2026-09-29T04:43:17.302Z",
+        "createdBy": null,
+        "updatedBy": null,
+        "allocations": [
+          {
+            "id": "ce52f92d-b697-4ee7-a5c4-909e42433787",
+            "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+            "paymentId": "8d276572-a196-4164-903d-7ec480078445",
+            "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+            "invoiceId": null,
+            "amount": "100000",
+            "status": "posted",
+            "createdAt": "2026-09-29T04:43:17.290Z"
+          }
+        ]
+      },
+      "allocations": [
+        {
+          "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+          "amount": 100000
+        }
+      ],
+      "unallocated": 0,
+      "overpaymentCredit": null,
+      "replayed": false
+    }
+  },
+  {
+    "label": "Pupil balance after cash payment",
+    "method": "GET",
+    "route": "/school/finance/students/57adf79f-bfd2-48d1-adfd-18749fe7a43b/balance",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "billed": 350000,
+      "collected": 100000,
+      "waived": 0,
+      "credited": 0,
+      "adjusted": 0,
+      "balance": 250000,
+      "invoiceCount": 1
+    }
+  },
+  {
+    "label": "Cash desk expected cash",
+    "method": "GET",
+    "route": "/school/fees/cash-desk",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "mode": "drawer",
+      "mustOpenDrawer": false,
+      "session": {
+        "id": "b62400bb-c446-4117-87b4-681ec0ba7a2a",
+        "openedAt": "2026-09-29T04:43:17.175Z",
+        "openingFloat": "10000",
+        "register": {
+          "id": "896c30f5-c901-4b6e-8675-10f39cd08aa9",
+          "name": "Fee desk",
+          "code": "FEE-DESK"
+        },
+        "expectedCash": "110000"
+      }
+    }
+  },
+  {
+    "label": "AR general ledger tie-out",
+    "method": "GET",
+    "route": "/school/finance/reconciliation/ar-gl",
+    "status": 200,
+    "expected": 200,
+    "passed": true,
+    "response": {
+      "arControlAccountId": "230f0be2-b36e-448a-9647-dd4cb2f21e5f",
+      "subledgerTotal": 250000,
+      "unallocatedTotal": 0,
+      "expectedGlTotal": 250000,
+      "glTotal": 250000,
+      "variance": 0,
+      "perStudent": []
+    }
+  },
+  {
+    "label": "Wrong-pupil adjustment denied",
+    "method": "POST",
+    "route": "/school/finance/adjustments",
+    "status": 400,
+    "expected": 400,
+    "passed": true,
+    "response": {
+      "message": "INV-2026-000001 belongs to a different pupil. An adjustment is always recorded against the invoice's own pupil.",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "label": "Create legitimate adjustment",
+    "method": "POST",
+    "route": "/school/finance/adjustments",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "06900899-56f5-4ec5-abee-8d73a7ac4445",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "code": "ADJ-000001",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+      "direction": "debit",
+      "amount": "1000",
+      "reason": "Concurrency audit",
+      "status": "pending_approval",
+      "journalEntryId": null,
+      "createdById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "approvedById": null,
+      "approvedAt": null,
+      "rejectionReason": null,
+      "reversedById": null,
+      "createdAt": "2026-09-29T04:43:17.512Z",
+      "updatedAt": "2026-09-29T04:43:17.512Z"
+    }
+  },
+  {
+    "label": "Maker cannot approve own adjustment",
+    "method": "POST",
+    "route": "/school/finance/adjustments/06900899-56f5-4ec5-abee-8d73a7ac4445/approve",
+    "status": 400,
+    "expected": 400,
+    "passed": true,
+    "response": {
+      "message": "The user who created an adjustment cannot approve it (maker-checker).",
+      "error": "Bad Request",
+      "statusCode": 400
+    }
+  },
+  {
+    "label": "Approver login",
+    "method": "POST",
+    "route": "/auth/login",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "hasAccessToken": true
+    }
+  },
+  {
+    "label": "Racing approval B",
+    "method": "POST",
+    "route": "/school/finance/adjustments/06900899-56f5-4ec5-abee-8d73a7ac4445/approve",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "06900899-56f5-4ec5-abee-8d73a7ac4445",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "code": "ADJ-000001",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+      "direction": "debit",
+      "amount": "1000",
+      "reason": "Concurrency audit",
+      "status": "posted",
+      "journalEntryId": "89b78262-9557-4997-b634-1a772b71fd47",
+      "createdById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "approvedById": "40279623-6ce5-4610-9141-7e16ab2ce7d8",
+      "approvedAt": "2026-09-29T04:43:17.887Z",
+      "rejectionReason": null,
+      "reversedById": null,
+      "createdAt": "2026-09-29T04:43:17.512Z",
+      "updatedAt": "2026-09-29T04:43:17.888Z"
+    }
+  },
+  {
+    "label": "Racing approval A",
+    "method": "POST",
+    "route": "/school/finance/adjustments/06900899-56f5-4ec5-abee-8d73a7ac4445/approve",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "06900899-56f5-4ec5-abee-8d73a7ac4445",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "code": "ADJ-000001",
+      "studentProfileId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+      "documentId": "14691ed8-77cf-4d80-bd8d-d8ad6986a584",
+      "direction": "debit",
+      "amount": "1000",
+      "reason": "Concurrency audit",
+      "status": "posted",
+      "journalEntryId": "89b78262-9557-4997-b634-1a772b71fd47",
+      "createdById": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "approvedById": "40279623-6ce5-4610-9141-7e16ab2ce7d8",
+      "approvedAt": "2026-09-29T04:43:17.887Z",
+      "rejectionReason": null,
+      "reversedById": null,
+      "createdAt": "2026-09-29T04:43:17.512Z",
+      "updatedAt": "2026-09-29T04:43:17.888Z"
+    }
+  },
+  {
+    "label": "Close counted drawer",
+    "method": "POST",
+    "route": "/school/fees/cash-desk/close",
+    "status": 201,
+    "expected": 201,
+    "passed": true,
+    "response": {
+      "id": "b62400bb-c446-4117-87b4-681ec0ba7a2a",
+      "organizationId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+      "cashRegisterId": "896c30f5-c901-4b6e-8675-10f39cd08aa9",
+      "branchId": null,
+      "userId": "2a102fb4-d649-48d6-aec1-a44f844b0d1b",
+      "status": "closed",
+      "deviceId": null,
+      "openedAt": "2026-09-29T04:43:17.175Z",
+      "closedAt": "2026-09-29T04:43:17.944Z",
+      "openingFloat": "10000",
+      "closingCounted": "110000",
+      "closingExpected": "110000",
+      "closingDifference": "0",
+      "varianceReason": null,
+      "varianceStatus": null,
+      "bankedAmount": null,
+      "bankName": null,
+      "approvedById": null,
+      "reopenedAt": null,
+      "reopenedById": null,
+      "openingDenomination": null,
+      "closingDenomination": null,
+      "closingByMethod": {},
+      "notes": null,
+      "createdAt": "2026-09-29T04:43:17.175Z",
+      "updatedAt": "2026-09-29T04:43:17.945Z"
+    }
+  }
+]

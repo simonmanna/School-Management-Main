@@ -2,95 +2,94 @@ import { Body, Controller, Delete, Get, GoneException, HttpCode, Param, Patch, P
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
-import { AnnouncementService, HomeworkService, LearningResourceService, SubmissionService } from './lms.service';
+import { AnnouncementService, LearningResourceService } from './lms.service';
 import {
   CreateAnnouncementDto,
-  CreateHomeworkDto,
   CreateLearningResourceDto,
-  GradeSubmissionDto,
-  SubmitHomeworkDto,
   UpdateAnnouncementDto,
-  UpdateHomeworkDto,
   UpdateLearningResourceDto,
 } from './dto.types';
 
+/**
+ * Legacy homework and its submissions are retired (audit 2026-09-29 A01).
+ *
+ * The reads were gated only on `school:read`, so a teacher who could not open a
+ * pupil still read that pupil's retained work, score, feedback and attachments.
+ * Homework now lives on the Assessment Board, whose reads are scoped per pupil.
+ * The rows stay in the database as migration provenance; no route serves them.
+ */
+const RETIRED = 'Legacy homework is retired. Use the Assessment Board (assessments of kind homework).';
+
 @Controller('school/homework')
 export class HomeworkController {
-  constructor(
-    private readonly assignments: HomeworkService,
-    private readonly submissions: SubmissionService,
-  ) {}
-
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
-  list(@Query() q: PaginationDto) {
-    return this.assignments.list(q);
+  list() {
+    throw new GoneException(RETIRED);
   }
 
   @Get('by-class/:classId')
   @RequirePermissions(PERMISSIONS.school.read)
-  byClass(@Param('classId') id: string) {
-    return this.assignments.byClass(id);
+  byClass() {
+    throw new GoneException(RETIRED);
   }
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
-  findOne(@Param('id') id: string) {
-    return this.assignments.findOne(id);
+  findOne() {
+    throw new GoneException(RETIRED);
   }
 
   @Get(':id/detail')
   @RequirePermissions(PERMISSIONS.school.read)
-  detail(@Param('id') id: string) {
-    return this.assignments.detail(id);
+  detail() {
+    throw new GoneException(RETIRED);
   }
 
   @Post()
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
-  create(@Body() dto: CreateHomeworkDto) {
-    throw new GoneException('Legacy homework is read-only. Create homework through the Assessment Board.');
+  create() {
+    throw new GoneException(RETIRED);
   }
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
-  update(@Param('id') id: string, @Body() dto: UpdateHomeworkDto) {
-    throw new GoneException('Legacy homework is read-only. Use the canonical assignment linked to its assessment.');
+  update() {
+    throw new GoneException(RETIRED);
   }
 
   @Post('submit')
   @RequirePermissions(PERMISSIONS.school.submitAssignments)
-  submit(@Body() dto: SubmitHomeworkDto) {
+  submit() {
     throw new GoneException('Use /school/assignments/submit with the migrated canonical assignment id.');
   }
 
   @Post('grade')
   @RequirePermissions(PERMISSIONS.school.gradeAssignments)
-  grade(@Body() dto: GradeSubmissionDto) {
+  grade() {
     throw new GoneException('Use the Assessment Board markbook or canonical assignment grading endpoint.');
   }
 
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions(PERMISSIONS.school.manageAssignments)
-  remove(@Param('id') id: string) {
-    throw new GoneException('Legacy homework is retained as read-only migration provenance.');
+  remove() {
+    throw new GoneException(RETIRED);
   }
 }
 
 @Controller('school/submissions')
 export class SubmissionController {
-  constructor(private readonly submissions: SubmissionService) {}
-
   @Get()
   @RequirePermissions(PERMISSIONS.school.read)
-  list(@Query() q: PaginationDto) {
-    return this.submissions.list(q);
+  list() {
+    throw new GoneException(RETIRED);
   }
 
   @Get(':id')
   @RequirePermissions(PERMISSIONS.school.read)
-  findOne(@Param('id') id: string) {
-    return this.submissions.findOne(id);
+  findOne() {
+    throw new GoneException(RETIRED);
   }
 }
 

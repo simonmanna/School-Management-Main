@@ -56,6 +56,8 @@ services:
       PORTAL_URL: ${PORTAL_URL:?set PORTAL_URL to the public parent portal address}
       # Operator-only: creating a new school. Leave unset to keep it closed.
       PROVISIONING_SECRET: ${PROVISIONING_SECRET:-}
+      # Operator-only backup API (/api/v1/admin/backups). Unset = closed.
+      OPERATOR_SECRET: ${OPERATOR_SECRET:-}
       # Parent alerts: the school's own SMS gateway (Communication → Channels).
       ENABLE_COMMUNICATION_SMS: "true"
       COMM_ENCRYPTION_KEY: ${COMM_ENCRYPTION_KEY:?set COMM_ENCRYPTION_KEY (openssl rand -base64 32)}

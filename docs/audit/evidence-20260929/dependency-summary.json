@@ -1,0 +1,752 @@
+{
+  "metadata": {
+    "info": 0,
+    "low": 4,
+    "moderate": 38,
+    "high": 30,
+    "critical": 0
+  },
+  "advisories": [
+    {
+      "module": "html-minifier",
+      "severity": "high",
+      "title": "kangax html-minifier REDoS vulnerability",
+      "url": "https://github.com/advisories/GHSA-pfq8-rq6v-vf5m",
+      "vulnerable": "<=4.0.0",
+      "patched": "<0.0.0",
+      "paths": [
+        "apps__api>mjml>mjml-cli>html-minifier"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Email to an unintended domain can occur due to Interpretation Conflict",
+      "url": "https://github.com/advisories/GHSA-mm7p-fcc7-pg87",
+      "vulnerable": "<7.0.7",
+      "patched": ">=7.0.7",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "js-yaml",
+      "severity": "moderate",
+      "title": "js-yaml has prototype pollution in merge (<<)",
+      "url": "https://github.com/advisories/GHSA-mh29-5h37-fv8m",
+      "vulnerable": ">=4.0.0 <4.1.1",
+      "patched": ">=4.1.1",
+      "paths": [
+        "apps__api>@nestjs/swagger>js-yaml"
+      ]
+    },
+    {
+      "module": "file-type",
+      "severity": "moderate",
+      "title": "file-type affected by infinite loop in ASF parser on malformed input with zero-size sub-header",
+      "url": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+      "vulnerable": ">=13.0.0 <21.3.1",
+      "patched": ">=21.3.1",
+      "paths": [
+        "apps__api>@whiskeysockets/baileys>music-metadata>file-type"
+      ]
+    },
+    {
+      "module": "music-metadata",
+      "severity": "high",
+      "title": "music-metadata has an infinite loop vulnerability in ASF parser",
+      "url": "https://github.com/advisories/GHSA-v6c2-xwv6-8xf7",
+      "vulnerable": "<=11.12.1",
+      "patched": ">=11.12.3",
+      "paths": [
+        "apps__api>@whiskeysockets/baileys>music-metadata"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "low",
+      "title": "Nodemailer has SMTP command injection due to unsanitized `envelope.size` parameter",
+      "url": "https://github.com/advisories/GHSA-c7w3-x93f-qmm8",
+      "vulnerable": "<8.0.4",
+      "patched": ">=8.0.4",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "lodash",
+      "severity": "high",
+      "title": "lodash vulnerable to Code Injection via `_.template` imports key names",
+      "url": "https://github.com/advisories/GHSA-r5fr-rjxr-66jc",
+      "vulnerable": ">=4.0.0 <=4.17.23",
+      "patched": ">=4.18.0",
+      "paths": [
+        "apps__api>@nestjs/swagger>lodash"
+      ]
+    },
+    {
+      "module": "lodash",
+      "severity": "moderate",
+      "title": "lodash vulnerable to Prototype Pollution via array path bypass in `_.unset` and `_.omit`",
+      "url": "https://github.com/advisories/GHSA-f23m-r3pf-42rh",
+      "vulnerable": "<=4.17.23",
+      "patched": ">=4.18.0",
+      "paths": [
+        "apps__api>@nestjs/swagger>lodash"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer Vulnerable to SMTP Command Injection via CRLF in Transport name Option (EHLO/HELO) ",
+      "url": "https://github.com/advisories/GHSA-vvjj-xcjg-gr5g",
+      "vulnerable": "<=8.0.4",
+      "patched": ">=8.0.5",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "uuid",
+      "severity": "moderate",
+      "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+      "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+      "vulnerable": "<11.1.1",
+      "patched": ">=11.1.1",
+      "paths": [
+        "apps__api>@nestjs/schedule>uuid",
+        "apps__api>exceljs>uuid"
+      ]
+    },
+    {
+      "module": "lodash",
+      "severity": "moderate",
+      "title": "Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions",
+      "url": "https://github.com/advisories/GHSA-xxjr-mmjv-4gpg",
+      "vulnerable": ">=4.0.0 <=4.17.22",
+      "patched": ">=4.17.23",
+      "paths": [
+        "apps__api>@nestjs/swagger>lodash"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: CRLF injection in Nodemailer List-* header comments allows arbitrary message header injection",
+      "url": "https://github.com/advisories/GHSA-268h-hp4c-crq3",
+      "vulnerable": "<=8.0.8",
+      "patched": ">=8.0.9",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer jsonTransport bypasses disableFileAccess and disableUrlAccess during message normalization",
+      "url": "https://github.com/advisories/GHSA-wqvq-jvpq-h66f",
+      "vulnerable": "<=8.0.8",
+      "patched": ">=8.0.9",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Improper TLS Certificate Validation in OAuth2 Token Fetch Enables Credential Interception",
+      "url": "https://github.com/advisories/GHSA-r7g4-qg5f-qqm2",
+      "vulnerable": "<=8.0.7",
+      "patched": ">=8.0.8",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "Multer vulnerable to Denial of Service via deeply nested field names",
+      "url": "https://github.com/advisories/GHSA-72gw-mp4g-v24j",
+      "vulnerable": ">=1.0.0 <2.2.0",
+      "patched": ">=2.2.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>multer"
+      ]
+    },
+    {
+      "module": "multer",
+      "severity": "moderate",
+      "title": "Multer vulnerable to Denial of Service via incomplete cleanup of aborted uploads",
+      "url": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm",
+      "vulnerable": ">=2.0.0-alpha.1 <2.2.0",
+      "patched": ">=2.2.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>multer"
+      ]
+    },
+    {
+      "module": "mjml",
+      "severity": "moderate",
+      "title": "MJML allows mj-include directory traversal due to an incomplete fix for CVE-2020-12827",
+      "url": "https://github.com/advisories/GHSA-45h5-66jx-r2wf",
+      "vulnerable": "<5.0.0-alpha.9",
+      "patched": ">=5.0.0-alpha.9",
+      "paths": [
+        "apps__api>mjml"
+      ]
+    },
+    {
+      "module": "js-yaml",
+      "severity": "moderate",
+      "title": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+      "url": "https://github.com/advisories/GHSA-h67p-54hq-rp68",
+      "vulnerable": ">=4.0.0 <=4.1.1",
+      "patched": ">=4.2.0",
+      "paths": [
+        "apps__api>@nestjs/swagger>js-yaml"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer’s addressparser is vulnerable to DoS caused by recursive calls",
+      "url": "https://github.com/advisories/GHSA-rcmh-qjqh-p98v",
+      "vulnerable": ">=3.0.0 <=7.0.10",
+      "patched": ">=7.0.11",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+      "url": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+      "vulnerable": ">=2.0.0 <2.1.2",
+      "patched": ">=2.1.2",
+      "paths": [
+        "apps__api>exceljs>archiver>readdir-glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+      "url": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+      "vulnerable": "<1.1.16",
+      "patched": ">=1.1.16",
+      "paths": [
+        "apps__api>exceljs>archiver>archiver-utils>glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+      "url": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp",
+      "vulnerable": ">=3.0.0 <5.0.7",
+      "patched": ">=5.0.7",
+      "paths": [
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/typescript-estree>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+      "url": "https://github.com/advisories/GHSA-52cp-r559-cp3m",
+      "vulnerable": ">=4.0.0 <4.3.0",
+      "patched": ">=4.3.0",
+      "paths": [
+        "apps__api>@nestjs/swagger>js-yaml",
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>eslint>@eslint/eslintrc>js-yaml"
+      ]
+    },
+    {
+      "module": "body-parser",
+      "severity": "low",
+      "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+      "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+      "vulnerable": ">=2.0.0 <2.3.0",
+      "patched": ">=2.3.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>express>body-parser"
+      ]
+    },
+    {
+      "module": "body-parser",
+      "severity": "low",
+      "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+      "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+      "vulnerable": "<1.20.6",
+      "patched": ">=1.20.6",
+      "paths": [
+        "apps__api>express>body-parser"
+      ]
+    },
+    {
+      "module": "react-router",
+      "severity": "moderate",
+      "title": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+      "url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+      "vulnerable": ">=6.0.0 <7.18.0",
+      "patched": ">=7.18.0",
+      "paths": [
+        "apps__portal>react-router-dom>react-router"
+      ]
+    },
+    {
+      "module": "react-router",
+      "severity": "moderate",
+      "title": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+      "url": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+      "vulnerable": ">=6.4.0 <7.18.0",
+      "patched": ">=7.18.0",
+      "paths": [
+        "apps__portal>react-router-dom>react-router"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "vulnerable": "<1.1.17",
+      "patched": ">=1.1.17",
+      "paths": [
+        "apps__api>exceljs>archiver>archiver-utils>glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "vulnerable": ">=2.0.0 <2.1.3",
+      "patched": ">=2.1.3",
+      "paths": [
+        "apps__api>exceljs>archiver>readdir-glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
+      "vulnerable": ">=4.0.0 <5.0.8",
+      "patched": ">=5.0.8",
+      "paths": [
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/typescript-estree>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "sanitize-html",
+      "severity": "moderate",
+      "title": "sanitize-html has incomplete URI scheme validation in that allows javascript: URIs through action, formaction, data, poster, and background attributes",
+      "url": "https://github.com/advisories/GHSA-vccv-cmxp-4j9h",
+      "vulnerable": ">=1.18.0 <=2.17.4",
+      "patched": ">=2.17.5",
+      "paths": [
+        "apps__api>sanitize-html"
+      ]
+    },
+    {
+      "module": "postcss",
+      "severity": "moderate",
+      "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+      "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+      "vulnerable": "<=8.5.22",
+      "patched": ">=8.5.23",
+      "paths": [
+        "apps__api>sanitize-html>postcss"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+      "vulnerable": ">=4.0.0 <5.0.9",
+      "patched": ">=5.0.9",
+      "paths": [
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/typescript-estree>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+      "vulnerable": ">=2.0.0 <2.1.4",
+      "patched": ">=2.1.4",
+      "paths": [
+        "apps__api>exceljs>archiver>readdir-glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895",
+      "vulnerable": "<1.1.18",
+      "patched": ">=1.1.18",
+      "paths": [
+        "apps__api>exceljs>archiver>archiver-utils>glob>minimatch>brace-expansion"
+      ]
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) — CVE-2026-59870 fix not backported",
+      "url": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj",
+      "vulnerable": ">=4.0.0 <4.3.1",
+      "patched": ">=4.3.1",
+      "paths": [
+        "apps__api>@nestjs/swagger>js-yaml",
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>eslint>@eslint/eslintrc>js-yaml"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Prototype pollution auth subfields can inject Basic auth",
+      "url": "https://github.com/advisories/GHSA-xj6q-8x83-jv6g",
+      "vulnerable": ">=1.15.2 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "nanoid",
+      "severity": "high",
+      "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+      "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+      "vulnerable": "<3.3.16",
+      "patched": ">=3.3.16",
+      "paths": [
+        "apps__api>nanoid"
+      ]
+    },
+    {
+      "module": "nanoid",
+      "severity": "high",
+      "title": "nanoid: custom generators can loop indefinitely when size is zero",
+      "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+      "vulnerable": "<3.3.18",
+      "patched": ">=3.3.18",
+      "paths": [
+        "apps__api>nanoid"
+      ]
+    },
+    {
+      "module": "postcss",
+      "severity": "high",
+      "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+      "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+      "vulnerable": "<=8.5.17",
+      "patched": ">=8.5.18",
+      "paths": [
+        "apps__api>sanitize-html>postcss"
+      ]
+    },
+    {
+      "module": "deepmerge-ts",
+      "severity": "high",
+      "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+      "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx",
+      "vulnerable": "<8.0.0",
+      "patched": ">=8.0.0",
+      "paths": [
+        "apps__api>@prisma/client>prisma>@prisma/config>deepmerge-ts"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Prototype pollution gadgets can alter axios request construction",
+      "url": "https://github.com/advisories/GHSA-mmx7-hfxf-jppx",
+      "vulnerable": ">=1.0.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Deep formToJSON Key Recursion Can Cause Denial of Service",
+      "url": "https://github.com/advisories/GHSA-pmv8-rq9r-6j72",
+      "vulnerable": ">=1.0.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: HTTP/2 streamed uploads bypass `maxBodyLength`",
+      "url": "https://github.com/advisories/GHSA-mwf2-3pr3-8698",
+      "vulnerable": ">=1.13.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "high",
+      "title": "Axios Node HTTP adapter can use an inherited proxy after interceptor config cloning",
+      "url": "https://github.com/advisories/GHSA-gcfj-64vw-6mp9",
+      "vulnerable": ">=1.15.2 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Nested axios option objects can consume polluted prototype values",
+      "url": "https://github.com/advisories/GHSA-7q8q-rj6j-mhjq",
+      "vulnerable": ">=1.0.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Fetch adapter `ReadableStream` uploads bypass `maxBodyLength`",
+      "url": "https://github.com/advisories/GHSA-jqh4-m9w3-8hp9",
+      "vulnerable": ">=1.7.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: NO_PROXY bypass for 0.0.0.0 local addresses in axios",
+      "url": "https://github.com/advisories/GHSA-f4gw-2p7v-4548",
+      "vulnerable": ">=1.15.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios: Excessive recursion in formDataToJSON can cause denial of service",
+      "url": "https://github.com/advisories/GHSA-42h9-826w-cgv3",
+      "vulnerable": ">=1.0.0 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "sanitize-html",
+      "severity": "moderate",
+      "title": "ApostropheCMS: Stored XSS via SVG SMIL URI-list scheme-policy bypass",
+      "url": "https://github.com/advisories/GHSA-g8qq-57p8-ggw5",
+      "vulnerable": ">=1.9.0 <=2.17.6",
+      "patched": ">=2.17.7",
+      "paths": [
+        "apps__api>sanitize-html"
+      ]
+    },
+    {
+      "module": "qs",
+      "severity": "moderate",
+      "title": "qs array-limit bypass via bracket-key comma parsing",
+      "url": "https://github.com/advisories/GHSA-x5fp-wj9c-mxmx",
+      "vulnerable": ">=6.14.2 <=6.15.3",
+      "patched": ">=6.16.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>express>qs"
+      ]
+    },
+    {
+      "module": "qs",
+      "severity": "moderate",
+      "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+      "url": "https://github.com/advisories/GHSA-4mjr-xmp4-gh2g",
+      "vulnerable": ">=2.2.5 <6.16.0",
+      "patched": ">=6.16.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>express>qs"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer: Message-level raw option bypasses disableFileAccess/disableUrlAccess, enabling arbitrary file read and full-response SSRF in the delivered message",
+      "url": "https://github.com/advisories/GHSA-p6gq-j5cr-w38f",
+      "vulnerable": "<=9.0.0",
+      "patched": ">=9.0.1",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "sanitize-html",
+      "severity": "moderate",
+      "title": "ApostropheCMS: Mutation-XSS / allowedTags bypass via literal `</textarea/>` solidus close",
+      "url": "https://github.com/advisories/GHSA-jxwj-j7wr-gfrw",
+      "vulnerable": "<=2.17.5",
+      "patched": ">=2.17.6",
+      "paths": [
+        "apps__api>sanitize-html"
+      ]
+    },
+    {
+      "module": "react-router-dom",
+      "severity": "moderate",
+      "title": "React Router: Open redirect leading to XSS",
+      "url": "https://github.com/advisories/GHSA-jjmj-jmhj-qwj2",
+      "vulnerable": ">=6.30.2 <=6.30.5",
+      "patched": ">=6.30.6",
+      "paths": [
+        "apps__portal>react-router-dom"
+      ]
+    },
+    {
+      "module": "axios",
+      "severity": "moderate",
+      "title": "Axios form serializer maxDepth bypass via {} metatoken",
+      "url": "https://github.com/advisories/GHSA-hcpx-6fm6-wx23",
+      "vulnerable": ">=1.15.1 <1.18.0",
+      "patched": ">=1.18.0",
+      "paths": [
+        "apps__portal>axios"
+      ]
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+      "url": "https://github.com/advisories/GHSA-2883-xcg3-v3hh",
+      "vulnerable": ">=4.0.0 <4.3.2",
+      "patched": ">=4.3.2",
+      "paths": [
+        "apps__api>@nestjs/swagger>js-yaml",
+        "apps__api>@whiskeysockets/baileys>@whiskeysockets/eslint-config>eslint>@eslint/eslintrc>js-yaml"
+      ]
+    },
+    {
+      "module": "adm-zip",
+      "severity": "moderate",
+      "title": "adm-zip extraction follows destination symlinks, allowing arbitrary file overwrite",
+      "url": "https://github.com/advisories/GHSA-vwc7-r8mq-g2x9",
+      "vulnerable": ">=0.5.9 <=0.6.0",
+      "patched": "<0.0.0",
+      "paths": [
+        "apps__api>adm-zip"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature",
+      "url": "https://github.com/advisories/GHSA-8m3c-c648-2xjj",
+      "vulnerable": "<=9.1.0",
+      "patched": ">=9.1.1",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to an attacker-controlled domain",
+      "url": "https://github.com/advisories/GHSA-wmmp-3585-3rmp",
+      "vulnerable": "<9.1.0",
+      "patched": ">=9.1.0",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer: Quadratic (O(n²)) time complexity in addressparser allows remote denial of service via a crafted address list",
+      "url": "https://github.com/advisories/GHSA-2x7j-588g-ccc2",
+      "vulnerable": "<9.1.0",
+      "patched": ">=9.1.0",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing leads to email delivery to an attacker-controlled domain",
+      "url": "https://github.com/advisories/GHSA-cc9r-2j5m-2m83",
+      "vulnerable": ">=6.9.16 <9.1.0",
+      "patched": ">=9.1.0",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    },
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "multer vulnerable to Denial of Service via crafted multipart field names",
+      "url": "https://github.com/advisories/GHSA-wc9g-mqfw-jrwm",
+      "vulnerable": "<2.3.0",
+      "patched": ">=2.3.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>multer"
+      ]
+    },
+    {
+      "module": "multer",
+      "severity": "low",
+      "title": "multer vulnerable to file size limit bypass via async fileFilter race condition",
+      "url": "https://github.com/advisories/GHSA-qvfw-j98x-7q72",
+      "vulnerable": "<2.3.0",
+      "patched": ">=2.3.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>multer"
+      ]
+    },
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "multer vulnerable to Denial of Service via oversized array index in field names",
+      "url": "https://github.com/advisories/GHSA-535w-7cp7-47q4",
+      "vulnerable": "<2.3.0",
+      "patched": ">=2.3.0",
+      "paths": [
+        "apps__api>@nestjs/platform-express>multer"
+      ]
+    },
+    {
+      "module": "adm-zip",
+      "severity": "high",
+      "title": "adm-zip: Uncontrolled memory allocation via the declared uncompressed size (DoS)",
+      "url": "https://github.com/advisories/GHSA-7q85-xj36-vmfc",
+      "vulnerable": "<0.6.1",
+      "patched": ">=0.6.1",
+      "paths": [
+        "apps__api>adm-zip"
+      ]
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Process-global DNS cache reuses TLS `servername` across transports, enabling cross-tenant SMTP credential disclosure",
+      "url": "https://github.com/advisories/GHSA-6vj9-mwq6-2f5v",
+      "vulnerable": ">=5.0.0 <10.0.2",
+      "patched": ">=10.0.2",
+      "paths": [
+        "apps__api>nodemailer"
+      ]
+    }
+  ]
+}

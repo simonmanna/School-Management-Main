@@ -21,9 +21,10 @@ describeDb('integration: wave 14 restore drill (F12)', () => {
   beforeAll(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'w14-backup-'));
     process.env.BACKUP_DIR = dir;
-    const settings = { get: async () => ({ value: { destinations: [{ type: 'local', path: dir, label: 'Local', enabled: true }] } }), set: async () => undefined } as any;
+    // Operator config is a host file (audit 2026-09-29 A03), not a tenant setting.
+    await fs.writeFile(path.join(dir, 'backup-config.json'), JSON.stringify({ destinations: [{ type: 'local', path: dir, label: 'Local', enabled: true }] }));
     const scheduler = { addCronJob: () => undefined, deleteCronJob: () => undefined } as any;
-    service = new BackupService(settings, scheduler);
+    service = new BackupService(scheduler);
     await (service as any).loadConfig();
     const record = (service as any).record.bind(service);
     (service as any).record = async (r: any) => { history.push(r); return record(r); };

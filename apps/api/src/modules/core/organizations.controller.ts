@@ -3,7 +3,6 @@ import {
   CanActivate,
   Controller,
   ExecutionContext,
-  ForbiddenException,
   Get,
   Injectable,
   Patch,
@@ -11,10 +10,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { timingSafeEqual } from 'node:crypto';
 import { ApiTags, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsObject, IsOptional, IsString, MinLength } from 'class-validator';
 import { Public } from '../../kernel/auth/decorators/public.decorator';
+import { assertHostSecret } from '../../kernel/auth/guards/operator-secret.guard';
 import { NoPermissionRequired } from '../../kernel/auth/decorators/no-permission-required.decorator';
 import { RequirePermissions } from '../../kernel/auth/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../kernel/auth/decorators/current-user.decorator';
@@ -128,11 +127,5 @@ export class OrganizationsController {
 
 /** Constant-time check of the operator provisioning secret. Fails closed when unset. */
 export function assertProvisioningSecret(provided: string | undefined): void {
-  const expected = process.env.PROVISIONING_SECRET;
-  if (!expected || !provided) throw new ForbiddenException('Tenant provisioning is not permitted');
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    throw new ForbiddenException('Tenant provisioning is not permitted');
-  }
+  assertHostSecret('PROVISIONING_SECRET', provided, 'Tenant provisioning is not permitted');
 }

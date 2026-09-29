@@ -1,0 +1,25 @@
+{
+  "schoolId": "6d15f2f3-6ebd-47f5-a899-00663df05665",
+  "pupilId": "57adf79f-bfd2-48d1-adfd-18749fe7a43b",
+  "classes": [
+    "Baby Class",
+    "Middle Class",
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P5",
+    "P6",
+    "P7",
+    "Top Class"
+  ],
+  "roleName": "Class Teacher",
+  "roleScope": "class",
+  "analyticsGrant": false,
+  "counts": {
+    "pupils": 1,
+    "placements": 1,
+    "pickupEvents": 1,
+    "audit": 9
+  }
+}

@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BackupController } from '../../src/modules/backup/backup.controller';
 import { BackupService } from '../../src/modules/backup/backup.service';
-import { SettingsService } from '../../src/kernel/settings/settings.service';
-import { SchedulerRegistry } from '@nestjs/schedule';
-import { PERMISSIONS } from '@erp/shared';
+import { ForbiddenException } from '@nestjs/common';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
+import { IS_PUBLIC_KEY } from '../../src/kernel/auth/decorators/public.decorator';
+import { PERMISSIONS_KEY } from '../../src/kernel/auth/decorators/require-permissions.decorator';
+import { OperatorSecretGuard } from '../../src/kernel/auth/guards/operator-secret.guard';
 
 describe('BackupController', () => {
   let controller: BackupController;
@@ -100,6 +102,48 @@ describe('BackupController', () => {
         backupFile: '/path/to/backup.dump' 
       });
       expect(result.success).toBe(true);
+    });
+  });
+});
+/**
+ * Audit 2026-09-29 A03: School B's Administrator read School A's backup
+ * destination because a tenant `backup:*` grant opened a process-wide config.
+ * No tenant grant opens these routes now; only the host's operator secret does.
+ */
+describe('BackupController is operator-only', () => {
+  const handlers = Object.getOwnPropertyNames(BackupController.prototype).filter((n) => n !== 'constructor');
+
+  it('is public to the JWT chain and guarded by the operator secret on every route', () => {
+    expect(Reflect.getMetadata(IS_PUBLIC_KEY, BackupController)).toBe(true);
+    expect(Reflect.getMetadata(GUARDS_METADATA, BackupController)).toContain(OperatorSecretGuard);
+    for (const h of handlers) {
+      expect(Reflect.getMetadata(PERMISSIONS_KEY, (BackupController.prototype as any)[h])).toBeUndefined();
+    }
+  });
+
+  describe('OperatorSecretGuard', () => {
+    const ctx = (headers: Record<string, string>) =>
+      ({ switchToHttp: () => ({ getRequest: () => ({ headers }) }) }) as any;
+    const saved = process.env.OPERATOR_SECRET;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.OPERATOR_SECRET;
+      else process.env.OPERATOR_SECRET = saved;
+    });
+
+    it('is closed when the host sets no secret', () => {
+      delete process.env.OPERATOR_SECRET;
+      expect(() => new OperatorSecretGuard().canActivate(ctx({ 'x-operator-secret': 'anything' }))).toThrow(ForbiddenException);
+    });
+
+    it('refuses a tenant caller (bearer token, no secret) and a wrong secret', () => {
+      process.env.OPERATOR_SECRET = 'fictional-operator-secret';
+      expect(() => new OperatorSecretGuard().canActivate(ctx({ authorization: 'Bearer tenant-admin' }))).toThrow(ForbiddenException);
+      expect(() => new OperatorSecretGuard().canActivate(ctx({ 'x-operator-secret': 'fictional-operator-secreX' }))).toThrow(ForbiddenException);
+    });
+
+    it('admits the operator', () => {
+      process.env.OPERATOR_SECRET = 'fictional-operator-secret';
+      expect(new OperatorSecretGuard().canActivate(ctx({ 'x-operator-secret': 'fictional-operator-secret' }))).toBe(true);
     });
   });
 });
