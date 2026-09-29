@@ -208,7 +208,8 @@ describe('D4 · fee corrections are maker-checker', () => {
       reallocate: jest.fn(async () => ({})),
     };
     const finance = { createCreditFromRequest: jest.fn(async () => ({ id: 'cr_1' })) };
-    const svc = new FinanceCorrectionRequestService(prisma as any, tenant as any, audit as any, reversals as any, finance as any);
+    const rebills = { assertRebillable: jest.fn(async () => undefined), rebill: jest.fn(async () => ({})) };
+    const svc = new FinanceCorrectionRequestService(prisma as any, tenant as any, audit as any, reversals as any, finance as any, rebills as any);
     return { svc, tx, reversals, finance };
   }
   const reverse = { kind: 'reverse_payment' as const, paymentId: 'pay_1', reason: 'cheque bounced' };

@@ -2270,6 +2270,20 @@ export function useReallocatePayment() {
 }
 
 /**
+ * Wave 17 R05: revise a billed term invoice to the fee structure's current
+ * published version — credit the old one, bill the new one, move its receipts.
+ * Maker-checker: normally comes back `pending_approval`.
+ */
+export function useRebillInvoice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ schoolFeeInvoiceId, reason }: { schoolFeeInvoiceId: string; reason: string }) =>
+      (await api.post<CorrectionOutcome>(`${S}/finance/invoices/${schoolFeeInvoiceId}/rebill`, { reason })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school'] }),
+  });
+}
+
+/**
  * D4 (re-audit #3): reversals, reallocations and manual credits are
  * maker-checker. A request comes back `pending_approval` unless the caller
  * holds both sides (then `applied`).
@@ -2281,7 +2295,7 @@ export interface FeeCorrectionRequest {
   createdAt: string;
   createdById: string | null;
   snapshot: {
-    kind: 'reverse_allocation' | 'reallocate' | 'reverse_payment' | 'credit';
+    kind: 'reverse_allocation' | 'reallocate' | 'reverse_payment' | 'credit' | 'rebill';
     amount: number | null;
     correction: Record<string, any> & { reason?: string };
   };

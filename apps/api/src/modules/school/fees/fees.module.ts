@@ -29,6 +29,7 @@ import {
 import { BillingService, SchoolPaymentService } from './billing.service';
 import { RefundRequestService } from './refund-request.service';
 import { FinanceCorrectionRequestService } from './finance-correction-request.service';
+import { FeeRebillService } from './fee-rebill.service';
 import { AdvancedFinanceService } from './advanced.service';
 import { BillingController, SchoolPaymentController } from './billing.controller';
 import { AdvancedFinanceController } from './advanced.controller';
@@ -110,6 +111,7 @@ import { CashDeskController } from './cash-desk.controller';
     SchoolPaymentService,
     RefundRequestService,
     FinanceCorrectionRequestService,
+    FeeRebillService,
     AdvancedFinanceService,
     PenaltyCronWorker,
     BudgetService,

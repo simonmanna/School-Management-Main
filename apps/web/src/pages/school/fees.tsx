@@ -459,6 +459,7 @@ const CORRECTION_LABEL: Record<string, string> = {
   reverse_allocation: 'Un-apply payment',
   reallocate: 'Reallocate receipt',
   credit: 'Manual fee credit',
+  rebill: 'Revise invoice to current fees',
 };
 
 /**

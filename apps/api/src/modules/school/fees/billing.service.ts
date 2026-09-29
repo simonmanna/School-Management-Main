@@ -651,9 +651,68 @@ export class BillingService {
   ): Promise<{ status: 'posted' | 'skipped'; documentId?: string; schoolFeeInvoiceId?: string; amount?: string; reason?: string }> {
     const organizationId = this.tenant.organizationId;
     const feeStructure = schedule.feeStructure;
+    const priced = await this.studentLines(s, schedule, termId, studentProfileId);
+    if (priced.lines === null) return { status: 'skipped', reason: priced.reason };
+    const lines = priced.lines;
+    if (lines.length === 0) return { status: 'skipped' };
+
+    const issueDate = new Date();
+    const reference = `TERM-${termId}`;
+    try {
+      const result = await this.billStudentTransaction(s, schedule, feeStructure, { termId } as GenerateBillingDto, lines, issueDate, reference);
+      if ((result as any)._skipped) return { status: 'skipped', documentId: (result as any).documentId };
+      const doc = (result as any).doc;
+      this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
+        organizationId, documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id,
+        studentProfileId, amount: doc.totalAmount.toString(),
+      });
+      return { status: 'posted', documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id, amount: doc.totalAmount.toString() };
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        const existing = await this.prisma.client.document.findFirst({
+          where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
+        });
+        if (existing) return { status: 'skipped', documentId: existing.id };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Wave 17 R05 — bill one pupil for one schedule at the fee structure's
+   * CURRENT published version, inside the caller's transaction, under a new
+   * document reference. Used only by the approved credit-and-rebill correction,
+   * after the superseded invoice has been credited in the same transaction.
+   */
+  async rebillInTx(
+    tx: any,
+    input: { studentProfileId: string; scheduleId: string; termId: string; reference: string },
+  ): Promise<{ doc: any; sfi: any }> {
+    const found = await tx.studentProfile.findFirst({ where: { id: input.studentProfileId } });
+    if (!found) throw new NotFoundException(`Student ${input.studentProfileId} not found`);
+    const [s] = await this.placements.attach([found], { termId: input.termId });
+    const schedule = await tx.feeSchedule.findFirst({ where: { id: input.scheduleId }, include: { feeStructure: true } });
+    if (!schedule) throw new NotFoundException(`Fee schedule ${input.scheduleId} not found`);
+    const priced = await this.studentLines(s, schedule, input.termId, input.studentProfileId);
+    if (priced.lines === null) throw new BadRequestException(priced.reason ?? 'The fee structure has no published version to bill from.');
+    if (priced.lines.length === 0) throw new BadRequestException('At the current fee version this pupil owes nothing on this schedule.');
+    const result = await this.postStudentInvoice(tx, s, schedule, schedule.feeStructure, input.termId, priced.lines, new Date(), input.reference);
+    if (result._skipped) throw new BadRequestException('A revised invoice already exists for this pupil and fee version.');
+    return { doc: result.doc, sfi: result.sfi };
+  }
+
+  /** What one pupil owes on one schedule at the structure's published version. */
+  private async studentLines(
+    s: any,
+    schedule: any,
+    termId: string,
+    studentProfileId: string,
+  ): Promise<{ lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> | null; reason?: string }> {
+    const organizationId = this.tenant.organizationId;
+    const feeStructure = schedule.feeStructure;
     // P1-A: priced from the immutable published version, same as the bulk run.
     const priced = await this.pricedComponents(feeStructure as any);
-    if (priced.components === null) return { status: 'skipped', reason: priced.reason };
+    if (priced.components === null) return { lines: null, reason: priced.reason };
     const components = priced.components;
     const [assignment, studentScholarships, discounts, optionalFees] = await Promise.all([
       this.prisma.client.studentFeeAssignment.findFirst({ where: { organizationId, termId, studentProfileId } }),
@@ -685,28 +744,7 @@ export class BillingService {
       optIns,
       this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
     );
-    if (lines.length === 0) return { status: 'skipped' };
-
-    const issueDate = new Date();
-    const reference = `TERM-${termId}`;
-    try {
-      const result = await this.billStudentTransaction(s, schedule, feeStructure, { termId } as GenerateBillingDto, lines, issueDate, reference);
-      if ((result as any)._skipped) return { status: 'skipped', documentId: (result as any).documentId };
-      const doc = (result as any).doc;
-      this.events.publish(EVENTS.SchoolFeeInvoicePosted, {
-        organizationId, documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id,
-        studentProfileId, amount: doc.totalAmount.toString(),
-      });
-      return { status: 'posted', documentId: doc.id, schoolFeeInvoiceId: (result as any).sfi.id, amount: doc.totalAmount.toString() };
-    } catch (err: any) {
-      if (err?.code === 'P2002') {
-        const existing = await this.prisma.client.document.findFirst({
-          where: { organizationId, partnerId: s.partnerId, sourceType: 'school_fee', sourceId: schedule.id, reference },
-        });
-        if (existing) return { status: 'skipped', documentId: existing.id };
-      }
-      throw err;
-    }
+    return { lines };
   }
 
   /**
@@ -723,8 +761,25 @@ export class BillingService {
     issueDate: Date,
     reference: string,
   ): Promise<any> {
+    return this.prisma.client.$transaction((tx: any) =>
+      this.postStudentInvoice(tx, s, schedule, feeStructure, dto.termId, lines, issueDate, reference),
+    );
+  }
+
+  /** The commit unit itself: document, GL posting and SchoolFeeInvoice, in `tx`. */
+  private async postStudentInvoice(
+    tx: any,
+    s: any,
+    schedule: any,
+    feeStructure: any,
+    termId: string,
+    lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }>,
+    issueDate: Date,
+    reference: string,
+  ): Promise<any> {
     const organizationId = this.tenant.organizationId;
-    return this.prisma.client.$transaction(async (tx: any) => {
+    const dto = { termId } as GenerateBillingDto;
+    {
           // Audit F05 (I-021): the close gate at the point of mutation. A run
           // queued while the term was open must not post after it closed.
           await this.controls.assertTermOpen(dto.termId, tx);
@@ -809,7 +864,7 @@ export class BillingService {
           });
 
           return { _skipped: false, doc: postedDoc, sfi };
-    });
+    }
   }
 
   /**

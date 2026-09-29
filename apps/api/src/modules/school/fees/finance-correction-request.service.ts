@@ -6,6 +6,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { PaymentAllocationReversalService } from './allocation-reversal.service';
 import { AdvancedFinanceService } from './advanced.service';
+import { FeeRebillService } from './fee-rebill.service';
 
 /** ApprovalRequest.entityType for a fee correction awaiting its second person. */
 export const FEE_CORRECTION_ENTITY = 'school_fee_correction';
@@ -14,6 +15,8 @@ export type FeeCorrection =
   | { kind: 'reverse_allocation'; allocationId: string; reason: string }
   | { kind: 'reallocate'; paymentId: string; allocations: Array<{ documentId: string; amount: number }>; reason: string }
   | { kind: 'reverse_payment'; paymentId: string; reason: string }
+  /** Wave 17 R05: credit a billed term invoice and re-bill it at the current fee version. */
+  | { kind: 'rebill'; schoolFeeInvoiceId: string; reason: string }
   | {
       kind: 'credit';
       studentProfileId: string;
@@ -59,11 +62,14 @@ export class FinanceCorrectionRequestService {
     private readonly audit: AuditService,
     private readonly reversals: PaymentAllocationReversalService,
     private readonly finance: AdvancedFinanceService,
+    private readonly rebills: FeeRebillService,
   ) {}
 
   /** Do it now when the caller holds both sides; otherwise file it for approval. */
   async submit(correction: FeeCorrection) {
     this.assertWellFormed(correction);
+    // Refuse a revision that could never be applied now, not at approval time.
+    if (correction.kind === 'rebill') await this.rebills.assertRebillable(correction.schoolFeeInvoiceId);
     const perms = this.tenant.permissions ?? [];
     const maker = perms.includes(makerOf(correction.kind));
     const checker = perms.includes(checkerOf(correction.kind));
@@ -153,6 +159,8 @@ export class FinanceCorrectionRequestService {
         return { result: await this.reversals.reallocate(c.paymentId, c.allocations, c.reason, tx) };
       case 'reverse_payment':
         return { result: await this.reversals.reversePayment(c.paymentId, c.reason, tx) };
+      case 'rebill':
+        return { result: await this.rebills.rebill(tx, c.schoolFeeInvoiceId, c.reason) };
       case 'credit':
         return {
           result: await this.finance.createCreditFromRequest(

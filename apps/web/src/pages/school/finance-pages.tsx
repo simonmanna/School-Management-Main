@@ -24,6 +24,7 @@ import {
   useImportPayments,
   useConfirmImportRow,
   useSchoolInvoices,
+  useRebillInvoice,
   useCachedProjectionReconciliation,
   useMomoClearing,
   useConfirmHighImportRows,
@@ -552,6 +553,24 @@ export function SchoolReconciliationPage() {
 export function SchoolInvoicesPage() {
   const [status, setStatus] = useState('');
   const invoices = useSchoolInvoices({ status: status || undefined, pageSize: 100 });
+  const rebill = useRebillInvoice();
+
+  // Wave 17 R05: a published fee change reaches an already-billed pupil only
+  // through this approved correction — never by editing the invoice.
+  const revise = async (r: { id: string; invoiceNumber: string }) => {
+    const reason = window.prompt(
+      `Revise ${r.invoiceNumber} to the current published fee version?\n\n` +
+        'The invoice is credited in full and kept on record, the pupil is billed at the new fees, and any ' +
+        'payments move to the new invoice. A second person must approve.\n\nReason (recorded permanently):',
+    );
+    if (!reason?.trim()) return;
+    try {
+      const res = await rebill.mutateAsync({ schoolFeeInvoiceId: r.id, reason: reason.trim() });
+      notify.success(res.status === 'pending_approval' ? `Revision of ${r.invoiceNumber} sent for approval` : `${r.invoiceNumber} revised`);
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not revise the invoice');
+    }
+  };
 
   return (
     <div className="p-4 space-y-4">
@@ -562,6 +581,7 @@ export function SchoolInvoicesPage() {
           <option value="issued">Issued</option>
           <option value="settled">Settled</option>
           <option value="cancelled">Cancelled</option>
+          <option value="voided">Revised (voided)</option>
         </select>
       </div>
       <p className="text-sm text-muted-foreground">
@@ -575,11 +595,11 @@ export function SchoolInvoicesPage() {
               <TableHead>Invoice #</TableHead><TableHead>Doc #</TableHead><TableHead>Status</TableHead>
               <TableHead className="text-right">Total</TableHead><TableHead className="text-right">Paid</TableHead>
               <TableHead className="text-right">Waived</TableHead><TableHead className="text-right">Balance</TableHead>
-              <TableHead>Issued</TableHead>
+              <TableHead>Issued</TableHead><TableHead />
             </TableRow></TableHeader>
             <TableBody>
-              {invoices.isLoading && <TableRow><TableCell colSpan={8} className="text-muted-foreground">Loading…</TableCell></TableRow>}
-              {invoices.data?.data.length === 0 && <TableRow><TableCell colSpan={8} className="text-muted-foreground">No invoices.</TableCell></TableRow>}
+              {invoices.isLoading && <TableRow><TableCell colSpan={9} className="text-muted-foreground">Loading…</TableCell></TableRow>}
+              {invoices.data?.data.length === 0 && <TableRow><TableCell colSpan={9} className="text-muted-foreground">No invoices.</TableCell></TableRow>}
               {(invoices.data?.data ?? []).map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-mono text-xs">{r.invoiceNumber}</TableCell>
@@ -590,6 +610,13 @@ export function SchoolInvoicesPage() {
                   <TableCell className="text-right">{r.amountWaived ? money(r.amountWaived) : ''}</TableCell>
                   <TableCell className="text-right font-medium">{money(r.amountResidual)}</TableCell>
                   <TableCell>{fmtDate(r.issueDate)}</TableCell>
+                  <TableCell className="text-right">
+                    {!['voided', 'cancelled'].includes(r.status) && (
+                      <Button size="sm" variant="ghost" disabled={rebill.isPending} onClick={() => void revise(r)}>
+                        Revise to current fees
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

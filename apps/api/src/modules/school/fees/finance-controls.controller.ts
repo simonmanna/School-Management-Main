@@ -106,6 +106,18 @@ export class FinanceControlsController {
     return this.corrections.submit({ kind: 'reverse_payment', paymentId: id, reason: body?.reason });
   }
 
+  /**
+   * Wave 17 R05: revise a billed term invoice to the current published fee
+   * version — credit it, re-bill it, re-apply its receipts. Maker-checker like
+   * every other correction.
+   */
+  @Post('invoices/:id/rebill')
+  @Idempotent()
+  @RequirePermissions(PERMISSIONS.school.readFees)
+  rebillInvoice(@Param('id') id: string, @Body() body: FinanceReasonDto) {
+    return this.corrections.submit({ kind: 'rebill', schoolFeeInvoiceId: id, reason: body?.reason });
+  }
+
   @Get('corrections')
   @RequirePermissions(PERMISSIONS.school.readFees)
   listCorrections(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
