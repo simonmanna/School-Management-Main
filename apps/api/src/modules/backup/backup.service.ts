@@ -500,15 +500,21 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       await this.execPg('createdb', ['--no-password', targetDb], env);
       
       // Restore
+      // Wave 17 (D08 drill): the backup role is deliberately not a superuser, and
+      // the dump carries GRANTs and `ALTER DEFAULT PRIVILEGES FOR ROLE app_system`
+      // that only a superuser/owner may replay — so every restore through this
+      // role failed. Privileges are left out here and re-applied by
+      // `pnpm --filter @erp/api rls:setup-role` against the restored database
+      // (runbook step), and any other error now stops the restore.
       await this.execPg('pg_restore', [
-        '--clean', '--if-exists', '--no-owner', '--no-password',
+        '--clean', '--if-exists', '--no-owner', '--no-privileges', '--exit-on-error', '--no-password',
         `--dbname=${targetDb}`, backupFile
       ], env);
       
       this.logger.log(`Restore completed: ${backupFile} -> ${targetDb}`);
       return { 
         success: true, 
-        message: `Database restored from ${backupFile}`, 
+        message: `Database restored from ${backupFile}. Re-apply runtime role privileges before use: rls:setup-role against ${targetDb}.`, 
         durationMs: Date.now() - started 
       };
     } catch (err) {
@@ -545,7 +551,9 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Restore drill: ${latest} -> ${scratch}`);
     try {
       await this.execPg('createdb', ['--no-password', scratch], env);
-      await this.execPg('pg_restore', ['--no-owner', '--no-password', '--exit-on-error', `--dbname=${scratch}`, latest], env);
+      // Data and manifest are what the drill proves; privileges belong to the
+      // live database's roles (see restore()), so they are not replayed here.
+      await this.execPg('pg_restore', ['--no-owner', '--no-privileges', '--no-password', '--exit-on-error', `--dbname=${scratch}`, latest], env);
       const restored = await this.captureManifest(env, scratch);
       const problems: string[] = [];
       let expected: any = null;
@@ -1101,8 +1109,8 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureDirs(): Promise<void> {
+    const base = this.config.destinations[0]?.path ?? BACKUP_DEFAULTS.destinations[0].path;
     try {
-      const base = this.config.destinations[0]?.path ?? BACKUP_DEFAULTS.destinations[0].path;
       if (!base || typeof base !== 'string' || base.trim().length === 0) {
         this.logger.warn(`Invalid backup path "${base}", using fallback`);
         this.config.destinations[0] = { ...BACKUP_DEFAULTS.destinations[0] };
@@ -1112,7 +1120,12 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
         await fs.mkdir(path.join(base, sub), { recursive: true });
       }
     } catch (err) {
-      this.logger.error(`Failed to create backup directories: ${err instanceof Error ? err.message : err}`);
+      // Name the folder: "mkdir '\?'" alone did not tell an operator that BACKUP_DIR
+      // pointed at a drive this host does not have. Backups cannot run until fixed.
+      this.logger.error(
+        `Failed to create backup directories under "${base}" (BACKUP_DIR): ${err instanceof Error ? err.message : err}. ` +
+          'No backup can be written until this folder exists and is writable.',
+      );
     }
   }
 

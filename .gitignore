@@ -63,3 +63,4 @@ apps/web/vite.config.js
 # Editor/script backups. A schema backup belongs beside the operator who made
 # it, not in the repository next to the schema it shadows.
 *.bak
+.drill/
