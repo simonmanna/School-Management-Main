@@ -4580,6 +4580,8 @@ model SavedReportRun {
 
   report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
+  /// Wave 16: one run per schedule slot, even with several API instances.
+  @@unique([reportId, scheduledFor])
   @@index([organizationId, status, scheduledFor])
 }
 

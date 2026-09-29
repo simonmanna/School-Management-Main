@@ -5,6 +5,7 @@ import { ReportPdfSerializer } from './report-pdf.serializer';
 import { ReportRegistryService } from './report-registry.service';
 import { ReportRunnerService } from './report-runner.service';
 import { ReportXlsxSerializer } from './report-xlsx.serializer';
+import { ScheduledReportService } from './scheduled-report.service';
 
 /**
  * The domain-free reporting engine (ADR-017).
@@ -29,6 +30,7 @@ import { ReportXlsxSerializer } from './report-xlsx.serializer';
     ReportCsvSerializer,
     ReportXlsxSerializer,
     ReportPdfSerializer,
+    ScheduledReportService,
   ],
   exports: [
     ReportRegistryService,
@@ -37,6 +39,7 @@ import { ReportXlsxSerializer } from './report-xlsx.serializer';
     ReportCsvSerializer,
     ReportXlsxSerializer,
     ReportPdfSerializer,
+    ScheduledReportService,
   ],
 })
 export class CoreReportingModule {}

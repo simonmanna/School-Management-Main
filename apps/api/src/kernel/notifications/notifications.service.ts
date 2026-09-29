@@ -50,6 +50,11 @@ export interface SendInput {
    * reminder run produces no second message (E2E audit N1).
    */
   dedupeKey?: string;
+  /**
+   * Email only: files to attach (e.g. a scheduled report). Sent, never stored
+   * on the Notification row.
+   */
+  attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
 /**
@@ -271,6 +276,7 @@ export class NotificationsService implements OnModuleInit {
       subject: input.title,
       text: input.body,
       html: `<p>${escapeHtml(input.body)}</p>`,
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     });
   }
 

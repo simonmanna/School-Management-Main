@@ -37,7 +37,7 @@ const TERM_LABELS: Record<keyof Terminology, string> = {
 
 const COMMON_ZONES = ['Africa/Kampala', 'Africa/Nairobi', 'Africa/Dar_es_Salaam', 'Africa/Kigali', 'Africa/Lagos', 'UTC'];
 
-type Draft = UpdateSchoolProfileInput & { terminology: Partial<Terminology> };
+type Draft = UpdateSchoolProfileInput & { terminology: Partial<Terminology>; libraryFinePerDay: string };
 
 export function SchoolSettingsPage() {
   const { data: profile, isLoading, isError } = useSchoolProfile();
@@ -65,6 +65,7 @@ export function SchoolSettingsPage() {
       attendanceExcusedInDenominator: profile.attendanceExcusedInDenominator ?? false,
       cashCustodyMode: profile.cashCustodyMode ?? 'cashbook',
       terminology: { ...(profile.terminology ?? {}) },
+      libraryFinePerDay: String(profile.customFields?.libraryFinePerDay ?? ''),
     });
   }, [profile]);
 
@@ -108,9 +109,13 @@ export function SchoolSettingsPage() {
       notify.error(`"${draft.timezone}" is not a valid time zone.`);
       return;
     }
-    const { attendanceLateContribution, ...rest } = draft;
+    const { attendanceLateContribution, libraryFinePerDay, ...rest } = draft;
+    // customFields is replaced as a whole on save; keep every other key.
+    const existing = (profile?.customFields ?? {});
+    const { libraryFinePerDay: _old, ...otherCustom } = existing;
     const payload: UpdateSchoolProfileInput = {
       ...rest,
+      customFields: libraryFinePerDay.trim() === '' ? otherCustom : { ...otherCustom, libraryFinePerDay: Number(libraryFinePerDay) },
       // Not chosen stays not chosen: the API has no default for it (ADR-032 P1).
       ...(attendanceLateContribution == null ? {} : { attendanceLateContribution: Number(attendanceLateContribution) }),
       email: draft.email?.trim() || undefined,
@@ -280,6 +285,18 @@ export function SchoolSettingsPage() {
             <p className="text-xs text-muted-foreground">
               With a drawer, cash cannot be taken until the cashier opens one, and the day closes on a count.
             </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="profile-library-fine">Library fine per overdue day</Label>
+            <Input
+              id="profile-library-fine"
+              type="number"
+              min={0}
+              placeholder="200"
+              value={draft.libraryFinePerDay}
+              onChange={(e) => set('libraryFinePerDay', e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Blank uses 200. Enter 0 if the school does not fine.</p>
           </div>
         </CardContent>
       </Card>

@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
 /**
@@ -124,4 +124,51 @@ export async function exportReport(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ── Wave 16: saved and scheduled reports ─────────────────────────────── */
+
+export interface SavedReport {
+  id: string;
+  name: string;
+  reportKey: string;
+  parameters: Record<string, unknown>;
+  schedule: string | null;
+  format: 'csv' | 'xlsx' | 'pdf';
+  emailTo: string[];
+  runs: Array<{ id: string; scheduledFor: string; ranAt: string | null; status: string; error: string | null }>;
+}
+
+/** Friendly schedules; the API takes cron in the school's time zone. */
+export const SCHEDULE_PRESETS: Array<{ label: string; cron: string }> = [
+  { label: 'Every weekday at 07:00', cron: '0 7 * * 1-5' },
+  { label: 'Every Monday at 07:00', cron: '0 7 * * 1' },
+  { label: 'Every Friday at 16:00', cron: '0 16 * * 5' },
+  { label: 'First day of each month at 07:00', cron: '0 7 1 * *' },
+];
+
+export function useSavedReports() {
+  return useQuery({ queryKey: ['reports', 'saved'], queryFn: async () => (await api.get<SavedReport[]>(`${R}/saved`)).data });
+}
+export function useSaveReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { name: string; reportKey: string; parameters: Record<string, unknown>; schedule?: string | null; format: 'csv' | 'xlsx' | 'pdf'; emailTo: string[] }) =>
+      (await api.post<SavedReport>(`${R}/saved`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'saved'] }),
+  });
+}
+export function useDeleteSavedReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${R}/saved/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'saved'] }),
+  });
+}
+export function useRunSavedReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post(`${R}/saved/${id}/run`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'saved'] }),
+  });
 }

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Download, Loader2, Play } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CalendarClock, Download, Loader2, Play } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import {
   exportReport,
+  SCHEDULE_PRESETS,
+  useSaveReport,
   useReportMeta,
   useRunReport,
   type ExportFormat,
@@ -49,6 +51,7 @@ export default function RunReportPage() {
   const [filters, setFilters] = useState<ReportFilters>(() => filtersFromSearch(search));
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
+  const [scheduling, setScheduling] = useState(false);
 
   const missing = useMemo(() => {
     if (!meta.data) return [];
@@ -108,6 +111,9 @@ export default function RunReportPage() {
         </div>
 
         <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" disabled={!meta.data || missing.length > 0} onClick={() => setScheduling((v) => !v)}>
+            <CalendarClock className="mr-1.5 h-3.5 w-3.5" /> Schedule
+          </Button>
           {(meta.data?.exportFormats ?? []).map((f) => (
             <Button
               key={f}
@@ -124,6 +130,16 @@ export default function RunReportPage() {
           ))}
         </div>
       </div>
+
+      {scheduling && meta.data && (
+        <ScheduleForm
+          reportKey={key}
+          title={meta.data.title}
+          filters={filters as Record<string, unknown>}
+          formats={meta.data.exportFormats}
+          onDone={() => setScheduling(false)}
+        />
+      )}
 
       {meta.isError && (
         <Card className="border-destructive/40 bg-destructive/5 p-4 text-sm">
@@ -200,5 +216,65 @@ export default function RunReportPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Wave 16: save this report, with the filters on screen, to be emailed on a
+ * schedule. It runs as you, with your permissions at the time it runs.
+ */
+function ScheduleForm({ reportKey, title, filters, formats, onDone }: {
+  reportKey: string;
+  title: string;
+  filters: Record<string, unknown>;
+  formats: ExportFormat[];
+  onDone: () => void;
+}) {
+  const save = useSaveReport();
+  const [name, setName] = useState(title);
+  const [cron, setCron] = useState(SCHEDULE_PRESETS[1].cron);
+  const [format, setFormat] = useState<ExportFormat>(formats.includes('pdf') ? 'pdf' : formats[0] ?? 'csv');
+  const [emails, setEmails] = useState('');
+  const submit = async () => {
+    try {
+      await save.mutateAsync({
+        name,
+        reportKey,
+        parameters: filters,
+        schedule: cron || null,
+        format: format as 'csv' | 'xlsx' | 'pdf',
+        emailTo: emails.split(/[,;\s]+/).map((e) => e.trim()).filter(Boolean),
+      });
+      toast.success(cron ? 'Scheduled — it will be emailed as set' : 'Saved');
+      onDone();
+    } catch (err: unknown) {
+      const m = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      toast.error(Array.isArray(m) ? m.join(' · ') : m ?? 'Could not save the schedule.');
+    }
+  };
+  const field = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1 text-sm"><span className="text-muted-foreground">Name</span>
+          <input className={field} value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="space-y-1 text-sm"><span className="text-muted-foreground">When</span>
+          <select className={field} value={cron} onChange={(e) => setCron(e.target.value)}>
+            {SCHEDULE_PRESETS.map((p) => <option key={p.cron} value={p.cron}>{p.label}</option>)}
+            <option value="">Do not schedule (save only)</option>
+          </select></label>
+        <label className="space-y-1 text-sm"><span className="text-muted-foreground">Format</span>
+          <select className={field} value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+            {formats.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
+          </select></label>
+        <label className="space-y-1 text-sm"><span className="text-muted-foreground">Email to (comma-separated)</span>
+          <input className={field} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="head@school.ug, bursar@school.ug" /></label>
+      </div>
+      <p className="text-xs text-muted-foreground">Uses the filters above. It runs with your permissions at the time it runs — if your access changes, so does what is sent.</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={submit} disabled={!name || save.isPending}>Save</Button>
+        <Button size="sm" variant="ghost" onClick={onDone}>Cancel</Button>
+      </div>
+    </Card>
   );
 }

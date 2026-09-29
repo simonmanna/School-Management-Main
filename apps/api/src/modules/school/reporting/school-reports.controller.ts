@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Param, Post, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { PermissionResolverService } from '../../../kernel/auth/permission-resolver.service';
 import { ReportExportService } from '../../core/reporting/report-export.service';
-import { ExportReportDto, RunReportDto } from '../../core/reporting/report-params.dto';
+import { ExportReportDto, RunReportDto, SavedReportDto, UpdateSavedReportDto } from '../../core/reporting/report-params.dto';
+import { ScheduledReportService } from '../../core/reporting/scheduled-report.service';
 import { ReportRegistryService } from '../../core/reporting/report-registry.service';
 import { ReportRunnerService } from '../../core/reporting/report-runner.service';
 
@@ -39,7 +40,41 @@ export class SchoolReportsController {
     private readonly runner: ReportRunnerService,
     private readonly exporter: ReportExportService,
     private readonly permissions: PermissionResolverService,
+    private readonly saved: ScheduledReportService,
   ) {}
+
+  /* ── Wave 16: saved and scheduled reports ── */
+
+  @Get('saved')
+  @RequirePermissions(PERMISSIONS.school.readReports)
+  listSaved() {
+    return this.saved.list();
+  }
+
+  /** Saving checks the caller may run the report; a scheduled run re-checks as its creator every time. */
+  @Post('saved')
+  @RequirePermissions(PERMISSIONS.school.readReports, PERMISSIONS.school.exportReports)
+  createSaved(@Body() dto: SavedReportDto) {
+    return this.saved.create(dto);
+  }
+
+  @Patch('saved/:id')
+  @RequirePermissions(PERMISSIONS.school.readReports, PERMISSIONS.school.exportReports)
+  updateSaved(@Param('id') id: string, @Body() dto: UpdateSavedReportDto) {
+    return this.saved.update(id, dto);
+  }
+
+  @Delete('saved/:id')
+  @RequirePermissions(PERMISSIONS.school.readReports, PERMISSIONS.school.exportReports)
+  removeSaved(@Param('id') id: string) {
+    return this.saved.remove(id);
+  }
+
+  @Post('saved/:id/run')
+  @RequirePermissions(PERMISSIONS.school.readReports, PERMISSIONS.school.exportReports)
+  runSaved(@Param('id') id: string) {
+    return this.saved.runNow(id);
+  }
 
   /** Only the reports this caller may actually run. */
   @Get('catalog')

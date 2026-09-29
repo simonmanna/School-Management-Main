@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  BarChart3, BookOpen, CalendarDays, ClipboardList, GraduationCap, Search,
-  Users, Wallet, Star,
+  BarChart3, BookOpen, CalendarDays, CalendarClock, ClipboardList, GraduationCap, Search,
+  Users, Wallet, Star, Play, Trash2,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { useReportCatalog } from '@/features/school/reports-api';
+import { SCHEDULE_PRESETS, useDeleteSavedReport, useReportCatalog, useRunSavedReport, useSavedReports } from '@/features/school/reports-api';
 import type { ReportCatalogEntry } from '@/features/school/reports-api';
 
 /**
@@ -121,6 +123,8 @@ export default function SchoolReportsPage() {
         </Card>
       )}
 
+      {!query && <SavedReportsSection />}
+
       {starred.length > 0 && !query && (
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -195,5 +199,47 @@ function ReportGrid({ reports, favourites, onToggle }: {
         </Card>
       ))}
     </div>
+  );
+}
+
+/** Wave 16: saved and scheduled reports, with their last runs. */
+function SavedReportsSection() {
+  const { data: saved } = useSavedReports();
+  const runNow = useRunSavedReport();
+  const remove = useDeleteSavedReport();
+  if (!saved?.length) return null;
+  const when = (cron: string | null) => (cron ? SCHEDULE_PRESETS.find((p) => p.cron === cron)?.label ?? cron : 'Not scheduled');
+  return (
+    <section>
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <CalendarClock className="h-4 w-4" /> Saved &amp; scheduled
+      </h2>
+      <div className="space-y-2">
+        {saved.map((r) => {
+          const last = r.runs[0];
+          return (
+            <Card key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
+              <div className="min-w-0">
+                <Link to={`/school/reports/${r.reportKey}`} className="font-medium hover:underline">{r.name}</Link>
+                <div className="text-xs text-muted-foreground">
+                  {when(r.schedule)} · {r.format.toUpperCase()}{r.emailTo.length ? ` · to ${r.emailTo.join(', ')}` : ''}
+                  {last ? ` · last ${last.status} ${new Date(last.ranAt ?? last.scheduledFor).toLocaleString()}` : ''}
+                </div>
+                {last?.status === 'failed' && last.error && <div className="text-xs text-destructive">{last.error}</div>}
+              </div>
+              <div className="flex gap-1">
+                <Button size="sm" variant="outline" disabled={runNow.isPending} onClick={async () => {
+                  try { await runNow.mutateAsync(r.id); toast.success('Run started — it will be emailed'); }
+                  catch { toast.error('Could not run the report'); }
+                }}><Play className="h-3.5 w-3.5" /> Run now</Button>
+                <Button size="sm" variant="ghost" aria-label={`Delete ${r.name}`} onClick={() => { if (window.confirm(`Delete "${r.name}"?`)) remove.mutate(r.id); }}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
   );
 }

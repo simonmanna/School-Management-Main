@@ -46,6 +46,8 @@ import { ReportingService } from '../../src/modules/school/reporting/reporting.s
 import { ReportRegistryService } from '../../src/modules/core/reporting/report-registry.service';
 import { ReportRunnerService } from '../../src/modules/core/reporting/report-runner.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
+import { ScheduledReportService } from '../../src/modules/core/reporting/scheduled-report.service';
+import { PermissionResolverService } from '../../src/kernel/auth/permission-resolver.service';
 import { placeInClass } from './_placement';
 
 describeDb('integration: school reporting', () => {
@@ -363,6 +365,38 @@ describeDb('integration: school reporting', () => {
     expect(rowA).toMatchObject({ present: 3, absent: 1, rate: 75 });
     // A pupil on the class list with no marks still has a row.
     expect(out.data.map((r) => r.admissionNo)).toContain(c.admissionNo);
+  });
+
+  it('Wave 16: a scheduled report runs once per slot, as its creator, and stores the file', async () => {
+    const saved = moduleRef.get(ScheduledReportService);
+    await expect(asUser(() => saved.create({ name: 'Bad', reportKey: 'student.register', schedule: 'every monday', emailTo: ['head@school.ug'] })))
+      .rejects.toThrow(/not a valid cron/);
+    await expect(asUser(() => saved.create({ name: 'Spam', reportKey: 'student.register', schedule: '* * * * *', emailTo: ['head@school.ug'] })))
+      .rejects.toThrow(/at most once an hour/);
+    await expect(asUser(() => saved.create({ name: 'Nobody', reportKey: 'student.register', schedule: '0 7 * * 1' })))
+      .rejects.toThrow(/email address/);
+
+    const report: any = await asUser(() => saved.create({
+      name: 'Monday register', reportKey: 'student.register', parameters: { termId, classId: classAId },
+      schedule: '0 7 * * 1', format: 'csv', emailTo: ['head@school.ug'],
+    }));
+
+    // Grants at run time come from the creator; this suite resolves grants from
+    // the tenant context, so give the scheduled run the creator's grants.
+    const grants = jest.spyOn(moduleRef.get(PermissionResolverService), 'grantedForCaller').mockResolvedValue(ALL_GRANTS);
+    try {
+      const future = new Date(Date.now() + 8 * 86_400_000); // at least one Monday 07:00 has passed
+      await saved.tick(future);
+      await saved.tick(future); // same slot: claimed already, nothing new
+    } finally {
+      grants.mockRestore();
+    }
+    const runs = await raw.savedReportRun.findMany({ where: { reportId: report.id } });
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe('succeeded');
+    const file = await raw.file.findFirst({ where: { id: runs[0].fileId! } });
+    expect(file?.contentType).toMatch(/csv/);
+    expect(Number(file?.byteSize)).toBeGreaterThan(20);
   });
 
   it('the enrolment summary reports capacity and flags an over-subscribed class', async () => {

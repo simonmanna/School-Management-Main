@@ -104,6 +104,8 @@ const S = '/school';
 export interface SchoolProfile {
   id?: string;
   name?: string;
+  /** School-level settings without their own column (proration policy, library fine rate). Replaced whole on save. */
+  customFields?: Record<string, unknown>;
   motto?: string | null;
   logoUrl?: string | null;
   phone?: string | null;

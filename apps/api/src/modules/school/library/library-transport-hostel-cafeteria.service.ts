@@ -39,6 +39,19 @@ import type {
 // Library
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Wave 16: the overdue fine per day, set by the school
+ * (`SchoolProfile.customFields.libraryFinePerDay`), UGX 200 when unset.
+ * Zero is a valid choice: a school that does not fine.
+ */
+async function finePerDay(client: any, organizationId: string): Promise<number> {
+  const profile = await client.schoolProfile
+    ?.findFirst({ where: { organizationId }, select: { customFields: true } })
+    .catch(() => null);
+  const raw = Number((profile?.customFields as any)?.libraryFinePerDay);
+  return Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : 200;
+}
+
 @Injectable()
 export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBookMetadataDto, UpdateBookMetadataDto> {
   protected readonly entityName = 'BookMetadata';
@@ -81,6 +94,7 @@ export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBoo
   /** Overdue books with fine details. */
   async getOverdue() {
     const orgId = this.tenant.organizationId;
+    const rate = await finePerDay(this.prisma.client, orgId);
     const overdue = await this.prisma.client.borrowing.findMany({
       where: { organizationId: orgId, status: 'overdue' },
       include: { book: true, bookCopy: true, studentProfile: { include: { partner: true } } },
@@ -88,7 +102,7 @@ export class BookMetadataService extends BaseCrudService<BookMetadata, CreateBoo
     });
     return overdue.map((b: any) => {
       const days = Math.ceil((new Date().getTime() - new Date(b.dueAt).getTime()) / (1000 * 60 * 60 * 24));
-      const fine = days * 200;
+      const fine = days * rate;
       return {
         id: b.id,
         book: b.book,
@@ -210,7 +224,7 @@ export class BorrowingService extends BaseCrudService<Borrowing, Partial<Borrowi
       let fineAmount = 0;
       if (overdue) {
         const days = Math.ceil((now.getTime() - borrowing.dueAt.getTime()) / (1000 * 60 * 60 * 24));
-        fineAmount = days * 200; // UGX 200 / day default
+        fineAmount = days * (await finePerDay(tx, borrowing.organizationId));
       }
       await tx.borrowing.updateMany({
         where: { id: borrowingId },

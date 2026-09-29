@@ -1,13 +1,17 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsDateString,
   IsIn,
+  IsNotEmpty,
+  IsObject,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -97,4 +101,22 @@ export class RunReportDto {
 
 export class ExportReportDto extends RunReportDto {
   @IsIn(['csv', 'xlsx', 'pdf']) format!: 'csv' | 'xlsx' | 'pdf';
+}
+
+/** Wave 16: a saved (optionally scheduled) report. */
+export class SavedReportDto {
+  @IsString() @IsNotEmpty() @MaxLength(120) name!: string;
+  @IsString() @IsNotEmpty() reportKey!: string;
+  @IsOptional() @IsObject() parameters?: Record<string, unknown>;
+  @IsOptional() @IsString() @MaxLength(60) schedule?: string | null;
+  @IsOptional() @IsIn(['csv', 'xlsx', 'pdf']) format?: 'csv' | 'xlsx' | 'pdf';
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) emailTo?: string[];
+}
+
+export class UpdateSavedReportDto {
+  @IsOptional() @IsString() @MaxLength(120) name?: string;
+  @IsOptional() @IsObject() parameters?: Record<string, unknown>;
+  @IsOptional() @IsString() @MaxLength(60) schedule?: string | null;
+  @IsOptional() @IsIn(['csv', 'xlsx', 'pdf']) format?: 'csv' | 'xlsx' | 'pdf';
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true }) emailTo?: string[];
 }
