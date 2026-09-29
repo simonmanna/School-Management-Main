@@ -4,6 +4,7 @@
  * stable codes. Validation failures throw (guard vocabulary G4, state targets).
  */
 import type { PrismaClient } from '@prisma/client';
+import { PORTAL_ROLE_PRESETS } from '@erp/shared';
 import {
   DMS_LIFECYCLES,
   DMS_RELATION_TYPES,
@@ -229,22 +230,47 @@ export async function seedDmsRegistry(client: AnyClient): Promise<SeedDmsResult>
 }
 
 /**
- * Append all DMS permission keys to every system role (Administrator etc.) so
+ * Give each organisation's Administrator every DMS permission key so
  * bootstrapped orgs can act on documents without per-org provisioning (O7).
  * Idempotent; preserves any role-specific grants.
+ *
+ * Wave 17 security fix: this used to append the keys to EVERY `isSystem` role,
+ * and the family portal roles (Parent, Student) are system roles. On each API
+ * boot a guardian's account gained `document:read`, `document:delete`,
+ * `document:manage` and the approve/void keys of every document type —
+ * authority the Parent preset never grants. Only Administrator roles are
+ * provisioned now, and DMS keys a portal preset does not list are stripped
+ * from portal roles, which also repairs databases the old code already wrote.
  */
 export async function wireDmsRoleKeys(client: AnyClient): Promise<number> {
-  const roles = await client.role.findMany({
-    where: { isSystem: true },
+  const keys = buildPermissionRows().map((r) => r.key);
+  const dmsKeys = new Set(keys);
+  let updated = 0;
+
+  const admins = await client.role.findMany({
+    where: { name: 'Administrator' },
     select: { id: true, permissions: true },
   });
-  const keys = buildPermissionRows().map((r) => r.key);
-  let updated = 0;
-  for (const role of roles) {
+  for (const role of admins) {
     const current: string[] = Array.isArray(role.permissions) ? role.permissions : [];
     const merged = Array.from(new Set([...current, ...keys]));
     if (merged.length !== current.length) {
       await client.role.update({ where: { id: role.id }, data: { permissions: merged } });
+      updated += 1;
+    }
+  }
+
+  const portalGrants = new Map(PORTAL_ROLE_PRESETS.map((p) => [p.name, new Set<string>(p.permissions as readonly string[])]));
+  const portalRoles = await client.role.findMany({
+    where: { name: { in: [...portalGrants.keys()] }, isSystem: true },
+    select: { id: true, name: true, permissions: true },
+  });
+  for (const role of portalRoles) {
+    const allowed = portalGrants.get(role.name)!;
+    const current: string[] = Array.isArray(role.permissions) ? role.permissions : [];
+    const kept = current.filter((k) => !dmsKeys.has(k) || allowed.has(k));
+    if (kept.length !== current.length) {
+      await client.role.update({ where: { id: role.id }, data: { permissions: kept } });
       updated += 1;
     }
   }
