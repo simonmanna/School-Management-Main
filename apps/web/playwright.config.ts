@@ -13,6 +13,8 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 15_000 },
   retries: 0,
+  // The acceptance specs share one school's registers and accounts: run them in order.
+  workers: 1,
   reporter: [['list']],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5175',

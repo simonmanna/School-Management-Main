@@ -67,6 +67,9 @@ test('daily, period 1 and period 2 registers stay separate (D01)', async ({ page
       const made = await req;
       if (made) expect(made.url().includes('periodId=')).toBe(periodExpected);
       if (made && periodExpected) periodReads += 1;
+      if (made) await made.response();
+      // Let React apply the new register before reading it.
+      await page.waitForTimeout(300);
       await expect(firstPupilButtons().first()).toBeEnabled();
     });
 

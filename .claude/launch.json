@@ -44,6 +44,26 @@
       ],
       "port": 3003,
       "autoPort": false
+    },
+    {
+      "name": "api-acceptance",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--max-http-header-size=65536",
+        "scripts/acceptance/api.cjs"
+      ],
+      "port": 3013,
+      "autoPort": false
+    },
+    {
+      "name": "web-acceptance",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--max-http-header-size=65536",
+        "scripts/acceptance/web.mjs"
+      ],
+      "port": 5185,
+      "autoPort": false
     }
   ]
 }

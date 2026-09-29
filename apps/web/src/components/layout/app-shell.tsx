@@ -164,7 +164,8 @@ interface NavItem {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
-  permission?: string;
+  /** Required grant. An array means ANY of them (an org-wide or an own-scoped grant). */
+  permission?: string | readonly string[];
   badge?: string;
   /** Optional sub-grouping label rendered as a sub-header above the item (expanded mode only). */
   group?: string;
@@ -341,7 +342,9 @@ const NAV_SECTIONS: NavSection[] = [
     icon: ClipboardCheck,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.takeAttendance },
+      // Org-wide OR own-class: a class teacher takes their own register here too;
+      // the API scopes which classes (audit R07 acceptance, wave 17).
+      { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: [PERMISSIONS.school.takeAttendance, PERMISSIONS.school.ownAttendance] },
       { to: '/school/attendance/report', label: 'Attendance Report', icon: BarChart3, permission: PERMISSIONS.school.read },
       { to: '/school/attendance/statuses', label: 'Statuses', icon: Settings2 },
     ],
@@ -652,11 +655,18 @@ const VISIBLE_SECTIONS = NAV_SECTIONS.filter((s) => flagEnabled(s.flag));
  * typing a URL should not render a screen whose every request will 403.
  * Longest matching menu path wins; routes with no menu entry need none.
  */
-const ROUTE_PERMISSIONS: Array<[string, string]> = NAV_SECTIONS.flatMap((section) =>
-  section.items.filter((i) => i.permission).map((i) => [i.to, i.permission!] as [string, string]),
+type RequiredPermission = string | readonly string[];
+const ROUTE_PERMISSIONS: Array<[string, RequiredPermission]> = NAV_SECTIONS.flatMap((section) =>
+  section.items.filter((i) => i.permission).map((i) => [i.to, i.permission!] as [string, RequiredPermission]),
 ).sort((a, b) => b[0].length - a[0].length);
 
-export function routePermission(pathname: string): string | undefined {
+/** True when `has` satisfies the requirement (any one of an array). */
+export function satisfies(required: RequiredPermission | undefined, has: (p: string) => boolean): boolean {
+  if (!required) return true;
+  return typeof required === 'string' ? has(required) : required.some(has);
+}
+
+export function routePermission(pathname: string): RequiredPermission | undefined {
   const hit = ROUTE_PERMISSIONS.find(([to]) => pathname === to || pathname.startsWith(`${to}/`));
   return hit?.[1];
 }
@@ -809,7 +819,7 @@ export function AppShell() {
       <nav className="flex-1 space-y-1 overflow-y-auto px-1 py-1">
         {VISIBLE_SECTIONS.map((section, idx) => {
           const items = section.items.filter(
-                      (i) => flagEnabled(i.flag) && (!i.permission || hasPermission(i.permission)),
+                      (i) => flagEnabled(i.flag) && satisfies(i.permission, hasPermission),
                     );
           if (items.length === 0) return null;
           // In collapsed (icon-rail) mode the accordion is hidden, so always

@@ -19,6 +19,7 @@
  * Usage (dev only):
  *   pnpm --filter @erp/api exec tsx ../../scripts/seed-sunrise-academics.ts
  *   SEED_TEACHER_PASSWORD=...   optional; defaults to Teacher@123 for the dev database
+ *   SEED_STAFF_PASSWORD=...     optional; registrar/bursar/head logins, default Staff@123
  */
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -110,6 +111,37 @@ async function main() {
     log('teacher linked to HR and a staff profile');
   } else {
     staff = await prisma.staffProfile.findFirstOrThrow({ where: { organizationId: ORG, partnerId: employee.partnerId! } });
+  }
+
+  // ── Acceptance staff: one login per office role (Wave 17 R07) ────────────
+  // Distinct people so separation of duties is really exercised: the bursar
+  // requests a fee correction, the head teacher approves it, the registrar
+  // admits. Roles come from the shared presets, never a hand-written list.
+  const { SCHOOL_ROLE_PRESETS } = await import('../packages/shared/src/permissions');
+  const STAFF = [
+    { email: 'registrar@sunrise.test', role: 'Registrar', first: 'Rose', last: 'Nansubuga' },
+    { email: 'bursar@sunrise.test', role: 'Bursar', first: 'Peter', last: 'Ssempijja' },
+    { email: 'head@sunrise.test', role: 'Head Teacher', first: 'Joseph', last: 'Okot' },
+  ];
+  const STAFF_PASSWORD = process.env.SEED_STAFF_PASSWORD ?? 'Staff@123';
+  for (const s of STAFF) {
+    const preset = SCHOOL_ROLE_PRESETS.find((p: { name: string }) => p.name === s.role);
+    if (!preset) throw new Error(`No role preset ${s.role}`);
+    const role = await prisma.role.upsert({
+      where: { organizationId_name: { organizationId: ORG, name: s.role } },
+      update: {},
+      create: { organizationId: ORG, name: s.role, description: preset.description, isSystem: false, permissions: [...preset.permissions] },
+    });
+    const found = await prisma.user.findFirst({ where: { organizationId: ORG, email: s.email } });
+    if (!found) {
+      await prisma.user.create({
+        data: {
+          organizationId: ORG, email: s.email, passwordHash: await bcrypt.hash(STAFF_PASSWORD, 12),
+          firstName: s.first, lastName: s.last, isActive: true, roles: { connect: { id: role.id } },
+        } as any,
+      });
+      log(`${s.role} login ${s.email}`);
+    }
   }
 
   // ── P.1 A Mathematics for Term 3 ─────────────────────────────────────────
