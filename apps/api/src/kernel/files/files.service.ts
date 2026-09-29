@@ -1,7 +1,7 @@
 import { AuditService } from '../audit/audit.service';
 import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { createReadStream, createWriteStream, statSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve, dirname, extname } from 'node:path';
 import { createHash, randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -232,6 +232,17 @@ export class FilesService {
       throw new NotFoundException('File not found');
     }
     return file;
+  }
+
+  /**
+   * The stored bytes of one file in the current tenant, for server-side reuse
+   * (re-sending a scheduled report to the recipients it failed to reach). Not a
+   * download path: callers apply their own authorization first.
+   */
+  async readStored(fileId: string): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
+    const file = await this.prisma.client.file.findFirst({ where: { id: fileId, deletedAt: null } });
+    if (!file) throw new NotFoundException('File not found');
+    return { buffer: await readFile(join(this.localDir, file.storageKey)), filename: file.filename, contentType: file.contentType };
   }
 
   /** Stream the file from local disk. S3 driver would call GetObjectCommand here. */

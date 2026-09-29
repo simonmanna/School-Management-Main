@@ -166,6 +166,23 @@ export class ScheduledReportService {
           .create({ data: { organizationId: report.organizationId, reportId: report.id, scheduledFor: slot, status: 'running' } })
           .catch((err: any) => (err?.code === 'P2002' ? null : Promise.reject(err)));
         if (!claimed) continue;
+        // The run executes as its creator. With no creator, or a creator whose
+        // account is closed, it must not run at all — the permission lookup would
+        // refuse anyway; this records why in words the school can act on.
+        const creator = report.createdById
+          ? await this.prisma.raw.user.findFirst({ where: { id: report.createdById }, select: { isActive: true } })
+          : null;
+        if (!creator?.isActive) {
+          await this.prisma.raw.savedReportRun.update({
+            where: { id: claimed.id },
+            data: {
+              status: 'failed',
+              ranAt: new Date(),
+              error: 'Not run: the person who scheduled this report no longer has an active account. Re-save it under an active user.',
+            },
+          });
+          continue;
+        }
         await this.tenant.run(
           { organizationId: report.organizationId, userId: report.createdById ?? undefined },
           () => this.execute(report, claimed.id),
@@ -178,7 +195,21 @@ export class ScheduledReportService {
     return { ran };
   }
 
-  /** Render, store, email; the run row records the outcome either way. */
+  /**
+   * Render, store, email; the run row records the outcome either way.
+   *
+   * Audit R04: a run is only `succeeded` when every recipient was actually
+   * sent the report. `NotificationsService.send` reports a failed delivery as
+   * `delivered: false` rather than throwing, and the run used to ignore it —
+   * an SMTP outage produced a week of green "succeeded" runs that nobody
+   * received. Now each recipient's outcome is recorded:
+   *   succeeded       — file stored, every recipient sent (or none configured)
+   *   partial         — file stored, some recipients failed
+   *   delivery_failed — file stored, no recipient reached
+   *   failed          — the report could not be produced (or its creator may no longer run it)
+   * Failed recipients can be retried from the stored file without re-sending
+   * to anyone who already received it.
+   */
   private async execute(report: any, runId: string) {
     try {
       const rendered = await this.exporter.render(report.reportKey, {
@@ -194,23 +225,22 @@ export class ScheduledReportService {
         ownerType: 'SavedReportRun',
         ownerId: runId,
       });
-      for (const to of report.emailTo ?? []) {
-        await this.notifications
-          .send({
-            organizationId: report.organizationId,
-            channel: 'email',
-            category: 'reports',
-            recipient: { email: to },
-            title: `${report.name} — ${new Date().toISOString().slice(0, 10)}`,
-            body: `Your scheduled report "${report.name}" is attached (${rendered.rows} rows).`,
-            attachments: [{ filename: rendered.filename, content: rendered.buffer, contentType: rendered.contentType }],
-            dedupeKey: `saved-report:${runId}:${to}`,
-          })
-          .catch((err) => this.log.warn(`report ${report.id} email to ${to} failed: ${String(err)}`));
-      }
+      const deliveries = await this.deliver(report, runId, report.emailTo ?? [], {
+        filename: rendered.filename,
+        contentType: rendered.contentType,
+        buffer: rendered.buffer,
+        rows: rendered.rows,
+      });
+      const status = deliveryStatus(deliveries);
       return this.prisma.raw.savedReportRun.update({
         where: { id: runId },
-        data: { status: 'succeeded', ranAt: new Date(), fileId: stored.id, error: null },
+        data: {
+          status,
+          ranAt: new Date(),
+          fileId: stored.id,
+          deliveries: deliveries as any,
+          error: status === 'succeeded' ? null : failureSummary(deliveries),
+        },
       });
     } catch (err) {
       const message = (err as Error).message?.slice(0, 500) ?? String(err);
@@ -221,4 +251,92 @@ export class ScheduledReportService {
       });
     }
   }
+
+  /** Send one run's file to `recipients`; one result per recipient, never thrown. */
+  private async deliver(
+    report: any,
+    runId: string,
+    recipients: string[],
+    file: { filename: string; contentType: string; buffer: Buffer; rows?: number },
+    previous: ReportDelivery[] = [],
+  ): Promise<ReportDelivery[]> {
+    const out: ReportDelivery[] = [];
+    for (const to of recipients) {
+      const before = previous.find((d) => d.recipient === to);
+      const attempt = (before?.attempts ?? 0) + 1;
+      try {
+        const res = await this.notifications.send({
+          organizationId: report.organizationId,
+          channel: 'email',
+          category: 'reports',
+          recipient: { email: to },
+          title: `${report.name} — ${new Date().toISOString().slice(0, 10)}`,
+          body: `Your scheduled report "${report.name}" is attached${file.rows != null ? ` (${file.rows} rows)` : ''}.`,
+          attachments: [{ filename: file.filename, content: file.buffer, contentType: file.contentType }],
+          // One successful send per run and recipient: a retry never re-sends
+          // to someone who already has it (the key is released on failure).
+          dedupeKey: `saved-report:${runId}:${to}`,
+        });
+        if (res.delivered || res.duplicate) {
+          out.push({ recipient: to, status: 'sent', attempts: attempt, at: new Date().toISOString() });
+        } else {
+          const why = await this.notificationError(res.id);
+          out.push({ recipient: to, status: 'failed', attempts: attempt, at: new Date().toISOString(), error: why });
+        }
+      } catch (err) {
+        out.push({ recipient: to, status: 'failed', attempts: attempt, at: new Date().toISOString(), error: String((err as Error)?.message ?? err).slice(0, 300) });
+      }
+    }
+    return out;
+  }
+
+  private async notificationError(notificationId: string): Promise<string> {
+    if (!notificationId) return 'Not sent';
+    const row = await this.prisma.raw.notification.findFirst({ where: { id: notificationId }, select: { error: true, status: true } });
+    return row?.error?.slice(0, 300) ?? (row?.status === 'failed' ? 'Not sent (recipient opted out or provider refused)' : 'Not sent');
+  }
+
+  /**
+   * Re-send a run's stored file to the recipients it failed to reach. Those who
+   * already received it are not sent it again. Runs as the caller, who needs the
+   * same grants as running the report (checked by the controller and here).
+   */
+  async retryDeliveries(runId: string) {
+    const run = await this.prisma.client.savedReportRun.findFirst({ where: { id: runId }, include: { report: true } });
+    if (!run) throw new NotFoundException('Report run not found');
+    if (!['partial', 'delivery_failed'].includes(run.status)) {
+      throw new BadRequestException(`Only a run with failed deliveries can be retried (this one is ${run.status}).`);
+    }
+    if (!run.fileId) throw new BadRequestException('This run has no stored report to send.');
+    await this.runner.assertMayRun(this.registry.get(run.report.reportKey));
+    const previous = ((run as any).deliveries ?? []) as ReportDelivery[];
+    const failed = previous.filter((d) => d.status === 'failed').map((d) => d.recipient);
+    const file = await this.files.readStored(run.fileId);
+    const retried = await this.deliver(run.report, run.id, failed, file, previous);
+    const merged = previous.map((d) => retried.find((r) => r.recipient === d.recipient) ?? d);
+    const status = deliveryStatus(merged);
+    return this.prisma.client.savedReportRun.update({
+      where: { id: run.id },
+      data: { status, deliveries: merged as any, error: status === 'succeeded' ? null : failureSummary(merged) },
+    });
+  }
+}
+
+export interface ReportDelivery {
+  recipient: string;
+  status: 'sent' | 'failed';
+  attempts: number;
+  at: string;
+  error?: string;
+}
+
+export function deliveryStatus(deliveries: ReportDelivery[]): 'succeeded' | 'partial' | 'delivery_failed' {
+  const failed = deliveries.filter((d) => d.status === 'failed').length;
+  if (failed === 0) return 'succeeded';
+  return failed === deliveries.length ? 'delivery_failed' : 'partial';
+}
+
+function failureSummary(deliveries: ReportDelivery[]): string {
+  const failed = deliveries.filter((d) => d.status === 'failed');
+  return `Not delivered to ${failed.length} of ${deliveries.length}: ${failed.map((d) => `${d.recipient} (${d.error ?? 'failed'})`).join('; ')}`.slice(0, 500);
 }

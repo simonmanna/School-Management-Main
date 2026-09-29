@@ -2,13 +2,13 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BarChart3, BookOpen, CalendarDays, CalendarClock, ClipboardList, GraduationCap, Search,
-  Users, Wallet, Star, Play, Trash2,
+  Users, Wallet, Star, Play, Trash2, RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { SCHEDULE_PRESETS, useDeleteSavedReport, useReportCatalog, useRunSavedReport, useSavedReports } from '@/features/school/reports-api';
+import { RUN_STATUS_LABEL, SCHEDULE_PRESETS, useDeleteSavedReport, useReportCatalog, useRetryReportDeliveries, useRunSavedReport, useSavedReports } from '@/features/school/reports-api';
 import type { ReportCatalogEntry } from '@/features/school/reports-api';
 
 /**
@@ -206,6 +206,7 @@ function ReportGrid({ reports, favourites, onToggle }: {
 function SavedReportsSection() {
   const { data: saved } = useSavedReports();
   const runNow = useRunSavedReport();
+  const retry = useRetryReportDeliveries();
   const remove = useDeleteSavedReport();
   if (!saved?.length) return null;
   const when = (cron: string | null) => (cron ? SCHEDULE_PRESETS.find((p) => p.cron === cron)?.label ?? cron : 'Not scheduled');
@@ -223,11 +224,22 @@ function SavedReportsSection() {
                 <Link to={`/school/reports/${r.reportKey}`} className="font-medium hover:underline">{r.name}</Link>
                 <div className="text-xs text-muted-foreground">
                   {when(r.schedule)} · {r.format.toUpperCase()}{r.emailTo.length ? ` · to ${r.emailTo.join(', ')}` : ''}
-                  {last ? ` · last ${last.status} ${new Date(last.ranAt ?? last.scheduledFor).toLocaleString()}` : ''}
+                  {last ? ` · last run ${RUN_STATUS_LABEL[last.status] ?? last.status} ${new Date(last.ranAt ?? last.scheduledFor).toLocaleString()}` : ''}
                 </div>
-                {last?.status === 'failed' && last.error && <div className="text-xs text-destructive">{last.error}</div>}
+                {last && ['failed', 'partial', 'delivery_failed'].includes(last.status) && last.error && (
+                  <div className={`text-xs ${last.status === 'partial' ? 'text-amber-600' : 'text-destructive'}`}>{last.error}</div>
+                )}
               </div>
               <div className="flex gap-1">
+                {last && ['partial', 'delivery_failed'].includes(last.status) && (
+                  <Button size="sm" variant="outline" disabled={retry.isPending} onClick={async () => {
+                    try {
+                      const res = await retry.mutateAsync(last.id);
+                      if (res.status === 'succeeded') toast.success('Sent to everyone it had missed');
+                      else toast.warning(res.error ?? 'Some recipients still did not receive it');
+                    } catch (e: any) { toast.error(e?.response?.data?.message ?? 'Could not retry'); }
+                  }}><RefreshCw className="h-3.5 w-3.5" /> Retry failed</Button>
+                )}
                 <Button size="sm" variant="outline" disabled={runNow.isPending} onClick={async () => {
                   try { await runNow.mutateAsync(r.id); toast.success('Run started — it will be emailed'); }
                   catch { toast.error('Could not run the report'); }

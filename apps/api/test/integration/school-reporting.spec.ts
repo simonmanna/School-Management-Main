@@ -47,6 +47,7 @@ import { ReportRegistryService } from '../../src/modules/core/reporting/report-r
 import { ReportRunnerService } from '../../src/modules/core/reporting/report-runner.service';
 import { CashSessionService } from '../../src/modules/accounting/treasury/cash-session.service';
 import { ScheduledReportService } from '../../src/modules/core/reporting/scheduled-report.service';
+import { NotificationsService } from '../../src/kernel/notifications/notifications.service';
 import { PermissionResolverService } from '../../src/kernel/auth/permission-resolver.service';
 import { placeInClass } from './_placement';
 
@@ -381,22 +382,106 @@ describeDb('integration: school reporting', () => {
       schedule: '0 7 * * 1', format: 'csv', emailTo: ['head@school.ug'],
     }));
 
+    // A scheduled run executes as its creator, who must be a live account.
+    const creator = await raw.user.create({
+      data: { organizationId, email: `head-${Date.now()}@school.test`, passwordHash: 'x', firstName: 'Head', lastName: 'Teacher' },
+    });
+    await raw.savedReport.update({ where: { id: report.id }, data: { createdById: creator.id } });
+
     // Grants at run time come from the creator; this suite resolves grants from
     // the tenant context, so give the scheduled run the creator's grants.
     const grants = jest.spyOn(moduleRef.get(PermissionResolverService), 'grantedForCaller').mockResolvedValue(ALL_GRANTS);
+    // No SMTP in tests: make the mailer deliver, so this checks the run itself.
+    const send = jest.spyOn(moduleRef.get(NotificationsService), 'send').mockResolvedValue({ id: 'n1', delivered: true });
     try {
       const future = new Date(Date.now() + 8 * 86_400_000); // at least one Monday 07:00 has passed
       await saved.tick(future);
       await saved.tick(future); // same slot: claimed already, nothing new
     } finally {
       grants.mockRestore();
+      send.mockRestore();
     }
     const runs = await raw.savedReportRun.findMany({ where: { reportId: report.id } });
     expect(runs).toHaveLength(1);
     expect(runs[0].status).toBe('succeeded');
+    expect(runs[0].deliveries).toEqual([expect.objectContaining({ recipient: 'head@school.ug', status: 'sent' })]);
     const file = await raw.file.findFirst({ where: { id: runs[0].fileId! } });
     expect(file?.contentType).toMatch(/csv/);
     expect(Number(file?.byteSize)).toBeGreaterThan(20);
+  });
+
+  it('Wave 17 R04: a failed email is recorded per recipient and retried only where it failed', async () => {
+    const saved = moduleRef.get(ScheduledReportService);
+    const notifications = moduleRef.get(NotificationsService);
+    const report: any = await asUser(() => saved.create({
+      name: 'Delivery truth', reportKey: 'student.register', parameters: { termId, classId: classAId },
+      format: 'csv', emailTo: ['head@school.ug', 'bursar@school.ug'],
+    }));
+    const grants = jest.spyOn(moduleRef.get(PermissionResolverService), 'grantedForCaller').mockResolvedValue(ALL_GRANTS);
+    const sentTo: string[] = [];
+    const mailer = (fail: (to: string) => boolean) =>
+      jest.spyOn(notifications, 'send').mockImplementation(async (input: any) => {
+        const to = input.recipient.email;
+        if (fail(to)) return { id: '', delivered: false };
+        sentTo.push(to);
+        return { id: 'n', delivered: true };
+      });
+    try {
+      // Both fail: the file exists, nobody got it.
+      let m = mailer(() => true);
+      const both: any = await asUser(() => saved.runNow(report.id));
+      m.mockRestore();
+      expect(both.status).toBe('delivery_failed');
+      expect(both.fileId).toBeTruthy();
+      expect(both.error).toMatch(/Not delivered to 2 of 2/);
+
+      // One fails.
+      m = mailer((to) => to === 'bursar@school.ug');
+      const one: any = await asUser(() => saved.runNow(report.id));
+      m.mockRestore();
+      expect(one.status).toBe('partial');
+      expect(one.deliveries).toEqual([
+        expect.objectContaining({ recipient: 'head@school.ug', status: 'sent' }),
+        expect.objectContaining({ recipient: 'bursar@school.ug', status: 'failed', attempts: 1 }),
+      ]);
+
+      // Retry sends ONLY to the bursar, and the run becomes succeeded.
+      sentTo.length = 0;
+      m = mailer(() => false);
+      const retried: any = await asUser(() => saved.retryDeliveries(one.id));
+      m.mockRestore();
+      expect(sentTo).toEqual(['bursar@school.ug']);
+      expect(retried.status).toBe('succeeded');
+      expect(retried.deliveries.find((d: any) => d.recipient === 'bursar@school.ug')).toMatchObject({ status: 'sent', attempts: 2 });
+
+      // A run that fully succeeded cannot be "retried" into a second send.
+      await expect(asUser(() => saved.retryDeliveries(one.id))).rejects.toThrow(/Only a run with failed deliveries/);
+    } finally {
+      grants.mockRestore();
+    }
+  });
+
+  it('Wave 17 R04: a schedule whose creator was deactivated does not run', async () => {
+    const saved = moduleRef.get(ScheduledReportService);
+    const report: any = await asUser(() => saved.create({
+      name: 'Orphan schedule', reportKey: 'student.register', parameters: { termId, classId: classAId },
+      schedule: '0 6 * * 2', format: 'csv', emailTo: ['head@school.ug'],
+    }));
+    const gone = await raw.user.create({
+      data: { organizationId, email: `left-${Date.now()}@school.test`, passwordHash: 'x', firstName: 'Former', lastName: 'Head', isActive: false },
+    });
+    await raw.savedReport.update({ where: { id: report.id }, data: { createdById: gone.id } });
+    const send = jest.spyOn(moduleRef.get(NotificationsService), 'send');
+    try {
+      await saved.tick(new Date(Date.now() + 8 * 86_400_000));
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+    }
+    const runs = await raw.savedReportRun.findMany({ where: { reportId: report.id } });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ status: 'failed', fileId: null });
+    expect(runs[0].error).toMatch(/no longer has an active account/);
   });
 
   it('the enrolment summary reports capacity and flags an over-subscribed class', async () => {

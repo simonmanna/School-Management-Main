@@ -4574,9 +4574,12 @@ model SavedReportRun {
   reportId       String
   scheduledFor   DateTime
   ranAt          DateTime?
-  status         String    @default("pending") // pending | running | succeeded | failed
+  /// pending | running | succeeded | partial | delivery_failed | failed (Wave 17 R04)
+  status         String    @default("pending")
   fileId         String? // -> File.id (CSV or PDF)
   error          String?
+  /// Wave 17 R04: one entry per recipient — { recipient, status: sent|failed, attempts, at, error? }.
+  deliveries     Json?
 
   report SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 

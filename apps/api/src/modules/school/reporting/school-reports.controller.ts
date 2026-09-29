@@ -76,6 +76,13 @@ export class SchoolReportsController {
     return this.saved.runNow(id);
   }
 
+  /** R04: re-send a run's stored file to the recipients it did not reach. */
+  @Post('saved/runs/:runId/retry-deliveries')
+  @RequirePermissions(PERMISSIONS.school.readReports, PERMISSIONS.school.exportReports)
+  retryDeliveries(@Param('runId') runId: string) {
+    return this.saved.retryDeliveries(runId);
+  }
+
   /** Only the reports this caller may actually run. */
   @Get('catalog')
   @RequirePermissions(PERMISSIONS.school.readReports)

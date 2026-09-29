@@ -136,8 +136,28 @@ export interface SavedReport {
   schedule: string | null;
   format: 'csv' | 'xlsx' | 'pdf';
   emailTo: string[];
-  runs: Array<{ id: string; scheduledFor: string; ranAt: string | null; status: string; error: string | null }>;
+  runs: SavedReportRun[];
 }
+
+/** R04: `succeeded` means every recipient got it; partial/delivery_failed say who did not. */
+export interface SavedReportRun {
+  id: string;
+  scheduledFor: string;
+  ranAt: string | null;
+  status: 'pending' | 'running' | 'succeeded' | 'partial' | 'delivery_failed' | 'failed' | string;
+  error: string | null;
+  fileId?: string | null;
+  deliveries?: Array<{ recipient: string; status: 'sent' | 'failed'; attempts: number; at: string; error?: string }> | null;
+}
+
+export const RUN_STATUS_LABEL: Record<string, string> = {
+  pending: 'waiting',
+  running: 'running',
+  succeeded: 'delivered',
+  partial: 'partly delivered',
+  delivery_failed: 'produced but not delivered',
+  failed: 'failed',
+};
 
 /** Friendly schedules; the API takes cron in the school's time zone. */
 export const SCHEDULE_PRESETS: Array<{ label: string; cron: string }> = [
@@ -162,6 +182,13 @@ export function useDeleteSavedReport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => (await api.delete(`${R}/saved/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'saved'] }),
+  });
+}
+export function useRetryReportDeliveries() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string) => (await api.post<SavedReportRun>(`${R}/saved/runs/${runId}/retry-deliveries`)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reports', 'saved'] }),
   });
 }
