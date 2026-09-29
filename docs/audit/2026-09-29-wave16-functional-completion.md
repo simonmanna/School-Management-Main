@@ -51,6 +51,7 @@ About 40 % of the audit's findings were already satisfied. Each was verified in 
 
 - Unit: 141 suites, 2 461 tests pass. Typecheck is clean for api, web and portal. Lint shows 0 errors.
 - New or extended integration specs: `mobile-money-callback`, `wave16-attendance-unique`, `wave16-documents`, `wave16-public-admissions`, `wave16-parent-portal`, `wave16-hostel`, plus additions to `school-fees-concurrency`, `school-result-integrity`, `school-reporting`, `school-exam-phase5` and `school-statutory-phase6`.
+- Full integration suite, run in 3 shards: 91 suites and 707 tests pass, 9 are skipped by design. One run had a load flake: `school-grade-sod` hit Prisma's 5 s transaction timeout while the dev servers were running. The spec passes 7/7 when rerun alone.
 - Local DB: `prisma migrate diff --exit-code` reports no difference; `assert-db-constraints.mjs` passes.
 - Browser (local previews): `/apply` renders and its options endpoint returns 200. The teacher portal home, My classes and Register load the real class and roster.
 - Admin web pages (hostel, certificates, receipts, schedules) were **not** clicked through. The seeded demo admin was locked out locally. They are covered by typecheck and integration specs only.
