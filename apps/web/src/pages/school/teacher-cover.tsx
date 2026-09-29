@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import { CalendarX2, UserCheck } from 'lucide-react';
 import { useStaff, useAffectedLessons, useAssignSubstitute } from '@/features/school/api';
@@ -12,7 +13,7 @@ import { notify } from '@/lib/notify';
 
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const err = (e: any) => notify.error(e?.response?.data?.message ?? 'Something went wrong');
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 
 /**
  * Teacher cover — what an absence breaks, and who picks it up.

@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarDays, ClipboardList, FileSpreadsheet, Plus, Settings2, Users } from 'lucide-react';
@@ -184,7 +185,7 @@ function NewExamDialog({
   const createExam = useCreateExam();
   const createType = useCreateExamType();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = schoolTodayNow();
   const [name, setName] = useState('');
   const [examTypeId, setExamTypeId] = useState('');
   const [term, setTerm] = useState(termId);

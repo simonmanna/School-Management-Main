@@ -9,6 +9,7 @@
  *   E2  Income vs budget              is the term tracking the plan
  *   D1  Discounts                     sibling and staff-child rates
  */
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import {
   Printer,
@@ -60,7 +61,7 @@ import { exportCSV } from '@/lib/export-csv';
 import { money, sel, Stat, apiError } from './fees-shared';
 import { JournalTrail } from './fees-integrity';
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 
 /* ══════════════════════ B2 · Receipts ══════════════════════ */
 

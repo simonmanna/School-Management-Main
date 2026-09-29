@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useState } from 'react';
 import { BedDouble, BedSingle, DoorOpen, Home, LogOut, Plus, Wrench } from 'lucide-react';
 import { useStudents } from '@/features/school/api';
@@ -14,7 +15,7 @@ import { useHasPermission } from '@/features/school/rbac/use-has-permission';
 import { PERMISSIONS } from '@erp/shared';
 
 const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 const msg = (e: unknown, fallback: string) => (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback;
 
 /**

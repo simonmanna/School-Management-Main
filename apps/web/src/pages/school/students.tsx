@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { CustomFieldsSection, missingRequired, pickCustomFieldValues, useCustomFieldDefs } from '@/features/school/custom-fields';
 import { formatCurrency } from '@/lib/utils';
 import { useMemo, useState } from 'react';
@@ -80,7 +81,7 @@ export function SchoolStudentsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ enrollmentDate: new Date().toISOString().slice(0, 10) });
+    setForm({ enrollmentDate: schoolTodayNow() });
     setCf({});
     setOpen(true);
   };

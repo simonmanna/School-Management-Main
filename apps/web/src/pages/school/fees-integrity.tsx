@@ -7,6 +7,7 @@
  *   MomoClearingCard      what the provider still holds, and recording payouts
  *   SchoolTermClosePage   term-scoped close preview, close and reopen
  */
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -496,7 +497,7 @@ export function MomoClearingCard() {
 
   const [provider, setProvider] = useState<'mtn' | 'airtel'>('mtn');
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState({ reference: '', date: new Date().toISOString().slice(0, 10), charges: '', gross: '', bankAccountId: '', notes: '' });
+  const [form, setForm] = useState({ reference: '', date: schoolTodayNow(), charges: '', gross: '', bankAccountId: '', notes: '' });
 
   const position = positions?.find((p) => p.provider === provider);
   const pickedRows = (position?.unsettled ?? []).filter((r) => picked[r.id]);

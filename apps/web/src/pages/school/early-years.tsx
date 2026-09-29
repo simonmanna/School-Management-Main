@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Baby, CheckCircle2, ClipboardList, DoorOpen, Send, ShieldCheck, Syringe } from 'lucide-react';
 import { useClasses } from '@/features/school/api';
@@ -34,7 +35,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 
 /**
  * The nursery's day, in one place.

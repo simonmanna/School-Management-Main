@@ -3,6 +3,7 @@ import { Clock, PencilLine, ChevronRight, FileCheck2, ClipboardCheck, ClipboardL
 import { useAuthStore } from '@/stores/auth.store';
 import { teacherClasses, useMyAssessments, useRegister, useTeacherDashboard } from '@/lib/portal-api';
 import { Badge, Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, Stat } from '@/components/ui';
+import { schoolToday } from '@/lib/utils';
 
 /**
  * The teacher's day, from home.
@@ -93,7 +94,7 @@ function RegistersToday({ classes }: { classes: Array<{ id: string; name: string
 }
 
 function RegisterLine({ classId, name }: { classId: string; name: string }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = schoolToday(useAuthStore((s) => s.organization?.timezone));
   const { data, isLoading } = useRegister(classId, today);
   const taken = (data?.length ?? 0) > 0;
   return (

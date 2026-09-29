@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { formatCurrency } from '@/lib/utils';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -52,7 +53,7 @@ import { notify } from '@/lib/notify';
 // The school's own currency (Organization.currencyCode), not a hard-coded UGX.
 const money = (n: number | string | null | undefined) => formatCurrency(n);
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 
 export function SchoolMealsPage() {
   const [searchParams] = useSearchParams();
@@ -1006,7 +1007,7 @@ function POSTab() {
 
 function ReportsTab() {
   const [days, setDays] = useState(30);
-  const to = new Date().toISOString().slice(0, 10);
+  const to = schoolTodayNow();
   const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const { data, isLoading } = useMealReports(from, to);
 

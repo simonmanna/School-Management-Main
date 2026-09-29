@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
 import { BarChart3, Printer } from 'lucide-react';
 import {
@@ -28,7 +29,7 @@ export function SchoolAttendanceReportPage() {
   const colorOf = (c: string) => byCode[c]?.color ?? '#6b7280';
 
   const [classId, setClassId] = useState('');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = schoolTodayNow();
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
 

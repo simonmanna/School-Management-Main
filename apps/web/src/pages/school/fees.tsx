@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Play, TrendingDown, GraduationCap, Gavel, RotateCcw, HeartHandshake, PiggyBank, Clock } from 'lucide-react';
@@ -536,7 +537,7 @@ function SponsorsTab() {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [capAmount, setCapAmount] = useState('');
-  const [validFrom, setValidFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [validFrom, setValidFrom] = useState(schoolTodayNow());
 
   const studentOptions = (students.data?.data ?? []).map((s: any) => ({ value: s.id, label: s.admissionNo ? `${s.admissionNo} · ${s.firstName} ${s.lastName}` : s.id }));
   const sponsorOptions = (partners?.data ?? []).map((p: any) => ({ value: p.id, label: p.name }));

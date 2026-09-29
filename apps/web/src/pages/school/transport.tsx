@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { formatCurrency } from '@/lib/utils';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -27,7 +28,7 @@ import {
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 // The school's own currency (Organization.currencyCode), not a hard-coded UGX.
 const money = (n: number | string | null | undefined) => formatCurrency(n);
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => schoolTodayNow();
 
 export function SchoolTransportPage() {
   const [params] = useSearchParams();

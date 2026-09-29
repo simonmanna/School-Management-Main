@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useState } from 'react';
 import { HandCoins, ChevronRight, ChevronLeft, Check, Layers, Wand2, Plus, Play, Eraser, Trash2, Printer, FileText, Receipt } from 'lucide-react';
 import {
@@ -125,7 +126,7 @@ export function SchoolFeesCollectPage() {
   const [studentId, setStudentId] = useState('');
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<'cash' | 'bank' | 'mobile_money' | 'card'>('cash');
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(schoolTodayNow());
   const [reference, setReference] = useState('');
   // allocations: invoiceId -> amount typed by the user
   const [alloc, setAlloc] = useState<Record<string, number>>({});
@@ -148,7 +149,7 @@ export function SchoolFeesCollectPage() {
 
   const reset = () => {
     setStep('details'); setStudentId(''); setAmount(''); setReference('');
-    setMethod('cash'); setPaymentDate(new Date().toISOString().slice(0, 10)); setAlloc({}); setSearch('');
+    setMethod('cash'); setPaymentDate(schoolTodayNow()); setAlloc({}); setSearch('');
   };
 
   const setAllocFor = (id: string, value: number) => {

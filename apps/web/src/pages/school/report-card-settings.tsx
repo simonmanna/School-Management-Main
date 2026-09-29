@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check, ChevronDown, ChevronUp, Download, Eye, FileText, GripVertical, Image, LayoutGrid,
@@ -167,7 +168,7 @@ export function SchoolReportCardSettingsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `report-card-design-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `report-card-design-${schoolTodayNow()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };

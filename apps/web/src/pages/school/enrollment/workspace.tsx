@@ -1,3 +1,4 @@
+import { schoolTodayNow } from '@/lib/format';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -426,7 +427,7 @@ function MoveDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose: () =
   const [sectionId, setSectionId] = useState<string | undefined>(row.currentPlacement?.sectionId ?? undefined);
   const [reason, setReason] = useState('');
   const [movementReason, setMovementReason] = useState<MovementReason>('SECTION_CHANGE');
-  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveFrom, setEffectiveFrom] = useState(schoolTodayNow());
   const [preview, setPreview] = useState<PlacementPreview | null>(null);
 
   const { data: options } = useGroupingOptions(cohortId || undefined);
@@ -580,7 +581,7 @@ function StatusDialog({
 }) {
   const copy = STATUS_COPY[intent];
   const [reason, setReason] = useState('');
-  const [effectiveAt, setEffectiveAt] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveAt, setEffectiveAt] = useState(schoolTodayNow());
   const mut = useEnrollmentAction(intent);
 
   const submit = async () => {
@@ -631,7 +632,7 @@ function ReinstateDialog({ row, onClose }: { row: StudentEnrollmentRow; onClose:
   const [cohortId, setCohortId] = useState('');
   const [sectionId, setSectionId] = useState<string | undefined>();
   const [reason, setReason] = useState('');
-  const [effectiveAt, setEffectiveAt] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveAt, setEffectiveAt] = useState(schoolTodayNow());
   const mut = useChangeEnrollmentStatus();
 
   useEffect(() => {
@@ -987,7 +988,7 @@ function EnrolDialog({ yearId, onClose }: { yearId: string; onClose: () => void 
   const [sectionId, setSectionId] = useState<string | undefined>();
   const [termId, setTermId] = useState('');
   const [rollNumber, setRollNumber] = useState('');
-  const [admissionDate, setAdmissionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [admissionDate, setAdmissionDate] = useState(schoolTodayNow());
   const [late, setLate] = useState(false);
 
   const { data: students } = useStudents({ search: studentSearch || undefined, page: 1, pageSize: 25 });
@@ -1135,7 +1136,7 @@ function RosterTab({ yearId }: { yearId: string }) {
   const labels = useTerminology();
   const { data: cohorts } = useClassCohorts({ academicYearId: yearId || undefined });
   const [cohortId, setCohortId] = useState('');
-  const [at, setAt] = useState(new Date().toISOString().slice(0, 10));
+  const [at, setAt] = useState(schoolTodayNow());
   const { data: roster, isLoading } = useRoster(cohortId || undefined, { at: new Date(at).toISOString() });
 
   return (
