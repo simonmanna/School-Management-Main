@@ -7,50 +7,51 @@
  * it is Tuesday. This mirrors `features/pos/offline-queue.ts`: writes go to
  * IndexedDB when the server is unreachable and replay in order when it returns.
  *
- * Two differences from the POS queue, both because of what is being queued:
+ * Differences from the POS queue, because of what is being queued:
  *
  *  - A register and a mark are LAST-WRITE-WINS per cell, not an append-only
  *    ledger. Queuing two edits of the same pupil's mark and replaying both is
  *    pointless work and can resurrect a value the teacher already corrected, so
  *    entries are keyed by what they address and a later edit replaces an
  *    earlier pending one.
- *  - There is no money here, so a 4xx is not something to preserve for a
- *    manager to reconcile. It is told to the teacher and dropped, because the
- *    common 4xx is the paper being locked while they were offline, and the
- *    honest outcome is "this did not save", not a queue that never drains.
+ *  - Every entry belongs to the school and staff member who typed it (audit
+ *    R02). Only that person, signed in to that school, sees or sends it; a
+ *    refused entry is kept with the reason until they discard it. The rules
+ *    live in `offline-queue-core.ts`.
  *
- * Public surface mirrors the POS one:
- *   enqueue(entry) · listPending() · replayAll() · useSchoolOfflineQueue()
+ * Public surface:
+ *   enqueue(entry) · listPending() · replayAll() · retry(id) · discard(id)
+ *   · useSchoolOfflineQueue()
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getApiBaseUrl } from '@/lib/api';
+import { useAuthStore } from '@/stores/auth.store';
+import {
+  countOthers,
+  discardOrphaned,
+  discardOwn,
+  listOwn,
+  makeEntry,
+  replayOwn,
+  retryOwn,
+  toOrphan,
+  type NewQueuedWrite,
+  type QueueOwner,
+  type QueueStore,
+  type QueuedWrite,
+  type ReplayResult,
+} from './offline-queue-core';
 
-export type QueuedKind = 'attendance' | 'mark';
-
-export interface QueuedWrite {
-  /**
-   * Identity of the thing being written — pupil + paper, or pupil + date.
-   * A second edit of the same cell replaces the first rather than stacking.
-   */
-  key: string;
-  kind: QueuedKind;
-  endpoint: string;
-  payload: unknown;
-  createdAt: number;
-  attempts: number;
-  lastError?: string;
-  /** Replay follows this, not IndexedDB key order. */
-  seq: number;
-  /** Human label for the pending badge — "P4 West · Mathematics". */
-  label?: string;
-}
+export type { QueuedKind, QueuedWrite, QueuedState, ReplayResult } from './offline-queue-core';
 
 /* ── IndexedDB ────────────────────────────────────────────────────────────── */
 
 const DB_NAME = 'school-offline-queue';
-const DB_VERSION = 1;
-const STORE = 'pending-writes';
+/** v2 (R02): entries are keyed by owner + key and carry their author. */
+const DB_VERSION = 2;
+const LEGACY_STORE = 'pending-writes';
+const STORE = 'owned-writes';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -64,8 +65,18 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE, { keyPath: 'key' });
+      const tx = req.transaction!;
+      const target = db.objectStoreNames.contains(STORE)
+        ? tx.objectStore(STORE)
+        : db.createObjectStore(STORE, { keyPath: 'id' });
+      if (db.objectStoreNames.contains(LEGACY_STORE)) {
+        // Rows from before R02 have no author. Keep them as orphans nobody can
+        // send, rather than guessing whose they were.
+        const legacy = tx.objectStore(LEGACY_STORE).getAll();
+        legacy.onsuccess = () => {
+          (legacy.result as Record<string, unknown>[]).forEach((row, i) => target.put(toOrphan(row, i)));
+          db.deleteObjectStore(LEGACY_STORE);
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -74,34 +85,45 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-async function idbPut(value: QueuedWrite): Promise<void> {
-  const db = await openDb();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(value);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+const idbStore: QueueStore = {
+  async put(value) {
+    const db = await openDb();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(value);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+  async all() {
+    const db = await openDb();
+    return new Promise<QueuedWrite[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve(req.result as QueuedWrite[]);
+      req.onerror = () => reject(req.error);
+    });
+  },
+  async del(id) {
+    const db = await openDb();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  },
+};
+
+/* ── session owner ────────────────────────────────────────────────────────── */
+
+function currentOwner(): QueueOwner | null {
+  const { user, organization } = useAuthStore.getState();
+  return user?.id && organization?.id ? { organizationId: organization.id, userId: user.id } : null;
 }
 
-async function idbAll(): Promise<QueuedWrite[]> {
-  const db = await openDb();
-  return new Promise<QueuedWrite[]>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).getAll();
-    req.onsuccess = () => resolve(req.result as QueuedWrite[]);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function idbDel(key: string): Promise<void> {
-  const db = await openDb();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).delete(key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+function changed() {
+  window.dispatchEvent(new CustomEvent('school-queue-changed'));
 }
 
 /* ── server reachability ──────────────────────────────────────────────────── */
@@ -129,96 +151,92 @@ export async function checkServerOnline(): Promise<boolean> {
 
 let seqCounter = Date.now();
 
-export async function enqueue(entry: Omit<QueuedWrite, 'createdAt' | 'attempts' | 'seq'>): Promise<void> {
-  await idbPut({ ...entry, createdAt: Date.now(), attempts: 0, seq: seqCounter++ });
-  window.dispatchEvent(new CustomEvent('school-queue-changed'));
+/** Save a write on this device, stamped with the signed-in school and staff member. */
+export async function enqueue(entry: NewQueuedWrite): Promise<void> {
+  const owner = currentOwner();
+  if (!owner) throw new Error('Sign in again to save work on this device.');
+  await idbStore.put(makeEntry(owner, entry, seqCounter++));
+  changed();
 }
 
+/** The signed-in person's own saved entries. */
 export async function listPending(): Promise<QueuedWrite[]> {
   try {
-    const all = await idbAll();
-    return all.sort((a, b) => a.seq - b.seq);
+    return await listOwn(idbStore, currentOwner());
   } catch {
     return [];
   }
 }
 
-export interface ReplayResult {
-  sent: number;
-  rejected: Array<{ label?: string; reason: string }>;
-  stillPending: number;
+/** Send the signed-in person's own entries; nobody else's are touched. */
+export async function replayAll(): Promise<ReplayResult> {
+  const result = await replayOwn(idbStore, currentOwner(), (endpoint, payload) => api.post(endpoint, payload));
+  changed();
+  return result;
 }
 
-/**
- * Replay everything pending, oldest first.
- *
- * A 4xx means the server refused this write on its merits — the paper is
- * locked, the marks are approved, the pupil moved class. Retrying will never
- * succeed, so it is dropped from the queue and reported. A network failure
- * leaves the entry alone to try again later.
- */
-export async function replayAll(): Promise<ReplayResult> {
-  const pending = await listPending();
-  if (pending.length === 0) return { sent: 0, rejected: [], stillPending: 0 };
+export async function retry(id: string): Promise<void> {
+  await retryOwn(idbStore, currentOwner(), id);
+  changed();
+}
 
-  let sent = 0;
-  const rejected: Array<{ label?: string; reason: string }> = [];
+export async function discard(id: string): Promise<void> {
+  await discardOwn(idbStore, currentOwner(), id);
+  changed();
+}
 
-  for (const item of pending) {
-    try {
-      await api.post(item.endpoint, item.payload);
-      await idbDel(item.key);
-      sent += 1;
-    } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } })?.response?.status;
-      if (status && status >= 400 && status < 500) {
-        const reason =
-          (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          'The server would not accept this.';
-        rejected.push({ label: item.label, reason: String(reason) });
-        await idbDel(item.key);
-      } else {
-        // Still offline, or the server is down. Leave it queued and stop —
-        // replaying the rest would just pile up the same failure.
-        await idbPut({ ...item, attempts: item.attempts + 1, lastError: String(status ?? 'network') });
-        break;
-      }
-    }
-  }
-
-  window.dispatchEvent(new CustomEvent('school-queue-changed'));
-  const left = await listPending();
-  return { sent, rejected, stillPending: left.length };
+export async function discardUnattributed(): Promise<number> {
+  const n = await discardOrphaned(idbStore);
+  changed();
+  return n;
 }
 
 /* ── hook ─────────────────────────────────────────────────────────────────── */
 
 /**
- * Watches connectivity and drains the queue when the server comes back.
- *
- * `online` reflects the API being reachable, which is what actually decides
- * whether a teacher's next keystroke saves.
+ * Watches connectivity and drains the signed-in person's queue when the server
+ * comes back or when they sign in. `othersCount` is how many entries on this
+ * device belong to someone else — a number only, never their content.
  */
 export function useSchoolOfflineQueue(onReplayed?: (r: ReplayResult) => void) {
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState<QueuedWrite[]>([]);
+  const [othersCount, setOthersCount] = useState(0);
   const replaying = useRef(false);
+  const onlineRef = useRef(true);
+  const onReplayedRef = useRef(onReplayed);
+  onReplayedRef.current = onReplayed;
+  const userId = useAuthStore((s) => s.user?.id);
+  const organizationId = useAuthStore((s) => s.organization?.id);
 
   const refresh = useCallback(async () => {
-    setPending(await listPending());
+    try {
+      const owner = currentOwner();
+      setPending(await listOwn(idbStore, owner));
+      setOthersCount(await countOthers(idbStore, owner));
+    } catch {
+      setPending([]);
+      setOthersCount(0);
+    }
   }, []);
 
   const drain = useCallback(async () => {
-    if (replaying.current) return;
+    if (replaying.current || !currentOwner()) return;
     replaying.current = true;
     try {
       const result = await replayAll();
       await refresh();
-      if (result.sent > 0 || result.rejected.length > 0) onReplayed?.(result);
+      if (result.sent > 0 || result.rejected.length > 0 || result.authBlocked > 0) onReplayedRef.current?.(result);
     } finally {
       replaying.current = false;
     }
-  }, [onReplayed, refresh]);
+  }, [refresh]);
+
+  // A different person (or school) signed in: show their queue, and send it if we can.
+  useEffect(() => {
+    void refresh();
+    if (userId && organizationId && onlineRef.current) void drain();
+  }, [userId, organizationId, refresh, drain]);
 
   useEffect(() => {
     let cancelled = false;
@@ -226,15 +244,14 @@ export function useSchoolOfflineQueue(onReplayed?: (r: ReplayResult) => void) {
     const probe = async () => {
       const up = await checkServerOnline();
       if (cancelled) return;
-      setOnline((was) => {
-        // Only drain on the transition back up, not on every poll.
-        if (!was && up) void drain();
-        return up;
-      });
+      const was = onlineRef.current;
+      onlineRef.current = up;
+      setOnline(up);
+      // Only drain on the transition back up, not on every poll.
+      if (!was && up) void drain();
     };
 
     void probe();
-    void refresh();
 
     const interval = window.setInterval(probe, 15_000);
     const onChange = () => void refresh();
@@ -251,5 +268,5 @@ export function useSchoolOfflineQueue(onReplayed?: (r: ReplayResult) => void) {
     };
   }, [drain, refresh]);
 
-  return { online, pending, replay: drain, refresh };
+  return { online, pending, othersCount, replay: drain, refresh, retry, discard, discardUnattributed };
 }
