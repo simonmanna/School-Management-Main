@@ -223,7 +223,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
                       <td className="px-4 py-2 font-mono text-xs">{s.admissionNo}</td>
                       <td className="px-4 py-2">{s.partner?.name ?? '—'}</td>
                       <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUS_LIST.map((st) => (
-                        <button key={st.code} disabled={!ready} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
+                        <button key={st.code} type="button" aria-pressed={m.status === st.code} aria-label={`${st.label} — ${s.partner?.name ?? s.admissionNo}`} disabled={!ready} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
                           className={`rounded px-2 py-1 text-xs capitalize ${m.status === st.code ? '' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`} style={m.status === st.code ? badgeStyle(st.code) : undefined}>{st.label}</button>
                       ))}</div></td>
                       <td className="px-4 py-2">
