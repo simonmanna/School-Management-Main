@@ -8,7 +8,7 @@
  *    DocumentLine, so the GL posting was skipped entirely.
  *
  * Fix (this PR):
- *  - A PenaltyRun row is created with `cronDate = today(UTC)`. A unique
+ *  - A PenaltyRun row is created with `cronDate = today` in the school's time zone. A unique
  *    constraint on (organizationId, scheduleId, cronDate) makes a
  *    second run on the same day impossible.
  *  - For every overdue source Document, a PenaltyAssessment row is
@@ -147,18 +147,19 @@ describe('BillingService.generatePenaltyRun — idempotency (P0-2, C2 + H6)', ()
     expect(mocks.penaltyRunCreate).toHaveBeenCalledTimes(1);
   });
 
-  it('sets cronDate to today (UTC) on the PenaltyRun', async () => {
-    const { service, mocks } = makeService();
-    await service.generatePenaltyRun('sch_1');
-    const call = mocks.penaltyRunCreate.mock.calls[0][0];
-    expect(call.data.cronDate).toBeDefined();
-    // cronDate is a Date instance with UTC hours zeroed out.
-    expect(call.data.cronDate).toBeInstanceOf(Date);
-    const now = new Date();
-    expect(call.data.cronDate.getUTCFullYear()).toBe(now.getUTCFullYear());
-    expect(call.data.cronDate.getUTCMonth()).toBe(now.getUTCMonth());
-    expect(call.data.cronDate.getUTCDate()).toBe(now.getUTCDate());
-    expect(call.data.cronDate.getUTCHours()).toBe(0);
+  it('sets cronDate to the school-local calendar day (Kampala, not UTC)', async () => {
+    // 2026-03-01 01:00 EAT is still 2026-02-28 22:00 UTC. The run belongs to
+    // the 1st — keying it to the UTC date filed it under the previous day.
+    jest.useFakeTimers({ now: new Date('2026-02-28T22:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const { service, mocks } = makeService();
+      await service.generatePenaltyRun('sch_1');
+      const cronDate: Date = mocks.penaltyRunCreate.mock.calls[0][0].data.cronDate;
+      expect(cronDate).toBeInstanceOf(Date);
+      expect(cronDate.toISOString()).toBe('2026-03-01T00:00:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('returns early when a PenaltyRun already exists for today (idempotent on rerun)', async () => {

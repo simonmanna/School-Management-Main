@@ -236,31 +236,9 @@ export class GradingService {
 
   // ── GPA / rank ──────────────────────────────────────────────────────────
 
-  /**
-   * P0-5 (C5): competition ranking.
-   *
-   * Walk a score-sorted list and only advance the rank when the score
-   * changes. Ties share the same rank; the next rank skips.
-   *   100, 95, 95, 90  →  ranks 1, 2, 2, 4
-   *   100, 100, 100    →  ranks 1, 1, 1
-   *
-   * Exported for unit testing.
-   */
-  static competitionRank(
-    sorted: Array<[string, number]>,
-    target: string,
-  ): number | null {
-    let rank = 0;
-    for (let i = 0; i < sorted.length; i++) {
-      if (i === 0 || sorted[i][1] < sorted[i - 1][1]) {
-        rank = i + 1;
-      }
-      if (sorted[i][0] === target) {
-        return rank;
-      }
-    }
-    return null;
-  }
+  // Competition ranking (P0-5) lives in one place: `assignCompetitionRanks` in
+  // assessment/result-computation.ts, which is what prints class positions. A
+  // second copy here had no callers and was removed in Wave 16.
 
   // `computeTermGpa` was removed here: it aggregated `GradeEntry`, the table the
   // B6 migration sealed read-only, so after the cutover it returned zeros for

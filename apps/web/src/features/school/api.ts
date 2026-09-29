@@ -3322,6 +3322,7 @@ export function useCorrectAttendance() {
 export interface AttendanceThreshold {
   id?: string; organizationId?: string; classId?: string | null;
   minAttendancePct: number; notifyAbsent: boolean; notifyLate: boolean; notifyEarly: boolean; notifyBelowThreshold: boolean;
+  consecutiveAbsenceAlert?: number | null;
 }
 export function useAttendanceThresholds(classId?: string) {
   return useQuery({

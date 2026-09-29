@@ -327,7 +327,7 @@ export class StudentAttendanceService {
     });
   }
 
-  async upsertThreshold(dto: { classId?: string | null; minAttendancePct?: number; notifyAbsent?: boolean; notifyLate?: boolean; notifyEarly?: boolean; notifyBelowThreshold?: boolean }) {
+  async upsertThreshold(dto: { classId?: string | null; minAttendancePct?: number; notifyAbsent?: boolean; notifyLate?: boolean; notifyEarly?: boolean; notifyBelowThreshold?: boolean; consecutiveAbsenceAlert?: number | null }) {
     const organizationId = this.tenant.organizationId;
     const classId = dto.classId ?? null;
     const existing = await this.prisma.client.attendanceThreshold.findFirst({
@@ -339,6 +339,7 @@ export class StudentAttendanceService {
     if (dto.notifyLate !== undefined) data.notifyLate = dto.notifyLate;
     if (dto.notifyEarly !== undefined) data.notifyEarly = dto.notifyEarly;
     if (dto.notifyBelowThreshold !== undefined) data.notifyBelowThreshold = dto.notifyBelowThreshold;
+    if (dto.consecutiveAbsenceAlert !== undefined) data.consecutiveAbsenceAlert = dto.consecutiveAbsenceAlert;
     if (existing) {
       return this.prisma.client.attendanceThreshold.update({ where: { id: existing.id }, data });
     }

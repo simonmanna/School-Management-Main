@@ -25,6 +25,7 @@ import { discountApplies } from './discount-targeting';
 import { AdvancedFinanceService } from './advanced.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 import { SCHOOL_ACCOUNTS } from './school-accounts';
+import { safeTimeZone, zonedDate } from '../../../kernel/common/school-time';
 
 /**
  * BillingService — the keystone of the school vertical.
@@ -882,9 +883,14 @@ export class BillingService {
   async generatePenaltyRun(scheduleId: string) {
     const organizationId = this.tenant.organizationId;
 
-    // UTC date (YYYY-MM-DD) — the natural idempotency key.
-    const cronDate = new Date();
-    cronDate.setUTCHours(0, 0, 0, 0);
+    // The school's local calendar date — the natural idempotency key. UTC
+    // midnight is 03:00 in Kampala, so a run between 00:00 and 03:00 local was
+    // keyed to the previous day (audit P1-5). @db.Date stores the calendar day.
+    const org = await this.prisma.client.organization
+      ?.findFirst({ where: { id: organizationId }, select: { timezone: true } })
+      .catch(() => null);
+    const today = zonedDate(new Date(), safeTimeZone(org?.timezone));
+    const cronDate = new Date(Date.UTC(today.year, today.month - 1, today.day));
 
     return this.prisma.client.$transaction(async (tx: any) => {
       // ── Idempotency gate: return existing run if today already ran. ──

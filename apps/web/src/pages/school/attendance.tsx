@@ -274,12 +274,13 @@ function ThresholdsTab({ classId, setClassId, classes }: any) {
   const { data: t } = useAttendanceThresholds(classId || undefined);
   const upsert = useUpsertAttendanceThreshold();
   const [min, setMin] = useState<number>(75);
+  const [streak, setStreak] = useState<string>('');
   const [flags, setFlags] = useState({ notifyAbsent: true, notifyLate: true, notifyEarly: true, notifyBelowThreshold: true });
-  useEffect(() => { if (t) { setMin(t.minAttendancePct); setFlags({ notifyAbsent: t.notifyAbsent, notifyLate: t.notifyLate, notifyEarly: t.notifyEarly, notifyBelowThreshold: t.notifyBelowThreshold }); } }, [t]);
+  useEffect(() => { if (t) { setMin(t.minAttendancePct); setStreak(t.consecutiveAbsenceAlert ? String(t.consecutiveAbsenceAlert) : ''); setFlags({ notifyAbsent: t.notifyAbsent, notifyLate: t.notifyLate, notifyEarly: t.notifyEarly, notifyBelowThreshold: t.notifyBelowThreshold }); } }, [t]);
 
   const save = async () => {
     try {
-      await upsert.mutateAsync({ classId: classId || null, minAttendancePct: min, ...flags });
+      await upsert.mutateAsync({ classId: classId || null, minAttendancePct: min, ...flags, consecutiveAbsenceAlert: streak ? Number(streak) : null });
       notify.success('Alert settings saved');
     } catch { notify.error('Save failed'); }
   };
@@ -290,6 +291,8 @@ function ThresholdsTab({ classId, setClassId, classes }: any) {
       <CardContent className="space-y-3">
         <div className="space-y-1 max-w-xs"><Label className="text-xs">Minimum attendance % before warning</Label>
           <Input type="number" value={min} onChange={(e) => setMin(Number(e.target.value))} /></div>
+        <div className="space-y-1 max-w-xs"><Label className="text-xs">Alert after this many absent days in a row (blank = off)</Label>
+          <Input type="number" min={2} max={30} value={streak} onChange={(e) => setStreak(e.target.value)} /></div>
         <div className="space-y-2">
           {([['notifyAbsent', 'Notify on absence'], ['notifyLate', 'Notify on late arrival'], ['notifyEarly', 'Notify on leaving early'], ['notifyBelowThreshold', 'Notify when below threshold']] as [keyof typeof flags, string][]).map(([k, label]) => (
             <label key={k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={(flags as any)[k]} onChange={(e) => setFlags({ ...flags, [k]: e.target.checked })} /> {label}</label>

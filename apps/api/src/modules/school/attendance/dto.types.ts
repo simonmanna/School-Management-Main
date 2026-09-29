@@ -56,4 +56,5 @@ export class UpsertAttendanceThresholdDto {
   @IsOptional() @IsBoolean() notifyLate?: boolean;
   @IsOptional() @IsBoolean() notifyEarly?: boolean;
   @IsOptional() @IsBoolean() notifyBelowThreshold?: boolean;
+  @IsOptional() @IsInt() @Min(2) @Max(30) consecutiveAbsenceAlert?: number | null;
 }

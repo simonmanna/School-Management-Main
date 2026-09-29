@@ -108,6 +108,12 @@ jobs:
       - name: Schema preflight (constraints that can silently not exist)
         run: node scripts/assert-db-constraints.mjs
 
+      # Wave 16: the migrated database and schema.prisma must agree. Prisma
+      # ignores partial indexes, so the raw-SQL ones are guarded by the
+      # preflight above; everything else it can see must match exactly.
+      - name: Schema drift (migrations vs schema.prisma)
+        run: pnpm --filter @erp/api exec prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code
+
       # F-01/F-02: provision the production runtime roles (`app` NOBYPASSRLS,
       # `app_system` BYPASSRLS) so the RLS specs run the real PrismaService
       # against them instead of skipping. The rest of the suite keeps the owner.

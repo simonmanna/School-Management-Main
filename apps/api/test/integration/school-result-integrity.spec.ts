@@ -28,7 +28,9 @@ import { StudentService } from '../../src/modules/school/people/student.service'
 import { AcademicRosterService } from '../../src/modules/school/assessment/roster.service';
 import { ResultRunService } from '../../src/modules/school/assessment/result-run.service';
 import { ExamTypeService, ExamService, ExamScheduleService, GradeEntryService, ReportCardService } from '../../src/modules/school/examinations/examinations.service';
+import { ReportCardPdfService } from '../../src/modules/school/examinations/report-card-pdf.service';
 import { ensureProgrammeRoute } from './_placement';
+import { expectPdf, pdfText } from '../_pdf-text';
 
 describeDb('integration: A3 result spine', () => {
   const rawUrl = (() => {
@@ -148,6 +150,16 @@ describeDb('integration: A3 result spine', () => {
     const ssr = await raw.studentSubjectResult.findFirst({ where: { resultSetId: rs.id, studentProfileId: s1.id } });
     const match = subjectRows.find((r: any) => Math.abs(r.totalPercent - Math.round(Number(ssr!.finalPercent))) <= 1);
     expect(match).toBeTruthy();
+
+    // Wave 16 (audit P0-4): the printed card, rendered from the database, is
+    // a real PDF that names the pupil, term, school and subject.
+    const pdf = await asUser('exams', () => moduleRef.get(ReportCardPdfService).generatePdf(card.id));
+    expectPdf(pdf);
+    const text = pdfText(pdf);
+    expect(text).toContain('S1 OK');
+    expect(text).toContain('Term 1');
+    expect(text).toMatch(/A3 SCHOOL|A3 School/);
+    expect(text).toContain('Mathematics');
 
     // Regenerating a PUBLISHED card is refused — it is a distributed record.
     await asUser('head', () => reportCards.publish(card.id));

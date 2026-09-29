@@ -40,6 +40,11 @@ const REQUIRED_INDEXES = [
   // Wave 13 (F04): a recomputation sits beside the released result, never over it.
   { name: 'ResultSet_one_released_per_scope', why: 'at most one released (published/locked) result set per term and scope' },
   { name: 'ResultSet_one_pending_per_scope', why: 'at most one unreleased result revision per term and scope' },
+  // Wave 16 — raw-SQL partial indexes Prisma cannot declare (and therefore
+  // never diffs), so only this preflight notices if one goes missing.
+  { name: 'StudentAttendance_daily_unique', why: 'one daily register row per pupil per date' },
+  { name: 'StudentAttendance_period_unique', why: 'one period register row per pupil per date per period' },
+  { name: 'Document_org_partner_source_reference_key', why: 'one fee invoice per pupil per schedule per term, across fee-structure versions' },
 ];
 
 // Wave 4 — constraints and triggers created by migrations 20260924150000-155000.

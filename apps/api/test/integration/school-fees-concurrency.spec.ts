@@ -50,6 +50,8 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
   let termId = '';
   let closedTermId = '';
   let cashRegisterId = '';
+  let feeStructureId = '';
+  let tuitionProductId = '';
 
   const setOrg = (id: string) => raw.$executeRawUnsafe(`SELECT set_config('app.org_id', $1, false)`, id);
 
@@ -191,6 +193,8 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
       where: { id: feeStructure.id },
       data: { status: 'published', currentVersionId: feeVersion.id },
     });
+    feeStructureId = feeStructure.id;
+    tuitionProductId = product.id;
     await raw.feeSchedule.create({
       data: { organizationId, feeStructureId: feeStructure.id, termId, dueDate: new Date('2026-02-15') },
     });
@@ -241,6 +245,35 @@ describeDb('integration: school fees concurrency + atomicity (G4/G5)', () => {
         },
       });
       expect(invoices).toBe(1);
+    });
+
+    it('audit P0-2: a fee-structure version bump mid-term does not bill the same pupil twice', async () => {
+      // The SchoolFeeInvoice key includes feeStructureVersionId, so on its own
+      // it would admit a second invoice after a re-publish. The Document key
+      // (partner, schedule, TERM-<termId>) is version-blind and is what holds.
+      const v2 = await raw.feeStructureVersion.create({
+        data: { organizationId, feeStructureId, versionNo: 2, publishedAt: new Date('2026-02-01') },
+      });
+      await raw.feeItem.create({
+        data: {
+          organizationId,
+          feeStructureVersionId: v2.id,
+          code: 'TUITION',
+          name: 'Tuition',
+          productId: tuitionProductId,
+          amount: TUITION + 50_000,
+          isOptional: false,
+        },
+      });
+      await raw.feeStructure.update({ where: { id: feeStructureId }, data: { currentVersionId: v2.id } });
+
+      await asTenant(() => billing.billSingleStudent(studentProfileId, termId));
+      await asTenant(() => billing.generateForTerm({ termId }));
+
+      expect(await raw.schoolFeeInvoice.count({ where: { organizationId, studentProfileId, termId } })).toBe(1);
+      expect(
+        await raw.document.count({ where: { organizationId, sourceType: 'school_fee', reference: `TERM-${termId}` } }),
+      ).toBe(1);
     });
 
     it('P0-B: two concurrent mobile-money collects with the same externalReference yield ONE payment', async () => {

@@ -13736,6 +13736,8 @@ model AttendanceThreshold {
   notifyLate           Boolean  @default(true)
   notifyEarly          Boolean  @default(true)
   notifyBelowThreshold Boolean  @default(true)
+  /// Wave 16: alert guardians on the Nth absent school day in a row. Null = off.
+  consecutiveAbsenceAlert Int?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -14503,6 +14505,7 @@ model AssessmentPolicy {
 
   @@index([organizationId])
   @@index([organizationId, subjectId, classId, gradeLevelId, termId])
+  @@index([organizationId, programmeId])
 }
 
 /// A weighted bucket within a policy (e.g. "Final Exam, 50%, mean").
