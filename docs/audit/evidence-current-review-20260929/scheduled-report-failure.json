@@ -1,0 +1,14 @@
+{
+  "kind": "isolated service failure probe; no real delivery or database",
+  "sends": 1,
+  "recorded": [
+    {
+      "status": "succeeded",
+      "ranAt": "2026-09-29T12:40:23.052Z",
+      "fileId": "fictional-file",
+      "error": null
+    }
+  ],
+  "expectedDeliveryStatus": "failed or partial",
+  "defectReproduced": true
+}
