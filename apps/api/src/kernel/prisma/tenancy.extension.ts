@@ -37,6 +37,10 @@ export const ORG_SCOPED = new Set<string>([
   'JournalLine',
   'AccountMapping',
   'BankAccount',
+  // Wave 18 — bank reconciliation (were cross-tenant debt before)
+  'BankStatementLine',
+  'BankReconciliationRun',
+  'BankReconciliationMatch',
   // Phase 3 — documents / AR
   'Document',
   'DocumentLine',

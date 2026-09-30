@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { ReportSection } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
 import { AccountResolverService, type AccountMeta } from '../posting/account-resolver.service';
 import {
@@ -38,6 +40,7 @@ export class BalanceSheetReportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accounts: AccountResolverService,
+    private readonly tenant: TenantContextService,
   ) {}
 
   /**
@@ -49,13 +52,18 @@ export class BalanceSheetReportService {
    * A balance sheet with no date is as of now, which is what every accounting
    * package does and what the sibling reports in the registry already assume.
    */
-  private resolveAsOf(asOf: string | null | undefined): Date {
-    const d = asOf ? new Date(asOf) : new Date();
-    return Number.isNaN(d.getTime()) ? new Date() : d;
+  private async resolveAsOf(asOf: string | null | undefined): Promise<Date> {
+    if (!asOf) return new Date();
+    const tz = await orgTimeZone(this.prisma.client, this.tenant.optionalOrganizationId);
+    try {
+      return reportEnd(asOf, tz) ?? new Date();
+    } catch {
+      return new Date();
+    }
   }
 
   async balanceSheet(asOf: string) {
-    const requested = this.resolveAsOf(asOf);
+    const requested = await this.resolveAsOf(asOf);
     const snap = await this.findSnapshot(requested);
     if (snap) {
       const rows = await this.prisma.client.reportBalanceSheetSnapshot.findMany({
@@ -125,7 +133,7 @@ export class BalanceSheetReportService {
       where: {
         entry: {
           status: { in: [...BALANCE_AFFECTING_STATUSES] },
-          postingDate: { lte: this.resolveAsOf(asOf) },
+          postingDate: { lte: await this.resolveAsOf(asOf) },
         },
       },
       _sum: { baseDebit: true, baseCredit: true },

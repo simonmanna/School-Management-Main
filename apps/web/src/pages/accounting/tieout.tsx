@@ -44,6 +44,14 @@ export function TieOutPage() {
             <p className="text-xs mt-1">Run snapshot rebuild or wait for nightly job to populate.</p>
           </CardContent>
         </Card>
+      ) : data.status === 'not_run' ? (
+        <Card className="border-red-200">
+          <CardContent className="py-10 text-center text-red-800">
+            <AlertTriangle className="h-10 w-10 mx-auto mb-2 opacity-60" />
+            <p className="font-medium">Tie-out did not run — nothing has been verified</p>
+            <p className="text-xs mt-1">{data.reason}</p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* AR Card */}

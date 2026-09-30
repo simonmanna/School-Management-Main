@@ -355,29 +355,66 @@ model FxRevaluation {
 // Phase D — Bank reconciliation
 // =============================================================================
 
-/// Bank statement imported from a CSV / MT940 / OFX file. Each row is a
-/// single transaction on the bank side.
-model BankStatementLine {
-  id               String   @id @default(uuid())
-  organizationId   String
-  bankAccountId    String // -> BankAccount.id
-  postedAt         DateTime
-  /// Bank's reference (often a transaction ID, check #, etc.).
-  externalRef      String?
-  description      String
-  /// Positive = money in, negative = money out (in the bank's currency).
-  amount           Decimal  @db.Decimal(20, 6)
-  currencyCode     String
-  /// Status: 'unmatched' | 'matched' | 'ignored'.
-  status           String   @default("unmatched")
-  /// Linked payment (null until matched).
-  matchedPaymentId String?
-  /// Linked bank reconciliation run.
-  matchedRunId     String?
-  createdAt        DateTime @default(now())
+enum BankStatementLineStatus {
+  unmatched
+  matched
+  excluded
+}
 
+/// Bank statement imported from a CSV / MT940 / OFX file. Each row is a
+/// single transaction on the bank side. Wave 18: reconciled against the GENERAL
+/// LEDGER lines of the bank's ledger account (`BankAccount.accountId`), so fee
+/// receipts, expense payments, mobile-money payouts, refunds and manual journals
+/// all reconcile in one place.
+model BankStatementLine {
+  id             String                  @id @default(uuid())
+  organizationId String
+  bankAccountId  String // -> BankAccount.id
+  postedAt       DateTime
+  /// Bank's reference (often a transaction ID, check #, etc.).
+  externalRef    String?
+  /// Dedupe key for a line without a bank reference: date|amount|description|n.
+  contentKey     String
+  description    String
+  /// Positive = money in, negative = money out (in the bank's currency).
+  amount         Decimal                 @db.Decimal(20, 6)
+  currencyCode   String
+  status         BankStatementLineStatus @default(unmatched)
+  /// Why the line was excluded from reconciliation (bank fee, duplicate …).
+  excludedReason String?
+  importedById   String?
+  createdAt      DateTime                @default(now())
+
+  matches BankReconciliationMatch[]
+
+  @@unique([organizationId, bankAccountId, contentKey])
   @@index([organizationId, bankAccountId, postedAt])
-  @@index([status])
+  @@index([organizationId, bankAccountId, status])
+}
+
+/// One statement line reconciled to one ledger line on the bank account. An
+/// unmatch stamps `unmatchedAt` instead of deleting, so the history stays; the
+/// partial unique indexes (migration) allow one LIVE match per statement line
+/// and per journal line, across every run.
+model BankReconciliationMatch {
+  id              String    @id @default(uuid())
+  organizationId  String
+  statementLineId String
+  journalLineId   String
+  runId           String?
+  /// auto | manual
+  method          String
+  matchedById     String?
+  matchedAt       DateTime  @default(now())
+  unmatchedAt     DateTime?
+  unmatchedById   String?
+  unmatchReason   String?
+
+  statementLine BankStatementLine @relation(fields: [statementLineId], references: [id], onDelete: Cascade)
+  journalLine   JournalLine       @relation(fields: [journalLineId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, statementLineId])
+  @@index([organizationId, journalLineId])
 }
 
 /// Reconciliation run — a single attempt to match a chunk of statement lines
@@ -1517,6 +1554,9 @@ model JournalLine {
 
   entry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account Account      @relation(fields: [accountId], references: [id])
+
+  /// Bank statement lines this ledger line is (or was) reconciled to.
+  bankMatches BankReconciliationMatch[]
 
   @@index([organizationId])
   @@index([journalEntryId])
@@ -4084,6 +4124,10 @@ model ReportTieoutSnapshot {
   id             String   @id @default(uuid())
   organizationId String
   asOf           DateTime
+  /// ran | not_run (wave 18). A not_run snapshot is never balanced.
+  status         String   @default("ran")
+  /// Why the tie-out did not run (missing mapping, historical date …).
+  reason         String?
   arBalanced     Boolean
   arVariance     Decimal  @db.Decimal(20, 6)
   apBalanced     Boolean
@@ -16395,6 +16439,9 @@ model MobileMoneySettlement {
   grossAmount      Decimal  @db.Decimal(20, 6)
   charges          Decimal  @default(0) @db.Decimal(20, 6)
   netAmount        Decimal  @db.Decimal(20, 6)
+  /// The GL account (Account.id) the payout was debited to — a ledger account,
+  /// not a BankAccount row, despite the name. Bank reconciliation finds this
+  /// payout through the journal line on that ledger account.
   bankAccountId    String
   journalEntryId   String?
   notes            String?

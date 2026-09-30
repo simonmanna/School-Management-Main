@@ -481,6 +481,9 @@ export function useAccountLedger(accountId: string | undefined, params: { from?:
 
 export interface TieOutResult {
   asOf: string;
+  /** `not_run`: the check could not be computed (see `reason`) — never treat as balanced. */
+  status?: 'ran' | 'not_run';
+  reason?: string | null;
   arBalanced: boolean;
   arVariance: string;
   apBalanced: boolean;

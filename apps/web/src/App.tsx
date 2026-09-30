@@ -187,6 +187,7 @@ import { AccountLedgerPage } from '@/pages/accounting/account-ledger';
 import { TieOutPage } from '@/pages/accounting/tieout';
 import { AuditLogPage } from '@/pages/accounting/audit-log';
 import FiscalPeriodsPage from '@/pages/accounting/fiscal-periods';
+import BankReconciliationPage from '@/pages/accounting/bank-reconciliation';
 import TaxesPage from '@/pages/accounting/taxes';
 import PaymentTermsPage from '@/pages/accounting/payment-terms';
 import FiscalPositionsPage from '@/pages/accounting/fiscal-positions';
@@ -408,6 +409,7 @@ export function App() {
           <Route path="/tieout" element={<TieOutPage />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/fiscal-periods" element={<FiscalPeriodsPage />} />
+          <Route path="/bank-reconciliation" element={<BankReconciliationPage />} />
           <Route path="/taxes" element={<TaxesPage />} />
           <Route path="/accounts/payment-terms" element={<PaymentTermsPage />} />
           <Route path="/accounts/fiscal-positions" element={<FiscalPositionsPage />} />

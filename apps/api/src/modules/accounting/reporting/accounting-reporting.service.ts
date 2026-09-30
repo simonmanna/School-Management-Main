@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { SnapshotRebuildService } from './snapshots/snapshot-rebuild.service';
 import { AccountResolverService } from '../posting/account-resolver.service';
 import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
@@ -27,10 +29,21 @@ export class AccountingReportingService {
     private readonly prisma: PrismaService,
     private readonly snapshots: SnapshotRebuildService,
     private readonly accounts: AccountResolverService,
+    private readonly tenant: TenantContextService,
   ) {}
 
+  /** Calendar-day bounds in the org's time zone (see report-range.ts). */
+  private async bounds(range: DateRange): Promise<DateRange> {
+    const tz = await orgTimeZone(this.prisma.client, this.tenant.optionalOrganizationId);
+    return {
+      from: reportStart(range.from, tz)?.toISOString(),
+      to: reportEnd(range.to, tz)?.toISOString(),
+    };
+  }
+
   /** Trial Balance — snapshot-first, live-fallback. */
-  async trialBalance(range: DateRange) {
+  async trialBalance(input: DateRange) {
+    const range = await this.bounds(input);
     const asOf = range.to ? new Date(range.to) : new Date();
     const snap = await this.findSnapshot(asOf);
     if (snap) {
@@ -105,7 +118,8 @@ export class AccountingReportingService {
   }
 
   /** Account Ledger — uses snapshot for the asOf balance + live lines for the period. */
-  async accountLedger(accountId: string, range: DateRange) {
+  async accountLedger(accountId: string, input: DateRange) {
+    const range = await this.bounds(input);
     const account = await this.prisma.client.account.findFirst({ where: { id: accountId } });
     const lines = await this.prisma.client.journalLine.findMany({
       where: { accountId, entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] }, postingDate: this.rangeFilter(range) } },
@@ -129,7 +143,8 @@ export class AccountingReportingService {
   }
 
   /** General Ledger — paginated, live. Not snapshotted (range is open-ended). */
-  async generalLedger(range: DateRange, page = 1, pageSize = 100) {
+  async generalLedger(input: DateRange, page = 1, pageSize = 100) {
+    const range = await this.bounds(input);
     const where = { entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] }, postingDate: this.rangeFilter(range) } } as any;
     const [lines, total] = await Promise.all([
       this.prisma.client.journalLine.findMany({

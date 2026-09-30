@@ -42,8 +42,6 @@ const ORG_SCOPED_EXCEPTIONS = new Map<string, string>([
 const ORG_SCOPED_BASELINE = new Set<string>([
   // Accounting / treasury
   'FxRevaluation',
-  'BankStatementLine',
-  'BankReconciliationRun',
   'CostCenter',
   'PurchasePayment',
   // Documents / POS

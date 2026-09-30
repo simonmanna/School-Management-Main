@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { REPORT_SECTION_BY_KEY, type ReportSection } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
 import { AccountResolverService, type AccountMeta } from '../posting/account-resolver.service';
@@ -74,15 +75,33 @@ export class FinancialReportsService {
     return Number.isNaN(d.getTime()) ? fallback : d;
   }
 
-  private startOfYear(): Date {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  private async tz(): Promise<string> {
+    return orgTimeZone(this.prisma.client, this.tenant.optionalOrganizationId);
   }
 
-  /** Resolve a period, defaulting to year-to-date. */
-  private resolvePeriod(range: PeriodRange): { from: Date; to: Date } {
-    const to = this.date(range.to, new Date());
-    const from = this.date(range.from, this.startOfYear());
+  /** A calendar-day `to`/`asOf` ends at the last millisecond of that local day. */
+  private async endDate(value: string | null | undefined, fallback: Date): Promise<Date> {
+    if (!value) return fallback;
+    try {
+      return reportEnd(value, await this.tz()) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /** Resolve a period, defaulting to year-to-date (local midnight, 1 January). */
+  private async resolvePeriod(range: PeriodRange): Promise<{ from: Date; to: Date }> {
+    const tz = await this.tz();
+    const safe = (fn: () => Date | undefined, fallback: Date) => {
+      try {
+        return fn() ?? fallback;
+      } catch {
+        return fallback;
+      }
+    };
+    const to = safe(() => reportEnd(range.to, tz), new Date());
+    const year = Number(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric' }).format(new Date()));
+    const from = safe(() => reportStart(range.from, tz), reportStart(`${year}-01-01`, tz)!);
     return { from, to };
   }
 
@@ -179,7 +198,7 @@ export class FinancialReportsService {
    * "how did they get there", which is what a period review actually needs.
    */
   async extendedTrialBalance(range: PeriodRange, opts: { includeZero?: boolean } = {}) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
 
     const [opening, period, metaById] = await Promise.all([
@@ -257,7 +276,7 @@ export class FinancialReportsService {
    * a comparative prior period and each line's share of net revenue.
    */
   async incomeStatement(range: PeriodRange, opts: { compare?: boolean } = {}) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const prior = this.priorPeriod(from, to);
 
     const [current, comparative, metaById] = await Promise.all([
@@ -381,9 +400,9 @@ export class FinancialReportsService {
    * the period has not been closed into retained earnings yet.
    */
   async comparativeBalanceSheet(asOfInput?: string, compareAsOfInput?: string) {
-    const asOf = this.date(asOfInput, new Date());
+    const asOf = await this.endDate(asOfInput, new Date());
     const compareAsOf = compareAsOfInput
-      ? this.date(compareAsOfInput, new Date())
+      ? await this.endDate(compareAsOfInput, new Date())
       : new Date(Date.UTC(asOf.getUTCFullYear() - 1, asOf.getUTCMonth(), asOf.getUTCDate()));
 
     const [current, prior, metaById] = await Promise.all([
@@ -508,7 +527,7 @@ export class FinancialReportsService {
     range: PeriodRange,
     opts: { accountIds?: string[]; page?: number; pageSize?: number } = {},
   ) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
     const page = Math.max(1, opts.page ?? 1);
     const pageSize = Math.min(50, Math.max(1, opts.pageSize ?? 25));
@@ -641,7 +660,7 @@ export class FinancialReportsService {
     range: PeriodRange,
     opts: { journalId?: string; status?: string; page?: number; pageSize?: number } = {},
   ) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const page = Math.max(1, opts.page ?? 1);
     const pageSize = Math.min(200, Math.max(1, opts.pageSize ?? 50));
 
@@ -726,7 +745,7 @@ export class FinancialReportsService {
     range: PeriodRange,
     opts: { type?: 'receivable' | 'payable'; partnerId?: string; detail?: boolean } = {},
   ) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
     const type = opts.type === 'payable' ? 'payable' : 'receivable';
     const controlType = type === 'receivable' ? 'ar' : 'ap';
@@ -893,7 +912,7 @@ export class FinancialReportsService {
    * receipts, payments and closing balance, plus a day-by-day movement series.
    */
   async cashBook(range: PeriodRange) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
 
     const metaById = await this.accounts.allMeta();
@@ -999,7 +1018,7 @@ export class FinancialReportsService {
    * GL tax control account, because a return has to be filed per rate.
    */
   async taxSummary(range: PeriodRange) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const organizationId = this.tenant.organizationId;
 
     const rows = await this.prisma.raw.$queryRaw<
@@ -1125,7 +1144,7 @@ export class FinancialReportsService {
 
   /** Shared engine for the revenue and expense breakdowns. */
   private async sectionAnalysis(range: PeriodRange, sections: ReportSection[], label: string) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const prior = this.priorPeriod(from, to);
 
     const [current, comparative, metaById] = await Promise.all([
@@ -1230,7 +1249,7 @@ export class FinancialReportsService {
    * the period, the period's profit, and closing equity.
    */
   async equityStatement(range: PeriodRange) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
 
     const [opening, period, metaById] = await Promise.all([
@@ -1290,7 +1309,7 @@ export class FinancialReportsService {
    * the arithmetic without re-running three other reports.
    */
   async financialRatios(range: PeriodRange) {
-    const { from, to } = this.resolvePeriod(range);
+    const { from, to } = await this.resolvePeriod(range);
 
     const [asOfMoves, periodMoves, metaById] = await Promise.all([
       this.movements({ to }),
@@ -1433,7 +1452,7 @@ export class FinancialReportsService {
 
   /** The chart of accounts as a report: every account with its as-of balance. */
   async accountBalances(asOfInput?: string, opts: { includeZero?: boolean } = {}) {
-    const asOf = this.date(asOfInput, new Date());
+    const asOf = await this.endDate(asOfInput, new Date());
     const [moves, metaById] = await Promise.all([
       this.movements({ to: asOf }),
       this.accounts.allMeta(),

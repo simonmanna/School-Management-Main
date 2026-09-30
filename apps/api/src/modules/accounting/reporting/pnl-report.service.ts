@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
 import { AccountResolverService } from '../posting/account-resolver.service';
 import { displayBalance } from './account-classification';
@@ -26,11 +28,25 @@ export class PnLReportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accounts: AccountResolverService,
+    private readonly tenant: TenantContextService,
   ) {}
 
-  async pnl(range: DateRange) {
+  /** Calendar-day bounds in the org's time zone (see report-range.ts). */
+  private async bounds(range: DateRange): Promise<DateRange> {
+    const tz = await orgTimeZone(this.prisma.client, this.tenant.optionalOrganizationId);
+    return {
+      from: reportStart(range.from, tz)?.toISOString(),
+      to: reportEnd(range.to, tz)?.toISOString(),
+    };
+  }
+
+  async pnl(input: DateRange) {
+    const range = await this.bounds(input);
     const asOf = range.to ? new Date(range.to) : new Date();
-    const snap = await this.findSnapshot(asOf);
+    // A snapshot holds cumulative totals up to its date; it answers a range
+    // with no start only. A dated range used to get the snapshot's totals,
+    // silently ignoring `from`.
+    const snap = range.from ? null : await this.findSnapshot(asOf);
     if (snap) {
       const pnl = await this.prisma.client.reportPnLSnapshot.findFirst({
         where: { organizationId: snap.organizationId, asOf: snap.asOf },

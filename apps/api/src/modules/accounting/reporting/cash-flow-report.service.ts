@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
+import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
+import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
 import { AccountResolverService, type AccountMeta } from '../posting/account-resolver.service';
 import { cashFlowSectionOf } from './account-classification';
@@ -41,13 +43,15 @@ export class CashFlowReportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accounts: AccountResolverService,
+    private readonly tenant: TenantContextService,
   ) {}
 
   async cashFlow(range: DateRange) {
-    const from = this.parseDate(range.from, 'from');
+    const tz = await orgTimeZone(this.prisma.client, this.tenant.optionalOrganizationId);
+    const from = this.parseDate(range.from, 'from', tz);
     // A date-only `to` (YYYY-MM-DD) is inclusive through the END of that day, so
     // a "July" report (to=2026-07-31) captures postings made on the 31st.
-    const to = this.parseDate(range.to, 'to', /* endOfDay */ true);
+    const to = this.parseDate(range.to, 'to', tz, /* endOfDay */ true);
     if (from && to && from > to) {
       throw new BadRequestException('`from` must be on or before `to`');
     }
@@ -157,16 +161,15 @@ export class CashFlowReportService {
     return cashFlowSectionOf(account);
   }
 
-  private parseDate(value: string | undefined, label: string, endOfDay = false): Date | undefined {
+  private parseDate(value: string | undefined, label: string, tz: string, endOfDay = false): Date | undefined {
     if (!value) return undefined;
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) throw new BadRequestException(`Invalid \`${label}\` date: ${value}`);
-    // Extend a date-only value (no time component) to the end of the day so the
-    // upper bound is inclusive of postings made during that day.
-    if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-      d.setUTCHours(23, 59, 59, 999);
+    try {
+      // A calendar day spans the org's local day: `from` its midnight, `to` its
+      // last millisecond, so the upper bound includes that day's postings.
+      return endOfDay ? reportEnd(value, tz) : reportStart(value, tz);
+    } catch {
+      throw new BadRequestException(`Invalid \`${label}\` date: ${value}`);
     }
-    return d;
   }
 
   private periodFilter(from?: Date, to?: Date): any {

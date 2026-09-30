@@ -542,6 +542,7 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Calculator,
     items: [
       { to: '/accounts/cash-accounts', label: 'Financial Accounts', icon: Banknote, permission: PERMISSIONS.account.read },
+      { to: '/bank-reconciliation', label: 'Bank Reconciliation', icon: Scale, permission: PERMISSIONS.bankReconciliation.read },
       { to: '/accounts', label: 'Chart of Accounts', icon: BookOpen, permission: PERMISSIONS.account.read },
       { to: '/accounts/categories', label: 'Account Categories', icon: Layers, permission: PERMISSIONS.accountCategory.read },
       { to: '/accounts/cash-registers', label: 'Cash Registers', icon: Smartphone, permission: 'cash_register:read' },
