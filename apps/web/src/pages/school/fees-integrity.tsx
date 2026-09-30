@@ -507,7 +507,8 @@ export function MomoClearingCard() {
 
   const submit = async () => {
     if (!form.reference.trim()) return notify.error('Enter the payout reference from the provider statement');
-    if (!(gross > 0)) return notify.error('Select collections or enter a gross amount');
+    if (!pickedRows.length) return notify.error('Tick the collections this payout covers');
+    if (!(gross > 0)) return notify.error('The selected collections total nothing');
     if (!form.bankAccountId) return notify.error('Choose the bank account the payout landed in');
     try {
       await record.mutateAsync({
@@ -517,7 +518,7 @@ export function MomoClearingCard() {
         grossAmount: gross,
         charges,
         bankAccountId: form.bankAccountId,
-        requestIds: pickedRows.length ? pickedRows.map((r) => r.id) : undefined,
+        requestIds: pickedRows.map((r) => r.id),
         notes: form.notes || undefined,
       });
       notify.success('Payout recorded — clearing swept to bank');

@@ -143,11 +143,17 @@ describe('mobile money · callback safety', () => {
     );
   });
 
-  it('posts what the provider says it collected, not what was requested', async () => {
+  // Wave 18: a short or over payment is held for a human, never posted as-is
+  // (and never posted as the requested amount either).
+  it('holds a success callback whose amount differs from the request for review', async () => {
     const partial = JSON.stringify({ externalId: 'REF-1', status: 'SUCCESSFUL', amount: '250000', currency: 'UGX' });
-    const { service, collect } = makeMomo();
-    await service.handleCallback('mtn', partial, sign(partial));
-    expect(collect).toHaveBeenCalledWith(expect.objectContaining({ amount: 250_000 }), expect.anything());
+    const { service, collect, updateMany } = makeMomo();
+    const res: any = await service.handleCallback('mtn', partial, sign(partial));
+    expect(res.status).toBe('needs_review');
+    expect(collect).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'needs_review' }) }),
+    );
   });
 
   it('holds money in a foreign currency for review instead of posting it', async () => {

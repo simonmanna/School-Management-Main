@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -489,14 +489,18 @@ export class MobileMoneyService {
         reference,
         note: dto.note ?? `Fees for ${student.partner?.name ?? student.admissionNo}`,
       });
-      await this.prisma.client.mobileMoneyRequest.update({
-        where: { id: row.id },
+      // Wave 18: only move a request the callback has not already settled. A
+      // fast provider can call back before requestToPay returns; overwriting
+      // `succeeded` with `pending` left the money unsettleable.
+      await this.prisma.client.mobileMoneyRequest.updateMany({
+        where: { id: row.id, status: 'pending' },
         data: { status: result.status, failureReason: result.message ?? null },
       });
-      return { id: row.id, reference, provider: provider.name, status: result.status, message: result.message };
+      const now = await this.prisma.client.mobileMoneyRequest.findFirst({ where: { id: row.id }, select: { status: true } });
+      return { id: row.id, reference, provider: provider.name, status: now?.status ?? result.status, message: result.message };
     } catch (err: any) {
-      await this.prisma.client.mobileMoneyRequest.update({
-        where: { id: row.id },
+      await this.prisma.client.mobileMoneyRequest.updateMany({
+        where: { id: row.id, status: 'pending' },
         data: { status: 'failed', failureReason: err?.message ?? String(err) },
       });
       throw err;
@@ -563,12 +567,27 @@ export class MobileMoneyService {
 
       let target: string = parsed.status;
       let reason: string | null = parsed.reason ?? null;
-      const received = parsed.amount > 0 ? round(dec(parsed.amount), 6) : dec(request.amount);
-      const currency = parsed.currency ?? request.currency ?? gateway?.currency ?? null;
-      if (target === 'succeeded' && currency && gateway?.currency && currency !== gateway.currency) {
-        // Money in a currency the books are not kept in: record, do not post.
-        target = 'needs_review';
-        reason = `Received ${currency}, gateway is ${gateway.currency}`;
+      const received = parsed.amount > 0 ? round(dec(parsed.amount), 6) : ZERO;
+      const currency = parsed.currency ?? null;
+      const expectedCurrency = gateway?.currency ?? request.currency ?? null;
+      // Wave 18: a success callback posts only what it proves. A missing or
+      // different amount, or a missing or foreign currency, is recorded for a
+      // human to review — never silently posted as the requested amount.
+      if (target === 'succeeded') {
+        if (received.lessThanOrEqualTo(0)) {
+          target = 'needs_review';
+          reason = 'Success callback carried no amount';
+        } else if (!received.equals(dec(request.amount))) {
+          target = 'needs_review';
+          reason = `Received ${received.toString()}, requested ${dec(request.amount).toString()}`;
+        } else if (!currency) {
+          target = 'needs_review';
+          reason = 'Success callback carried no currency';
+        } else if (expectedCurrency && currency !== expectedCurrency) {
+          // Money in a currency the books are not kept in: record, do not post.
+          target = 'needs_review';
+          reason = `Received ${currency}, gateway is ${expectedCurrency}`;
+        }
       }
 
       if (!(CALLBACK_TRANSITIONS[request.status] ?? []).includes(target)) {
@@ -582,8 +601,8 @@ export class MobileMoneyService {
         data: {
           status: target,
           failureReason: target === 'succeeded' ? null : reason,
-          ...(target === 'pending' ? {} : { receivedAmount: received }),
-          currency,
+          ...(target === 'pending' || received.isZero() ? {} : { receivedAmount: received }),
+          currency: currency ?? request.currency,
         },
       });
       if (claimed.count !== 1) {
@@ -649,14 +668,22 @@ export class MobileMoneyService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const gateway = await tx.paymentGatewayAccount.findFirst({ where: { provider } });
       if (!gateway) throw new BadRequestException(`No ${provider.toUpperCase()} gateway configured.`);
-      const bank = await tx.account.findFirst({ where: { id: dto.bankAccountId } });
-      if (!bank) throw new BadRequestException('Bank account not found in this organization.');
+      // `bankAccountId` names the GL bank account the payout landed in.
+      const bank = await tx.account.findFirst({
+        where: { id: dto.bankAccountId, isPostable: true, isActive: true, category: { isCashEquivalent: true } },
+      });
+      if (!bank) throw new BadRequestException('Payout account must be an active bank or cash ledger account.');
 
       const dup = await tx.mobileMoneySettlement.findFirst({ where: { provider, reference } });
       if (dup) throw new BadRequestException(`Settlement ${reference} is already recorded.`);
 
+      // Wave 18: a settlement always names the collections it sweeps, so the
+      // clearing account can never be swept twice for the same money.
+      if (!dto.requestIds?.length) {
+        throw new BadRequestException('Select the collections this settlement pays out.');
+      }
       let requests: any[] = [];
-      if (dto.requestIds?.length) {
+      {
         requests = await tx.mobileMoneyRequest.findMany({
           where: { id: { in: dto.requestIds }, provider, status: 'succeeded', settlementId: null },
         });
@@ -710,11 +737,12 @@ export class MobileMoneyService {
         },
         tx,
       );
-      if (requests.length) {
-        await tx.mobileMoneyRequest.updateMany({
-          where: { id: { in: requests.map((r) => r.id) } },
-          data: { settlementId: settlement.id },
-        });
+      const linked = await tx.mobileMoneyRequest.updateMany({
+        where: { id: { in: requests.map((r) => r.id) }, settlementId: null },
+        data: { settlementId: settlement.id },
+      });
+      if (linked.count !== requests.length) {
+        throw new ConflictException('Some collections were settled concurrently; reload and retry.');
       }
       return tx.mobileMoneySettlement.update({ where: { id: settlement.id }, data: { journalEntryId: entry.id } });
     });

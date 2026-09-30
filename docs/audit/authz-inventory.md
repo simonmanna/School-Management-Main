@@ -8,7 +8,7 @@ Chain for every row: JWT auth → tenant (RLS) → role permission (PermissionsG
 - **DataScopeService (service)**: the handler's service calls a class/seat assertion or filters by seats.
 - **school-wide grant only**: no teacher preset holds the grant, so only school-scope roles reach it.
 
-Routes: 108. Gaps: 0.
+Routes: 113. Gaps: 0.
 
 | Verb | Path | Handler | Grants | Teacher-readable | Scope enforcement | File |
 |---|---|---|---|---|---|---|
@@ -98,7 +98,12 @@ Routes: 108. Gaps: 0.
 | Post | `/school/portals/parent/:studentProfileId/pay` | pay | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/parent/:studentProfileId/pay-quote` | payQuote | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/parent/:studentProfileId/payments` | payments | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
+| Get | `/school/portals/parent/:studentProfileId/pickup` | pickupList | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
+| Post | `/school/portals/parent/:studentProfileId/pickup` | pickupRequest | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
+| Patch | `/school/portals/parent/:studentProfileId/pickup/:id/withdraw` | pickupWithdraw | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
+| Get | `/school/portals/parent/:studentProfileId/receipts` | feeReceipts | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/parent/:studentProfileId/statement` | statement | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
+| Get | `/school/portals/parent/:studentProfileId/transport` | transportView | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/parent/:studentProfileIds` | parentDashboard | school:portal:parent | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/student/:studentProfileId` | studentDashboard | school:portal:student | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |
 | Get | `/school/portals/student/:studentProfileId/report-cards` | reportCards | school:portal:student | no | PupilScopeGuard | apps/api/src/modules/school/portals/portals.controller.ts |

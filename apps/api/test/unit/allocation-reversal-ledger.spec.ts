@@ -24,6 +24,8 @@ function makeService() {
     payment: { allocatedAmount: D(300), unallocatedAmount: D(200), accountId: 'acc_cash', paymentMethod: 'cash' },
   };
   const tx: any = {
+    // Wave 18 row locks (document → payment) are raw SELECT … FOR UPDATE.
+    $queryRawUnsafe: jest.fn(async () => []),
     paymentAllocation: {
       findFirst: jest.fn(async () => alloc),
       findMany: jest.fn(async () => [alloc]),
@@ -41,6 +43,7 @@ function makeService() {
     payment: {
       findFirst: jest.fn(async () => ({ id: 'pay_1', status: 'posted', paymentNumber: 'RCPT-1', journalEntryId: 'je_receipt', unallocatedAmount: D(500) })),
       update: jest.fn(async () => ({})),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     cashMovement: { findMany: jest.fn(async () => []), create: jest.fn() },
     feeCredit: { findMany: jest.fn(async () => [] as any[]), updateMany: jest.fn(async () => ({ count: 1 })) },
@@ -70,9 +73,10 @@ describe('PaymentAllocationReversalService — ledger', () => {
     const { svc, tx, posting } = makeService();
     await svc.reverseAllocation('al_1', 'wrong invoice');
     expect(posting.post).not.toHaveBeenCalled();
+    // Relative writes under the payment row lock (wave 18), not absolutes.
     expect(tx.payment.update).toHaveBeenCalledWith({
       where: { id: 'pay_1' },
-      data: { allocatedAmount: D(0), unallocatedAmount: D(500) },
+      data: { allocatedAmount: { decrement: D(300) }, unallocatedAmount: { increment: D(300) } },
     });
     expect(tx.document.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ amountResidual: D(300), amountPaid: D(0) }) }),

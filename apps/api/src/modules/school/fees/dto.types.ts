@@ -9,6 +9,7 @@
  * types, required fields and strips unknown properties before any handler runs.
  */
 import {
+  ValidateIf,
   IsArray,
   IsBoolean,
   IsIn,
@@ -365,7 +366,10 @@ export class CollectFeePaymentDto {
    */
   @IsOptional() @IsString() externalReference?: string;
 
-  @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES])
+  /** Required with `externalReference` (wave 18): the unique index treats a
+   *  null type as distinct, so an untyped key had no database-level dedupe. */
+  @ValidateIf((o) => o.externalReference !== undefined && o.externalReference !== null)
+  @IsIn([...EXTERNAL_REFERENCE_TYPES])
   externalReferenceType?: ExternalReferenceType;
 
   /**
@@ -407,7 +411,10 @@ export class RefundFeeDto {
    */
   @IsOptional() @IsString() externalReference?: string;
 
-  @IsOptional() @IsIn([...EXTERNAL_REFERENCE_TYPES])
+  /** Required with `externalReference` (wave 18): the unique index treats a
+   *  null type as distinct, so an untyped key had no database-level dedupe. */
+  @ValidateIf((o) => o.externalReference !== undefined && o.externalReference !== null)
+  @IsIn([...EXTERNAL_REFERENCE_TYPES])
   externalReferenceType?: ExternalReferenceType;
 
   /**

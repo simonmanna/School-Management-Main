@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -118,6 +118,26 @@ export class PaymentAllocationReversalService {
       // P1-B: restoring AR on this document is a posting against its term.
       await this.controls.assertDocumentsPeriodOpen([alloc.documentId], db);
 
+      // Wave 18: lock the document, then the payment (the order collect and
+      // refund use), and re-read both. A collect against this invoice or a
+      // refund drawing on this payment used to be lost-updated by the absolute
+      // writes below.
+      await db.$queryRawUnsafe(
+        `SELECT id FROM "Document" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        alloc.documentId,
+        organizationId,
+      );
+      await db.$queryRawUnsafe(
+        `SELECT id FROM "Payment" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        alloc.paymentId,
+        organizationId,
+      );
+      const current = await db.paymentAllocation.findFirst({ where: { id: alloc.id }, select: { status: true } });
+      if (current?.status === 'reversed') {
+        const existing = await db.paymentAllocationReversal.findFirst({ where: { paymentAllocationId: alloc.id } });
+        return { reversal: existing, alreadyReversed: true };
+      }
+
       const doc = await db.document.findFirst({ where: { id: alloc.documentId, organizationId } });
       if (!doc) throw new NotFoundException(`Document ${alloc.documentId} not found`);
 
@@ -148,8 +168,8 @@ export class PaymentAllocationReversalService {
       await db.payment.update({
         where: { id: alloc.paymentId },
         data: {
-          allocatedAmount: dec(alloc.payment.allocatedAmount).minus(amount),
-          unallocatedAmount: dec(alloc.payment.unallocatedAmount).plus(amount),
+          allocatedAmount: { decrement: amount },
+          unallocatedAmount: { increment: amount },
         },
       });
 
@@ -275,6 +295,24 @@ export class PaymentAllocationReversalService {
     }
     const organizationId = this.tenant.organizationId;
     const run = async (tx: any) => {
+      // Wave 18: lock the allocated documents (id order) then the payment, so
+      // two reversals of one receipt serialize and the second sees it
+      // cancelled — instead of both reversing the journal and both writing
+      // compensating cash movements.
+      await tx.$queryRawUnsafe(
+        `SELECT d.id FROM "Document" d
+           JOIN "PaymentAllocation" a ON a."documentId" = d.id
+          WHERE a."paymentId" = $1 AND a."organizationId" = $2
+          ORDER BY d.id
+          FOR UPDATE OF d`,
+        paymentId,
+        organizationId,
+      );
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "Payment" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        paymentId,
+        organizationId,
+      );
       const payment = await tx.payment.findFirst({ where: { id: paymentId, organizationId } });
       if (!payment) throw new NotFoundException(`Payment ${paymentId} not found`);
       if (payment.status === 'cancelled') {
@@ -323,10 +361,11 @@ export class PaymentAllocationReversalService {
         );
       }
 
-      await tx.payment.update({
-        where: { id: paymentId },
+      const cancelled = await tx.payment.updateMany({
+        where: { id: paymentId, status: { not: 'cancelled' } },
         data: { status: 'cancelled', allocatedAmount: ZERO, unallocatedAmount: ZERO },
       });
+      if (cancelled.count === 0) throw new ConflictException('Payment was reversed concurrently');
 
       // Owner decision D2 (2026-09-25): unspent credit is voided; what the
       // credit already settled re-opens on those invoices; what was paid out in
@@ -341,10 +380,14 @@ export class PaymentAllocationReversalService {
       // said it did must be compensated too or the Z-report overstates the till.
       const movements = await tx.cashMovement.findMany({ where: { organizationId, paymentId } });
       for (const m of movements) {
+        // A closed session's Z-report is final: the compensation goes to a
+        // drawer that is still open — the original if it is, else the
+        // reverser's own.
+        const cashSessionId = await this.openSessionFor(tx, m.cashSessionId);
         await tx.cashMovement.create({
           data: {
             organizationId,
-            cashSessionId: m.cashSessionId,
+            cashSessionId,
             paymentId: m.paymentId,
             movementType: m.movementType,
             // A compensating NEGATIVE movement, not a deletion: the session's
@@ -396,6 +439,28 @@ export class PaymentAllocationReversalService {
    * `createCredit`). The part already refunded is returned so the caller can
    * raise it as a receivable; the liability for it was discharged by the payout.
    */
+  /** The open session a compensating cash movement goes to (see reversePayment). */
+  private async openSessionFor(tx: any, originalSessionId: string): Promise<string> {
+    const organizationId = this.tenant.organizationId;
+    await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR SHARE`, originalSessionId);
+    const original = await tx.cashSession.findFirst({ where: { id: originalSessionId, organizationId } });
+    if (original?.status === 'open') return original.id;
+    const userId = this.tenant.userId;
+    const own = userId
+      ? await tx.cashSession.findFirst({
+          where: { organizationId, userId, status: 'open' },
+          orderBy: { openedAt: 'desc' },
+        })
+      : null;
+    if (!own) {
+      throw new BadRequestException(
+        'The cash session that took this receipt is closed. Open your own drawer to record the reversal in it.',
+      );
+    }
+    await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR SHARE`, own.id);
+    return own.id;
+  }
+
   private async unwindFundedCredits(tx: any, credits: any[], reason: string, partnerId: string) {
     const organizationId = this.tenant.organizationId;
     const out = { creditIds: [] as string[], reopened: ZERO, refunded: ZERO };

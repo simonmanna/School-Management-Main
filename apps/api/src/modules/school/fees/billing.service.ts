@@ -1202,6 +1202,9 @@ export class SchoolPaymentService {
 
   async collect(dto: CollectFeePaymentDto, opts: { tx?: any; settlementAccountId?: string } = {}) {
     const organizationId = this.tenant.organizationId;
+    if (dto.externalReference && !dto.externalReferenceType) {
+      throw new BadRequestException('externalReferenceType is required with externalReference');
+    }
     const run = async (tx: any) => {
       const student = await tx.studentProfile.findFirst({
         where: { id: dto.studentProfileId },
@@ -1232,7 +1235,9 @@ export class SchoolPaymentService {
           where: {
             organizationId,
             externalReference: dto.externalReference,
-            externalReferenceType: dto.externalReferenceType ?? undefined,
+            // null, not undefined: undefined drops the filter and matched a
+            // payment with the same reference under ANY type.
+            externalReferenceType: dto.externalReferenceType ?? null,
             direction: 'inbound',
           },
           include: { allocations: true },
@@ -1376,12 +1381,19 @@ export class SchoolPaymentService {
             where: {
               organizationId,
               externalReference: dto.externalReference,
-              externalReferenceType: dto.externalReferenceType ?? undefined,
+              externalReferenceType: dto.externalReferenceType ?? null,
               direction: 'inbound',
             },
             include: { allocations: true },
           });
-          if (existing) return { payment: existing, allocations: [], unallocated: 0, replayed: true };
+          if (existing) {
+            return {
+              payment: existing,
+              allocations: existing.allocations ?? [],
+              unallocated: Number(existing.unallocatedAmount),
+              replayed: true,
+            };
+          }
           throw err; // genuine conflict, not the replay we guard
         }
         throw err;
@@ -1515,7 +1527,8 @@ export class SchoolPaymentService {
           bankAccountId: dto.bankAccountId,
           reference: row.reference,
           externalReference: row.externalReference,
-          externalReferenceType: row.externalReferenceType,
+          // A batch row's key is an import-row reference unless it says otherwise.
+          externalReferenceType: row.externalReferenceType ?? (row.externalReference ? 'import_row' : undefined),
           convertOverpaymentToCredit: row.convertOverpaymentToCredit ?? true,
         } as CollectFeePaymentDto);
 

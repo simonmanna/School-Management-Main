@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -564,12 +565,13 @@ export class PurchaseOrdersService {
             description: `Cash purchase ${po.orderNumber} · GRN ${receiptNumber}`,
             tx,
           });
-          // Drawer artifact (best-effort): record the pay-out on an open session
-          // so the till's expected cash reflects the withdrawal. GL already done.
-          const session = await this.cashSession.findOpen();
-          if (session) {
+          // Drawer artifact: the pay-out goes through the receiver's own open
+          // session (required in drawer-mode schools) so the till's expected
+          // cash reflects the withdrawal. GL already done above.
+          const sessionId = await this.cashSession.custodySessionForPayOut(tx, { method: 'cash' });
+          if (sessionId) {
             await this.cashSession.recordExternalPayOut(
-              tx, session.id, settleAmount, `Cash purchase PO ${po.orderNumber}`,
+              tx, sessionId, settleAmount, `Cash purchase PO ${po.orderNumber}`,
             );
           }
         }
@@ -606,31 +608,50 @@ export class PurchaseOrdersService {
 
   async pay(id: string, dto: PayPODto) {
     const orgId = this.tenant.organizationId;
-    const po = await this.requireOwned(id);
-
-    if (po.paymentType !== 'credit')
-      throw new BadRequestException(
-        'Only credit purchases can accept manual payments',
-      );
-    if (po.status === 'cancelled')
-      throw new BadRequestException('Cannot pay a cancelled PO');
-
-    const amount = dto.amount ?? Number(po.totalAmount) - Number(po.totalPaid);
-    if (amount <= 0)
+    if (dto.amount !== undefined && dto.amount !== null && !(Number(dto.amount) > 0)) {
       throw new BadRequestException('Payment amount must be positive');
-
-    const remaining = Number(po.totalAmount) - Number(po.totalPaid);
-    if (amount > remaining) {
-      throw new BadRequestException(
-        `Payment of ${amount} exceeds remaining balance of ${remaining}`,
-      );
     }
 
-    const newTotalPaid = Number(po.totalPaid) + amount;
-    const newPaymentStatus =
-      newTotalPaid >= Number(po.totalAmount) ? 'paid' : 'partial';
-
     const result = await this.prisma.client.$transaction(async (tx) => {
+      // Wave 18: read and settle under a row lock. Two concurrent payments used
+      // to both read the same totalPaid, both pass the balance check and both
+      // post Dr AP / Cr cash — an overpayment and a double journal.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "PurchaseOrder" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        id,
+        orgId,
+      );
+      const po = await tx.purchaseOrder.findFirst({ where: { id, organizationId: orgId } });
+      if (!po) throw new NotFoundException('Purchase order not found');
+
+      if (po.paymentType !== 'credit')
+        throw new BadRequestException(
+          'Only credit purchases can accept manual payments',
+        );
+      if (po.status === 'cancelled')
+        throw new BadRequestException('Cannot pay a cancelled PO');
+
+      const remaining = dec(po.totalAmount).minus(dec(po.totalPaid));
+      const amount = dto.amount !== undefined && dto.amount !== null ? dec(dto.amount) : remaining;
+      if (amount.lessThanOrEqualTo(0))
+        throw new BadRequestException('Payment amount must be positive');
+      if (amount.greaterThan(remaining)) {
+        throw new BadRequestException(
+          `Payment of ${amount.toString()} exceeds remaining balance of ${remaining.toString()}`,
+        );
+      }
+
+      const newTotalPaid = dec(po.totalPaid).plus(amount);
+      const newPaymentStatus =
+        newTotalPaid.greaterThanOrEqualTo(dec(po.totalAmount)) ? 'paid' : 'partial';
+      const method = dto.method ?? 'bank';
+      // Cash leaves through the payer's drawer (drawer-mode schools must have
+      // one open); the session is locked FOR SHARE so a close counts it.
+      const sessionId = await this.cashSession.custodySessionForPayOut(tx, {
+        method,
+        cashRegisterId: dto.cashRegisterId,
+      });
+
       // 1. Record payment
       const payment = await tx.purchasePayment.create({
         data: {
@@ -644,19 +665,20 @@ export class PurchaseOrdersService {
         },
       });
 
-      // 2. Update PO totalPaid and paymentStatus
-      await tx.purchaseOrder.update({
-        where: { id },
+      // 2. Update PO totalPaid and paymentStatus (row is locked; the version
+      //    predicate also fences any writer that skipped the lock).
+      const bumped = await tx.purchaseOrder.updateMany({
+        where: { id, organizationId: orgId, version: po.version },
         data: {
           totalPaid: newTotalPaid,
           paymentStatus: newPaymentStatus,
           version: { increment: 1 },
         },
       });
+      if (bumped.count === 0) throw new ConflictException('Purchase order changed concurrently; retry');
 
       // 3. GL: Dr AP / Cr Cash|Bank — relieve the payable the receipt vouchered.
       //    Bank is the default for a manual credit-PO settlement.
-      const method = dto.method ?? 'bank';
       await this.stockPosting.postPurchasePayment({
         partnerId: po.partnerId,
         amount,
@@ -667,15 +689,8 @@ export class PurchaseOrdersService {
         description: `Payment PO ${po.orderNumber}${dto.reference ? ` · ${dto.reference}` : ''}`,
         tx,
       });
-      // Cash method: also record the drawer pay-out (best-effort, no GL — the
-      // journal above owns the cash credit).
-      if (method === 'cash') {
-        const session = await this.cashSession.findOpen(dto.cashRegisterId);
-        if (session) {
-          await this.cashSession.recordExternalPayOut(
-            tx, session.id, dec(amount), `Payment PO ${po.orderNumber}`,
-          );
-        }
+      if (sessionId) {
+        await this.cashSession.recordExternalPayOut(tx, sessionId, amount, `Payment PO ${po.orderNumber}`);
       }
 
       // F3 fix: write the audit row inside the TX so an audit failure rolls
@@ -686,7 +701,7 @@ export class PurchaseOrdersService {
         action: 'update',
         newValues: {
           paymentStatus: newPaymentStatus,
-          amountPaid: amount,
+          amountPaid: amount.toString(),
           method,
         },
       });
@@ -697,7 +712,7 @@ export class PurchaseOrdersService {
     this.events.publish('purchase_order.paid' as any, {
       organizationId: orgId,
       orderId: id,
-      amount,
+      amount: Number(result.amount),
     });
 
     return result;

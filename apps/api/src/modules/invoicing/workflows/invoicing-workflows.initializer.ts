@@ -334,7 +334,14 @@ export class InvoicingWorkflowsInitializer implements OnModuleInit {
       select: { id: true },
     });
     const fundedCredit = await tx.feeCredit.findFirst({ where: { sourcePaymentId: payment.id }, select: { id: true } });
-    if (feeAllocation || fundedCredit) {
+    // Wave 18: an unallocated fee receipt or an outbound fee refund has neither
+    // of the markers above, yet voiding it here hard-deletes its drawer
+    // movement and loses the refund entitlement. Any payment whose party is a
+    // pupil's account belongs to the fee office's reversal path.
+    const pupil = payment.partnerId
+      ? await tx.studentProfile.findFirst({ where: { partnerId: payment.partnerId }, select: { id: true } })
+      : null;
+    if (feeAllocation || fundedCredit || pupil) {
       throw new BadRequestException(
         `${payment.paymentNumber ?? 'This payment'} is a school-fee receipt. Reverse it from Fees (reverse payment), ` +
           'which keeps the reversal trail, unwinds credits and respects term close.',

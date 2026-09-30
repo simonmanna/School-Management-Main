@@ -261,7 +261,7 @@ export class PaymentService {
             },
           });
           allocatedTotal = allocatedTotal.plus(allocAmount);
-          this.events.publish('payment.allocated', { organizationId, paymentId: payment.id, documentId: inv.id, amount: allocAmount.toString() });
+          await this.events.publishInTx(tx, 'payment.allocated', { organizationId, paymentId: payment.id, documentId: inv.id, amount: allocAmount.toString() });
           continue;
         }
 
@@ -296,14 +296,14 @@ export class PaymentService {
         });
 
         allocatedTotal = allocatedTotal.plus(allocAmount);
-        this.events.publish('payment.allocated', {
+        await this.events.publishInTx(tx, 'payment.allocated', {
           organizationId,
           paymentId: payment.id,
           documentId: doc.id,
           amount: allocAmount.toString(),
         });
         if (direction === 'inbound' && newResidual.lessThanOrEqualTo(0)) {
-          this.events.publish('invoice.paid', {
+          await this.events.publishInTx(tx, 'invoice.paid', {
             organizationId,
             documentId: doc.id,
             documentNumber: doc.documentNumber,
@@ -324,6 +324,9 @@ export class PaymentService {
       // a CashMovement row inside the same transaction so the session's
       // Z-report reconciles with the ledger. Store credit is not cash.
       if (method === 'cash' && dto.cashSessionId && !dto.accountId) {
+        // FOR SHARE: a concurrent close (FOR UPDATE) waits for this movement
+        // and counts it, or this payment waits and sees the session closed.
+        await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR SHARE`, dto.cashSessionId);
         const session = await tx.cashSession.findFirst({
           where: { id: dto.cashSessionId, organizationId },
         });
@@ -353,7 +356,7 @@ export class PaymentService {
         },
       });
 
-      this.events.publish('payment.received', {
+      await this.events.publishInTx(tx, 'payment.received', {
         organizationId,
         paymentId: payment.id,
         amount: amount.toString(),
@@ -452,7 +455,7 @@ export class PaymentService {
         });
         allocated = allocated.plus(amount);
         created.push(row);
-        this.events.publish('payment.allocated', {
+        await this.events.publishInTx(db, 'payment.allocated', {
           organizationId,
           paymentId: payment.id,
           documentId: doc.id,
