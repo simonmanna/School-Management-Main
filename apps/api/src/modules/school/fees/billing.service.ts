@@ -5,7 +5,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
-import { dec, round, ZERO } from '../../../kernel/common/money';
+import { currencyDecimals, dec, round, ZERO } from '../../../kernel/common/money';
 import { BILLABLE_STUDENT_STATUSES, COLLECTABLE_FEE_WHERE, OPEN_COLLECTABLE_FEE_WHERE } from './fee-document.constants';
 import { DocumentBuilderService } from '../../invoicing/document/document-builder.service';
 import { PostingService } from '../../accounting/posting/posting.service';
@@ -26,6 +26,40 @@ import { AdvancedFinanceService } from './advanced.service';
 import type { CollectFeePaymentDto, FeeComponent, GenerateBillingDto, RefundFeeDto } from './dto.types';
 import { SCHOOL_ACCOUNTS } from './school-accounts';
 import { safeTimeZone, zonedDate } from '../../../kernel/common/school-time';
+
+/** Minor units of an organization's currency (UGX → 0). Tolerates partial test doubles. */
+async function orgMoneyDecimals(client: any, organizationId: string): Promise<number> {
+  const org = typeof client.organization?.findUnique === 'function'
+    ? await client.organization.findUnique({ where: { id: organizationId }, select: { currencyCode: true } })
+    : null;
+  const cur = org?.currencyCode && typeof client.currency?.findUnique === 'function'
+    ? await client.currency.findUnique({ where: { code: org.currencyCode }, select: { decimalPlaces: true } })
+    : null;
+  return currencyDecimals(org?.currencyCode, cur?.decimalPlaces);
+}
+
+/** Money in and out of a pupil's account is whole minor units (UGX: shillings). */
+async function assertWholeMinorUnits(client: any, organizationId: string, amount: unknown): Promise<void> {
+  if (amount === undefined || amount === null) return;
+  const dp = await orgMoneyDecimals(client, organizationId);
+  const d = dec(amount as any);
+  if (!d.equals(d.toDecimalPlaces(dp))) {
+    throw new BadRequestException(
+      dp === 0 ? 'Amounts must be whole shillings' : `Amounts may have at most ${dp} decimal places`,
+    );
+  }
+}
+
+/** One invoice line from the fee calculator (see computeLines). */
+type FeeLine = {
+  productId?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discountPercent: number;
+  discountType?: 'fixed_amount';
+  discountAmount?: number;
+};
 
 /**
  * BillingService — the keystone of the school vertical.
@@ -147,6 +181,7 @@ export class BillingService {
     // D4: mid-term proration policy + the term's own dates, read once for the
     // whole run. Default 'none' — an existing school's billing is unchanged
     // until somebody deliberately turns proration on.
+    const moneyDecimals = await this.moneyDecimals();
     const [prorationPolicy, term] = await Promise.all([
       this.prorationPolicy(),
       this.prisma.client.term.findFirst({
@@ -246,6 +281,7 @@ export class BillingService {
           s,
           optInsByStudent.get(s.id) ?? new Map(),
           this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
+          moneyDecimals,
         );
         if (lines.length === 0) continue;
 
@@ -440,6 +476,11 @@ export class BillingService {
     };
   }
 
+  /** Minor units of the organization's currency (UGX → 0). */
+  private moneyDecimals(): Promise<number> {
+    return orgMoneyDecimals(this.prisma.client, this.tenant.organizationId);
+  }
+
   /**
    * A3.1 canonical line calculation. Deterministic precedence:
    *   base (component amount, or per-student override)
@@ -464,7 +505,10 @@ export class BillingService {
      * an admission fee is not cheaper for arriving in week six.
      */
     prorationFactor = 1,
-  ): Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> {
+    /** Currency minor units (UGX 0): line prices and discounts are whole units of it. */
+    moneyDecimals = 2,
+  ): FeeLine[] {
+    const toMoney = (n: number) => dec(n).toDecimalPlaces(moneyDecimals, Prisma.Decimal.ROUND_HALF_UP).toNumber();
     // Resolved placement (see generateForTerm). `student.placement` is the
     // effective placement for the billing term; the projection it replaced
     // answered "today" regardless of which term was being billed.
@@ -525,7 +569,7 @@ export class BillingService {
       .reduce((s, sc) => s + Number(sc.value), 0);
 
     return billable.map((c, i) => {
-      const base = bases[i];
+      const base = toMoney(bases[i]);
       // The invoice line reads as the fee's name ("Swimming"), not its code.
       const description = c.name?.trim() || c.code;
       if (base <= 0) {
@@ -546,10 +590,23 @@ export class BillingService {
       const proRataFixedScholarship = baseTotal > 0 ? (fixedScholarshipPool * base) / baseTotal : 0;
       const lineDiscountAmount =
         (base * (percentDiscount + percentScholarship)) / 100 + fixedDiscount + proRataFixedScholarship;
-      const cappedDiscount = Math.min(lineDiscountAmount, base);
+      // Wave 18: the discount is carried as a fixed amount rounded to the
+      // currency's minor unit, so the invoice line nets to whole shillings. A
+      // 1/3 percentage used to leave 233,333.333333 on a UGX invoice.
+      const cappedDiscount = toMoney(Math.min(lineDiscountAmount, base));
+      if (cappedDiscount <= 0) {
+        return { productId: c.productId, description, quantity: 1, unitPrice: base, discountPercent: 0 };
+      }
       const discountPercent = (cappedDiscount / base) * 100;
-
-      return { productId: c.productId, description, quantity: 1, unitPrice: base, discountPercent };
+      return {
+        productId: c.productId,
+        description,
+        quantity: 1,
+        unitPrice: base,
+        discountPercent,
+        discountType: 'fixed_amount' as const,
+        discountAmount: cappedDiscount,
+      };
     });
   }
 
@@ -707,7 +764,7 @@ export class BillingService {
     schedule: any,
     termId: string,
     studentProfileId: string,
-  ): Promise<{ lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }> | null; reason?: string }> {
+  ): Promise<{ lines: FeeLine[] | null; reason?: string }> {
     const organizationId = this.tenant.organizationId;
     const feeStructure = schedule.feeStructure;
     // P1-A: priced from the immutable published version, same as the bulk run.
@@ -743,6 +800,7 @@ export class BillingService {
       s,
       optIns,
       this.prorationFactor(prorationPolicy, s.enrollmentDate, term),
+      await this.moneyDecimals(),
     );
     return { lines };
   }
@@ -757,7 +815,7 @@ export class BillingService {
     schedule: any,
     feeStructure: any,
     dto: GenerateBillingDto,
-    lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }>,
+    lines: FeeLine[],
     issueDate: Date,
     reference: string,
   ): Promise<any> {
@@ -773,7 +831,7 @@ export class BillingService {
     schedule: any,
     feeStructure: any,
     termId: string,
-    lines: Array<{ productId?: string; description: string; quantity: number; unitPrice: number; discountPercent: number }>,
+    lines: FeeLine[],
     issueDate: Date,
     reference: string,
   ): Promise<any> {
@@ -1205,6 +1263,7 @@ export class SchoolPaymentService {
     if (dto.externalReference && !dto.externalReferenceType) {
       throw new BadRequestException('externalReferenceType is required with externalReference');
     }
+    await assertWholeMinorUnits(this.prisma.client, organizationId, dto.amount);
     const run = async (tx: any) => {
       const student = await tx.studentProfile.findFirst({
         where: { id: dto.studentProfileId },
@@ -1412,8 +1471,11 @@ export class SchoolPaymentService {
         });
       }
 
-      const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
-      const unallocatedAmt = Math.max(0, Number(dto.amount) - allocatedTotal);
+      // Decimal throughout: the float version could leave a sub-shilling residue
+      // between the credit and the payment's unallocated pot.
+      const allocatedTotal = allocations.reduce((s, a) => s.plus(dec(a.amount)), ZERO as Prisma.Decimal);
+      const unallocatedDec = Prisma.Decimal.max(ZERO, dec(dto.amount).minus(allocatedTotal));
+      const unallocatedAmt = unallocatedDec.toNumber();
 
       // B1 · overpayment.
       //
@@ -1449,7 +1511,7 @@ export class SchoolPaymentService {
         // + FeeCredit) and AR⇄GL reconciliation diverges.
         await tx.payment.update({
           where: { id: receipt.id },
-          data: { unallocatedAmount: { decrement: unallocatedAmt } },
+          data: { unallocatedAmount: { decrement: unallocatedDec } },
         });
         converted = unallocatedAmt;
       }
@@ -1619,6 +1681,7 @@ export class SchoolPaymentService {
     } = {},
   ) {
     const organizationId = this.tenant.organizationId;
+    await assertWholeMinorUnits(this.prisma.client, organizationId, dto.amount);
     const run = async (tx: any) => {
       const student = await tx.studentProfile.findFirst({
         where: { id: dto.studentProfileId },
