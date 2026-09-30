@@ -13,7 +13,7 @@ export class PeriodCloseController {
 
   @Post(':id/close')
   @Idempotent()
-  @RequirePermissions(PERMISSIONS.fiscalPeriod.update)
+  @RequirePermissions(PERMISSIONS.fiscalPeriod.close)
   close(@Param('id') id: string) {
     return this.periodClose.close(id);
   }
@@ -21,7 +21,7 @@ export class PeriodCloseController {
   @Post(':id/lock')
   @Idempotent()
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.fiscalPeriod.update)
+  @RequirePermissions(PERMISSIONS.fiscalPeriod.lock)
   lock(@Param('id') id: string) {
     return this.periodClose.lock(id);
   }

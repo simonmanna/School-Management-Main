@@ -560,11 +560,24 @@ export function useClosePeriod() {
   });
 }
 
+/** closed → open (fiscal_period:reopen). The closing entry is reversed; a reason is required. */
 export function useReopenPeriod() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => (await api.post(`/fiscal-periods/${id}/reopen`)).data,
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
+      (await api.post(`/fiscal-periods/${id}/reopen`, { reason })).data,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fiscal-periods'] }); notify.success('Period reopened'); },
+    onError: (e: any) => notify.error('Failed', e?.response?.data?.message ?? e.message),
+  });
+}
+
+/** locked → open (fiscal_period:unlock, Administrator). A reason is required. */
+export function useUnlockPeriod() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
+      (await api.post(`/fiscal-periods/${id}/unlock`, { reason })).data,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fiscal-periods'] }); notify.success('Period unlocked'); },
     onError: (e: any) => notify.error('Failed', e?.response?.data?.message ?? e.message),
   });
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { dec, sum, ZERO } from '../../../kernel/common/money';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -8,6 +8,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { PostingService } from './posting.service';
 import { AccountDeterminationService } from './account-determination.service';
 import { AccountResolverService } from './account-resolver.service';
+import { BALANCE_AFFECTING_STATUSES } from './posting.types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -46,7 +47,15 @@ export class PeriodCloseService {
   async close(periodId: string): Promise<{ journalEntryId: string; netIncome: string }> {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx) => {
-      const period = await tx.fiscalPeriod.findFirst({ where: { id: periodId, organizationId } });
+      // Wave 18: FOR UPDATE here pairs with FOR SHARE in assertOpen — postings
+      // in flight finish (and are counted) before the totals are taken, and
+      // postings that arrive later wait and are refused.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "FiscalPeriod" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        periodId,
+        organizationId,
+      );
+      const period = await tx.fiscalPeriod.findFirst({ where: { id: periodId, organizationId, deletedAt: null } });
       if (!period) throw new NotFoundException('Fiscal period not found');
       if (period.status !== 'open') {
         throw new BadRequestException(
@@ -65,7 +74,10 @@ export class PeriodCloseService {
         where: {
           organizationId,
           status: { in: ['pending', 'processing', 'failed'] },
-          createdAt: { gte: period.startDate, lte: period.endDate },
+          // A job has no posting date of its own, and one enqueued after the
+          // period ended can still belong to an in-period sale — so any backlog
+          // since the period began blocks the close.
+          createdAt: { gte: period.startDate },
         },
       });
       if (unpostedCogs > 0) {
@@ -81,7 +93,9 @@ export class PeriodCloseService {
         by: ['accountId'],
         where: {
           entry: {
-            status: 'posted',
+            // posted + reversed: a reversed original and its reversal net to
+            // zero only when both are summed (same rule as every report).
+            status: { in: [...BALANCE_AFFECTING_STATUSES] },
             postingDate: { gte: period.startDate, lte: period.endDate },
           },
         },
@@ -213,7 +227,7 @@ export class PeriodCloseService {
 
       // 4) Flip period to closed.
       await tx.fiscalPeriod.updateMany({
-        where: { id: period.id },
+        where: { id: period.id, status: 'open' },
         data: {
           status: 'closed',
           closedAt: new Date(),
@@ -250,16 +264,24 @@ export class PeriodCloseService {
   async lock(periodId: string): Promise<void> {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx) => {
-      const period = await tx.fiscalPeriod.findFirst({ where: { id: periodId, organizationId } });
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "FiscalPeriod" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        periodId,
+        organizationId,
+      );
+      const period = await tx.fiscalPeriod.findFirst({ where: { id: periodId, organizationId, deletedAt: null } });
       if (!period) throw new NotFoundException('Fiscal period not found');
-      if (period.status === 'open') {
+      if (period.status === 'locked') {
+        throw new ConflictException(`Fiscal period '${period.name}' is already locked`);
+      }
+      if (period.status !== 'closed') {
         throw new BadRequestException(
           `Fiscal period '${period.name}' is open; close it before locking`,
         );
       }
 
       await tx.fiscalPeriod.updateMany({
-        where: { id: period.id },
+        where: { id: period.id, status: 'closed' },
         data: { status: 'locked', lockedAt: new Date() },
       });
 

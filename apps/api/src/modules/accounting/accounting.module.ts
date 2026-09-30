@@ -49,6 +49,7 @@ import { ExportController } from './reporting/export.controller';
 import { CostCenterController } from './cost-center/cost-center.controller';
 import { CostCenterService } from './cost-center/cost-center.service';
 import { FiscalPeriodCrudController } from './posting/fiscal-period-crud.controller';
+import { FiscalPeriodLifecycleService } from './posting/fiscal-period-lifecycle.service';
 import { InventoryValuationController } from './reporting/inventory-valuation.controller';
 import { FinancialReportsService } from './reporting/financial-reports.service';
 import { FinancialReportsController } from './reporting/financial-reports.controller';
@@ -85,6 +86,7 @@ import { FinancialReportsController } from './reporting/financial-reports.contro
     JournalService,
     AccountMappingService,
     FiscalPeriodService,
+    FiscalPeriodLifecycleService,
     AccountCategoryService,
     AccountResolverService,
     AccountDeterminationService,

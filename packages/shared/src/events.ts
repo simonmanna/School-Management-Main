@@ -45,6 +45,7 @@ export const EVENTS = {
   // D2-2 — period close
   FiscalPeriodClosed: 'fiscal_period.closed',
   FiscalPeriodLocked: 'fiscal_period.locked',
+  FiscalPeriodReopened: 'fiscal_period.reopened',
   // Phase C — FX revaluation
   FxRevaluationRan: 'fx_revaluation.ran',
   // Phase D — bank reconciliation
@@ -463,6 +464,14 @@ export interface DomainEventMap {
   'cash.banking.recorded': { organizationId: string; sessionId: string; amount: string; bankName: string };
   'fiscal_period.closed': { organizationId: string; periodId: string; periodName: string; closingEntryId: string; netIncome: string };
   'fiscal_period.locked': { organizationId: string; periodId: string; periodName: string };
+  'fiscal_period.reopened': {
+    organizationId: string;
+    periodId: string;
+    periodName: string;
+    fromStatus: string;
+    reason: string;
+    reversedClosingEntryId: string | null;
+  };
   'fx_revaluation.ran': { organizationId: string; asOf: string; revalued: number; totalGain: string };
   'bank_statement.imported': { organizationId: string; bankAccountId: string; imported: number; skipped: number };
   'bank_reconciliation.ran': { organizationId: string; bankAccountId: string; runId: string; matched: number; unmatched: number };

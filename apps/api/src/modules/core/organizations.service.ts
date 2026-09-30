@@ -20,6 +20,7 @@ import {
   ACCOUNTING_BOOTSTRAP,
   type AccountingBootstrap,
 } from '../../kernel/common/org-bootstrap.tokens';
+import { periodBounds } from '../accounting/posting/fiscal-period.service';
 
 /**
  * F.5 — Tenant self-service.
@@ -125,8 +126,7 @@ export class OrganizationsService {
       data: {
         organizationId: org.id,
         name: `FY${year}`,
-        startDate: new Date(Date.UTC(year, 0, 1)),
-        endDate: new Date(Date.UTC(year, 11, 31)),
+        ...periodBounds(`${year}-01-01`, `${year}-12-31`, org.timezone),
         status: 'open',
       },
     });

@@ -29,9 +29,18 @@ export function YearEndClosePage() {
 
   const handleAction = async (id: string, action: 'close' | 'lock' | 'reopen') => {
     try {
-      if (action === 'close') await closeMut.mutateAsync(id);
-      else if (action === 'lock') await lockMut.mutateAsync(id);
-      else await reopenMut.mutateAsync(id);
+      if (action === 'close') {
+        if (!window.confirm('Close this period? Its income and expenses move to retained earnings and posting stops.')) return;
+        await closeMut.mutateAsync(id);
+      } else if (action === 'lock') {
+        if (!window.confirm('Lock this period? Only an administrator can unlock it, with a recorded reason.')) return;
+        await lockMut.mutateAsync(id);
+      } else {
+        const reason = window.prompt('Why is this period being reopened? (kept in the audit log)')?.trim();
+        if (!reason) return;
+        if (reason.length < 5) return notify.error('Reason too short', 'Give at least 5 characters.');
+        await reopenMut.mutateAsync({ id, reason });
+      }
     } catch (e: any) {
       notify.error('Action failed', e?.response?.data?.message ?? e.message);
     }

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ChevronRight, Plus, Lock, Unlock, RotateCcw } from 'lucide-react';
+import { ChevronRight, Plus, Lock, LockOpen, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -30,9 +31,41 @@ import {
   useClosePeriod,
   useReopenPeriod,
   useLockPeriod,
+  useUnlockPeriod,
   type FiscalPeriod,
 } from '@/features/accounting/api';
+import { useAuthStore } from '@/stores/auth.store';
 import { cn } from '@/lib/utils';
+
+type PeriodAction = 'close' | 'lock' | 'reopen' | 'unlock';
+
+/** What each lifecycle action does, shown before the user confirms it. */
+const ACTION_COPY: Record<PeriodAction, { title: string; body: string; confirm: string; needsReason: boolean }> = {
+  close: {
+    title: 'Close period',
+    body: 'Posts the closing entry that moves this period’s income and expenses into retained earnings. Nothing can be posted into the period while it is closed.',
+    confirm: 'Close period',
+    needsReason: false,
+  },
+  lock: {
+    title: 'Lock period',
+    body: 'Locking is final for day-to-day work: the period can only be unlocked by an administrator, with a recorded reason.',
+    confirm: 'Lock period',
+    needsReason: false,
+  },
+  reopen: {
+    title: 'Reopen period',
+    body: 'Reverses the closing entry and allows posting into this period again. The reason is kept in the audit log.',
+    confirm: 'Reopen period',
+    needsReason: true,
+  },
+  unlock: {
+    title: 'Unlock period',
+    body: 'Break-glass: reopens a locked period and reverses its closing entry. Later closed or locked periods must be reopened first. The reason is kept in the audit log.',
+    confirm: 'Unlock period',
+    needsReason: true,
+  },
+};
 
 const STATUS_BADGE: Record<FiscalPeriod['status'], { label: string; className: string }> = {
   open: { label: 'Open', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' },
@@ -53,6 +86,10 @@ function FiscalPeriodsPage() {
   const closeMutation = useClosePeriod();
   const reopenMutation = useReopenPeriod();
   const lockMutation = useLockPeriod();
+  const unlockMutation = useUnlockPeriod();
+  const can = useAuthStore((s) => s.hasPermission);
+  const [pending, setPending] = useState<{ action: PeriodAction; period: FiscalPeriod } | null>(null);
+  const [reason, setReason] = useState('');
 
   const periods = data?.data ?? [];
   const meta = data?.meta;
@@ -72,16 +109,22 @@ function FiscalPeriodsPage() {
     );
   }
 
-  function handleClose(id: string) {
-    closeMutation.mutate(id);
+  function ask(action: PeriodAction, period: FiscalPeriod) {
+    setReason('');
+    setPending({ action, period });
   }
 
-  function handleReopen(id: string) {
-    reopenMutation.mutate(id);
-  }
+  const busy =
+    closeMutation.isPending || lockMutation.isPending || reopenMutation.isPending || unlockMutation.isPending;
 
-  function handleLock(id: string) {
-    lockMutation.mutate(id);
+  function confirmPending() {
+    if (!pending) return;
+    const { action, period } = pending;
+    const done = { onSuccess: () => setPending(null) };
+    if (action === 'close') closeMutation.mutate(period.id, done);
+    else if (action === 'lock') lockMutation.mutate(period.id, done);
+    else if (action === 'reopen') reopenMutation.mutate({ id: period.id, reason: reason.trim() }, done);
+    else unlockMutation.mutate({ id: period.id, reason: reason.trim() }, done);
   }
 
   return (
@@ -189,42 +232,53 @@ function FiscalPeriodsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          {p.status === 'open' && (
+                          {p.status === 'open' && can('fiscal_period:close') && (
                             <Button
                               variant="outline"
                               size="sm"
                               className="h-7 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
-                              onClick={() => handleClose(p.id)}
-                              disabled={closeMutation.isPending}
+                              onClick={() => ask('close', p)}
+                              disabled={busy}
                             >
-                              <Lock className="h-3 w-3" /> Close
+                              <CheckCircle2 className="h-3 w-3" /> Close
                             </Button>
                           )}
-                          {p.status === 'closed' && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-[10px] gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                                onClick={() => handleReopen(p.id)}
-                                disabled={reopenMutation.isPending}
-                              >
-                                <RotateCcw className="h-3 w-3" /> Reopen
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-[10px] gap-1 border-slate-300 text-slate-600 hover:bg-slate-50"
-                                onClick={() => handleLock(p.id)}
-                                disabled={lockMutation.isPending}
-                              >
-                                <Unlock className="h-3 w-3" /> Lock
-                              </Button>
-                            </>
+                          {p.status === 'closed' && can('fiscal_period:reopen') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                              onClick={() => ask('reopen', p)}
+                              disabled={busy}
+                            >
+                              <RotateCcw className="h-3 w-3" /> Reopen
+                            </Button>
                           )}
-                          {p.status === 'locked' && (
+                          {p.status === 'closed' && can('fiscal_period:lock') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] gap-1 border-slate-300 text-slate-600 hover:bg-slate-50"
+                              onClick={() => ask('lock', p)}
+                              disabled={busy}
+                            >
+                              <Lock className="h-3 w-3" /> Lock
+                            </Button>
+                          )}
+                          {p.status === 'locked' && can('fiscal_period:unlock') && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[10px] gap-1 border-red-300 text-red-700 hover:bg-red-50"
+                              onClick={() => ask('unlock', p)}
+                              disabled={busy}
+                            >
+                              <LockOpen className="h-3 w-3" /> Unlock
+                            </Button>
+                          )}
+                          {p.status === 'locked' && !can('fiscal_period:unlock') && (
                             <span className="text-[10px] text-muted-foreground italic px-2">
-                              No actions
+                              Locked
                             </span>
                           )}
                         </div>
@@ -265,6 +319,47 @@ function FiscalPeriodsPage() {
           </div>
         </div>
       )}
+
+      {/* Lifecycle confirmation */}
+      <Dialog open={!!pending} onOpenChange={(o) => !o && setPending(null)}>
+        <DialogContent className="max-w-md">
+          {pending && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {ACTION_COPY[pending.action].title}: {pending.period.name}
+                </DialogTitle>
+                <DialogDescription>{ACTION_COPY[pending.action].body}</DialogDescription>
+              </DialogHeader>
+              {ACTION_COPY[pending.action].needsReason && (
+                <div className="space-y-2 py-2">
+                  <Label htmlFor="period-reason">Reason</Label>
+                  <Textarea
+                    id="period-reason"
+                    rows={3}
+                    placeholder="e.g. Late supplier invoice for March must be booked in March"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">At least 5 characters.</p>
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPending(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={pending.action === 'unlock' ? 'destructive' : 'default'}
+                  onClick={confirmPending}
+                  disabled={busy || (ACTION_COPY[pending.action].needsReason && reason.trim().length < 5)}
+                >
+                  {busy ? 'Working…' : ACTION_COPY[pending.action].confirm}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Create Period Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

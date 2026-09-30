@@ -218,7 +218,8 @@ async function main(): Promise<void> {
       organizationId: org.id,
       name: `FY${year}`,
       startDate: new Date(Date.UTC(year, 0, 1)),
-      endDate: new Date(Date.UTC(year, 11, 31)),
+      // End of the last day, so a posting on 31 December is inside the year.
+      endDate: new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999)),
       status: 'open',
     },
   });

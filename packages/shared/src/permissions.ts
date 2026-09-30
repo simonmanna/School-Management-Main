@@ -75,6 +75,18 @@ export const PERMISSIONS = {
     read: 'fiscal_period:read',
     update: 'fiscal_period:update',
     delete: 'fiscal_period:delete',
+    // Wave 18: the period lifecycle is split from metadata edits so closing,
+    // locking and reopening are separate grants. Unlocking a locked period is
+    // the break-glass one and is held by Administrator only.
+    close: 'fiscal_period:close',
+    lock: 'fiscal_period:lock',
+    reopen: 'fiscal_period:reopen',
+    unlock: 'fiscal_period:unlock',
+  },
+  bankReconciliation: {
+    read: 'bank_reconciliation:read',
+    import: 'bank_reconciliation:import',
+    reconcile: 'bank_reconciliation:reconcile',
   },
   setting: {
     read: 'setting:read',

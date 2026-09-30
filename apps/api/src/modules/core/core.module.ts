@@ -4,8 +4,6 @@ import { ModuleRegistry } from '../../kernel/module-loader/module-registry.servi
 import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { PartnerModule } from './partner/partner.module';
 import { ProductModule } from './product/product.module';
-import { FiscalPeriodService } from './fiscal-period.service';
-import { FiscalPeriodController } from './fiscal-period.controller';
 import { BranchService } from './branch.service';
 import { BranchController } from './branch.controller';
 import { BranchScopeService } from './branch/branch-scope.service';
@@ -23,9 +21,9 @@ import { FiscalPositionController } from './fiscal-position.controller';
  */
 @Module({
   imports: [PartnerModule, ProductModule],
-  controllers: [FiscalPeriodController, BranchController, OrganizationsController, PaymentTermController, FiscalPositionController],
-  providers: [FiscalPeriodService, BranchService, BranchScopeService, OrganizationsService, PaymentTermService, FiscalPositionService],
-  exports: [FiscalPeriodService, BranchService, BranchScopeService, OrganizationsService, PaymentTermService, FiscalPositionService],
+  controllers: [BranchController, OrganizationsController, PaymentTermController, FiscalPositionController],
+  providers: [BranchService, BranchScopeService, OrganizationsService, PaymentTermService, FiscalPositionService],
+  exports: [BranchService, BranchScopeService, OrganizationsService, PaymentTermService, FiscalPositionService],
 })
 export class CoreModule implements OnModuleInit {
   constructor(
