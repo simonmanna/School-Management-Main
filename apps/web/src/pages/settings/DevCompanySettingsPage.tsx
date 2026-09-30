@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Loader2, Upload, Building2, Puzzle } from 'lucide-react';
+import { Save, Loader2, Upload, Building2, Puzzle, PanelLeft } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { usePosSettings, useUpdatePosSettings } from '@/features/pos/api';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { useAuthStore } from '@/stores/auth.store';
+import { SIDEBAR_MODULES, isModuleEnabled, moduleFeatureKey, ORG_FEATURES_QUERY_KEY } from '@/lib/sidebar-modules';
 
 interface DeveloperSettings {
   logoUrl: string | null;
@@ -18,16 +19,12 @@ interface DeveloperSettings {
   features: Record<string, boolean>;
 }
 
+// Accounting, assets, inventory, expense, task board and procurement used to be
+// listed here too; they are now controlled per sidebar section (Sidebar Modules).
 const KNOWN_FEATURES: Array<{ key: string; label: string; description: string }> = [
-  { key: 'accounting', label: 'Accounting', description: 'Chart of accounts, journals, posting engine' },
-  { key: 'assets', label: 'Assets', description: 'Fixed asset register and depreciation' },
-  { key: 'inventory', label: 'Inventory', description: 'Stock tracking, batches, serial numbers' },
   { key: 'multiCurrency', label: 'Multi-Currency', description: 'Foreign currency support and FX revaluation' },
-  { key: 'expense', label: 'Expense', description: 'Employee expense reports, approvals, and reimbursements' },
-  { key: 'taskBoard', label: 'Task Board', description: 'Kanban-style task management and workflow tracking' },
   { key: 'alcoholBeverageMonitor', label: 'Alcohol Beverage Monitor', description: 'Alcohol stock, duty tracking, and compliance reporting' },
   { key: 'offlineDevices', label: 'Offline Devices', description: 'Offline-capable POS terminals and device sync management' },
-  { key: 'procurement', label: 'Procurement', description: 'Purchase requests, orders, and receipts' },
 ];
 
 const POS_MODES = [
@@ -70,7 +67,10 @@ export function DevCompanySettingsPage() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload: Record<string, unknown> = { name, features };
+      // Persist every module explicitly so later default changes don't flip a saved choice.
+      const resolved = { ...features };
+      for (const m of SIDEBAR_MODULES) resolved[moduleFeatureKey(m.key)] = isModuleEnabled(features, m);
+      const payload: Record<string, unknown> = { name, features: resolved };
       if (logoUrl !== undefined) payload.logoUrl = logoUrl;
       return (await api.put('/settings/developer', payload)).data;
     },
@@ -81,6 +81,7 @@ export function DevCompanySettingsPage() {
         auth.setOrganization({ ...org, name: data.name });
       }
       qc.invalidateQueries({ queryKey: ['settings-developer'] });
+      qc.invalidateQueries({ queryKey: ORG_FEATURES_QUERY_KEY });
     },
     onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Failed'),
   });
@@ -119,6 +120,19 @@ export function DevCompanySettingsPage() {
 
   const toggleFeature = (key: string) => {
     setFeatures((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleModule = (key: string) => {
+    const mod = SIDEBAR_MODULES.find((m) => m.key === key)!;
+    setFeatures((prev) => ({ ...prev, [moduleFeatureKey(key)]: !isModuleEnabled(prev, mod) }));
+  };
+
+  const setAllModules = (on: boolean) => {
+    setFeatures((prev) => {
+      const next = { ...prev };
+      for (const m of SIDEBAR_MODULES) next[moduleFeatureKey(m.key)] = on;
+      return next;
+    });
   };
 
   return (
@@ -302,6 +316,56 @@ export function DevCompanySettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sidebar Modules */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <PanelLeft className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <CardTitle>Sidebar Modules</CardTitle>
+                <CardDescription>Checked modules appear in the sidebar menu for every user. Dashboard and Settings are always shown.</CardDescription>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setAllModules(true)} disabled={q.isLoading}>Check all</Button>
+              <Button size="sm" variant="outline" onClick={() => setAllModules(false)} disabled={q.isLoading}>Uncheck all</Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {q.isLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {SIDEBAR_MODULES.map((mod) => {
+                const on = isModuleEnabled(features, mod);
+                return (
+                  <label
+                    key={mod.key}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 rounded"
+                      checked={on}
+                      onChange={() => toggleModule(mod.key)}
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        {mod.section}
+                        {on && <Badge variant="secondary" className="text-[10px]">shown</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{mod.description}</p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Save button */}
       <div className="flex items-center gap-2">

@@ -115,6 +115,7 @@ import { ThemePicker } from '@/components/theme-picker';
 import { useTranslation } from 'react-i18next';
 import { useSidebarTheme } from '@/lib/sidebar-theme';
 import { enhanceTablesIn } from '@/lib/table-enhancer';
+import { isSectionEnabled, useOrgFeatures } from '@/lib/sidebar-modules';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -198,8 +199,6 @@ const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-      // Plain-language walkthrough of the school year and who does what.
-      { to: '/school/guide', label: 'How it works', icon: BookOpen, permission: PERMISSIONS.school.read },
     ],
   },
   {
@@ -230,15 +229,6 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/promotion', label: 'Promote & Roll Over', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
       { to: '/school/portals', label: 'Parent & Pupil Portals', icon: GraduationCap, permission: PERMISSIONS.school.read },
       { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
-    ],
-  },
-  {
-    title: 'Messaging',
-    icon: MessagesSquare,
-    flag: 'VITE_ENABLE_SCHOOL',
-    items: [
-      { to: '/school/messaging', label: 'Send Message', icon: MessagesSquare, permission: PERMISSIONS.school.read },
-      { to: '/school/messaging?tab=history', label: 'Message History', icon: History, permission: PERMISSIONS.school.read },
     ],
   },
   {
@@ -322,24 +312,18 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/exam-ops', label: 'Venues, Seating & Papers', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
       // Phase 6 — what the school sends to UNEB, and whether it can yet.
       { to: '/school/statutory', label: 'National Submissions', icon: FileSpreadsheet, permission: PERMISSIONS.school.readStatutory, group: 'Examinations' },
-    ],
-  },
-  {
-    // Release has ONE owner. "Report Cards" and "Results & Reports" both looked
-    // like the place a term is published from, and only one of them goes through
-    // the immutable ResultSet the portal is served from. Computing and publishing
-    // leads; the documents that fall out of it follow.
-    title: 'Results',
-    icon: GitBranch,
-    flag: 'VITE_ENABLE_SCHOOL',
-    items: [
-      { to: '/school/results', label: 'Compute & Publish Results', icon: GitBranch, permission: PERMISSIONS.school.computeResults },
-      { to: '/school/report-cards', label: 'Report Documents', icon: FileText, permission: PERMISSIONS.school.manageExams },
-      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read },
-      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read },
-      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read },
-      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Reports' },
-      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Setup' },
+
+      // Release has ONE owner. "Report Cards" and "Results & Reports" both looked
+      // like the place a term is published from, and only one of them goes through
+      // the immutable ResultSet the portal is served from. Computing and publishing
+      // leads; the documents that fall out of it follow.
+      { to: '/school/results', label: 'Compute & Publish Results', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Results' },
+      { to: '/school/report-cards', label: 'Report Documents', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Results' },
+      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Results' },
+      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Results' },
+      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Results' },
+      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Results' },
+      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Results' },
     ],
   },
   {
@@ -574,6 +558,15 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/reports', label: 'Report Center', icon: BarChart3, permission: PERMISSIONS.report.accounting },
     ],
   },
+  {
+    title: 'Messaging',
+    icon: MessagesSquare,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/messaging', label: 'Send Message', icon: MessagesSquare, permission: PERMISSIONS.school.read },
+      { to: '/school/messaging?tab=history', label: 'Message History', icon: History, permission: PERMISSIONS.school.read },
+    ],
+  },
   // ===== Meals & Cafeteria =====
   {
     title: 'Meals & Cafeteria',
@@ -650,6 +643,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/settings/devices', label: 'Offline devices', icon: Smartphone, permission: PERMISSIONS.organization.read },
       { to: '/settings/company', label: 'Company Settings', icon: Landmark, permission: PERMISSIONS.setting.read },
       { to: '/settings/developer', label: 'Developer Settings', icon: SettingsIcon, permission: PERMISSIONS.setting.read },
+      // Plain-language walkthrough of the school year and who does what.
+      { to: '/school/guide', label: 'How it works', icon: BookOpen, permission: PERMISSIONS.school.read },
     ],
   },
 ];
@@ -750,8 +745,6 @@ export function AppShell() {
   const setOrganization = useAuthStore((s) => s.setOrganization);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [navQuery, setNavQuery] = useState('');
-  const navSearchRef = useRef<HTMLInputElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const [userCollapsed, setUserCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { return false; }
@@ -785,13 +778,15 @@ export function AppShell() {
   const toggleSection = (title: string) =>
     persistExpanded({ ...expanded, [title]: !expanded[title] });
 
+  // Sections switched off in Developer Settings → Sidebar Modules.
+  const { data: orgFeatures } = useOrgFeatures();
   const visibleSections = useMemo(
     () =>
-      VISIBLE_SECTIONS.map((s) => ({
+      VISIBLE_SECTIONS.filter((s) => isSectionEnabled(orgFeatures, s.title)).map((s) => ({
         ...s,
         items: s.items.filter((i) => flagEnabled(i.flag) && satisfies(i.permission, hasPermission)),
       })).filter((s) => s.items.length > 0),
-    [hasPermission],
+    [hasPermission, orgFeatures],
   );
   const allItems = useMemo(() => visibleSections.flatMap((s) => s.items), [visibleSections]);
   const activeTo = activeItemKey(allItems, location.pathname, location.search);
@@ -849,15 +844,6 @@ export function AppShell() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setSearchOpen(true);
-        return;
-      }
-      // "/" jumps to the menu filter, unless the user is typing somewhere.
-      const el = e.target as HTMLElement;
-      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !el.closest('input, textarea, select, [contenteditable=true]')) {
-        if (navSearchRef.current && navSearchRef.current.offsetParent !== null) {
-          e.preventDefault();
-          navSearchRef.current.focus();
-        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -870,7 +856,6 @@ export function AppShell() {
   // Close mobile drawer on navigation.
   useEffect(() => {
     setMobileOpen(false);
-    setNavQuery('');
   }, [location.pathname, location.search]);
 
   const currentItem = allItems.find((i) => i.to === activeTo);
@@ -900,23 +885,6 @@ export function AppShell() {
     '--sb-bar': sb.sidebarActiveBar,
     '--sb-border': sb.sidebarBorder,
   };
-
-  // ── Menu filter: flat matches, grouped by section ──
-  const q = navQuery.trim().toLowerCase();
-  const filteredSections = q
-    ? visibleSections
-        .map((s) => ({
-          ...s,
-          items: s.items.filter(
-            (i) =>
-              i.label.toLowerCase().includes(q) ||
-              (i.group ?? '').toLowerCase().includes(q) ||
-              sectionTitle(s.title, t).toLowerCase().includes(q),
-          ),
-        }))
-        .filter((s) => s.items.length > 0)
-    : visibleSections;
-  const firstMatch = q ? filteredSections[0]?.items[0] : undefined;
 
   const itemLink = (item: NavItem, onItemClick?: () => void, withIcon = false) => {
     const Icon = item.icon;
@@ -960,12 +928,7 @@ export function AppShell() {
 
   const renderExpandedNav = (onItemClick?: () => void) => (
     <nav className="sb-scroll flex-1 overflow-y-auto overscroll-contain px-3 pb-4 pt-1" aria-label="Main">
-      {filteredSections.length === 0 && (
-        <p className="px-2 py-6 text-center text-[13px] text-[color:var(--sb-muted)]">
-          No pages match “{navQuery}”.
-        </p>
-      )}
-      {filteredSections.map((section, idx) => {
+      {visibleSections.map((section, idx) => {
         if (!section.title) {
           return (
             <div key={`top-${idx}`} className="mb-2 space-y-0.5">
@@ -974,7 +937,7 @@ export function AppShell() {
           );
         }
         const title = section.title;
-        const isOpen = !!q || !!expanded[title];
+        const isOpen = !!expanded[title];
         const SectionIcon = section.icon ?? LayoutDashboard;
         const holdsActive = section.items.some((i) => i.to === activeTo);
         return (
@@ -1146,48 +1109,6 @@ export function AppShell() {
     </div>
   );
 
-  const navSearch = (
-    <div className="px-3 pb-2">
-      <label className="relative flex h-9 items-center rounded-lg border border-[color:var(--sb-border)] bg-white/[0.06] transition-colors focus-within:border-[color:var(--sb-bar)] focus-within:bg-white/[0.1]">
-        <Search className="pointer-events-none absolute left-2.5 h-4 w-4 text-[color:var(--sb-muted)]" />
-        <input
-          ref={navSearchRef}
-          type="search"
-          value={navQuery}
-          onChange={(e) => setNavQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && firstMatch) {
-              navigate(firstMatch.to);
-              setNavQuery('');
-              (e.target as HTMLInputElement).blur();
-            }
-            if (e.key === 'Escape') {
-              setNavQuery('');
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          placeholder="Find a page…"
-          aria-label="Find a page in the menu"
-          className="h-full w-full bg-transparent pl-8 pr-8 text-[13px] text-[color:var(--sb-active)] outline-none placeholder:text-[color:var(--sb-muted)] focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
-        />
-        {navQuery ? (
-          <button
-            type="button"
-            onClick={() => setNavQuery('')}
-            className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[color:var(--sb-muted)] hover:bg-white/10 hover:text-[color:var(--sb-active)]"
-            aria-label="Clear"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        ) : (
-          <kbd className="pointer-events-none absolute right-2 rounded border border-[color:var(--sb-border)] px-1.5 font-sans text-[10px] font-medium text-[color:var(--sb-muted)]">
-            /
-          </kbd>
-        )}
-      </label>
-    </div>
-  );
-
   const userCard = (collapsed: boolean, inDrawer = false) => (
     <div className={cn('shrink-0 border-t border-[color:var(--sb-border)]', collapsed ? 'flex flex-col items-center gap-1 px-2 py-3' : 'flex items-center gap-2.5 px-3 py-3')}>
       {!collapsed && (
@@ -1239,7 +1160,6 @@ export function AppShell() {
           {brand(sidebarCollapsed)}
           {sidebarCollapsed ? renderRail() : (
             <>
-              {navSearch}
               {renderExpandedNav()}
             </>
           )}
@@ -1255,7 +1175,6 @@ export function AppShell() {
               style={sidebarVars}
             >
               {brand(false, () => setMobileOpen(false))}
-              {navSearch}
               {renderExpandedNav(() => setMobileOpen(false))}
               {userCard(false, true)}
             </aside>

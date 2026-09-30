@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+const lbl = 'flex min-w-0 flex-col gap-1';
+const lblText = 'text-xs font-medium text-muted-foreground';
 
 export function SchoolAnalyticsPage() {
   const { data: terms } = useTerms();
@@ -20,25 +22,56 @@ export function SchoolAnalyticsPage() {
   const { data: exams } = useExams();
   const [examId, setExamId] = useState('');
 
+  const termRosters = (rosters?.data ?? []).filter((r) => !termId || r.termId === termId);
+  const roster = termRosters.find((r) => r.id === rosterId);
+  const rosterName = (id?: string | null) => {
+    const r = (rosters?.data ?? []).find((x) => x.id === id);
+    return r ? (r.name ?? `${r.scopeType} ${r.classId?.slice(0, 6)}`) : null;
+  };
+  // A result set belongs to one class list; narrow the versions to the chosen one.
+  const visibleSets = (sets ?? []).filter((s) => !roster || s.rosterId === roster.id || (!!roster.classId && s.scopeId === roster.classId));
+  const termExams = (exams?.data ?? []).filter((e) => !termId || e.termId === termId);
+
+  const pickRoster = (id: string) => {
+    setRosterId(id);
+    const r = termRosters.find((x) => x.id === id);
+    const match = (sets ?? []).filter((s) => !r || s.rosterId === r.id || (!!r.classId && s.scopeId === r.classId));
+    // Jump to the newest published version for that class, else clear so stale charts don't linger.
+    setResultSetId((match.find((s) => s.status === 'published') ?? match[0])?.id ?? '');
+  };
+
   return (
     <div className="space-y-4 p-6">
       <div>
         <h1 className="text-xl font-semibold">Academic Analytics</h1>
         <p className="text-sm text-muted-foreground">Performance across the school, read from a released set of results.</p>
       </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <select className={sel + ' w-44'} value={termId} onChange={(e) => { setTermId(e.target.value); setRosterId(''); setResultSetId(''); }}>
-          <option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        <select className={sel + ' w-56'} value={rosterId} onChange={(e) => setRosterId(e.target.value)}>
-          <option value="">Class list…</option>{(rosters?.data ?? []).filter((r) => !termId || r.termId === termId).map((r) => <option key={r.id} value={r.id}>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`}</option>)}
-        </select>
-        <select className={sel + ' w-64'} value={resultSetId} onChange={(e) => setResultSetId(e.target.value)}>
-          <option value="">Results version…</option>{(sets ?? []).map((s) => <option key={s.id} value={s.id}>rev {s.revision} · {s.status}</option>)}
-        </select>
-        <select className={sel + ' w-56'} value={examId} onChange={(e) => setExamId(e.target.value)}>
-          <option value="">Exam (attendance)…</option>{(exams?.data ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-        </select>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className={lbl}>
+          <span className={lblText}>Term</span>
+          <select className={sel} value={termId} onChange={(e) => { setTermId(e.target.value); setRosterId(''); setResultSetId(''); setExamId(''); }}>
+            <option value="">Select term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </label>
+        <label className={lbl}>
+          <span className={lblText}>Class list</span>
+          <select className={sel} value={rosterId} onChange={(e) => pickRoster(e.target.value)}>
+            <option value="">All class lists</option>{termRosters.map((r) => <option key={r.id} value={r.id}>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`}</option>)}
+          </select>
+        </label>
+        <label className={lbl}>
+          <span className={lblText}>Results version</span>
+          <select className={sel} value={resultSetId} onChange={(e) => setResultSetId(e.target.value)}>
+            <option value="">{termId ? (visibleSets.length ? 'Select results version…' : 'No results for this selection') : 'Pick a term first'}</option>
+            {visibleSets.map((s) => <option key={s.id} value={s.id}>{roster ? '' : `${rosterName(s.rosterId) ?? s.scopeType} · `}rev {s.revision} · {s.status}</option>)}
+          </select>
+        </label>
+        <label className={lbl}>
+          <span className={lblText}>Exam (attendance)</span>
+          <select className={sel} value={examId} onChange={(e) => setExamId(e.target.value)}>
+            <option value="">Select exam…</option>{termExams.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+        </label>
       </div>
 
       {resultSetId ? (
@@ -56,7 +89,7 @@ export function SchoolAnalyticsPage() {
           <TabsContent value="subject" className="pt-4"><SubjectTab resultSetId={resultSetId} /></TabsContent>
           <TabsContent value="diagnostic" className="pt-4"><CaExamTab resultSetId={resultSetId} /></TabsContent>
           <TabsContent value="predictive" className="pt-4"><AtRiskTab resultSetId={resultSetId} /></TabsContent>
-          <TabsContent value="operational" className="pt-4"><OperationalTab examId={examId} rosterId={rosterId} termId={termId} /></TabsContent>
+          <TabsContent value="operational" className="pt-4"><OperationalTab examId={examId} classId={roster?.classId ?? ''} termId={termId} /></TabsContent>
         </Tabs>
       ) : <p className="text-sm text-muted-foreground">Choose a result set to render the tiers.</p>}
     </div>
@@ -140,9 +173,9 @@ function AtRiskTab({ resultSetId }: { resultSetId: string }) {
   );
 }
 
-function OperationalTab({ examId, rosterId, termId }: { examId: string; rosterId: string; termId: string }) {
+function OperationalTab({ examId, classId, termId }: { examId: string; classId: string; termId: string }) {
   const examAtt = useExamAttendance(examId || undefined);
-  const assign = useAssignmentMetrics(rosterId || undefined, termId || undefined);
+  const assign = useAssignmentMetrics(classId || undefined, termId || undefined);
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card><CardHeader><CardTitle className="text-base">Exam attendance</CardTitle></CardHeader>
@@ -153,7 +186,7 @@ function OperationalTab({ examId, rosterId, termId }: { examId: string; rosterId
       <Card><CardHeader><CardTitle className="text-base">Assignment completion</CardTitle></CardHeader>
         <CardContent>{assign.data ? <div className="flex flex-wrap gap-2">
           <Badge>{assign.data.totalAssigned} assigned</Badge><Badge variant="secondary">submitted {assign.data.submissionRate}%</Badge><Badge variant="secondary">graded {assign.data.gradedRate}%</Badge><Badge variant="destructive">missing {assign.data.missingRate}%</Badge>
-        </div> : <p className="text-sm text-muted-foreground">Pick a cohort + term.</p>}</CardContent>
+        </div> : <p className="text-sm text-muted-foreground">Pick a term and class list.</p>}</CardContent>
       </Card>
     </div>
   );

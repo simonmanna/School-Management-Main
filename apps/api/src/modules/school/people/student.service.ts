@@ -13,7 +13,7 @@ import { EncryptionService } from '../../../kernel/encryption/encryption.service
 import { POSTED_FEE_WHERE } from '../fees/fee-document.constants';
 import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
-import { StudentAdmissionService } from './student-admission.service';
+import { StudentAdmissionService, toInlineGuardians } from './student-admission.service';
 import type { CreateStudentDto, StudentListQueryDto, UpdateStudentDto } from './dto.types';
 
 /**
@@ -223,6 +223,9 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       religion: dto.religion ?? null,
       residenceType: dto.residenceType ?? null,
       house: dto.house ?? null,
+      studentCategoryId: dto.studentCategoryId ?? null,
+      nin: dto.nin ?? null,
+      inlineGuardians: toInlineGuardians(dto.guardians),
       partnerCustomFields: {
         ...(dto.customFields ?? {}),
         middleName: dto.middleName ?? null,
@@ -238,10 +241,18 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         countryOfBirth: dto.countryOfBirth ?? null,
         placeOfBirth: dto.placeOfBirth ?? null,
         address: dto.address ?? null,
+        ...(dto.entryStatus?.trim() ? { entryStatus: dto.entryStatus.trim() } : {}),
       },
       placement:
         dto.classId && termId
-          ? { termId, classId: dto.classId, sectionId: dto.sectionId ?? null, rollNumber: dto.admissionNo }
+          ? {
+              termId,
+              classId: dto.classId,
+              sectionId: dto.sectionId ?? null,
+              rollNumber: dto.admissionNo,
+              effectiveFrom: dto.enrollmentDate,
+              enrollmentType: dto.entryStatus?.trim().toLowerCase() === 'transfer' ? 'TRANSFER_IN' : 'NEW',
+            }
           : null,
       allowDuplicate: dto.allowDuplicate ?? false,
       duplicateReason: dto.duplicateReason ?? null,

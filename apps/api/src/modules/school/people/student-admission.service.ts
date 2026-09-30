@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
-import { IsBoolean, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsNotEmpty, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { loadCustomFieldDefinitions, validateCustomFieldValues } from '../foundation/custom-field-values';
 import { EVENTS, PERMISSIONS } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
@@ -7,6 +8,7 @@ import { TenantContextService } from '../../../kernel/tenancy/tenant-context.ser
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { EncryptionService } from '../../../kernel/encryption/encryption.service';
 import { StudentEnrollmentService } from '../enrollment/student-enrollment.service';
 
 /**
@@ -31,10 +33,43 @@ export class GuardianInput {
 
 /** A guardian named on the registration screen rather than picked from Contacts. */
 export interface InlineGuardianInput {
+  /** Other names (or the full name when no surname is split out). */
   name: string;
+  lastName?: string | null;
   phone?: string | null;
   email?: string | null;
   relationship?: string | null;
+  occupation?: string | null;
+  /** Defaults to true (the front desk's single guardian is the primary one). */
+  isPrimary?: boolean;
+}
+
+/**
+ * A guardian captured on the full admission / register-and-place page: the same
+ * shape the application form collects, minus fields a Contact cannot hold.
+ */
+export class InlineGuardianDto {
+  @IsString() @IsNotEmpty() @MaxLength(120) firstName!: string;
+  @IsOptional() @IsString() @MaxLength(120) lastName?: string;
+  @IsOptional() @IsString() @MaxLength(40) relationship?: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsOptional() @IsEmail() email?: string;
+  @IsOptional() @IsString() @MaxLength(120) occupation?: string;
+}
+
+/** Map validated guardian rows to the admission input; the first one is primary. */
+export function toInlineGuardians(rows?: InlineGuardianDto[] | null): InlineGuardianInput[] {
+  return (rows ?? [])
+    .filter((g) => g.firstName?.trim())
+    .map((g, i) => ({
+      name: g.firstName.trim(),
+      lastName: g.lastName?.trim() || null,
+      phone: g.phone?.trim() || null,
+      email: g.email?.trim() || null,
+      relationship: g.relationship?.trim() || null,
+      occupation: g.occupation?.trim() || null,
+      isPrimary: i === 0,
+    }));
 }
 
 /**
@@ -78,6 +113,10 @@ export class AdmitStudentInput {
    * duplicate failure cannot leave an orphaned contact behind.
    */
   inlineGuardian?: InlineGuardianInput | null;
+  /** Several guardians typed inline (full admission page). Same transaction rules. */
+  inlineGuardians?: InlineGuardianInput[];
+  /** National ID in the clear; stored encrypted with only the last four readable (F08). */
+  nin?: string | null;
   customFields?: Record<string, unknown>;
   partnerCustomFields?: Record<string, unknown>;
   placement?: AdmissionPlacement | null;
@@ -115,6 +154,17 @@ export class RegisterStudentDto {
   @IsOptional() @IsString() guardianName?: string;
   @IsOptional() @IsString() guardianPhone?: string;
   @IsOptional() @IsString() guardianRelationship?: string;
+  /** Full guardian rows from the register-and-place page; supersede the single inline guardian. */
+  @IsOptional() @IsArray() @ArrayMaxSize(4) @ValidateNested({ each: true }) @Type(() => InlineGuardianDto)
+  guardians?: InlineGuardianDto[];
+  @IsOptional() @IsString() email?: string;
+  @IsOptional() @IsString() phone?: string;
+  /** When the learner joined; defaults to today. */
+  @IsOptional() @IsString() enrollmentDate?: string;
+  @IsOptional() @IsString() @MaxLength(500) address?: string;
+  /** New entrant / Transfer / Re-admission / Returning. A transfer is enrolled as TRANSFER_IN. */
+  @IsOptional() @IsString() @MaxLength(40) entryStatus?: string;
+  @IsOptional() @IsString() @MaxLength(40) nin?: string;
   /** A different child who shares a name and birthday with an existing pupil (ADR-032 P4). */
   @IsOptional() @IsBoolean() allowDuplicate?: boolean;
   @IsOptional() @IsString() @MaxLength(500) duplicateReason?: string;
@@ -141,6 +191,7 @@ export class StudentAdmissionService {
     private readonly events: EventBus,
     private readonly sequence: SequenceService,
     private readonly enrollments: StudentEnrollmentService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   /**
@@ -190,6 +241,13 @@ export class StudentAdmissionService {
         input.customFields,
         { requireAll: true },
       );
+      // The national ID is never stored in the clear (F08).
+      delete customFields.nin;
+      const nin = input.nin?.trim();
+      if (nin) {
+        customFields.ninEncrypted = this.encryption.encrypt(nin);
+        customFields.ninLast4 = nin.slice(-4);
+      }
 
       const code = await this.sequence.next(
         `student:${new Date().getUTCFullYear()}`,
@@ -458,7 +516,12 @@ export class StudentAdmissionService {
       house: dto.house ?? null,
       residenceType: dto.residenceType ?? null,
       studentCategoryId: dto.studentCategoryId ?? null,
-      inlineGuardian: dto.guardianName?.trim()
+      email: dto.email?.trim() || null,
+      phone: dto.phone?.trim() || null,
+      enrollmentDate: dto.enrollmentDate ?? null,
+      nin: dto.nin ?? null,
+      inlineGuardians: toInlineGuardians(dto.guardians),
+      inlineGuardian: !dto.guardians?.length && dto.guardianName?.trim()
         ? {
             name: dto.guardianName.trim(),
             phone: dto.guardianPhone ?? null,
@@ -470,10 +533,17 @@ export class StudentAdmissionService {
         classId: dto.classId,
         sectionId: dto.sectionId ?? null,
         rollNumber: dto.rollNumber ?? null,
+        effectiveFrom: dto.enrollmentDate ?? null,
+        enrollmentType: dto.entryStatus?.trim().toLowerCase() === 'transfer' ? 'TRANSFER_IN' : 'NEW',
       },
       allowDuplicate: dto.allowDuplicate ?? false,
       duplicateReason: dto.duplicateReason ?? null,
-      customFields: dto.customFields,
+      // Same keys admissions conversion writes, so the record reads alike.
+      customFields: {
+        ...(dto.customFields ?? {}),
+        ...(dto.address?.trim() ? { address: dto.address.trim() } : {}),
+        ...(dto.entryStatus?.trim() ? { entryStatus: dto.entryStatus.trim() } : {}),
+      },
     });
   }
 
@@ -516,8 +586,13 @@ export class StudentAdmissionService {
     input: AdmitStudentInput,
   ): Promise<GuardianInput[]> {
     const guardians = [...(input.guardians ?? [])];
-    if (input.inlineGuardian?.name?.trim()) {
-      guardians.push(await this.resolveGuardianInTx(tx, organizationId, input.inlineGuardian));
+    const inline = [...(input.inlineGuardians ?? []), ...(input.inlineGuardian ? [input.inlineGuardian] : [])];
+    for (const g of inline) {
+      if (!g.name?.trim()) continue;
+      const resolved = await this.resolveGuardianInTx(tx, organizationId, g);
+      // One parent typed twice (same phone or email) is linked once.
+      if (guardians.some((x) => x.guardianContactId === resolved.guardianContactId)) continue;
+      guardians.push(resolved);
     }
     return guardians;
   }
@@ -538,7 +613,7 @@ export class StudentAdmissionService {
   ): Promise<GuardianInput> {
     const link = {
       relationship: guardian.relationship?.trim() || 'guardian',
-      isPrimary: true,
+      isPrimary: guardian.isPrimary ?? true,
       canPickup: true,
       receivesStatements: true,
     };
@@ -574,7 +649,8 @@ export class StudentAdmissionService {
         organizationId,
         partnerId: owner.id,
         firstName: guardian.name.trim(),
-        lastName: '',
+        lastName: guardian.lastName?.trim() || '',
+        position: guardian.occupation?.trim() || null,
         phone: guardian.phone ?? null,
         email: guardian.email ?? null,
       },

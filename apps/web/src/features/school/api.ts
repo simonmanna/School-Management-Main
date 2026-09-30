@@ -1367,6 +1367,16 @@ export function useStudent(id: string | undefined) {
   });
 }
 
+/** A guardian typed on the admission page (becomes, or reuses, a Contact). */
+export interface InlineGuardianInput {
+  firstName: string;
+  lastName?: string;
+  relationship?: string;
+  phone?: string;
+  email?: string;
+  occupation?: string;
+}
+
 export interface CreateStudentInput {
   name: string;
   admissionNo: string;
@@ -1386,6 +1396,12 @@ export interface CreateStudentInput {
   house?: string;
   nationality?: string;
   religion?: string;
+  address?: string;
+  studentCategoryId?: string;
+  entryStatus?: string;
+  /** Stored encrypted; only the last four stay readable. */
+  nin?: string;
+  guardians?: InlineGuardianInput[];
   /** Wave 16: the school's own fields, validated by the API against their definitions. */
   customFields?: Record<string, unknown>;
 }
@@ -1416,6 +1432,14 @@ export interface RegisterStudentInput {
   guardianName?: string;
   guardianPhone?: string;
   guardianRelationship?: string;
+  /** Full guardian rows; supersede the single guardianName/Phone fields. */
+  guardians?: InlineGuardianInput[];
+  email?: string;
+  phone?: string;
+  enrollmentDate?: string;
+  address?: string;
+  entryStatus?: string;
+  nin?: string;
   /** ADR-032 P4: a different child who matches an existing pupil, with the reason. */
   allowDuplicate?: boolean;
   duplicateReason?: string;

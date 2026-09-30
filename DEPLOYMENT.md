@@ -120,8 +120,8 @@ through it. Until a channel exists they are recorded as *failed — no SMS gatew
 
 The dashboard shows **Get your school ready**: eleven steps computed from real
 data (year → terms → classes → subjects → staff → teachers → fees → pupils →
-SMS → parents), each linking to the screen that does it. **How it works** (top
-of the menu) explains the school year and who does what.
+SMS → parents), each linking to the screen that does it. **How it works** (under
+Settings) explains the school year and who does what.
 
 ### 5. Roles to hand out
 

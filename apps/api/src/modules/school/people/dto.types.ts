@@ -20,6 +20,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
+import { InlineGuardianDto } from './student-admission.service';
 
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
@@ -72,6 +73,14 @@ export class CreateStudentDto {
   @IsOptional() @IsString() countryOfBirth?: string;
   @IsOptional() @IsString() placeOfBirth?: string;
   @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsString() studentCategoryId?: string;
+  /** New entrant / Transfer / Re-admission / Returning. A transfer is enrolled as TRANSFER_IN. */
+  @IsOptional() @IsString() @MaxLength(40) entryStatus?: string;
+  /** National ID. Stored encrypted; only the last four stay readable (F08). */
+  @IsOptional() @IsString() @MaxLength(40) nin?: string;
+  /** Guardians typed on the admission page; each becomes (or reuses) a Contact. */
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => InlineGuardianDto)
+  guardians?: InlineGuardianDto[];
   @IsOptional() @IsObject() customFields?: Record<string, unknown>;
 }
 
