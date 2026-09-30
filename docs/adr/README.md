@@ -35,5 +35,6 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [027](./ADR-027-legacy-academic-retirement.md) | Legacy Academic Retirement Strategy | Proposed |
 | [028](./ADR-028-examination-operations-integrity.md) | Examination Operations and Result Integrity | Proposed |
 | [032](./ADR-032-launch-safety-policies.md) | Launch Safety Policies | Accepted |
+| [033](./ADR-033-finance-controls-gl-reconciliation-and-period-lock.md) | Finance Controls: Mandatory Posting, GL Bank Reconciliation, Period Lock | Accepted |
 
 Template: **Context → Decision → Consequences → Alternatives considered.**
