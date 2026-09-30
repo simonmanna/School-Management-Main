@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { dec } from '../../kernel/common/money';
 import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../kernel/events/event-bus';
@@ -40,14 +41,13 @@ function journalForMethod(method?: string): string {
 /**
  * Other Revenue / Income receipts (fine, donation, grant, interest, canteen…).
  * Lifecycle:
- *   create → RECEIVED (cash in hand) and posts Dr cash/bank / Cr revenue (best-effort)
+ *   create → RECEIVED (cash in hand) and posts Dr cash/bank / Cr revenue
  *   update → allowed while not CANCELLED
  *   cancel → reverses the GL entry (if posted) and sets CANCELLED
  *   remove → soft-delete (blocked if already posted/cancelled)
  *
- * GL posting is best-effort: if no postable cash/revenue account can be resolved
- * (un-configured COA), the receipt is still recorded with a null journalEntryId
- * so the feature works on a fresh install.
+ * GL posting is mandatory (wave 18): a receipt whose cash/bank or revenue
+ * account cannot be resolved is refused, and nothing is written.
  */
 @Injectable()
 export class IncomeService {
@@ -354,8 +354,8 @@ export class IncomeService {
 
   /**
    * Post Dr cash/bank (the receipt account) / Cr revenue (head GL account, else
-   * the `other_revenue` mapping). Best-effort: null journalEntryId if no
-   * postable accounts resolve.
+   * the `other_revenue` mapping). Mandatory (wave 18): income that cannot be
+   * journalled is refused, so cash never enters the books unrecorded.
    */
   private async postReceipt(tx: any, income: any, head: any | null): Promise<void> {
     const creditAccountId = head?.ledgerAccountId
@@ -363,11 +363,27 @@ export class IncomeService {
       : await this.resolveRevenueAccount(tx, null);
 
     const debitAccount = income.accountId
-      ? await tx.account.findFirst({ where: { id: income.accountId, isPostable: true, isActive: true } })
+      ? await tx.account.findFirst({
+          where: {
+            id: income.accountId,
+            isPostable: true,
+            isActive: true,
+            deprecatedAt: null,
+            category: { isCashEquivalent: true },
+          },
+        })
       : null;
     const debitAccountId = debitAccount?.id ?? null;
 
-    if (!creditAccountId || !debitAccountId) return; // best-effort GL
+    if (!debitAccountId) {
+      throw new UnprocessableEntityException('Received-into account must be an active cash or bank ledger account');
+    }
+    if (!creditAccountId) {
+      throw new UnprocessableEntityException(
+        head ? `Map income head '${head.name}' to a revenue account before recording income` : "Map the 'other_revenue' account before recording income",
+      );
+    }
+    const amount = dec(income.amount);
 
     const entry = await this.posting.post(
       {
@@ -376,9 +392,10 @@ export class IncomeService {
         description: `Income ${income.incomeCode} — ${income.name}`,
         sourceType: 'income',
         sourceId: income.id,
+        postingKey: `income:${income.id}`,
         lines: [
-          { accountId: debitAccountId, debit: Number(income.amount), description: income.name },
-          { accountId: creditAccountId, credit: Number(income.amount), description: `Received: ${income.name}` },
+          { accountId: debitAccountId, debit: amount.toString(), description: income.name },
+          { accountId: creditAccountId, credit: amount.toString(), description: `Received: ${income.name}` },
         ],
       },
       tx,

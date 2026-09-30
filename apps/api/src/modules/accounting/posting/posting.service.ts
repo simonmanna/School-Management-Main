@@ -1,4 +1,10 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
@@ -34,9 +40,13 @@ export class PostingService {
     return tx ? this.doPost(request, tx) : this.prisma.client.$transaction((c: any) => this.doPost(request, c));
   }
 
+  /**
+   * Reverse a posted entry. `allowPeriodClose` is reserved for the fiscal-period
+   * service: a period's closing entry is only ever unwound by reopening it.
+   */
   async reverse(
     journalEntryId: string,
-    options: { date?: Date | string; description?: string } = {},
+    options: { date?: Date | string; description?: string; allowPeriodClose?: boolean } = {},
     tx?: any,
   ): Promise<any> {
     return tx
@@ -73,7 +83,10 @@ export class PostingService {
         where: { organizationId: this.tenant.organizationId, postingKey: request.postingKey },
         include: { lines: true },
       });
-      if (existing) return existing;
+      if (existing) {
+        this.assertSameIntent(existing, request);
+        return existing;
+      }
     }
 
     const journal = await client.journal.findFirst({ where: { code: request.journalCode } });
@@ -132,7 +145,7 @@ export class PostingService {
     );
 
     const entryDims = this.normalizeDimensions(request.dimensions);
-    const entry = await client.journalEntry.create({
+    const entry: any = await this.createEntryOrConflict(request.postingKey, () => client.journalEntry.create({
       data: {
         organizationId,
         journalId: journal.id,
@@ -170,7 +183,7 @@ export class PostingService {
         },
       },
       include: { lines: true },
-    });
+    }));
 
     this.events.publish('journal.posted', {
       organizationId,
@@ -184,7 +197,7 @@ export class PostingService {
 
   private async doReverse(
     journalEntryId: string,
-    options: { date?: Date | string; description?: string },
+    options: { date?: Date | string; description?: string; allowPeriodClose?: boolean },
     client: any,
   ): Promise<any> {
     const original = await client.journalEntry.findFirst({
@@ -195,9 +208,20 @@ export class PostingService {
     if (original.status !== 'posted') {
       throw new BadRequestException('Only posted entries can be reversed');
     }
+    if (original.sourceType === 'period_close' && !options.allowPeriodClose) {
+      throw new BadRequestException('A period closing entry is reversed only by reopening the fiscal period');
+    }
 
     const date = options.date ? new Date(options.date) : new Date();
     await this.fiscalPeriod.assertOpen(date, client);
+
+    // Claim the original first: of two concurrent reversals only one flips it
+    // from posted, the other gets a conflict and writes nothing.
+    const claimed = await client.journalEntry.updateMany({
+      where: { id: original.id, status: 'posted' },
+      data: { status: 'reversed' },
+    });
+    if (claimed.count === 0) throw new ConflictException('Journal entry was already reversed');
 
     const organizationId = this.tenant.organizationId;
     const year = date.getUTCFullYear();
@@ -249,7 +273,7 @@ export class PostingService {
 
     await client.journalEntry.updateMany({
       where: { id: original.id },
-      data: { status: 'reversed', reversedEntryId: reversal.id },
+      data: { reversedEntryId: reversal.id },
     });
 
     this.events.publish('journal.reversed', {
@@ -258,6 +282,53 @@ export class PostingService {
       reversalEntryId: reversal.id,
     });
     return reversal;
+  }
+
+  // ─── Idempotency ──────────────────────────────────────────────────────────
+
+  /**
+   * A replayed postingKey must describe the same economic event. Every requested
+   * line must be present on the stored entry (account, debit, credit); the only
+   * extra lines tolerated are rounding residuals of at most 0.01.
+   */
+  private assertSameIntent(existing: any, request: PostingRequest): void {
+    const key = (accountId: string, d: any, c: any) => `${accountId}|${dec(d ?? 0).toFixed(6)}|${dec(c ?? 0).toFixed(6)}`;
+    const stored = new Map<string, number>();
+    for (const l of existing.lines ?? []) {
+      const k = key(l.accountId, l.debit, l.credit);
+      stored.set(k, (stored.get(k) ?? 0) + 1);
+    }
+    for (const l of request.lines) {
+      const k = key(l.accountId, l.debit, l.credit);
+      const n = stored.get(k) ?? 0;
+      if (n === 0) {
+        throw new ConflictException(
+          `postingKey '${request.postingKey}' was already used for a different journal entry (${existing.entryNumber})`,
+        );
+      }
+      stored.set(k, n - 1);
+    }
+    for (const [k, n] of stored) {
+      if (n <= 0) continue;
+      const [, d, c] = k.split('|');
+      if (dec(d).plus(dec(c)).greaterThan(dec(0.01))) {
+        throw new ConflictException(
+          `postingKey '${request.postingKey}' was already used for a different journal entry (${existing.entryNumber})`,
+        );
+      }
+    }
+  }
+
+  /** Translate the postingKey unique-index race into a retryable 409. */
+  private async createEntryOrConflict<T>(postingKey: string | undefined, create: () => Promise<T>): Promise<T> {
+    try {
+      return await create();
+    } catch (e: any) {
+      if (postingKey && e?.code === 'P2002') {
+        throw new ConflictException(`A concurrent posting with key '${postingKey}' won the race; retry to replay it`);
+      }
+      throw e;
+    }
   }
 
   // ─── Rounding ─────────────────────────────────────────────────────────────
@@ -414,10 +485,11 @@ export class PostingService {
       client,
     );
 
-    await client.journalEntry.updateMany({
-      where: { id: draft.id },
+    const claimed = await client.journalEntry.updateMany({
+      where: { id: draft.id, status: 'draft' },
       data: { entryNumber, status: 'posted', postedAt: new Date(), postedBy: this.tenant.userId ?? null },
     });
+    if (claimed.count === 0) throw new ConflictException('Journal entry was already posted');
 
     this.events.publish('journal.posted', {
       organizationId,

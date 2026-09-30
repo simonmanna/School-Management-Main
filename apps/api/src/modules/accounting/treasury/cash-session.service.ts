@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -130,8 +131,8 @@ function zonedDayRange(dateStr: string, timeZone: string): { start: Date; end: D
  * general ledger (double-entry) inside the SAME transaction as the drawer
  * write, so the books never diverge from the till. The register's own cash GL
  * account (`CashRegister.defaultAccountId`) is the cash leg. GL posting is
- * best-effort: a missing account mapping is logged + audited rather than
- * trapping the cashier — the entry can be back-filled once mappings exist.
+ * mandatory (wave 18): a missing account mapping fails the drawer operation
+ * with an error naming the mapping, so the till never runs ahead of the books.
  */
 @Injectable()
 export class CashSessionService {
@@ -221,11 +222,15 @@ export class CashSessionService {
       return this.prisma.client.$transaction(async (tx: any) => {
         // If sessionId is provided, close that specific session (shared terminal - any cashier can close)
         // Otherwise, close the caller's own open session (existing behavior)
-        const session = dto.sessionId
+        const found = dto.sessionId
           ? await tx.cashSession.findFirst({ where: { id: dto.sessionId, organizationId } })
           : await this.requireOpenSession(tx);
-        if (!session) throw new NotFoundException('No open cash session');
-        if (session.status !== 'open') throw new BadRequestException('Session is not open');
+        if (!found) throw new NotFoundException('No open cash session');
+        // Wave 18: lock the session so a second close, or a payment/pay-out still
+        // in flight (they take FOR SHARE), serializes against this one.
+        await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR UPDATE`, found.id);
+        const session = await tx.cashSession.findFirst({ where: { id: found.id, organizationId } });
+        if (!session || session.status !== 'open') throw new BadRequestException('Session is not open');
 
       // H1 — do not close while orders are still un-settled on this session.
       const openOrders = await tx.order.count({
@@ -273,7 +278,7 @@ export class CashSessionService {
       const closingByMethod = await this.computeByMethod(tx, organizationId, session.id);
 
       const updated = await tx.cashSession.updateMany({
-        where: { id: session.id },
+        where: { id: session.id, status: 'open' },
         data: {
           status: 'closed',
           closedAt: resolveOccurredAt(dto.occurredAt) ?? new Date(),
@@ -288,7 +293,7 @@ export class CashSessionService {
           notes: dto.notes ?? session.notes,
         },
       });
-      if (updated.count === 0) throw new Error('Failed to close session');
+      if (updated.count === 0) throw new ConflictException('Session was closed concurrently');
 
       // C1 — book the drawer over/short to the ledger.
       if (!closingDifference.isZero()) {
@@ -341,10 +346,13 @@ export class CashSessionService {
     const counted = dec(dto.closingCounted);
 
     return this.prisma.client.$transaction(async (tx: any) => {
-      const outgoing = await tx.cashSession.findFirst({
+      const candidate = await tx.cashSession.findFirst({
         where: { organizationId, cashRegisterId: dto.cashRegisterId, status: 'open' },
       });
-      if (!outgoing) throw new NotFoundException('No open session on this register');
+      if (!candidate) throw new NotFoundException('No open session on this register');
+      await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR UPDATE`, candidate.id);
+      const outgoing = await tx.cashSession.findFirst({ where: { id: candidate.id, status: 'open' } });
+      if (!outgoing) throw new ConflictException('Session was closed concurrently');
 
       const expected = await this.computeExpected(tx, outgoing);
       const variance = counted.minus(expected);
@@ -354,7 +362,7 @@ export class CashSessionService {
 
       const now = new Date();
       await tx.cashSession.updateMany({
-        where: { id: outgoing.id },
+        where: { id: outgoing.id, status: 'open' },
         data: {
           status: 'closed',
           closedAt: now,
@@ -553,6 +561,55 @@ export class CashSessionService {
         performedBy: this.tenant.userId ?? null,
       },
     });
+  }
+
+  /**
+   * Wave 18: the drawer session a cash pay-out must go through, taken inside the
+   * caller's transaction. The session row is locked FOR SHARE, so a concurrent
+   * close waits for the pay-out to commit and counts it.
+   *
+   * - Not cash, or a `cashbook` school → null (no drawer artifact).
+   * - `drawer` school → the named session (must be open and the caller's), else
+   *   the caller's own open session; none open → 400.
+   * - A non-school org with a named register → that register's open session, if any.
+   */
+  async custodySessionForPayOut(
+    tx: any,
+    opts: { method?: string; sessionId?: string; cashRegisterId?: string },
+  ): Promise<string | null> {
+    if ((opts.method ?? 'cash').toLowerCase() !== 'cash') return null;
+    const organizationId = this.tenant.organizationId;
+    const userId = this.tenant.userId;
+    const profile = await tx.schoolProfile
+      .findFirst({ where: { organizationId }, select: { cashCustodyMode: true } })
+      .catch(() => null);
+    const drawer = profile?.cashCustodyMode === 'drawer';
+
+    let session: any = null;
+    if (opts.sessionId) {
+      session = await tx.cashSession.findFirst({ where: { id: opts.sessionId, organizationId } });
+      if (!session) throw new BadRequestException('Cash session not found');
+    } else if (userId) {
+      const where: any = { organizationId, userId, status: 'open' };
+      if (opts.cashRegisterId) where.cashRegisterId = opts.cashRegisterId;
+      session = await tx.cashSession.findFirst({ where, orderBy: { openedAt: 'desc' } });
+    }
+
+    if (!session) {
+      if (drawer) {
+        throw new BadRequestException(
+          'This school keeps cash in a cash drawer. Open your drawer before paying out cash.',
+        );
+      }
+      return null;
+    }
+    await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR SHARE`, session.id);
+    const fresh = await tx.cashSession.findFirst({ where: { id: session.id }, select: { status: true, userId: true } });
+    if (fresh?.status !== 'open') throw new BadRequestException('Cash session is not open');
+    if (drawer && userId && fresh.userId !== userId) {
+      throw new BadRequestException('Cash session belongs to a different cashier');
+    }
+    return session.id;
   }
 
   /** Get any open session on the terminal (or null). */
@@ -914,6 +971,7 @@ export class CashSessionService {
     if (!reason || !reason.trim()) throw new BadRequestException('A reason is required to reopen a session');
 
     return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM "CashSession" WHERE id = $1 FOR UPDATE`, sessionId);
       const session = await tx.cashSession.findFirst({ where: { id: sessionId, organizationId } });
       if (!session) throw new NotFoundException('Cash session not found');
       if (session.status === 'open') throw new BadRequestException('Session is already open');
@@ -930,11 +988,9 @@ export class CashSessionService {
         where: { organizationId, sourceType: 'cash_session_variance', sourceId: session.id, status: 'posted' },
       });
       if (varianceEntry) {
-        try {
-          await this.posting.reverse(varianceEntry.id, { description: `Reopen session ${session.id}` }, tx);
-        } catch (e) {
-          this.logger.warn(`Could not reverse variance entry on reopen: ${String(e)}`);
-        }
+        // Fail closed: reopening without unwinding the booked over/short would
+        // double it when the session is closed again.
+        await this.posting.reverse(varianceEntry.id, { description: `Reopen session ${session.id}` }, tx);
       }
 
       await tx.cashSession.updateMany({
@@ -1292,7 +1348,10 @@ export class CashSessionService {
     return manager;
   }
 
-  // ─── GL posting (best-effort; a config gap is logged, never trapping the till) ──
+  // ─── GL posting (mandatory since wave 18) ──
+  // A drawer movement, deposit or variance that cannot be journalled aborts the
+  // whole operation: the drawer and the ledger never disagree silently. A
+  // missing mapping surfaces as a 400/422 naming the key to configure.
 
   private async registerCashAccount(tx: any, session: any): Promise<string> {
     const register = await tx.cashRegister.findFirst({ where: { id: session.cashRegisterId } });
@@ -1309,41 +1368,43 @@ export class CashSessionService {
     movementId: string,
     reason: string | null,
   ) {
-    try {
-      const cash = await this.registerCashAccount(tx, session);
-      const date = new Date();
-      const base = { date, sourceType: 'cash_movement', sourceId: movementId, branchId: session.branchId ?? undefined } as const;
+    const cash = await this.registerCashAccount(tx, session);
+    const date = new Date();
+    const base = {
+      date,
+      sourceType: 'cash_movement',
+      sourceId: movementId,
+      postingKey: `cash_movement:${movementId}`,
+      branchId: session.branchId ?? undefined,
+    } as const;
 
-      const amt = amount.toString();
-      if (movementType === 'pay_in') {
-        const clearing = await this.determination.mapped('cash_clearing', tx);
-        await this.posting.post({
-          ...base, journalCode: 'CASH', description: reason ?? 'Cash pay-in',
-          lines: [
-            { accountId: cash, debit: amt },
-            { accountId: clearing, credit: amt },
-          ],
-        }, tx);
-      } else if (movementType === 'pay_out') {
-        const clearing = await this.determination.mapped('cash_clearing', tx);
-        await this.posting.post({
-          ...base, journalCode: 'CASH', description: reason ?? 'Cash pay-out',
-          lines: [
-            { accountId: clearing, debit: amt },
-            { accountId: cash, credit: amt },
-          ],
-        }, tx);
-      } else {
-        // adjustment: positive adds cash (Cr over/short income), negative removes.
-        const shortOver = await this.determination.mapped('cash_short_over', tx);
-        const abs = amount.abs().toString();
-        const lines = amount.greaterThan(0)
-          ? [{ accountId: cash, debit: abs }, { accountId: shortOver, credit: abs }]
-          : [{ accountId: shortOver, debit: abs }, { accountId: cash, credit: abs }];
-        await this.posting.post({ ...base, journalCode: 'CASH', description: reason ?? 'Cash adjustment', lines }, tx);
-      }
-    } catch (e) {
-      await this.recordGlSkip(tx, 'CashMovement', movementId, e);
+    const amt = amount.toString();
+    if (movementType === 'pay_in') {
+      const clearing = await this.determination.mapped('cash_clearing', tx);
+      await this.posting.post({
+        ...base, journalCode: 'CASH', description: reason ?? 'Cash pay-in',
+        lines: [
+          { accountId: cash, debit: amt },
+          { accountId: clearing, credit: amt },
+        ],
+      }, tx);
+    } else if (movementType === 'pay_out') {
+      const clearing = await this.determination.mapped('cash_clearing', tx);
+      await this.posting.post({
+        ...base, journalCode: 'CASH', description: reason ?? 'Cash pay-out',
+        lines: [
+          { accountId: clearing, debit: amt },
+          { accountId: cash, credit: amt },
+        ],
+      }, tx);
+    } else {
+      // adjustment: positive adds cash (Cr over/short income), negative removes.
+      const shortOver = await this.determination.mapped('cash_short_over', tx);
+      const abs = amount.abs().toString();
+      const lines = amount.greaterThan(0)
+        ? [{ accountId: cash, debit: abs }, { accountId: shortOver, credit: abs }]
+        : [{ accountId: shortOver, debit: abs }, { accountId: cash, credit: abs }];
+      await this.posting.post({ ...base, journalCode: 'CASH', description: reason ?? 'Cash adjustment', lines }, tx);
     }
   }
 
@@ -1354,64 +1415,42 @@ export class CashSessionService {
     movementId: string,
     bankName: string,
   ) {
-    try {
-      const cash = await this.registerCashAccount(tx, session);
-      const bank = await this.determination.mapped('default_bank', tx);
-      const amt = amount.toString();
-      await this.posting.post({
-        date: new Date(),
-        journalCode: 'BANK',
-        description: `Bank deposit: ${bankName}`,
-        sourceType: 'cash_movement',
-        sourceId: movementId,
-        branchId: session.branchId ?? undefined,
-        lines: [
-          { accountId: bank, debit: amt },
-          { accountId: cash, credit: amt },
-        ],
-      }, tx);
-    } catch (e) {
-      await this.recordGlSkip(tx, 'CashMovement', movementId, e);
-    }
+    const cash = await this.registerCashAccount(tx, session);
+    const bank = await this.determination.mapped('default_bank', tx);
+    const amt = amount.toString();
+    await this.posting.post({
+      date: new Date(),
+      journalCode: 'BANK',
+      description: `Bank deposit: ${bankName}`,
+      sourceType: 'cash_movement',
+      sourceId: movementId,
+      postingKey: `cash_movement:${movementId}`,
+      branchId: session.branchId ?? undefined,
+      lines: [
+        { accountId: bank, debit: amt },
+        { accountId: cash, credit: amt },
+      ],
+    }, tx);
   }
 
   /** difference = counted − expected. Short (<0) = missing cash; over (>0) = surplus. */
   private async postVarianceGl(tx: any, session: any, difference: Prisma.Decimal) {
-    try {
-      const cash = await this.registerCashAccount(tx, session);
-      const shortOver = await this.determination.mapped('cash_short_over', tx);
-      const abs = difference.abs().toString();
-      const lines = difference.isNegative()
-        // short: expense the missing cash → Dr Short&Over / Cr Cash
-        ? [{ accountId: shortOver, debit: abs }, { accountId: cash, credit: abs }]
-        // over: surplus cash → Dr Cash / Cr Short&Over
-        : [{ accountId: cash, debit: abs }, { accountId: shortOver, credit: abs }];
-      await this.posting.post({
-        date: new Date(),
-        journalCode: 'CASH',
-        description: `Cash over/short — session ${session.id}`,
-        sourceType: 'cash_session_variance',
-        sourceId: session.id,
-        branchId: session.branchId ?? undefined,
-        lines,
-      }, tx);
-    } catch (e) {
-      await this.recordGlSkip(tx, 'CashSession', session.id, e);
-    }
-  }
-
-  private async recordGlSkip(tx: any, entity: string, entityId: string, e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    this.logger.warn(`GL posting skipped for ${entity} ${entityId}: ${msg}`);
-    try {
-      await this.audit.recordInTx(tx, {
-        entity: entity as any,
-        entityId,
-        action: 'update',
-        newValues: { glPostingSkipped: true, reason: msg },
-      });
-    } catch {
-      // never let an audit failure roll back the drawer write
-    }
+    const cash = await this.registerCashAccount(tx, session);
+    const shortOver = await this.determination.mapped('cash_short_over', tx);
+    const abs = difference.abs().toString();
+    const lines = difference.isNegative()
+      // short: expense the missing cash → Dr Short&Over / Cr Cash
+      ? [{ accountId: shortOver, debit: abs }, { accountId: cash, credit: abs }]
+      // over: surplus cash → Dr Cash / Cr Short&Over
+      : [{ accountId: cash, debit: abs }, { accountId: shortOver, credit: abs }];
+    await this.posting.post({
+      date: new Date(),
+      journalCode: 'CASH',
+      description: `Cash over/short — session ${session.id}`,
+      sourceType: 'cash_session_variance',
+      sourceId: session.id,
+      branchId: session.branchId ?? undefined,
+      lines,
+    }, tx);
   }
 }

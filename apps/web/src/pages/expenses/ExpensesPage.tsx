@@ -55,7 +55,6 @@ import { useForm } from "react-hook-form";
 import {
   expensesApi,
   suppliersApi,
-  usersApi,
   accountsApi,
 } from "@/lib/api/expenses";
 import {
@@ -66,7 +65,6 @@ import type {
   Expense,
   ExpenseStats,
   Account,
-  User,
   AuditLogRow,
 } from "../../types/expenses";
 import { Link } from "react-router-dom";
@@ -88,7 +86,6 @@ interface ExpenseFormData {
   amount: string;
   expenseDate: string;
   notes: string;
-  createdBy: string;
   supplierId: string;
   paymentType: "CASH" | "CREDIT";
   paymentMethod: string;
@@ -225,10 +222,6 @@ function staffName(
   return user?.staff ? user.staff.firstName : "—";
 }
 
-function userDisplayName(u: User) {
-  return u.staff ? u.staff.firstName : u.email;
-}
-
 // ─── Status Badge ────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CONFIG[status] ?? STATUS_CONFIG.DRAFT;
@@ -333,7 +326,6 @@ function StatCard({
 // ─── Expense Form Dialog (AdminLTE Themed) ──────────────────────────────────
 function ExpenseFormDialog({
   expense,
-  users,
   suppliers,
   accounts,
   categories,
@@ -341,7 +333,6 @@ function ExpenseFormDialog({
   onSaved,
 }: {
   expense?: Expense | null;
-  users: User[];
   suppliers: Supplier[];
   accounts: Account[];
   categories: ExpenseCategory[];
@@ -358,7 +349,6 @@ function ExpenseFormDialog({
         ? expense.expenseDate.split("T")[0]
         : new Date().toISOString().split("T")[0],
       notes: expense?.notes ?? "",
-      createdBy: "",
       supplierId: (expense as any)?.supplier?.id ?? "",
       paymentType: (expense as any)?.paymentType ?? "CREDIT",
       paymentMethod: "",
@@ -376,8 +366,6 @@ function ExpenseFormDialog({
     if (!data.title.trim()) return setError("Title is required");
     if (!data.amount || +data.amount <= 0)
       return setError("Enter a valid amount greater than 0");
-    if (!isEdit && !data.createdBy)
-      return setError("Select who is creating this expense");
     if (isCash && !data.paymentMethod)
       return setError("Select a payment method for cash expenses");
     if (isCash && !data.accountId)
@@ -399,7 +387,6 @@ function ExpenseFormDialog({
       };
 
       if (!isEdit) {
-        body.createdBy = data.createdBy;
         if (isCash) {
           body.paymentMethod = data.paymentMethod;
           body.accountId = data.accountId;
@@ -742,37 +729,6 @@ function ExpenseFormDialog({
                   </h3>
                 </div>
                 <div className="p-4 space-y-4">
-                  {!isEdit && (
-                    <FormField
-                      control={form.control}
-                      name="createdBy"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-xs font-bold uppercase text-gray-500">
-                            Created By *
-                          </FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="rounded-none border-gray-300">
-                                <SelectValue placeholder="Select staff member" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {users.map((u) => (
-                                <SelectItem key={u.id} value={u.id}>
-                                  {userDisplayName(u)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
                   <FormField
                     control={form.control}
                     name="notes"
@@ -1161,20 +1117,18 @@ function ExpenseDetailDialog({
 function PayExpenseDialog({
   expense,
   accounts,
-  users,
   onClose,
   onSaved,
 }: {
   expense: Expense;
   accounts: Account[];
-  users: User[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [form, setForm] = useState({
     paymentMethod: "",
     reference: "",
-    paidBy: "",
+    paymentDate: new Date().toISOString().split("T")[0],
     accountId: accounts[0]?.id ?? "",
     paymentNotes: "",
   });
@@ -1184,7 +1138,6 @@ function PayExpenseDialog({
   const selectedAccount = accounts.find((a) => a.id === form.accountId);
 
   const handlePay = async () => {
-    if (!form.paidBy) return setError("Select who is processing this payment");
     if (!form.paymentMethod) return setError("Select a payment method");
     if (!form.accountId) return setError("Select an account to debit");
 
@@ -1192,8 +1145,8 @@ function PayExpenseDialog({
     setError("");
     try {
       await expensesApi.pay(expense.id, {
-        paidBy: form.paidBy,
         paymentMethod: form.paymentMethod,
+        paymentDate: form.paymentDate || undefined,
         reference: form.reference || undefined,
         paymentNotes: form.paymentNotes || undefined,
         accountId: form.accountId,
@@ -1261,22 +1214,20 @@ function PayExpenseDialog({
           <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-xs font-bold uppercase text-gray-500 mb-1">
-                Paid By *
+                Payment Date *
               </label>
-              <select
-                value={form.paidBy}
+              <input
+                type="date"
+                value={form.paymentDate}
                 onChange={(e) =>
-                  setForm((p) => ({ ...p, paidBy: e.target.value }))
+                  setForm((p) => ({ ...p, paymentDate: e.target.value }))
                 }
                 className="w-full px-3 py-2 rounded-none border border-gray-300 focus:border-[#3c8dbc] bg-white text-sm"
-              >
-                <option value="">Select who is paying...</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {userDisplayName(u)}
-                  </option>
-                ))}
-              </select>
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Recorded as paid by you. The person who approved this expense
+                cannot pay it out.
+              </p>
             </div>
 
             <div>
@@ -1360,7 +1311,7 @@ function PayExpenseDialog({
               className="bg-[#3c8dbc] hover:bg-[#367fa9] rounded-none px-8 font-bold shadow-md"
               onClick={handlePay}
               disabled={
-                saving || !form.paidBy || !form.accountId || !form.paymentMethod
+                saving || !form.paymentDate || !form.accountId || !form.paymentMethod
               }
             >
               {saving ? (
@@ -1383,27 +1334,22 @@ function PayExpenseDialog({
 // ─── Approve Dialog (AdminLTE Themed) ───────────────────────────────────────
 function ApproveDialog({
   expense,
-  users,
   onClose,
   onSaved,
 }: {
   expense: Expense;
-  users: User[];
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [approvedBy, setApprovedBy] = useState("");
   const [approvalNotes, setApprovalNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const handleApprove = async () => {
-    if (!approvedBy) return setError("Select who is approving this expense");
     setSaving(true);
     setError("");
     try {
       await expensesApi.approve(expense.id, {
-        approvedBy,
         approvalNotes: approvalNotes || undefined,
       });
       onSaved();
@@ -1453,21 +1399,10 @@ function ApproveDialog({
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase text-gray-500 mb-1">
-              Approved By *
-            </label>
-            <select
-              value={approvedBy}
-              onChange={(e) => setApprovedBy(e.target.value)}
-              className="w-full px-3 py-2 rounded-none border border-gray-300 focus:border-[#3c8dbc] bg-white text-sm"
-            >
-              <option value="">Select approver...</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {userDisplayName(u)}
-                </option>
-              ))}
-            </select>
+            <p className="text-sm text-gray-600">
+              You are approving this expense as yourself. Whoever raised an
+              expense cannot approve it, and its approver cannot pay it out.
+            </p>
           </div>
 
           <div>
@@ -1496,7 +1431,7 @@ function ApproveDialog({
             <Button
               className="bg-[#3c8dbc] hover:bg-[#367fa9] rounded-none px-8 font-bold shadow-md"
               onClick={handleApprove}
-              disabled={saving || !approvedBy}
+              disabled={saving}
             >
               {saving ? (
                 <>
@@ -1612,7 +1547,6 @@ export function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [stats, setStats] = useState<ExpenseStats | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1649,7 +1583,7 @@ export function ExpensesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [expensesData, statsData, accountsData, usersData, suppliersData] =
+      const [expensesData, statsData, accountsData, suppliersData] =
         await Promise.all([
           expensesApi.getAll({
             page,
@@ -1663,7 +1597,6 @@ export function ExpensesPage() {
           }),
           expensesApi.getStats(dateFrom || undefined, dateTo || undefined),
           accountsApi.getAll(),
-          usersApi.getAll(),
           suppliersApi.getAll(),
         ]);
       setExpenses(expensesData.data ?? []);
@@ -1674,7 +1607,6 @@ export function ExpensesPage() {
           ? accountsData
           : (accountsData.accounts ?? []),
       );
-      setUsers(Array.isArray(usersData) ? usersData : (usersData.data ?? []));
       setSuppliers(
         Array.isArray(suppliersData)
           ? suppliersData
@@ -2215,7 +2147,6 @@ export function ExpensesPage() {
       {expenseDialog.open && (
         <ExpenseFormDialog
           expense={expenseDialog.expense}
-          users={users}
           suppliers={suppliers}
           accounts={accounts}
           categories={categories.filter(
@@ -2232,7 +2163,6 @@ export function ExpensesPage() {
         <PayExpenseDialog
           expense={payDialog.expense}
           accounts={accounts}
-          users={users}
           onClose={() => setPayDialog({ open: false })}
           onSaved={() => {
             setPayDialog({ open: false });
@@ -2243,7 +2173,6 @@ export function ExpensesPage() {
       {approveDialog.open && approveDialog.expense && (
         <ApproveDialog
           expense={approveDialog.expense}
-          users={users}
           onClose={() => setApproveDialog({ open: false })}
           onSaved={() => {
             setApproveDialog({ open: false });

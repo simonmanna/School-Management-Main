@@ -5992,8 +5992,10 @@ model ExpensePayment {
   /// Cash/bank GL account that was credited (plain id).
   accountId      String?
   paidById       String?
-  /// The GL journal entry this payment posted (null if GL was skipped because
-  /// no postable accounts were resolvable). Used to reverse on void.
+  /// Value date of the payment; the journal is dated with it (wave 18).
+  paymentDate    DateTime @default(now())
+  /// The GL journal entry this payment posted. Always set for a posted payment
+  /// since wave 18 (posting is mandatory). Used to reverse on void.
   journalEntryId String?
   status         String   @default("posted") // posted | void
   voidReason     String?

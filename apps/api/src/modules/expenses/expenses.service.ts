@@ -1,4 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../kernel/events/event-bus';
@@ -6,6 +15,9 @@ import { SequenceService } from '../../kernel/sequence/sequence.service';
 import { AuditService } from '../../kernel/audit/audit.service';
 import { ApprovalsService } from '../../kernel/approvals/approvals.service';
 import { PostingService } from '../accounting/posting/posting.service';
+import { BALANCE_AFFECTING_STATUSES } from '../accounting/posting/posting.types';
+import { CashSessionService } from '../accounting/treasury/cash-session.service';
+import { dec, fitsCurrency, roundToCurrency, ZERO } from '../../kernel/common/money';
 import {
   ApproveExpenseDto,
   CreateExpenseDto,
@@ -45,17 +57,30 @@ function journalForMethod(method?: string): string {
   }
 }
 
+interface FinancePolicy {
+  /** Cash expenses at or below this may be raised, approved and paid by one person. 0 = off. */
+  pettyCashThreshold: Prisma.Decimal;
+  /** The approver of an expense may not also pay it out. */
+  enforcePayerApproverSod: boolean;
+  currencyCode: string;
+  decimals: number | null;
+}
+
 /**
- * Standalone expenses (petty-cash / operating). Lifecycle:
- *   create(CREDIT) → APPROVED/UNPAID   create(CASH) → POSTED/PAID (+GL)
- *   approve  DRAFT → APPROVED          reject DRAFT → REJECTED
- *   pay      → records ExpensePayment, posts Dr expense / Cr cash-bank, sets
- *             PARTIALLY_PAID|PAID and POSTED
+ * Standalone expenses (petty-cash / operating). Lifecycle (wave 18):
+ *   create           → DRAFT/UNPAID, routed to the approval engine when a
+ *                      workflow matches. Petty cash (CASH, amount ≤ the org's
+ *                      `settings.finance.pettyCashThreshold`) → POSTED/PAID at once.
+ *   approve  DRAFT → APPROVED  (approver = session user, never the raiser)
+ *   reject   DRAFT → REJECTED
+ *   pay      APPROVED → records ExpensePayment, posts Dr expense / Cr cash-bank,
+ *            sets PAID and POSTED (payer = session user, never the approver
+ *            unless `settings.finance.enforcePayerApproverSod` is false)
  *   void     → reverses every posted payment JE, marks VOID
  *
- * GL posting is best-effort: if no postable expense/cash account can be
- * resolved (un-configured COA), the payment is still recorded with a null
- * journalEntryId so the feature works on a fresh install.
+ * GL posting is mandatory: a payment that cannot be journalled (no mapped
+ * expense account, pay-from account not cash/bank) is refused and nothing is
+ * written. Identities come from the session, never from the request body.
  */
 @Injectable()
 export class ExpensesService {
@@ -67,7 +92,38 @@ export class ExpensesService {
     private readonly audit: AuditService,
     private readonly approvals: ApprovalsService,
     private readonly posting: PostingService,
+    private readonly cashSessions: CashSessionService,
   ) {}
+
+  private requireUser(): string {
+    const userId = this.tenant.userId;
+    if (!userId) throw new UnauthorizedException('A signed-in user is required');
+    return userId;
+  }
+
+  private async financePolicy(client: any): Promise<FinancePolicy> {
+    const org = await client.organization.findUnique({
+      where: { id: this.tenant.organizationId },
+      select: { settings: true, currencyCode: true },
+    });
+    const fin = ((org?.settings as any) ?? {}).finance ?? {};
+    const currencyCode = org?.currencyCode ?? 'UGX';
+    const currency = await client.currency
+      .findUnique({ where: { code: currencyCode }, select: { decimalPlaces: true } })
+      .catch(() => null);
+    let threshold = ZERO;
+    try {
+      threshold = dec(fin.pettyCashThreshold ?? 0);
+    } catch {
+      threshold = ZERO;
+    }
+    return {
+      pettyCashThreshold: threshold.isNegative() ? ZERO : threshold,
+      enforcePayerApproverSod: fin.enforcePayerApproverSod !== false,
+      currencyCode,
+      decimals: currency?.decimalPlaces ?? null,
+    };
+  }
 
   // ─── Reads ────────────────────────────────────────────────────────────────
 
@@ -255,12 +311,12 @@ export class ExpensesService {
     const balances = ids.length
       ? await this.prisma.client.journalLine.groupBy({
           by: ['accountId'],
-          where: { accountId: { in: ids } },
+          where: { accountId: { in: ids }, entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] } } },
           _sum: { baseDebit: true, baseCredit: true },
         })
       : [];
     const balByAccount = new Map(
-      balances.map((b) => [b.accountId, Number(b._sum.baseDebit ?? 0) - Number(b._sum.baseCredit ?? 0)]),
+      balances.map((b) => [b.accountId, dec(b._sum.baseDebit ?? 0).minus(dec(b._sum.baseCredit ?? 0)).toNumber()]),
     );
     return accounts.map((a) => ({
       id: a.id,
@@ -283,10 +339,19 @@ export class ExpensesService {
   // ─── Writes ─────────────────────────────────────────────────────────────────
 
   async create(dto: CreateExpenseDto) {
-    if (!dto.createdBy) throw new BadRequestException('createdBy is required');
+    const userId = this.requireUser();
+    const policy = await this.financePolicy(this.prisma.client);
+    if (!fitsCurrency(dto.amount, policy.currencyCode, policy.decimals)) {
+      throw new BadRequestException(`Amount has more decimal places than ${policy.currencyCode} allows`);
+    }
+    const amount = roundToCurrency(dto.amount, policy.currencyCode, policy.decimals);
     const isCash = dto.paymentType === 'CASH';
-    if (isCash && (!dto.paymentMethod || !dto.accountId)) {
-      throw new BadRequestException('Cash expenses require paymentMethod and accountId');
+    // Petty cash: one person may raise, approve and pay a small cash expense.
+    // Everything else waits for an approver who is not the raiser.
+    const pettyCash =
+      isCash && policy.pettyCashThreshold.greaterThan(0) && amount.lessThanOrEqualTo(policy.pettyCashThreshold);
+    if (pettyCash && (!dto.paymentMethod || !dto.accountId)) {
+      throw new BadRequestException('Petty-cash expenses require paymentMethod and accountId');
     }
 
     const category = dto.categoryId
@@ -307,10 +372,8 @@ export class ExpensesService {
           expenseCode,
           title: dto.title.trim(),
           description: dto.description ?? null,
-          amount: dto.amount,
-          // Cash expenses post immediately. Credit expenses start DRAFT and are
-          // routed through the approval engine below (no workflow ⇒ APPROVED).
-          status: isCash ? 'POSTED' : 'DRAFT',
+          amount,
+          status: pettyCash ? 'POSTED' : 'DRAFT',
           paymentStatus: PaymentStatus.UNPAID,
           paymentType: dto.paymentType,
           expenseDate: new Date(dto.expenseDate),
@@ -318,9 +381,8 @@ export class ExpensesService {
           categoryId: category?.id ?? null,
           categoryName: category?.name ?? null,
           supplierId: dto.supplierId || null,
-          createdById: dto.createdBy ?? null,
-          // A cash expense is created already approved by its raiser.
-          approvedById: isCash ? (dto.createdBy ?? null) : null,
+          createdById: userId,
+          approvedById: pettyCash ? userId : null,
         },
       });
 
@@ -328,20 +390,29 @@ export class ExpensesService {
         entity: 'Expense',
         entityId: expense.id,
         action: 'create',
-        newValues: { expenseCode, title: expense.title, amount: dto.amount, paymentType: dto.paymentType },
+        newValues: {
+          expenseCode,
+          title: expense.title,
+          amount: amount.toString(),
+          paymentType: dto.paymentType,
+          pettyCash,
+          ...(pettyCash ? { pettyCashThreshold: policy.pettyCashThreshold.toString() } : {}),
+        },
       });
 
-      if (isCash) {
+      if (pettyCash) {
         await this.recordPayment(
           tx,
           expense,
           {
-            paidBy: dto.createdBy!,
+            paidBy: userId,
             paymentMethod: dto.paymentMethod!,
             accountId: dto.accountId!,
             reference: dto.paymentReference,
+            paymentDate: new Date(dto.expenseDate),
           },
           category,
+          policy,
         );
       }
 
@@ -353,22 +424,15 @@ export class ExpensesService {
       return expense;
     });
 
-    // Credit expenses route through the approval engine. No configured workflow
-    // ⇒ checkOrRequestApproval returns null and the expense is auto-approved
-    // (legacy behavior). A matching workflow creates a pending ApprovalRequest and
-    // the expense stays DRAFT until every applicable step is cleared.
-    if (!isCash) {
-      const gate = await this.approvals.checkOrRequestApproval({
+    // Non-petty expenses stay DRAFT. When an approval workflow matches, the
+    // engine opens a request now; otherwise an approver (not the raiser)
+    // approves inline. Nothing is auto-approved.
+    if (!pettyCash) {
+      await this.approvals.checkOrRequestApproval({
         entityType: 'expense',
         entityId: created.id,
-        snapshot: { amount: Number(dto.amount), categoryId: created.categoryId, title: created.title },
+        snapshot: { amount: amount.toNumber(), categoryId: created.categoryId, title: created.title },
       });
-      if (!gate?.needsApproval) {
-        await this.prisma.client.expense.updateMany({
-          where: { id: created.id },
-          data: { status: 'APPROVED', approvedById: created.createdById ?? dto.createdBy ?? null },
-        });
-      }
     }
 
     return this.loadDecorated(this.prisma.client, created.id);
@@ -378,13 +442,21 @@ export class ExpensesService {
     return this.prisma.client.$transaction(async (tx: any) => {
       const exp = await tx.expense.findFirst({ where: { id, deletedAt: null } });
       if (!exp) throw new NotFoundException('Expense not found');
-      if (!['DRAFT', 'APPROVED'].includes(exp.status) || exp.paymentStatus !== PaymentStatus.UNPAID) {
-        throw new BadRequestException('Only unpaid draft/approved expenses can be edited');
+      // An approved expense is frozen: editing it would change what the approver
+      // agreed to. Void it and raise a new one instead.
+      if (exp.status !== 'DRAFT' || exp.paymentStatus !== PaymentStatus.UNPAID) {
+        throw new BadRequestException('Only unpaid draft expenses can be edited');
       }
       const data: any = {};
       if (dto.title !== undefined) data.title = dto.title.trim();
       if (dto.description !== undefined) data.description = dto.description || null;
-      if (dto.amount !== undefined) data.amount = dto.amount;
+      if (dto.amount !== undefined) {
+        const policy = await this.financePolicy(tx);
+        if (!fitsCurrency(dto.amount, policy.currencyCode, policy.decimals)) {
+          throw new BadRequestException(`Amount has more decimal places than ${policy.currencyCode} allows`);
+        }
+        data.amount = roundToCurrency(dto.amount, policy.currencyCode, policy.decimals);
+      }
       if (dto.expenseDate !== undefined) data.expenseDate = new Date(dto.expenseDate);
       if (dto.notes !== undefined) data.notes = dto.notes || null;
       if (dto.supplierId !== undefined) data.supplierId = dto.supplierId || null;
@@ -404,43 +476,55 @@ export class ExpensesService {
   }
 
   async approve(id: string, dto: ApproveExpenseDto) {
+    const userId = this.requireUser();
     const exp = await this.prisma.client.expense.findFirst({ where: { id, deletedAt: null } });
     if (!exp) throw new NotFoundException('Expense not found');
     if (exp.status !== 'DRAFT') throw new BadRequestException('Only draft expenses can be approved');
+    if (exp.createdById && exp.createdById === userId) {
+      throw new ForbiddenException('Self-approval is not allowed: whoever raised an expense cannot approve it');
+    }
 
-    // When the approval engine created a pending request, decide it there — this
-    // honors multi-step chains, per-step permissions and SoD. The expense flips to
-    // APPROVED only once the whole request resolves (a mid-chain step leaves it DRAFT).
-    const pending = await this.prisma.client.approvalRequest.findFirst({
+    // When the approval engine has (or now opens) a request, decide it there —
+    // this honors multi-step chains, per-step permissions and SoD. The expense
+    // flips to APPROVED only once the whole request resolves.
+    let pending = await this.prisma.client.approvalRequest.findFirst({
       where: { entityType: 'expense', entityId: id, status: 'pending' },
     });
+    if (!pending) {
+      // A workflow configured after the expense was raised still applies.
+      const gate = await this.approvals.checkOrRequestApproval({
+        entityType: 'expense',
+        entityId: id,
+        snapshot: { amount: Number(exp.amount), categoryId: exp.categoryId, title: exp.title },
+      });
+      if (gate?.needsApproval && gate.requestId) {
+        pending = await this.prisma.client.approvalRequest.findFirst({ where: { id: gate.requestId } });
+      }
+    }
     if (pending) {
       await this.approvals.decide({ requestId: pending.id, status: 'approved', comment: dto.approvalNotes });
       const after = await this.prisma.client.approvalRequest.findFirst({ where: { id: pending.id } });
       if (after?.status === 'approved') {
         await this.prisma.client.expense.updateMany({
-          where: { id },
-          data: {
-            status: 'APPROVED',
-            approvedById: this.tenant.userId ?? dto.approvedBy,
-            approvalNotes: dto.approvalNotes ?? null,
-          },
+          where: { id, status: 'DRAFT' },
+          data: { status: 'APPROVED', approvedById: userId, approvalNotes: dto.approvalNotes ?? null },
         });
       }
       return this.loadDecorated(this.prisma.client, id);
     }
 
-    // Legacy path: no configured workflow / no pending request → inline approve.
+    // No workflow → inline approval by a second person.
     return this.prisma.client.$transaction(async (tx: any) => {
-      await tx.expense.updateMany({
-        where: { id },
-        data: { status: 'APPROVED', approvedById: dto.approvedBy, approvalNotes: dto.approvalNotes ?? null },
+      const r = await tx.expense.updateMany({
+        where: { id, status: 'DRAFT' },
+        data: { status: 'APPROVED', approvedById: userId, approvalNotes: dto.approvalNotes ?? null },
       });
+      if (r.count === 0) throw new ConflictException('Expense is no longer a draft');
       await this.audit.recordInTx(tx, {
         entity: 'Expense',
         entityId: id,
         action: 'approve',
-        newValues: { approvedBy: dto.approvedBy, reason: dto.approvalNotes },
+        newValues: { approvedBy: userId, reason: dto.approvalNotes },
       });
       return this.loadDecorated(tx, id);
     });
@@ -480,32 +564,35 @@ export class ExpensesService {
   }
 
   async pay(id: string, dto: PayExpenseDto) {
-    // Block payment until the approval engine clears the expense (no workflow ⇒
-    // proceeds; a pending multi-step chain blocks the payout).
-    const exp0 = await this.prisma.client.expense.findFirst({
-      where: { id, deletedAt: null },
-      select: { amount: true },
-    });
-    if (!exp0) throw new NotFoundException('Expense not found');
-    const gate = await this.approvals.checkOrRequestApproval({
-      entityType: 'expense',
-      entityId: id,
-      snapshot: { amount: Number(exp0.amount) },
-    });
-    if (gate?.needsApproval) {
-      throw new BadRequestException(
-        `Approval required before paying this expense. Pending approval request ${gate.requestId}.`,
-      );
-    }
-
+    const userId = this.requireUser();
+    const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx: any) => {
+      // Serialize payers: the second concurrent pay waits here, then sees PAID.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM "Expense" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        id,
+        organizationId,
+      );
       const exp = await tx.expense.findFirst({ where: { id, deletedAt: null } });
       if (!exp) throw new NotFoundException('Expense not found');
-      if (!['APPROVED', 'POSTED', 'DRAFT'].includes(exp.status)) {
-        throw new BadRequestException(`Cannot pay an expense in status ${exp.status}`);
-      }
       if (exp.paymentStatus === PaymentStatus.PAID) {
         throw new BadRequestException('Expense is already fully paid');
+      }
+      if (exp.status !== 'APPROVED') {
+        throw new BadRequestException(`Only approved expenses can be paid (status ${exp.status})`);
+      }
+      const pending = await tx.approvalRequest.findFirst({
+        where: { entityType: 'expense', entityId: id, status: 'pending' },
+        select: { id: true },
+      });
+      if (pending) {
+        throw new BadRequestException(
+          `Approval required before paying this expense. Pending approval request ${pending.id}.`,
+        );
+      }
+      const policy = await this.financePolicy(tx);
+      if (policy.enforcePayerApproverSod && exp.approvedById && exp.approvedById === userId) {
+        throw new ForbiddenException('The approver of an expense cannot also pay it out');
       }
       const category = exp.categoryId
         ? await tx.expenseCategory.findFirst({ where: { id: exp.categoryId } })
@@ -514,16 +601,19 @@ export class ExpensesService {
         tx,
         exp,
         {
-          paidBy: dto.paidBy,
+          paidBy: userId,
           paymentMethod: dto.paymentMethod,
           accountId: dto.accountId,
           reference: dto.reference,
           paymentNotes: dto.paymentNotes,
+          paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : new Date(),
+          cashSessionId: dto.cashSessionId,
         },
         category,
+        policy,
       );
       this.events.publish('expense.paid' as any, {
-        organizationId: this.tenant.organizationId,
+        organizationId,
         expenseId: id,
       } as any);
       return this.loadDecorated(tx, id);
@@ -585,63 +675,97 @@ export class ExpensesService {
   // ─── Internals ──────────────────────────────────────────────────────────────
 
   /**
-   * Record a payment that fully settles the residual, post Dr expense / Cr
-   * cash-bank (best-effort), and roll the expense's payment state forward.
+   * Record a payment that fully settles the residual and post Dr expense /
+   * Cr cash-bank in the same transaction. Fails closed: no journal, no payment.
+   * The caller holds the expense row lock.
    */
   private async recordPayment(
     tx: any,
     expense: any,
-    input: { paidBy: string; paymentMethod: string; accountId: string; reference?: string; paymentNotes?: string },
+    input: {
+      paidBy: string;
+      paymentMethod: string;
+      accountId: string;
+      reference?: string;
+      paymentNotes?: string;
+      paymentDate: Date;
+      cashSessionId?: string;
+    },
     category: any | null,
+    policy: FinancePolicy,
   ) {
-    const residual = Number(expense.amount) - Number(expense.amountPaid ?? 0);
-    if (residual <= 0) throw new BadRequestException('Nothing left to pay');
+    const residual = roundToCurrency(
+      dec(expense.amount).minus(dec(expense.amountPaid ?? 0)),
+      policy.currencyCode,
+      policy.decimals,
+    );
+    if (residual.lessThanOrEqualTo(0)) throw new BadRequestException('Nothing left to pay');
+    if (Number.isNaN(input.paymentDate.getTime())) throw new BadRequestException('Invalid paymentDate');
 
     const debitAccountId = await this.resolveExpenseAccountId(tx, category);
     const creditAccount = await tx.account.findFirst({
-      where: { id: input.accountId, isPostable: true, isActive: true },
+      where: {
+        id: input.accountId,
+        isPostable: true,
+        isActive: true,
+        deprecatedAt: null,
+        category: { isCashEquivalent: true },
+      },
     });
-
-    let journalEntryId: string | null = null;
-    if (debitAccountId && creditAccount) {
-      const entry = await this.posting.post(
-        {
-          journalCode: journalForMethod(input.paymentMethod),
-          date: new Date(),
-          description: `Expense ${expense.expenseCode} — ${expense.title}`,
-          sourceType: 'expense_payment',
-          sourceId: expense.id,
-          lines: [
-            { accountId: debitAccountId, debit: residual, description: expense.title },
-            { accountId: creditAccount.id, credit: residual, description: `Paid: ${expense.title}` },
-          ],
-        },
-        tx,
-      );
-      journalEntryId = entry.id;
+    if (!creditAccount) {
+      throw new UnprocessableEntityException('Pay-from account must be an active cash or bank ledger account');
     }
+
+    const isCash = (input.paymentMethod ?? '').toUpperCase() === 'CASH';
+    const sessionId = await this.cashSessions.custodySessionForPayOut(tx, {
+      method: isCash ? 'cash' : 'other',
+      sessionId: input.cashSessionId,
+    });
 
     const payment = await tx.expensePayment.create({
       data: {
         expenseId: expense.id,
         amount: residual,
         paymentMethod: input.paymentMethod,
+        paymentDate: input.paymentDate,
         reference: input.reference ?? null,
         paymentNotes: input.paymentNotes ?? null,
-        accountId: input.accountId,
+        accountId: creditAccount.id,
         paidById: input.paidBy,
-        journalEntryId,
         status: 'posted',
       },
     });
 
-    const newPaid = Number(expense.amountPaid ?? 0) + residual;
+    const entry = await this.posting.post(
+      {
+        journalCode: journalForMethod(input.paymentMethod),
+        date: input.paymentDate,
+        description: `Expense ${expense.expenseCode} — ${expense.title}`,
+        sourceType: 'expense_payment',
+        sourceId: payment.id,
+        postingKey: `expense_payment:${payment.id}`,
+        lines: [
+          { accountId: debitAccountId, debit: residual.toString(), description: expense.title },
+          { accountId: creditAccount.id, credit: residual.toString(), description: `Paid: ${expense.title}` },
+        ],
+      },
+      tx,
+    );
+    await tx.expensePayment.updateMany({ where: { id: payment.id }, data: { journalEntryId: entry.id } });
+
+    if (sessionId) {
+      await this.cashSessions.recordExternalPayOut(tx, sessionId, residual, `Expense ${expense.expenseCode}`);
+    }
+
+    const newPaid = dec(expense.amountPaid ?? 0).plus(residual);
     await tx.expense.updateMany({
       where: { id: expense.id },
       data: {
         amountPaid: newPaid,
-        paymentStatus: newPaid >= Number(expense.amount) ? PaymentStatus.PAID : PaymentStatus.PARTIALLY_PAID,
-        paidAt: new Date(),
+        paymentStatus: newPaid.greaterThanOrEqualTo(dec(expense.amount))
+          ? PaymentStatus.PAID
+          : PaymentStatus.PARTIALLY_PAID,
+        paidAt: input.paymentDate,
         status: expense.status === 'APPROVED' || expense.status === 'DRAFT' ? 'POSTED' : expense.status,
       },
     });
@@ -652,37 +776,40 @@ export class ExpensesService {
       action: 'post',
       newValues: {
         paymentId: payment.id,
-        amount: residual,
+        amount: residual.toString(),
         method: input.paymentMethod,
         reason: input.paymentNotes,
-        glPosted: Boolean(journalEntryId),
+        journalEntryId: entry.id,
+        cashSessionId: sessionId,
       },
     });
     return payment;
   }
 
-  /** category.ledgerAccountId, else the first postable expense account, else null. */
-  private async resolveExpenseAccountId(tx: any, category: any | null): Promise<string | null> {
+  /**
+   * The ledger account an expense debits: its category's account, else the
+   * org's `default_expense` mapping. Both must be postable and active. No
+   * guessing — an unmapped expense is refused so it is never misclassified.
+   */
+  private async resolveExpenseAccountId(tx: any, category: any | null): Promise<string> {
+    const postable = { isPostable: true, isActive: true, deprecatedAt: null };
     if (category?.ledgerAccountId) {
-      const acc = await tx.account.findFirst({
-        where: { id: category.ledgerAccountId, isPostable: true, isActive: true },
-      });
+      const acc = await tx.account.findFirst({ where: { id: category.ledgerAccountId, ...postable } });
+      if (acc) return acc.id;
+      throw new UnprocessableEntityException(
+        `Expense category '${category.name}' points to a ledger account that is inactive or not postable`,
+      );
+    }
+    const mapping = await tx.accountMapping.findFirst({ where: { key: 'default_expense' } });
+    if (mapping) {
+      const acc = await tx.account.findFirst({ where: { id: mapping.accountId, ...postable } });
       if (acc) return acc.id;
     }
-    // Fall back to the org's configured default expense account rather than
-    // "whichever expense account sorts first by code".
-    const mapping = await tx.accountMapping.findFirst({ where: { key: 'default_expense' } });
-    if (mapping) return mapping.accountId;
-    const fallback = await tx.account.findFirst({
-      where: {
-        category: { classification: 'expense' },
-        isPostable: true,
-        isActive: true,
-        deprecatedAt: null,
-      },
-      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }],
-    });
-    return fallback?.id ?? null;
+    throw new UnprocessableEntityException(
+      category
+        ? `Map expense category '${category.name}' to a ledger account before paying it`
+        : 'Choose an expense category (or map a default expense account) before paying',
+    );
   }
 
   private async loadDecorated(tx: any, id: string) {

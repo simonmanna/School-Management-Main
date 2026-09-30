@@ -28,13 +28,13 @@ export const expensesApi = {
   delete(id: string): Promise<void> {
     return api.delete(`/expenses/${id}`).then((r) => r.data);
   },
-  approve(id: string, body: { approvedBy: string; approvalNotes?: string }): Promise<Expense> {
+  approve(id: string, body: { approvalNotes?: string }): Promise<Expense> {
     return api.post(`/expenses/${id}/approve`, body).then((r) => r.data);
   },
   reject(id: string, reason?: string): Promise<Expense> {
     return api.post(`/expenses/${id}/reject`, { reason }).then((r) => r.data);
   },
-  pay(id: string, body: { paidBy: string; paymentMethod: string; reference?: string; paymentNotes?: string; accountId: string }): Promise<Expense> {
+  pay(id: string, body: { paymentMethod: string; paymentDate?: string; reference?: string; paymentNotes?: string; accountId: string; cashSessionId?: string }): Promise<Expense> {
     return api.post(`/expenses/${id}/pay`, body).then((r) => r.data);
   },
   void(id: string, body: { voidReason: string }): Promise<Expense> {

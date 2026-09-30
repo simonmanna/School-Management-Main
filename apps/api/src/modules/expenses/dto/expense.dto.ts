@@ -44,12 +44,9 @@ export class CreateExpenseDto {
   @IsIn(['CASH', 'CREDIT'])
   paymentType!: 'CASH' | 'CREDIT';
 
-  /** Required on create — the staff member raising the expense. */
-  @IsOptional()
-  @IsString()
-  createdBy?: string;
-
-  // Cash (pay-now) fields — only present when paymentType === 'CASH'.
+  // Petty-cash (pay-now) fields — used when paymentType === 'CASH' and the
+  // amount is within the org's petty-cash threshold. The raiser is always the
+  // signed-in user; the request body never names who acted.
   @IsOptional()
   @IsString()
   paymentMethod?: string;
@@ -99,9 +96,7 @@ export class UpdateExpenseDto {
 }
 
 export class PayExpenseDto {
-  @IsString()
-  paidBy!: string;
-
+  /** Payer is the signed-in user. */
   @IsString()
   paymentMethod!: string;
 
@@ -115,12 +110,20 @@ export class PayExpenseDto {
   @IsOptional()
   @IsString()
   paymentNotes?: string;
+
+  /** Value date of the payment (defaults to now). Drives the journal date. */
+  @IsOptional()
+  @IsDateString()
+  paymentDate?: string;
+
+  /** Drawer-mode schools: the cash session the money leaves (defaults to the payer's own open one). */
+  @IsOptional()
+  @IsString()
+  cashSessionId?: string;
 }
 
 export class ApproveExpenseDto {
-  @IsString()
-  approvedBy!: string;
-
+  /** Approver is the signed-in user and must not be the raiser. */
   @IsOptional()
   @IsString()
   approvalNotes?: string;
