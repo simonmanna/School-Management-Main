@@ -102,8 +102,9 @@ async function ensureAcademicYear() {
       startDate: new Date('2026-01-15'),
       endDate: new Date('2026-12-15'),
       isCurrent: true,
+      status: 'ACTIVE',
     },
-    update: { isCurrent: true },
+    update: { isCurrent: true, status: 'ACTIVE' },
   });
   const terms = await Promise.all([
     prisma.term.upsert({
@@ -298,13 +299,66 @@ async function ensureStudents(campuses: { main: any; annex: any }, gradeLevels: 
     classes.push(cls);
   }
   // Create a section per class.
+  const sectionByClass = new Map<string, string>();
   for (const c of classes) {
-    await prisma.section.upsert({
+    const section = await prisma.section.upsert({
       where: { organizationId_classId_name: { organizationId: ORG_ID, classId: c.id, name: 'A' } },
       create: { organizationId: ORG_ID, classId: c.id, name: 'A', capacity: 40 },
       update: {},
     });
+    sectionByClass.set(c.id, section.id);
   }
+
+  // Enrolment is per academic year (StudentEnrollment) with a placement into
+  // the year's class cohort for the current term — the class a pupil is "in".
+  const year = await prisma.academicYear.findFirstOrThrow({ where: { organizationId: ORG_ID, name: '2026' } });
+  const term3 = await prisma.term.findFirstOrThrow({ where: { organizationId: ORG_ID, academicYearId: year.id, name: 'Term 3' } });
+  const primary = await prisma.academicProgramme.upsert({
+    where: { organizationId_code: { organizationId: ORG_ID, code: 'PRI' } },
+    create: { organizationId: ORG_ID, code: 'PRI', name: 'Primary (NCDC)', stage: 'PRIMARY', curriculumAuthority: 'NCDC', effectiveFrom: year.startDate },
+    update: {},
+  });
+  const secondary = await prisma.academicProgramme.upsert({
+    where: { organizationId_code: { organizationId: ORG_ID, code: 'SEC' } },
+    create: { organizationId: ORG_ID, code: 'SEC', name: 'Secondary (UNEB)', stage: 'LOWER_SECONDARY', curriculumAuthority: 'UNEB', effectiveFrom: year.startDate },
+    update: {},
+  });
+  const programmeFor = (c: any) => (c.name.startsWith('P.') ? primary.id : secondary.id);
+  const cohortByClass = new Map<string, string>();
+  for (const c of classes) {
+    const cohort = await prisma.classCohort.upsert({
+      where: { organizationId_academicYearId_classId: { organizationId: ORG_ID, academicYearId: year.id, classId: c.id } },
+      create: { organizationId: ORG_ID, academicYearId: year.id, classId: c.id, programmeId: programmeFor(c), capacity: 40 },
+      update: {},
+    });
+    cohortByClass.set(c.id, cohort.id);
+  }
+  const enrol = async (studentProfileId: string, c: any, rollNumber: string) => {
+    const existing = await prisma.studentEnrollment.findFirst({ where: { organizationId: ORG_ID, studentProfileId, academicYearId: year.id } });
+    if (existing) return;
+    await prisma.studentEnrollment.create({
+      data: {
+        organizationId: ORG_ID,
+        studentProfileId,
+        academicYearId: year.id,
+        programmeId: programmeFor(c),
+        gradeLevelId: c.gradeLevelId,
+        admissionDate: new Date('2026-01-15'),
+        placements: {
+          create: {
+            organizationId: ORG_ID,
+            termId: term3.id,
+            classCohortId: cohortByClass.get(c.id)!,
+            sectionId: sectionByClass.get(c.id),
+            rollNumber,
+            classNameSnapshot: c.name,
+            sectionNameSnapshot: 'A',
+            effectiveFrom: term3.startDate,
+          },
+        },
+      },
+    });
+  };
 
   // 200 students — 15-16 per class (rounded up).
   const firstNames = ['Achieng', 'Brian', 'Catherine', 'Daniel', 'Edith', 'Francis', 'Gloria', 'Henry', 'Irene', 'Jacob', 'Kevin', 'Linet', 'Martin', 'Naomi', 'Oscar', 'Patience', 'Ronald', 'Sandra', 'Tomas', 'Vivian'];
@@ -317,7 +371,7 @@ async function ensureStudents(campuses: { main: any; annex: any }, gradeLevels: 
     for (let j = 0; j < n && created.length < 200; j++, i++) {
       const admissionNo = `STU-${String(i + 1).padStart(4, '0')}`;
       const existing = await prisma.studentProfile.findFirst({ where: { organizationId: ORG_ID, admissionNo } });
-      if (existing) { created.push(existing.id); continue; }
+      if (existing) { await enrol(existing.id, c, String(j + 1)); created.push(existing.id); continue; }
       const partner = await prisma.partner.create({
         data: {
           organizationId: ORG_ID,
@@ -340,7 +394,6 @@ async function ensureStudents(campuses: { main: any; annex: any }, gradeLevels: 
           organizationId: ORG_ID,
           partnerId: partner.id,
           admissionNo,
-          currentClassId: c.id,
           enrollmentDate: new Date('2026-01-15'),
           dateOfBirth: new Date('2014-01-01'),
           gender: j % 2 === 0 ? 'female' : 'male',
@@ -349,6 +402,7 @@ async function ensureStudents(campuses: { main: any; annex: any }, gradeLevels: 
           residenceType: 'day',
         },
       });
+      await enrol(profile.id, c, String(j + 1));
       // Create 2 guardians.
       for (let g = 0; g < 2; g++) {
         await prisma.studentGuardian.create({

@@ -1,0 +1,27 @@
+# School demo — append to the host site's Caddyfile, then:
+#   docker network connect school-demo-edge <caddy-container>
+#   docker exec <caddy-container> caddy validate --config /etc/caddy/Caddyfile
+#   docker exec <caddy-container> caddy reload --config /etc/caddy/Caddyfile
+# Names resolve over the school-demo-edge network (docker-compose.demo.yml).
+
+school-demo.almasiresidence.com {
+	encode zstd gzip
+	header X-Robots-Tag "noindex, nofollow"
+	handle /api/* {
+		reverse_proxy sd-api:3000
+	}
+	handle {
+		reverse_proxy sd-web:80
+	}
+}
+
+portal-demo.almasiresidence.com {
+	encode zstd gzip
+	header X-Robots-Tag "noindex, nofollow"
+	handle /api/* {
+		reverse_proxy sd-api:3000
+	}
+	handle {
+		reverse_proxy sd-portal:80
+	}
+}

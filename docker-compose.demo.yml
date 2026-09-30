@@ -1,0 +1,133 @@
+# Client demo overlay — runs beside another site on a shared host:
+#   docker compose -p school-demo --env-file .env.demo \
+#     -f docker-compose.yml -f docker-compose.demo.yml up -d
+#
+# The host already has a reverse proxy owning 80/443 (see
+# docs/operations/demo-on-shared-vps.md). So this stack publishes NOTHING: the
+# api, web and portal join the external `school-demo-edge` network under
+# prefixed aliases, and the host's proxy is attached to that network to reach
+# them. The prefixes matter — the other site's services are also called `api`
+# and `web`, and a shared network with bare names would resolve to either.
+#
+# Demo data only. The database is built and seeded off-host and restored here,
+# because the runtime image carries no TypeScript sources to seed with.
+#
+# Memory limits keep the demo from starving the host's primary site.
+
+services:
+  db:
+    container_name: school-demo-db
+    ports: !reset []
+    mem_limit: 512m
+    environment:
+      POSTGRES_USER: school_owner
+      POSTGRES_PASSWORD: ${DEMO_DB_OWNER_PASSWORD:?set DEMO_DB_OWNER_PASSWORD}
+      POSTGRES_DB: school
+    volumes: !override
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U school_owner -d school"]
+
+  redis:
+    container_name: school-demo-redis
+    ports: !reset []
+    mem_limit: 128m
+
+  api:
+    image: school-demo/api:latest
+    container_name: school-demo-api
+    ports: !reset []
+    mem_limit: 1g
+    networks:
+      default:
+      edge:
+        aliases: [sd-api]
+    environment:
+      # Non-superuser NOBYPASSRLS app role; BYPASSRLS system role for
+      # pre-tenant lookups. Both created before the dump is restored.
+      DATABASE_URL: postgresql://app:${DEMO_DB_APP_PASSWORD:?set DEMO_DB_APP_PASSWORD}@db:5432/school?schema=public
+      SYSTEM_DATABASE_URL: postgresql://app_system:${DEMO_DB_SYSTEM_PASSWORD:?set DEMO_DB_SYSTEM_PASSWORD}@db:5432/school?schema=public
+      NODE_ENV: production
+      LOG_LEVEL: info
+      # One proxy hop in front (the host's Caddy).
+      TRUST_PROXY: "1"
+      CORS_ORIGINS: ${DEMO_WEB_URL:?set DEMO_WEB_URL},${DEMO_PORTAL_URL:?set DEMO_PORTAL_URL}
+      WEB_URL: ${DEMO_WEB_URL}
+      PORTAL_URL: ${DEMO_PORTAL_URL}
+      METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
+      PERMISSIONS_FAIL_CLOSED: "true"
+      PERMISSIONS_DB_LOOKUP: "true"
+      # Operator surfaces stay closed on a demo.
+      PROVISIONING_SECRET: ""
+      OPERATOR_SECRET: ""
+      # No SMTP: emails are recorded as not sent. No SMS, no live money.
+      SMTP_HOST: ""
+      SMTP_FROM: no-reply@school-demo.invalid
+      ENABLE_COMMUNICATION_SMS: "false"
+      # Same scope as docker-compose.prod.yml.
+      ENABLE_SCHOOL: "true"
+      ENABLE_HR: "true"
+      ENABLE_COMMUNICATION: "true"
+      ENABLE_ADVANCED_LMS: "false"
+      ENABLE_MANUFACTURING: "false"
+      ENABLE_RENTAL: "false"
+      ENABLE_REPAIR: "false"
+      ENABLE_BEVERAGE: "false"
+      ENABLE_ASSETS: "false"
+      ENABLE_TASKS: "false"
+      ENABLE_ORDERS: "false"
+      ENABLE_LIVE_MOBILE_MONEY: "false"
+
+  # Browser bundles call /api/v1 on their own origin; the proxy routes it.
+  # Flags mirror ENABLE_* above — change one, change both, rebuild.
+  web:
+    image: school-demo/web:latest
+    container_name: school-demo-web
+    ports: !reset []
+    mem_limit: 64m
+    networks:
+      default:
+      edge:
+        aliases: [sd-web]
+    build:
+      args:
+        VITE_API_URL: ""
+        VITE_ENABLE_SCHOOL: "true"
+        VITE_ENABLE_HR: "true"
+        VITE_ENABLE_COMMUNICATION: "true"
+        VITE_ENABLE_ADVANCED_LMS: "false"
+        VITE_ENABLE_ORDERS: "false"
+        VITE_ENABLE_BEVERAGE: "false"
+        VITE_ENABLE_ASSETS: "false"
+        VITE_ENABLE_TASKS: "false"
+        VITE_ENABLE_MANUFACTURING: "false"
+        VITE_ENABLE_RENTAL: "false"
+        VITE_ENABLE_REPAIR: "false"
+        VITE_ENABLE_LIVE_MOBILE_MONEY: "false"
+
+  portal:
+    image: school-demo/portal:latest
+    container_name: school-demo-portal
+    ports: !reset []
+    mem_limit: 64m
+    networks:
+      default:
+      edge:
+        aliases: [sd-portal]
+    build:
+      args:
+        VITE_API_URL: ""
+        VITE_ORG_CODE: SUNRISE
+        VITE_SCHOOL_NAME: Sunrise Academy (Demo)
+        VITE_ENABLE_ADVANCED_LMS: "false"
+
+  adminer:
+    profiles: ["never"]
+
+  caddy:
+    profiles: ["never"]
+
+networks:
+  edge:
+    name: school-demo-edge
+    external: true

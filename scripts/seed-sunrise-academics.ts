@@ -79,6 +79,41 @@ async function main() {
     log('weighting policy CA 40% / exam 60% (published)');
   }
 
+  // ── Roles + administrator (what organization bootstrap provisions) ───────
+  // seed-school.ts upserts the organization row directly, so the roles the
+  // bootstrap endpoint would create are missing. Same presets, same scopes.
+  const perms = await import('../packages/shared/src/permissions');
+  const adminRole = await prisma.role.upsert({
+    where: { organizationId_name: { organizationId: ORG, name: 'Administrator' } },
+    update: {},
+    create: { organizationId: ORG, name: 'Administrator', description: 'Full platform access', isSystem: true, permissions: [...perms.ALL_PERMISSIONS] },
+  });
+  for (const preset of perms.PORTAL_ROLE_PRESETS) {
+    await prisma.role.upsert({
+      where: { organizationId_name: { organizationId: ORG, name: preset.name } },
+      update: {},
+      create: { organizationId: ORG, name: preset.name, description: preset.description, isSystem: true, permissions: [...preset.permissions], dataScope: preset.dataScope ?? 'own' } as any,
+    });
+  }
+  for (const preset of perms.SCHOOL_ROLE_PRESETS) {
+    await prisma.role.upsert({
+      where: { organizationId_name: { organizationId: ORG, name: preset.name } },
+      update: {},
+      create: { organizationId: ORG, name: preset.name, description: preset.description, isSystem: false, permissions: [...preset.permissions], dataScope: preset.dataScope ?? 'school' } as any,
+    });
+  }
+  const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@sunrise.test';
+  if (!(await prisma.user.findFirst({ where: { organizationId: ORG, email: ADMIN_EMAIL } }))) {
+    await prisma.user.create({
+      data: {
+        organizationId: ORG, email: ADMIN_EMAIL,
+        passwordHash: await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD ?? 'Admin@123', 12),
+        firstName: 'School', lastName: 'Administrator', isActive: true, roles: { connect: { id: adminRole.id } },
+      } as any,
+    });
+    log(`administrator login ${ADMIN_EMAIL}`);
+  }
+
   // ── The subject teacher: login + HR + staff profile ──────────────────────
   let user = await prisma.user.findFirst({ where: { organizationId: ORG, email: TEACHER_EMAIL } });
   if (!user) {
