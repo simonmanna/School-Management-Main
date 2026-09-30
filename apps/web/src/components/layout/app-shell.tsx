@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { HeaderComms } from './header-comms';
 import {
   LayoutDashboard,
@@ -94,6 +94,9 @@ import {
   Workflow,
   Coins,
   FileSpreadsheet,
+  ChevronRight,
+  Search,
+  X,
 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { cn } from '@/lib/utils';
@@ -111,6 +114,8 @@ import { RouteErrorBoundary } from '@/components/error-boundary';
 import { ThemePicker } from '@/components/theme-picker';
 import { useTranslation } from 'react-i18next';
 import { useSidebarTheme } from '@/lib/sidebar-theme';
+import { enhanceTablesIn } from '@/lib/table-enhancer';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -676,6 +681,7 @@ export function routePermission(pathname: string): RequiredPermission | undefine
 
 // Collapsed (icon-only) sidebar keeps sections flat; accordion is only for expanded mode.
 const SIDEBAR_EXPAND_STATE_KEY = 'poscafe.sidebar.expandedSections';
+const SIDEBAR_COLLAPSED_KEY = 'poscafe.sidebar.collapsed';
 
 // Localized section titles for the accordion parent buttons.
 const SECTION_TITLE_KEYS: Record<string, string> = {
@@ -705,6 +711,33 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
 const sectionTitle = (title: string | undefined, t: (k: string) => string) =>
   title ? (SECTION_TITLE_KEYS[title] ? t(SECTION_TITLE_KEYS[title]) : title) : '';
 
+/**
+ * The one menu entry the current URL belongs to. Entries that differ only by
+ * `?tab=` (Meals, Transport, Messaging) would all light up under NavLink's
+ * path matching, so a query-string entry wins only when its params match, and
+ * the longest matching path wins overall.
+ */
+function activeItemKey(items: NavItem[], pathname: string, search: string): string | null {
+  const current = new URLSearchParams(search);
+  let best: { to: string; score: number } | null = null;
+  for (const item of items) {
+    const [path, query] = item.to.split('?');
+    const pathHit = path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`);
+    if (!pathHit) continue;
+    let score = path.length;
+    if (query) {
+      const wanted = new URLSearchParams(query);
+      const ok = Array.from(wanted.entries()).every(([k, v]) => current.get(k) === v);
+      if (!ok) continue;
+      score += 1000;
+    }
+    if (!best || score > best.score) best = { to: item.to, score };
+  }
+  return best?.to ?? null;
+}
+
+type SidebarVars = CSSProperties & Record<`--${string}`, string>;
+
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -717,7 +750,20 @@ export function AppShell() {
   const setOrganization = useAuthStore((s) => s.setOrganization);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [navQuery, setNavQuery] = useState('');
+  const navSearchRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const [userCollapsed, setUserCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { return false; }
+  });
+  const onTerminal = location.pathname.startsWith('/pos/terminal');
+  // The POS terminal always runs on the icon rail; elsewhere the user's choice sticks.
+  const sidebarCollapsed = onTerminal || userCollapsed;
+  const toggleCollapsed = () => {
+    const next = !sidebarCollapsed;
+    setUserCollapsed(next);
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+  };
 
   // Accordion state: which titled sections are expanded (expanded sidebar only).
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
@@ -739,22 +785,40 @@ export function AppShell() {
   const toggleSection = (title: string) =>
     persistExpanded({ ...expanded, [title]: !expanded[title] });
 
-  // Auto-expand the section containing the active route so it's never hidden.
-  const [autoExpanded, setAutoExpanded] = useState(false);
+  const visibleSections = useMemo(
+    () =>
+      VISIBLE_SECTIONS.map((s) => ({
+        ...s,
+        items: s.items.filter((i) => flagEnabled(i.flag) && satisfies(i.permission, hasPermission)),
+      })).filter((s) => s.items.length > 0),
+    [hasPermission],
+  );
+  const allItems = useMemo(() => visibleSections.flatMap((s) => s.items), [visibleSections]);
+  const activeTo = activeItemKey(allItems, location.pathname, location.search);
+  const activeSection = visibleSections.find((s) => s.items.some((i) => i.to === activeTo));
+
+  // Keep the section holding the current page open, so it is never hidden.
   useEffect(() => {
-    if (sidebarCollapsed || autoExpanded) return;
-    const activeSection = VISIBLE_SECTIONS.find(
-      (s) =>
-        s.title &&
-        s.items.some(
-          (n) => n.to !== '/' && (location.pathname === n.to || location.pathname.startsWith(`${n.to}/`)),
-        ),
-    );
     if (activeSection?.title && !expanded[activeSection.title]) {
       persistExpanded({ ...expanded, [activeSection.title]: true });
     }
-    setAutoExpanded(true);
-  }, [location.pathname, sidebarCollapsed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection?.title]);
+
+  // Bring the current page's menu entry into view once its section has opened.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      // Scroll only the menu itself; scrollIntoView would also move the page.
+      document.querySelectorAll<HTMLElement>('aside nav [aria-current="page"]').forEach((el) => {
+        const nav = el.closest('nav');
+        if (!nav) return;
+        const r = el.getBoundingClientRect();
+        const n = nav.getBoundingClientRect();
+        if (r.top < n.top || r.bottom > n.bottom) nav.scrollTop += r.top - n.top - n.height / 2 + r.height / 2;
+      });
+    }, 320);
+    return () => window.clearTimeout(id);
+  }, [activeTo, mobileOpen]);
 
   // Keep the org (incl. base currency) in sync with the server on boot.
   useEffect(() => {
@@ -780,31 +844,38 @@ export function AppShell() {
     };
   }, [setOrganization]);
 
-  // Auto-collapse sidebar on POS terminal, restore on other pages.
-  useEffect(() => {
-    setSidebarCollapsed(location.pathname.startsWith('/pos/terminal'));
-  }, [location.pathname]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setSearchOpen(true);
+        return;
+      }
+      // "/" jumps to the menu filter, unless the user is typing somewhere.
+      const el = e.target as HTMLElement;
+      if (e.key === '/' && !e.metaKey && !e.ctrlKey && !el.closest('input, textarea, select, [contenteditable=true]')) {
+        if (navSearchRef.current && navSearchRef.current.offsetParent !== null) {
+          e.preventDefault();
+          navSearchRef.current.focus();
+        }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Close mobile drawer on navigation.
-  useEffect(() => setMobileOpen(false), [location.pathname]);
+  // Every table on every screen gets search and column sorting.
+  useEffect(() => (mainRef.current ? enhanceTablesIn(mainRef.current) : undefined), []);
 
-  const allItems = VISIBLE_SECTIONS.flatMap((s) => s.items);
-  const current =
-    allItems.find(
-      (n) =>
-        n.to !== '/' &&
-        (location.pathname === n.to || location.pathname.startsWith(`${n.to}/`)),
-    )?.label ?? (location.pathname === '/' ? 'Dashboard' : '');
+  // Close mobile drawer on navigation.
+  useEffect(() => {
+    setMobileOpen(false);
+    setNavQuery('');
+  }, [location.pathname, location.search]);
+
+  const currentItem = allItems.find((i) => i.to === activeTo);
+  const current = currentItem?.label ?? (location.pathname === '/' ? 'Dashboard' : '');
+  const currentSection = activeSection?.title ? sectionTitle(activeSection.title, t) : '';
 
   const logout = () => {
     serverLogout();
@@ -814,285 +885,477 @@ export function AppShell() {
 
   // Hide the app-shell header (Theme / User profile) on the full-screen POS
   // selling terminal — the Terminal's own Topbar covers those controls.
-  const hideHeader = location.pathname.startsWith('/pos/terminal');
+  const hideHeader = onTerminal;
 
-  // ── Sidebar rendering: themed background, brand tile, themed nav items ──
-  const renderNav = (onItemClick?: () => void, collapsed = false) => {
+  const initials = `${(user?.firstName?.[0] ?? '').toUpperCase()}${(user?.lastName?.[0] ?? '').toUpperCase()}` || '?';
+
+  const sidebarVars: SidebarVars = {
+    background: sb.sidebar,
+    color: sb.sidebarText,
+    '--sb-text': sb.sidebarText,
+    '--sb-muted': sb.sidebarMuted,
+    '--sb-hover': sb.sidebarHover,
+    '--sb-active': sb.sidebarActive,
+    '--sb-active-bg': sb.sidebarActiveBg,
+    '--sb-bar': sb.sidebarActiveBar,
+    '--sb-border': sb.sidebarBorder,
+  };
+
+  // ── Menu filter: flat matches, grouped by section ──
+  const q = navQuery.trim().toLowerCase();
+  const filteredSections = q
+    ? visibleSections
+        .map((s) => ({
+          ...s,
+          items: s.items.filter(
+            (i) =>
+              i.label.toLowerCase().includes(q) ||
+              (i.group ?? '').toLowerCase().includes(q) ||
+              sectionTitle(s.title, t).toLowerCase().includes(q),
+          ),
+        }))
+        .filter((s) => s.items.length > 0)
+    : visibleSections;
+  const firstMatch = q ? filteredSections[0]?.items[0] : undefined;
+
+  const itemLink = (item: NavItem, onItemClick?: () => void, withIcon = false) => {
+    const Icon = item.icon;
+    const active = item.to === activeTo;
     return (
-      <nav className="flex-1 space-y-1 overflow-y-auto px-1 py-1">
-        {VISIBLE_SECTIONS.map((section, idx) => {
-          const items = section.items.filter(
-                      (i) => flagEnabled(i.flag) && satisfies(i.permission, hasPermission),
-                    );
-          if (items.length === 0) return null;
-          // In collapsed (icon-rail) mode the accordion is hidden, so always
-          // show the items regardless of accordion open-state — otherwise every
-          // titled section's icons would vanish when the sidebar collapses.
-          const isOpen = collapsed || !section.title || expanded[section.title];
+      <Link
+        key={item.to}
+        to={item.to}
+        onClick={onItemClick}
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'group relative flex h-8 items-center gap-2.5 rounded-lg pr-2 text-[13.5px] outline-none transition-[background-color,color] duration-150',
+          'text-[color:var(--sb-text)] hover:bg-[var(--sb-hover)] hover:text-[color:var(--sb-active)] focus-visible:ring-2 focus-visible:ring-[color:var(--sb-bar)] focus-visible:ring-offset-0',
+          withIcon ? 'pl-2.5' : 'pl-3',
+          active && 'bg-[var(--sb-active-bg)] font-medium text-[color:var(--sb-active)] hover:bg-[var(--sb-active-bg)]',
+        )}
+      >
+        {!withIcon && (
+          // The section's guide line; the active entry lights its own segment.
+          <span
+            aria-hidden
+            className={cn(
+              'absolute -left-[9px] top-1.5 bottom-1.5 w-[2px] rounded-full transition-colors',
+              active ? 'bg-[var(--sb-bar)]' : 'bg-transparent',
+            )}
+          />
+        )}
+        {withIcon && <Icon className={cn('h-4 w-4 shrink-0 opacity-80', active && 'opacity-100')} />}
+        <span className="flex-1 truncate">{item.label}</span>
+        {item.badge && (
+          <span
+            className="rounded-full px-1.5 py-px text-[10px] font-bold text-white"
+            style={{ background: sb.badgeBg }}
+          >
+            {item.badge}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
+  const renderExpandedNav = (onItemClick?: () => void) => (
+    <nav className="sb-scroll flex-1 overflow-y-auto overscroll-contain px-3 pb-4 pt-1" aria-label="Main">
+      {filteredSections.length === 0 && (
+        <p className="px-2 py-6 text-center text-[13px] text-[color:var(--sb-muted)]">
+          No pages match “{navQuery}”.
+        </p>
+      )}
+      {filteredSections.map((section, idx) => {
+        if (!section.title) {
           return (
-            <div key={idx} className="space-y-0">
-              {section.title && !collapsed ? (
-                <button
-                  type="button"
-                  onClick={() => toggleSection(section.title as string)}
-                  className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-[13px] font-semibold uppercase tracking-[0.03em] transition-colors hover:bg-white/10"
-                  style={{ color: sb.sidebarActive, borderBottom: `1px solid ${sb.sidebarBorder}`, marginBottom: 2 }}
-                  aria-expanded={isOpen}
-                >
-                  {section.icon && <section.icon className="h-4 w-4 shrink-0" />}
-                  <span className="flex-1 truncate text-left">{sectionTitle(section.title, t)}</span>
-                  <ChevronDown
-                    className={cn('h-3.5 w-3.5 shrink-0 transition-transform duration-150', !isOpen && '-rotate-90')}
-                  />
-                </button>
-              ) : section.title && collapsed ? (
-                <div
-                  className="mx-2 my-1 border-t"
-                  style={{ borderColor: sb.sidebarBorder }}
-                  aria-hidden
-                />
-              ) : null}
-              {isOpen &&
-                items.map((item, itemIdx) => {
-                const Icon = item.icon;
-                // Sub-group sub-header: show once when the group label changes (expanded mode).
-                const prev = items[itemIdx - 1];
-                const showGroup = !collapsed && item.group && item.group !== prev?.group;
-                return (
-                  <Fragment key={item.to}>
-                    {showGroup && (
-                      <div
-                        className="px-3 pt-2 pb-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]"
-                        style={{ color: sb.sidebarMuted }}
-                      >
-                        {item.group}
-                      </div>
-                    )}
-                  <NavLink
-                    to={item.to}
-                    end={item.to === '/'}
-                    onClick={onItemClick}
-                    className={() =>
-                      cn(
-                        'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[15px] transition-all duration-150',
-                        collapsed && 'justify-center px-2',
-                      )
-                    }
-                    style={({ isActive }) => ({
-                      color: isActive ? sb.sidebarActive : sb.sidebarText,
-                      background: isActive ? sb.sidebarActiveBg : 'transparent',
-                      fontWeight: isActive ? 600 : 400,
-                    })}
-                    onMouseEnter={(e) => {
-                      const a = (e.currentTarget as HTMLElement);
-                      if (!a.style.background || a.style.background === 'transparent' || a.style.background === '') {
-                        a.style.background = sb.sidebarHover;
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = (e.currentTarget as HTMLElement);
-                      el.style.background = '';
-                    }}
-                    title={collapsed ? item.label : undefined}
-                  >
-                    {({ isActive }) => (
-                      <>
-                        {isActive && (
-                          <span
-                            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full"
-                            style={{ background: sb.sidebarActiveBar }}
-                          />
-                        )}
-                        <Icon className="h-4 w-4 shrink-0" style={{ width: 16, height: 16 }} />
-                        {!collapsed && <span className="flex-1 truncate tracking-[0.01em]">{item.label}</span>}
-                        {item.badge && !collapsed && (
-                          <span
-                            className="rounded-full px-1.5 py-0.5 text-[10px] font-bold text-white"
-                            style={{ background: sb.badgeBg, minWidth: 18, textAlign: 'center', lineHeight: 'tight' }}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </NavLink>
-                  </Fragment>
-                );
-                })}
+            <div key={`top-${idx}`} className="mb-2 space-y-0.5">
+              {section.items.map((item) => itemLink(item, onItemClick, true))}
             </div>
           );
-        })}
-      </nav>
-    );
-  };
-
-  // ── Brand tile + section heading text inside the sidebar ──
-  const sidebarInner = (collapsed = false) => {
-    const toggle = () => setSidebarCollapsed((c) => !c);
-    return (
-      <div className="flex h-full flex-col" style={{ background: sb.sidebar }}>
-        {/* Brand Header */}
-        <div
-          className="flex h-[58px] shrink-0 items-center gap-2 px-4"
-          style={{ borderBottom: `1px solid ${sb.sidebarBorder}` }}
-        >
-          <div
-            className="flex shrink-0 items-center justify-center rounded-xl"
-            style={{
-              width: 34,
-              height: 34,
-              background: sb.brandBg,
-              border: '1px solid rgba(255,255,255,0.22)',
-            }}
-          >
-            <School style={{ width: 18, height: 18, color: '#fff' }} />
-          </div>
-          {!collapsed && (
-            <div className="ml-1 flex flex-1 flex-col leading-none">
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, letterSpacing: '-0.3px' }}>
-                {org?.name ?? 'School Management'}
-              </span>
-              <span
-                style={{
-                  color: sb.sidebarMuted,
-                  fontSize: 10,
-                  fontWeight: 500,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  marginTop: 2,
-                }}
-              >
-                School Management
-              </span>
-            </div>
-          )}
-          <button
-            onClick={toggle}
-            className="ml-auto flex shrink-0 items-center justify-center rounded-lg p-1 transition-colors hover:bg-white/10"
-            style={{ color: sb.sidebarMuted }}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </button>
-        </div>
-
-        {renderNav(() => setMobileOpen(false), collapsed)}
-
-      </div>
-    );
-  };
-
-  return (
-    <div className="flex min-h-screen bg-background">
-      {/* Desktop sidebar */}
-      <aside
-        className={cn(
-          'sticky top-0 hidden h-screen shrink-0 flex-col transition-all duration-200 md:flex print:hidden',
-          sidebarCollapsed ? 'w-20' : 'w-72',
-        )}
-        style={{ background: sb.sidebar }}
-      >
-        {sidebarInner(sidebarCollapsed)}
-      </aside>
-
-      {/* Mobile drawer */}
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-72 flex-col shadow-xl">
-            {sidebarInner(false)}
-          </aside>
-        </div>
-      )}
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        {!hideHeader && (
-          <header className="app-shell-header sticky top-0 z-30 flex h-11 items-center justify-between gap-2 border-b bg-background/95 px-4 backdrop-blur print:hidden md:px-6">
-            <div className="flex min-w-0 items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="hidden md:inline-flex"
-                onClick={() => setSidebarCollapsed((c) => !c)}
-                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              >
-                {sidebarCollapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Open menu"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-              <div className="truncate text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{current}</span>
+        }
+        const title = section.title;
+        const isOpen = !!q || !!expanded[title];
+        const SectionIcon = section.icon ?? LayoutDashboard;
+        const holdsActive = section.items.some((i) => i.to === activeTo);
+        return (
+          <div key={title} className="mt-0.5">
+            <button
+              type="button"
+              onClick={() => toggleSection(title)}
+              aria-expanded={isOpen}
+              className={cn(
+                'flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13.5px] font-medium outline-none transition-colors',
+                'text-[color:var(--sb-text)] hover:bg-[var(--sb-hover)] focus-visible:ring-2 focus-visible:ring-[color:var(--sb-bar)] focus-visible:ring-offset-0',
+                holdsActive && 'text-[color:var(--sb-active)]',
+              )}
+            >
+              <SectionIcon className={cn('h-4 w-4 shrink-0 opacity-80', holdsActive && 'opacity-100')} />
+              <span className="flex-1 truncate text-left">{sectionTitle(title, t)}</span>
+              {holdsActive && !isOpen && (
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--sb-bar)]" />
+              )}
+              <ChevronRight
+                className={cn(
+                  'h-3.5 w-3.5 shrink-0 text-[color:var(--sb-muted)] transition-transform duration-200',
+                  isOpen && 'rotate-90',
+                )}
+              />
+            </button>
+            {/* grid-rows 0fr→1fr animates to the content's real height. */}
+            <div
+              className={cn(
+                'grid transition-[grid-template-rows,opacity] duration-200 ease-out',
+                isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+              )}
+              // Closed sections keep their links out of the tab order (React 18 has no `inert` prop type).
+              {...({ inert: isOpen ? undefined : '' } as Record<string, string | undefined>)}
+            >
+              <div className="overflow-hidden">
+                <div className="relative mb-1.5 ml-[17px] mt-0.5 space-y-px border-l border-[color:var(--sb-border)] pl-2">
+                  {section.items.map((item, itemIdx) => {
+                    const prev = section.items[itemIdx - 1];
+                    const showGroup = item.group && item.group !== prev?.group;
+                    return (
+                      <Fragment key={item.to}>
+                        {showGroup && (
+                          <div className="px-3 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[color:var(--sb-muted)]">
+                            {item.group}
+                          </div>
+                        )}
+                        {itemLink(item, onItemClick)}
+                      </Fragment>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-1 sm:gap-2">
-              <ThemePicker />
-              <HeaderComms />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full px-1.5 py-1 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+          </div>
+        );
+      })}
+    </nav>
+  );
+
+  const railButton =
+    'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl outline-none transition-colors text-[color:var(--sb-text)] hover:bg-[var(--sb-hover)] hover:text-[color:var(--sb-active)] focus-visible:ring-2 focus-visible:ring-[color:var(--sb-bar)] focus-visible:ring-offset-0';
+
+  // Icon rail: one button per section, each opening its pages in a flyout.
+  const renderRail = () => (
+    <nav className="sb-scroll flex flex-1 flex-col items-center gap-1 overflow-y-auto px-2 py-2" aria-label="Main">
+      {visibleSections.map((section, idx) => {
+        if (!section.title) {
+          return section.items.map((item) => {
+            const Icon = item.icon;
+            const active = item.to === activeTo;
+            return (
+              <Tooltip key={item.to}>
+                <TooltipTrigger asChild>
+                  <Link
+                    to={item.to}
+                    aria-label={item.label}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(railButton, active && 'bg-[var(--sb-active-bg)] text-[color:var(--sb-active)]')}
                   >
-                    <span
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary"
-                      aria-hidden="true"
-                    >
-                      {(user?.firstName?.[0] ?? '').toUpperCase()}
-                      {(user?.lastName?.[0] ?? '').toUpperCase()}
-                    </span>
-                    <span className="hidden text-sm font-medium text-foreground sm:inline">
-                      {user?.firstName}
-                    </span>
-                    <ChevronDown className="hidden h-4 w-4 text-muted-foreground sm:inline" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel className="flex flex-col gap-0.5">
-                    <span className="text-sm font-semibold text-foreground">
-                      {user?.firstName} {user?.lastName}
-                    </span>
-                    <span className="truncate text-xs font-normal text-muted-foreground">
-                      {user?.email}
-                    </span>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <div className="px-2 py-1.5">
-                    <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Active Branch
-                    </label>
-                    <BranchSwitcher />
-                  </div>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>{t('auth.signOut')}</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <Icon className="h-[18px] w-[18px]" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">{item.label}</TooltipContent>
+              </Tooltip>
+            );
+          });
+        }
+        const SectionIcon = section.icon ?? LayoutDashboard;
+        const holdsActive = section.items.some((i) => i.to === activeTo);
+        const label = sectionTitle(section.title, t);
+        return (
+          <Fragment key={section.title}>
+            {idx > 0 && !visibleSections[idx - 1].title && (
+              <div aria-hidden className="my-1 h-px w-8 shrink-0 bg-[var(--sb-border)]" />
+            )}
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger
+                    aria-label={label}
+                    className={cn(railButton, 'relative', holdsActive && 'bg-[var(--sb-active-bg)] text-[color:var(--sb-active)]')}
+                  >
+                    <SectionIcon className="h-[18px] w-[18px]" />
+                    {holdsActive && (
+                      <span aria-hidden className="absolute -left-2 top-2 bottom-2 w-[3px] rounded-r-full bg-[var(--sb-bar)]" />
+                    )}
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="right">{label}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent side="right" align="start" sideOffset={10} className="max-h-[70vh] w-60 overflow-y-auto">
+                <DropdownMenuLabel className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                  {label}
+                </DropdownMenuLabel>
+                {section.items.map((item, itemIdx) => {
+                  const Icon = item.icon;
+                  const prev = section.items[itemIdx - 1];
+                  const showGroup = item.group && item.group !== prev?.group;
+                  const active = item.to === activeTo;
+                  return (
+                    <Fragment key={item.to}>
+                      {showGroup && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <div className="px-2 pb-1 pt-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                            {item.group}
+                          </div>
+                        </>
+                      )}
+                      <DropdownMenuItem asChild className={cn('cursor-pointer gap-2', active && 'bg-primary/10 font-medium text-foreground')}>
+                        <Link to={item.to} aria-current={active ? 'page' : undefined}>
+                          <Icon className="h-4 w-4 text-muted-foreground" />
+                          <span className="truncate">{item.label}</span>
+                        </Link>
+                      </DropdownMenuItem>
+                    </Fragment>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </Fragment>
+        );
+      })}
+    </nav>
+  );
+
+  const brand = (collapsed: boolean, onClose?: () => void) => (
+    <div className={cn('flex h-16 shrink-0 items-center gap-3', collapsed ? 'justify-center px-2' : 'px-4')}>
+      <div
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-[0_4px_12px_-2px_rgba(0,0,0,0.35)] ring-1 ring-white/20"
+        style={{ background: sb.brandBg }}
+      >
+        <School className="h-[18px] w-[18px] text-white" />
+      </div>
+      {!collapsed && (
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-[15px] font-semibold leading-tight tracking-[-0.01em] text-[color:var(--sb-active)]">
+            {org?.name ?? 'School Management'}
+          </span>
+          <span className="truncate text-[11px] leading-tight text-[color:var(--sb-muted)]">School Management</span>
+        </div>
+      )}
+      {onClose && (
+        <button type="button" onClick={onClose} className={cn(railButton, 'h-8 w-8')} aria-label="Close menu">
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+
+  const navSearch = (
+    <div className="px-3 pb-2">
+      <label className="relative flex h-9 items-center rounded-lg border border-[color:var(--sb-border)] bg-white/[0.06] transition-colors focus-within:border-[color:var(--sb-bar)] focus-within:bg-white/[0.1]">
+        <Search className="pointer-events-none absolute left-2.5 h-4 w-4 text-[color:var(--sb-muted)]" />
+        <input
+          ref={navSearchRef}
+          type="search"
+          value={navQuery}
+          onChange={(e) => setNavQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && firstMatch) {
+              navigate(firstMatch.to);
+              setNavQuery('');
+              (e.target as HTMLInputElement).blur();
+            }
+            if (e.key === 'Escape') {
+              setNavQuery('');
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="Find a page…"
+          aria-label="Find a page in the menu"
+          className="h-full w-full bg-transparent pl-8 pr-8 text-[13px] text-[color:var(--sb-active)] outline-none placeholder:text-[color:var(--sb-muted)] focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden"
+        />
+        {navQuery ? (
+          <button
+            type="button"
+            onClick={() => setNavQuery('')}
+            className="absolute right-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[color:var(--sb-muted)] hover:bg-white/10 hover:text-[color:var(--sb-active)]"
+            aria-label="Clear"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <kbd className="pointer-events-none absolute right-2 rounded border border-[color:var(--sb-border)] px-1.5 font-sans text-[10px] font-medium text-[color:var(--sb-muted)]">
+            /
+          </kbd>
+        )}
+      </label>
+    </div>
+  );
+
+  const userCard = (collapsed: boolean, inDrawer = false) => (
+    <div className={cn('shrink-0 border-t border-[color:var(--sb-border)]', collapsed ? 'flex flex-col items-center gap-1 px-2 py-3' : 'flex items-center gap-2.5 px-3 py-3')}>
+      {!collapsed && (
+        <>
+          <span
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white ring-2 ring-white/15"
+            style={{ background: sb.brandBg }}
+            aria-hidden
+          >
+            {initials}
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-[13px] font-medium text-[color:var(--sb-active)]">
+              {user?.firstName} {user?.lastName}
             </div>
-          </header>
+            <div className="truncate text-[11.5px] text-[color:var(--sb-muted)]">{user?.email}</div>
+          </div>
+        </>
+      )}
+      {!onTerminal && !inDrawer && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className={cn(railButton, 'h-8 w-8 rounded-lg text-[color:var(--sb-muted)]')}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  );
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <div className="flex min-h-screen bg-background">
+        {/* Desktop sidebar */}
+        <aside
+          className={cn(
+            'sticky top-0 hidden h-screen shrink-0 flex-col border-r border-black/10 transition-[width] duration-200 ease-out md:flex print:hidden',
+            sidebarCollapsed ? 'w-[76px]' : 'w-[272px]',
+          )}
+          style={sidebarVars}
+        >
+          {brand(sidebarCollapsed)}
+          {sidebarCollapsed ? renderRail() : (
+            <>
+              {navSearch}
+              {renderExpandedNav()}
+            </>
+          )}
+          {userCard(sidebarCollapsed)}
+        </aside>
+
+        {/* Mobile drawer */}
+        {mobileOpen && (
+          <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+            <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-[2px] animate-in fade-in-0" onClick={() => setMobileOpen(false)} />
+            <aside
+              className="absolute inset-y-0 left-0 flex w-[min(300px,86vw)] flex-col shadow-2xl animate-in slide-in-from-left duration-200"
+              style={sidebarVars}
+            >
+              {brand(false, () => setMobileOpen(false))}
+              {navSearch}
+              {renderExpandedNav(() => setMobileOpen(false))}
+              {userCard(false, true)}
+            </aside>
+          </div>
         )}
 
-        <main
-          className={`flex-1 overflow-auto ${
-            location.pathname.startsWith('/pos/terminal') ? 'p-1 md:p-1' : 'p-1 md:p-1'
-          }`}
-        >
-          <RouteErrorBoundary resetKey={location.pathname}>
-            <Outlet />
-          </RouteErrorBoundary>
-        </main>
-      </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {!hideHeader && (
+            <header className="app-shell-header sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border/70 bg-background/80 px-3 backdrop-blur-md print:hidden md:px-5">
+              <div className="flex min-w-0 items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 md:hidden"
+                  onClick={() => setMobileOpen(true)}
+                  aria-label="Open menu"
+                >
+                  <Menu className="h-5 w-5" />
+                </Button>
+                <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+                  {currentSection && (
+                    <>
+                      <span className="hidden truncate text-muted-foreground sm:inline">{currentSection}</span>
+                      <ChevronRight aria-hidden className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground/60 sm:inline" />
+                    </>
+                  )}
+                  <span className="truncate font-semibold text-foreground">{current}</span>
+                </nav>
+              </div>
+              <div className="flex items-center gap-1 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSearchOpen(true)}
+                  className="hidden h-9 w-56 items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted/70 lg:flex"
+                >
+                  <Search className="h-4 w-4" />
+                  <span className="flex-1 text-left">Search…</span>
+                  <kbd className="rounded border border-border bg-background px-1.5 font-sans text-[10px] font-medium">Ctrl K</kbd>
+                </button>
+                <Button variant="ghost" size="icon" className="h-9 w-9 lg:hidden" onClick={() => setSearchOpen(true)} aria-label="Search">
+                  <Search className="h-[18px] w-[18px]" />
+                </Button>
+                <ThemePicker />
+                <HeaderComms />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-full py-1 pl-1 pr-1.5 outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[13px] font-semibold text-white"
+                        style={{ background: sb.brandBg }}
+                        aria-hidden="true"
+                      >
+                        {initials}
+                      </span>
+                      <span className="hidden text-sm font-medium text-foreground sm:inline">
+                        {user?.firstName}
+                      </span>
+                      <ChevronDown className="hidden h-4 w-4 text-muted-foreground sm:inline" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-60">
+                    <DropdownMenuLabel className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-foreground">
+                        {user?.firstName} {user?.lastName}
+                      </span>
+                      <span className="truncate text-xs font-normal text-muted-foreground">
+                        {user?.email}
+                      </span>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <div className="px-2 py-1.5">
+                      <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Active Branch
+                      </label>
+                      <BranchSwitcher />
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>{t('auth.signOut')}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </header>
+          )}
 
-      <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
-      <PushBootstrap />
-    </div>
+          <main ref={mainRef} className="flex-1 overflow-auto p-1 md:p-1">
+            <RouteErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </RouteErrorBoundary>
+          </main>
+        </div>
+
+        <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+        <PushBootstrap />
+      </div>
+    </TooltipProvider>
   );
 }

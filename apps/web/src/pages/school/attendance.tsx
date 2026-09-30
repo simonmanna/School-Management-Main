@@ -356,7 +356,7 @@ function ThresholdsTab({ classId, setClassId, classes }: any) {
 /* ── Analytics (P2) ── */
 function AnalyticsTab({ classId, setClassId, classes, today }: any) {
   const { STATUS_LIST, labelOf, colorOf } = useStatusCatalog();
-  const weekStart = useMemo(() => { const d = new Date(today); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d.toISOString().slice(0, 10); }, [today]);
+  const weekStart = useMemo(() => { const d = new Date(today); const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); return d.toISOString().slice(0, 10); }, [today]);
   const { data: weekly } = useAttendanceWeekly(classId || undefined, weekStart);
   const days = useMemo(() => { const out: string[] = []; const d = new Date(weekStart); for (let i = 0; i < 7; i++) { out.push(new Date(d.getTime() + i * 86400000).toISOString().slice(0, 10)); } return out; }, [weekStart]);
   const series = STATUS_LIST.map((s) => s.code);

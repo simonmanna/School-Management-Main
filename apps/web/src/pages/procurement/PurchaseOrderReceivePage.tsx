@@ -140,7 +140,7 @@ export function PurchaseOrderReceivePage() {
           </div>
         </CardHeader>
         <CardContent>
-          <table className="w-full text-sm">
+          <table data-enhance="off" className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="px-3 py-2 text-left">Item</th>

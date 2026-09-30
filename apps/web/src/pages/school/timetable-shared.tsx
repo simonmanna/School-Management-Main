@@ -95,7 +95,7 @@ export function TimetableGrid({
   return (
     <Card>
       <CardContent className="overflow-x-auto p-0">
-        <table className="w-full text-sm">
+        <table data-enhance="off" className="w-full text-sm">
           <thead className="border-b text-left text-muted-foreground">
             <tr><th className="px-3 py-2 font-medium">Period</th>{DAYS.map((d) => <th key={d.n} className="px-3 py-2 font-medium">{d.label}</th>)}</tr>
           </thead>
@@ -267,7 +267,7 @@ export function TeacherAvailabilityCard({ teacherId, periods }: { teacherId: str
     <Card>
       <CardHeader><CardTitle className="text-base">Teacher availability</CardTitle></CardHeader>
       <CardContent className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table data-enhance="off" className="w-full text-sm">
           <thead className="border-b text-muted-foreground"><tr><th className="px-2 py-1 text-left">Period</th>{DAYS.map((d) => <th key={d.n} className="px-2 py-1">{d.label}</th>)}</tr></thead>
           <tbody>
             {periods.map((p: any) => (

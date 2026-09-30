@@ -113,7 +113,7 @@ function TabOverview({ data }: { data: OrderDetail }) {
           </h2>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table data-enhance="off" className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/20 text-xs uppercase tracking-wider text-muted-foreground">
                 <th className="px-5 py-2.5 text-left font-semibold">#</th>

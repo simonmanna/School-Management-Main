@@ -218,7 +218,7 @@ export function OrderCreatePage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table data-enhance="off" className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/30 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       <th className="px-4 py-2 w-[38%]">Item</th>

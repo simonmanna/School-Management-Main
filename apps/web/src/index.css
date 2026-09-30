@@ -295,6 +295,105 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
+   Data tables — shared by <DataTable> (React) and the DOM table enhancer.
+   Components layer, so a page's own utility classes still win.
+   ────────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .dt-shell {
+    @apply overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04),0_4px_16px_-8px_rgba(15,23,42,0.08)];
+  }
+  .dt-toolbar {
+    @apply flex flex-wrap items-center gap-3 border-b border-border/60 bg-card px-3 py-2.5;
+  }
+  /* The auto toolbar sits beside a table it does not own: keep it pinned while
+     a wide table scrolls sideways underneath it. */
+  .dt-toolbar-auto {
+    @apply sticky left-0 border-0 bg-transparent px-0.5 pb-2.5 pt-1;
+  }
+  .dt-toolbar[hidden] { display: none; }
+  .dt-search {
+    @apply relative flex h-9 w-full max-w-xs items-center rounded-lg border border-input bg-background
+           transition-[border-color,box-shadow] duration-150;
+  }
+  .dt-search:focus-within { @apply border-primary/60 ring-4 ring-primary/10; }
+  .dt-search-icon { @apply pointer-events-none absolute left-2.5 flex h-4 w-4 text-muted-foreground; }
+  .dt-search-icon svg, svg.dt-search-icon { @apply h-4 w-4; }
+  .dt-search input {
+    @apply h-full w-full rounded-lg bg-transparent pl-8 pr-8 text-sm outline-none placeholder:text-muted-foreground;
+  }
+  .dt-search input:focus-visible { box-shadow: none; }
+  .dt-search input::-webkit-search-cancel-button { display: none; }
+  .dt-clear {
+    @apply absolute right-1.5 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground
+           transition-colors hover:bg-muted hover:text-foreground;
+  }
+  .dt-clear[hidden] { display: none; }
+  .dt-clear svg { @apply h-3.5 w-3.5; }
+  .dt-count { @apply text-xs font-medium tabular-nums text-muted-foreground; }
+
+  .dt-sort-btn {
+    @apply -mx-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-semibold uppercase tracking-[0.04em]
+           transition-colors hover:bg-muted hover:text-foreground;
+  }
+  .dt-sort-btn[data-active] { @apply text-foreground; }
+  .dt-sort-icon { @apply h-3.5 w-3.5 shrink-0; }
+  .dt-sort-btn[data-active] .dt-sort-icon { @apply text-primary; }
+  .dt-sort-idle { @apply opacity-40; }
+  .dt-sort-btn:hover .dt-sort-idle { @apply opacity-80; }
+
+  .dt-pager {
+    @apply flex flex-wrap items-center justify-end gap-x-5 gap-y-2 border-t border-border/60 px-3 py-2 text-xs text-muted-foreground;
+  }
+  .dt-select {
+    @apply h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+  .dt-page-btn {
+    @apply flex h-7 w-7 items-center justify-center rounded-md border border-input bg-background text-foreground
+           transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40;
+  }
+  .dt-page-btn svg { @apply h-4 w-4; }
+
+  /* Enhanced tables (any table inside the shell). */
+  table[data-dt] { font-variant-numeric: tabular-nums; }
+  table[data-dt] > thead > tr > th {
+    @apply bg-muted/50 text-[11.5px] font-semibold uppercase tracking-[0.04em] text-muted-foreground;
+  }
+  table[data-dt] > tbody > tr { @apply transition-colors; }
+  table[data-dt] td[data-dt-fig] { white-space: nowrap; }
+  table[data-dt] > tbody > tr:hover { background-color: hsl(var(--primary) / 0.04); }
+  th[data-dt-sortable] {
+    @apply cursor-pointer select-none whitespace-nowrap transition-colors hover:text-foreground;
+  }
+  th[data-dt-sortable]::after {
+    content: '';
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    margin-left: 0.3rem;
+    vertical-align: -0.12rem;
+    background-color: currentColor;
+    opacity: 0.35;
+    -webkit-mask: var(--dt-idle) center / contain no-repeat;
+            mask: var(--dt-idle) center / contain no-repeat;
+    --dt-idle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5M7 9l5-5 5 5'/%3E%3C/svg%3E");
+  }
+  th[data-dt-sortable]:hover::after { opacity: 0.7; }
+  th[aria-sort='ascending'], th[aria-sort='descending'] { @apply text-foreground; }
+  th[aria-sort='ascending']::after, th[aria-sort='descending']::after {
+    opacity: 1;
+    background-color: hsl(var(--primary));
+  }
+  th[aria-sort='ascending']::after {
+    --dt-idle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7'/%3E%3C/svg%3E");
+  }
+  th[aria-sort='descending']::after {
+    --dt-idle: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M19 12l-7 7-7-7'/%3E%3C/svg%3E");
+  }
+  th[data-dt-sortable]:focus-visible { @apply rounded-sm ring-2 ring-inset ring-ring ring-offset-0; }
+  tr[data-dt-hidden] { display: none !important; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
    Print styles
    ────────────────────────────────────────────────────────────────────────── */
 @media print {
@@ -317,4 +416,11 @@
   .scroll-thin::-webkit-scrollbar-track { background: transparent; }
   .scroll-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
   .scroll-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .5); }
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  /* Sidebar scroller: thin, tinted from the sidebar's own palette. */
+  .sb-scroll { scrollbar-width: thin; scrollbar-color: var(--sb-border) transparent; }
+  .sb-scroll::-webkit-scrollbar { width: 6px; }
+  .sb-scroll::-webkit-scrollbar-track { background: transparent; }
+  .sb-scroll::-webkit-scrollbar-thumb { background: var(--sb-border); border-radius: 999px; }
+  .sb-scroll:hover::-webkit-scrollbar-thumb { background: var(--sb-muted); }
 }

@@ -446,7 +446,7 @@ function MarksTable({ s, data, gap }: BlockProps) {
       {data.sections.map((sec, si) => (
         <div key={si} style={{ marginBottom: si < data.sections.length - 1 ? `${3 * gap}pt` : 0 }}>
           {s.showSectionTitles && data.sections.length > 1 && <SectionTitle s={s}>{sec.title}</SectionTitle>}
-          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', border: style === 'grid' ? border : 'none' }}>
+          <table data-enhance="off" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', border: style === 'grid' ? border : 'none' }}>
             <colgroup>
               {cols.map((c) => <col key={c.key} style={{ width: `${c.pct}%` }} />)}
             </colgroup>
@@ -526,7 +526,7 @@ function Summary({ s, data, gap }: BlockProps) {
         <div>{stats.map((x) => `${x.label}: ${x.value}`).join('     •     ')}</div>
       )}
       {style === 'table' && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', border }}>
+        <table data-enhance="off" style={{ width: '100%', borderCollapse: 'collapse', border }}>
           <tbody>
             {stats.map((x) => (
               <tr key={x.label}>
@@ -620,7 +620,7 @@ function Conduct({ s, gap }: { s: Record<string, any>; gap: number }) {
   return (
     <section style={{ marginBottom: `${5 * gap}pt`, fontSize: fs }}>
       <SectionTitle s={s}>{String(s.conductTitle || 'CONDUCT & BEHAVIOUR')}</SectionTitle>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border, tableLayout: 'fixed' }}>
+      <table data-enhance="off" style={{ width: '100%', borderCollapse: 'collapse', border, tableLayout: 'fixed' }}>
         <thead>
           <tr style={{ background: hex(s.tableHeaderBg, '#1f2937'), color: hex(s.tableHeaderText, '#ffffff') }}>
             <th style={{ border, padding: '2px 4px', width: '34%' }} />
@@ -647,7 +647,7 @@ function CoCurricular({ s, gap }: { s: Record<string, any>; gap: number }) {
   return (
     <section style={{ marginBottom: `${5 * gap}pt`, fontSize: `${nz(s.tableFontSize, 8)}pt` }}>
       <SectionTitle s={s}>{String(s.coCurricularTitle || 'CO-CURRICULAR ACTIVITIES')}</SectionTitle>
-      <table style={{ width: '100%', borderCollapse: 'collapse', border, tableLayout: 'fixed' }}>
+      <table data-enhance="off" style={{ width: '100%', borderCollapse: 'collapse', border, tableLayout: 'fixed' }}>
         <tbody>
           {items.map((x) => (
             <tr key={x}>

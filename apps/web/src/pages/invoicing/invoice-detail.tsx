@@ -347,7 +347,7 @@ export function InvoiceDetailPage() {
           </div>
 
           <div className="p-5 bg-sky-50/20">
-            <table className="w-full text-sm">
+            <table data-enhance="off" className="w-full text-sm">
               <tbody className="divide-y divide-sky-100">
                 <tr>
                   <th className="text-left text-sky-600 font-medium py-1.5 w-32 align-top">Invoice Date</th>

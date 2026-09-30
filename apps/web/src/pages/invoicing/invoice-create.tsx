@@ -362,7 +362,7 @@ export function InvoiceCreatePage() {
         {/* Odoo header: customer left, meta right */}
         <div className="grid grid-cols-1 md:grid-cols-2 divide-x divide-sky-100 text-xs">
           <div className="px-4 py-3 bg-sky-50/30">
-            <table className="w-full text-xs">
+            <table data-enhance="off" className="w-full text-xs">
               <tbody className="divide-y divide-sky-100">
                 <MetaRow label="Customer">
                   <select className={selectClassSm} {...register('partnerId', { required: true })}>
@@ -395,7 +395,7 @@ export function InvoiceCreatePage() {
           </div>
 
           <div className="px-4 py-3 bg-sky-50/20">
-            <table className="w-full text-xs">
+            <table data-enhance="off" className="w-full text-xs">
               <tbody className="divide-y divide-sky-100">
                 <MetaRow label="Due Date">
                   <Input id="dueDate" type="date" className="h-8 text-xs px-2 py-1 border-sky-200 focus-visible:ring-sky-400" {...register('dueDate')} />
@@ -717,7 +717,7 @@ export function InvoiceCreatePage() {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table data-enhance="off" className="w-full text-sm">
                     <thead className="border-b border-sky-100 bg-muted/30">
                       <tr className="text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
                         <th className="px-4 py-2 w-10">#</th>
