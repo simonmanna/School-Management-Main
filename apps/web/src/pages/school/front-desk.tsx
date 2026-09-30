@@ -4,7 +4,7 @@ import { notify } from '@/lib/notify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table';
+import { DataTable, type Column } from '@/components/data-table';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -33,6 +33,15 @@ const statusBadge = (s: string) => (
   </span>
 );
 
+// Range bounds are datetime-local strings; a set bound excludes rows with no timestamp.
+const emptyRange = { inFrom: '', inTo: '', outFrom: '', outTo: '' };
+const inRange = (d: string | null | undefined, from: string, to: string) => {
+  if (!from && !to) return true;
+  if (!d) return false;
+  const t = new Date(d).getTime();
+  return (!from || t >= new Date(from).getTime()) && (!to || t <= new Date(to).getTime());
+};
+
 const emptyForm = { partnerId: '', visitorName: '', phone: '', purpose: '', personVisited: '', notes: '' };
 
 export function FrontDeskPage() {
@@ -48,12 +57,17 @@ export function FrontDeskPage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
+  const [range, setRange] = useState(emptyRange);
+  const hasRange = Object.values(range).some(Boolean);
+
   const q = search.toLowerCase();
   const filtered = (logs.data ?? []).filter((l) =>
-    l.visitorName.toLowerCase().includes(q) ||
-    (l.phone ?? '').includes(search) ||
-    (l.purpose ?? '').toLowerCase().includes(q) ||
-    (l.personVisited ?? '').toLowerCase().includes(q)
+    (l.visitorName.toLowerCase().includes(q) ||
+      (l.phone ?? '').includes(search) ||
+      (l.purpose ?? '').toLowerCase().includes(q) ||
+      (l.personVisited ?? '').toLowerCase().includes(q)) &&
+    inRange(l.checkInAt, range.inFrom, range.inTo) &&
+    inRange(l.checkOutAt, range.outFrom, range.outTo)
   );
   const onSite = (logs.data ?? []).filter((l) => l.status === 'in').length;
 
@@ -79,6 +93,35 @@ export function FrontDeskPage() {
     try { await checkout.mutateAsync({ id }); notify.success('Visitor checked out'); } catch { notify.error('Check-out failed'); }
   };
 
+  const columns: Column<FrontDeskLog>[] = [
+    {
+      key: 'visitorName', header: 'Visitor', className: 'font-medium',
+      render: (l) => <>{l.visitorName}{l.partner && <span className="text-muted-foreground ml-1">({l.partner.name})</span>}</>,
+    },
+    { key: 'phone', header: 'Phone', className: 'font-mono', render: (l) => l.phone ?? '—' },
+    { key: 'purpose', header: 'Purpose', className: 'text-muted-foreground', sortValue: (l) => l.purpose ?? null, render: (l) => l.purpose ?? '—' },
+    { key: 'personVisited', header: 'Host', className: 'text-muted-foreground', sortValue: (l) => l.personVisited ?? null, render: (l) => l.personVisited ?? '—' },
+    { key: 'checkInAt', header: 'Check-in', sortValue: (l) => (l.checkInAt ? new Date(l.checkInAt).getTime() : null), render: (l) => <TimeCell d={l.checkInAt} /> },
+    {
+      key: 'checkOutAt', header: 'Check-out', sortValue: (l) => (l.checkOutAt ? new Date(l.checkOutAt).getTime() : null),
+      render: (l) => (
+        <>
+          {l.checkOutAt ? <TimeCell d={l.checkOutAt} /> : <span className="text-muted-foreground">—</span>}
+          {l.checkOutAt && <div className="text-xs text-sky-600">{dur(l.checkInAt, l.checkOutAt)}</div>}
+        </>
+      ),
+    },
+    { key: 'status', header: 'Status', render: (l) => statusBadge(l.status) },
+    {
+      key: 'actions', header: 'Actions', className: 'text-right', sortable: false,
+      render: (l) => l.status === 'in' && (
+        <Button size="sm" variant="outline" onClick={() => checkOut(l.id)} disabled={checkout.isPending}>
+          <LogOut className="mr-1 h-3.5 w-3.5" />Check out
+        </Button>
+      ),
+    },
+  ];
+
   const statusOptions: { value: '' | 'in' | 'out'; label: string }[] = [
     { value: '', label: 'All statuses' }, { value: 'in', label: 'On site' }, { value: 'out', label: 'Checked out' },
   ];
@@ -102,54 +145,39 @@ export function FrontDeskPage() {
           </Select>
           <Input placeholder="Search visitor, phone, purpose, host…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-72" />
           <span className="ml-auto text-sm text-muted-foreground">{onSite} on site</span>
+          <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Check-in</span>
+              <Input type="datetime-local" aria-label="Check-in from" value={range.inFrom} onChange={(e) => setRange({ ...range, inFrom: e.target.value })} className="w-52" />
+              <span className="text-muted-foreground">to</span>
+              <Input type="datetime-local" aria-label="Check-in to" value={range.inTo} onChange={(e) => setRange({ ...range, inTo: e.target.value })} className="w-52" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Check-out</span>
+              <Input type="datetime-local" aria-label="Check-out from" value={range.outFrom} onChange={(e) => setRange({ ...range, outFrom: e.target.value })} className="w-52" />
+              <span className="text-muted-foreground">to</span>
+              <Input type="datetime-local" aria-label="Check-out to" value={range.outTo} onChange={(e) => setRange({ ...range, outTo: e.target.value })} className="w-52" />
+            </div>
+            {hasRange && <Button variant="ghost" size="sm" onClick={() => setRange(emptyRange)}>Clear times</Button>}
+          </div>
         </CardContent>
       </Card>
 
       {/* Table */}
       <Card>
         <CardContent className="text-sm">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Visitor</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Purpose</TableHead>
-                <TableHead>Host</TableHead>
-                <TableHead>Check-in</TableHead>
-                <TableHead>Check-out</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((l: FrontDeskLog) => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-medium">
-                    {l.visitorName}{l.partner && <span className="text-muted-foreground ml-1">({l.partner.name})</span>}
-                  </TableCell>
-                  <TableCell className="font-mono">{l.phone ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{l.purpose ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{l.personVisited ?? '—'}</TableCell>
-                  <TableCell><TimeCell d={l.checkInAt} /></TableCell>
-                  <TableCell>
-                    {l.checkOutAt ? <TimeCell d={l.checkOutAt} /> : <span className="text-muted-foreground">—</span>}
-                    {l.checkOutAt && <div className="text-xs text-sky-600">{dur(l.checkInAt, l.checkOutAt)}</div>}
-                  </TableCell>
-                  <TableCell>{statusBadge(l.status)}</TableCell>
-                  <TableCell className="text-right">
-                    {l.status === 'in' && (
-                      <Button size="sm" variant="outline" onClick={() => checkOut(l.id)} disabled={checkout.isPending}>
-                        <LogOut className="mr-1 h-3.5 w-3.5" />Check out
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No visitors logged yet.{' '}{!logs.isLoading && <Button variant="ghost" size="sm" onClick={openNew}><Plus className="mr-1 h-3.5 w-3.5" />Check in first visitor</Button>}</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable<FrontDeskLog>
+            columns={columns}
+            data={filtered}
+            loading={logs.isLoading}
+            getRowId={(l) => l.id}
+            searchable={false}
+            pageSize={25}
+            initialSort={{ key: 'checkInAt', dir: 'desc' }}
+            emptyMessage={(logs.data ?? []).length > 0 ? 'No visitors match these filters.' : (
+              <>No visitors logged yet.{' '}<Button variant="ghost" size="sm" onClick={openNew}><Plus className="mr-1 h-3.5 w-3.5" />Check in first visitor</Button></>
+            )}
+          />
         </CardContent>
       </Card>
 
