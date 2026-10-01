@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Phone, PhoneIncoming, PhoneOutgoing, Plus, Edit, Trash2 } from 'lucide-react';
+import { Phone, PhoneCall as PhoneCallIcon, PhoneIncoming, PhoneOutgoing, Plus, Pencil, Trash2 } from 'lucide-react';
 import {
   usePhoneCalls, useCreatePhoneCall, useUpdatePhoneCall, useDeletePhoneCall,
   usePartners, type PhoneCall, type CallDirection, type CallStatus,
@@ -7,12 +7,14 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table';
+import { DataTable, type Column } from '@/components/data-table';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
+import { FilterField } from './_components/filter-field';
+import { inRange } from './_components/in-range';
 
 const timeOf = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const dateOf = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '');
@@ -67,6 +69,7 @@ export function PhoneCallsPage() {
   const [status, setStatus] = useState<CallStatus | ''>('');
   const [partnerId, setPartnerId] = useState('');
   const [search, setSearch] = useState('');
+  const [range, setRange] = useState({ from: '', to: '' });
 
   const calls = usePhoneCalls({ direction: direction || undefined, status: status || undefined, partnerId: partnerId || undefined });
   const create = useCreatePhoneCall();
@@ -91,13 +94,18 @@ export function PhoneCallsPage() {
     callAmPm: 'AM' as 'AM' | 'PM',
   });
 
+  const q = search.toLowerCase();
   const filtered = (calls.data ?? []).filter((c) =>
-    c.contactName.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone.includes(search) ||
-    c.subject?.toLowerCase().includes(search.toLowerCase()) ||
-    c.outcome?.toLowerCase().includes(search.toLowerCase())
+    (c.contactName.toLowerCase().includes(q) ||
+      c.phone.includes(search) ||
+      (c.subject ?? '').toLowerCase().includes(q) ||
+      (c.outcome ?? '').toLowerCase().includes(q)) &&
+    inRange(c.callAt, range.from, range.to)
   );
+  const hasFilters = Boolean(direction || status || partnerId || search || range.from || range.to);
+  const clearFilters = () => { setDirection(''); setStatus(''); setPartnerId(''); setSearch(''); setRange({ from: '', to: '' }); };
 
+  const openNew = () => { resetForm(); setEditing(null); setOpen(true); };
   const resetForm = () => setForm({ partnerId: '', direction: 'inbound', contactName: '', phone: '', subject: '', outcome: '', notes: '', durationSec: '', status: 'completed', callDate: '', callHour: '', callMinute: '', callAmPm: 'AM' });
 
   const handleSubmit = async () => {
@@ -156,6 +164,47 @@ export function PhoneCallsPage() {
   const dirOptions: { value: CallDirection | ''; label: string }[] = [{ value: '', label: 'All directions' }, { value: 'inbound', label: 'Inbound' }, { value: 'outbound', label: 'Outbound' }];
   const statusOptions: { value: CallStatus | ''; label: string }[] = [{ value: '', label: 'All statuses' }, { value: 'completed', label: 'Completed' }, { value: 'missed', label: 'Missed' }, { value: 'voicemail', label: 'Voicemail' }, { value: 'scheduled', label: 'Scheduled' }, { value: 'cancelled', label: 'Cancelled' }];
 
+  const actionBtn = 'inline-flex h-8 w-8 items-center justify-center rounded-full ring-1 transition hover:shadow-sm disabled:opacity-50';
+  const columns: Column<PhoneCall>[] = [
+    {
+      key: 'direction', header: 'Dir.', className: 'w-16',
+      render: (c) => (
+        <span title={c.direction} className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${c.direction === 'inbound' ? 'bg-emerald-50' : 'bg-blue-50'}`}>
+          {dirIcon(c.direction)}
+        </span>
+      ),
+    },
+    {
+      key: 'contactName', header: 'Contact', className: 'font-medium',
+      render: (c) => <>{c.contactName}{c.partner && <span className="text-muted-foreground ml-1">({c.partner.name})</span>}</>,
+    },
+    { key: 'phone', header: 'Phone', className: 'font-mono', render: (c) => c.phone },
+    { key: 'subject', header: 'Subject', className: 'text-muted-foreground', sortValue: (c) => c.subject ?? null, render: (c) => c.subject ?? '—' },
+    { key: 'outcome', header: 'Outcome', className: 'text-muted-foreground', sortValue: (c) => c.outcome ?? null, render: (c) => c.outcome ?? '—' },
+    {
+      key: 'durationSec', header: 'Duration', className: 'text-muted-foreground', sortValue: (c) => c.durationSec ?? null,
+      render: (c) => (c.durationSec ? `${Math.floor(c.durationSec / 60)}m ${c.durationSec % 60}s` : '—'),
+    },
+    { key: 'status', header: 'Status', render: (c) => statusBadge(c.status) },
+    { key: 'callAt', header: 'Time', sortValue: (c) => (c.callAt ? new Date(c.callAt).getTime() : null), render: (c) => <TimeCell d={c.callAt} /> },
+    {
+      key: 'actions', header: 'Actions', className: 'text-right', sortable: false,
+      render: (c) => (
+        <div className="flex justify-end gap-1.5">
+          <a href={`tel:${c.phone}`} title="Call back" aria-label="Call back" className={`${actionBtn} bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100`}>
+            <PhoneCallIcon className="h-3.5 w-3.5" />
+          </a>
+          <button type="button" onClick={() => edit(c)} title="Edit" aria-label="Edit call" className={`${actionBtn} bg-sky-50 text-sky-700 ring-sky-200 hover:bg-sky-100`}>
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" onClick={() => remove(c.id)} disabled={del.isPending} title="Delete" aria-label="Delete call" className={`${actionBtn} bg-red-50 text-red-600 ring-red-200 hover:bg-red-100`}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -163,70 +212,61 @@ export function PhoneCallsPage() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><Phone className="h-6 w-6" /> Phone Calls</h1>
           <p className="text-sm text-muted-foreground">Log and track inbound/outbound phone calls at the front desk.</p>
         </div>
-        <Button onClick={() => { resetForm(); setEditing(null); setOpen(true); }}><Plus className="mr-1 h-4 w-4" /> Log call</Button>
+        <Button onClick={openNew}><Plus className="mr-1 h-4 w-4" /> Log call</Button>
       </div>
 
       {/* Filters */}
       <Card>
-        <CardContent className="flex flex-wrap gap-3 p-4">
-          <Select value={direction} onValueChange={(v) => setDirection(v as CallDirection | '')}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Direction" /></SelectTrigger>
-            <SelectContent>{dirOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={status} onValueChange={(v) => setStatus(v as CallStatus | '')}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={partnerId} onValueChange={(v) => setPartnerId(v)}>
-            <SelectTrigger className="w-56"><SelectValue placeholder="Partner (optional)" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">None</SelectItem>
-{partnersList.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input placeholder="Search contact, phone, subject…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-72" />
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <FilterField label="Call time from" wide>
+            <Input type="datetime-local" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          </FilterField>
+          <FilterField label="Call time to" wide>
+            <Input type="datetime-local" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </FilterField>
+          <FilterField label="Direction">
+            <Select value={direction} onValueChange={(v) => setDirection(v as CallDirection | '')}>
+              <SelectTrigger><SelectValue placeholder="Direction" /></SelectTrigger>
+              <SelectContent>{dirOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Status">
+            <Select value={status} onValueChange={(v) => setStatus(v as CallStatus | '')}>
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Partner">
+            <Select value={partnerId} onValueChange={(v) => setPartnerId(v)}>
+              <SelectTrigger><SelectValue placeholder="All partners" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All partners</SelectItem>
+                {partnersList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Search" className="min-w-[140px]">
+            <Input placeholder="Contact, phone, subject…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </FilterField>
+          <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!hasFilters}>Clear</Button>
         </CardContent>
       </Card>
 
       {/* Table */}
       <Card>
         <CardContent className="text-sm">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-20">Dir.</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Outcome</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="text-center">{dirIcon(c.direction)}</TableCell>
-                  <TableCell className="font-medium">{c.contactName}{c.partner && <span className="text-muted-foreground ml-1">({c.partner.name})</span>}</TableCell>
-                  <TableCell className="font-mono">{c.phone}</TableCell>
-                  <TableCell className="text-muted-foreground">{c.subject ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{c.outcome ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{c.durationSec ? `${Math.floor(c.durationSec / 60)}m ${c.durationSec % 60}s` : '—'}</TableCell>
-                  <TableCell>{statusBadge(c.status)}</TableCell>
-                  <TableCell><TimeCell d={c.callAt} /></TableCell>
-                  <TableCell className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => edit(c)}><Edit className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => remove(c.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No calls logged yet.{" "}{!calls.isLoading && <Button variant="ghost" size="sm" onClick={() => setOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Log first call</Button>}</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <DataTable<PhoneCall>
+            columns={columns}
+            data={filtered}
+            loading={calls.isLoading}
+            getRowId={(c) => c.id}
+            searchable={false}
+            pageSize={25}
+            initialSort={{ key: 'callAt', dir: 'desc' }}
+            emptyMessage={(calls.data ?? []).length > 0 ? 'No calls match these filters.' : (
+              <>No calls logged yet.{' '}<Button variant="ghost" size="sm" onClick={openNew}><Plus className="mr-1 h-3.5 w-3.5" />Log first call</Button></>
+            )}
+          />
         </CardContent>
       </Card>
 
@@ -253,7 +293,7 @@ export function PhoneCallsPage() {
               <SelectTrigger><SelectValue placeholder="Linked partner (optional)" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">None</SelectItem>
-{partnersList.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+{partnersList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
             <Input placeholder="Subject" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} />

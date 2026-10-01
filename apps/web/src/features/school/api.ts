@@ -558,10 +558,12 @@ export interface UpdateAdmissionInput {
   entryStatus?: string;
   address?: string;
   studentCategoryId?: string;
+  /// Replaces the application's guardian set when present.
+  guardians?: AdmissionGuardianInput[];
   customFields?: Record<string, unknown>;
 }
 
-export function useAdmissions(params: { page?: number; pageSize?: number } = {}) {
+export function useAdmissions(params: { page?: number; pageSize?: number; search?: string; status?: string } = {}) {
   return useQuery({
     queryKey: ['school', 'admissions', params],
     queryFn: async () => (await api.get<Paginated<AdmissionApplication>>(`${S}/admissions`, { params })).data,
@@ -1410,6 +1412,42 @@ export function useCreateStudent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (dto: CreateStudentInput) => (await api.post<Student>(`${S}/students`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'students'] }),
+  });
+}
+
+/** An uploaded .xlsx / .csv read into headings and rows, ready for column mapping. */
+export interface ParsedStudentSheet {
+  fileName: string;
+  sheetName: string | null;
+  headers: string[];
+  rows: Array<Record<string, string>>;
+}
+
+export interface StudentImportResult {
+  created: number;
+  /** `row` is the 0-based index into the submitted rows. */
+  skipped: Array<{ row: number; reason: string; admissionNo?: string }>;
+}
+
+export function useParseStudentImportFile() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return (await api.post<ParsedStudentSheet>(`${S}/students/bulk-import/parse`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })).data;
+    },
+  });
+}
+
+/** Rows keyed by system field (admissionNo, name, classCode, …). */
+export function useBulkImportStudents() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: Array<Record<string, string>>) =>
+      (await api.post<StudentImportResult>(`${S}/students/bulk-import`, { rows })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'students'] }),
   });
 }
@@ -5274,7 +5312,11 @@ export interface GradingScale { id: string; name: string; bands: GradingBand[]; 
 export function useGradingScales() {
   return useQuery({
     queryKey: ['school', 'grading-scales'],
-    queryFn: async () => (await api.get<GradingScale[]>(`${S}/grading-scales`, { params: { pageSize: 100 } })).data,
+    // The list endpoint is paginated ({ data, meta }); callers want the rows.
+    queryFn: async (): Promise<GradingScale[]> => {
+      const body = (await api.get<Paginated<GradingScale> | GradingScale[]>(`${S}/grading-scales`, { params: { pageSize: 100 } })).data;
+      return Array.isArray(body) ? body : body?.data ?? [];
+    },
   });
 }
 export function useDefaultGradingScale() {

@@ -60,6 +60,11 @@ const MATRIX: Row[] = [
     { 'Head Teacher': 'allow', Bursar: 'deny', 'Class Teacher': 'deny' }],
   ['reports: finance dashboard', ReportingController, 'financeDashboard',
     { 'Head Teacher': 'allow', Bursar: 'allow', 'Class Teacher': 'deny', Registrar: 'deny' }],
+  // Admissions review P1-1: applicant PII is not a `school:read` record.
+  ['admissions: list applications', AdmissionsController, 'list',
+    { 'Class Teacher': 'deny', 'Subject Teacher': 'deny', Parent: 'deny', Registrar: 'allow', 'Head Teacher': 'allow', 'Deputy Head': 'allow', Bursar: 'allow' }],
+  ['admissions: read one application', AdmissionsController, 'findOne',
+    { 'Class Teacher': 'deny', 'Subject Teacher': 'deny', Registrar: 'allow', 'Head Teacher': 'allow' }],
   ['admissions: decide', AdmissionsController, 'recordDecision',
     { 'Head Teacher': 'allow', 'Deputy Head': 'allow', Registrar: 'deny', Bursar: 'deny', 'Class Teacher': 'deny' }],
   ['admissions: take fee', AdmissionsController, 'payApplicationFee',

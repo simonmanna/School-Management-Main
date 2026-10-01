@@ -14,6 +14,8 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
+import { FilterField } from './_components/filter-field';
+import { inRange } from './_components/in-range';
 
 const timeOf = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const dateOf = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '');
@@ -49,6 +51,7 @@ const categoryIcon = (c: ComplaintCategory) => {
   };
   return icons[c] ?? '📋';
 };
+const categoryLabel = (c: ComplaintCategory) => c.charAt(0).toUpperCase() + c.slice(1).replace('_', ' ');
 const statusBadge = (s: ComplaintStatus) => {
   const variants: Record<ComplaintStatus, string> = {
     open: 'bg-red-100 text-red-700',
@@ -84,6 +87,7 @@ export function ComplaintsPage() {
   const [priority, setPriority] = useState<ComplaintPriority | ''>('');
   const [partnerId, setPartnerId] = useState('');
   const [search, setSearch] = useState('');
+  const [range, setRange] = useState({ from: '', to: '' });
 
   const complaints = useComplaints({ category: category || undefined, status: status || undefined, priority: priority || undefined, partnerId: partnerId || undefined });
   const create = useCreateComplaint();
@@ -107,11 +111,15 @@ export function ComplaintsPage() {
     receivedAmPm: 'AM' as 'AM' | 'PM',
   });
 
+  const q = search.toLowerCase();
   const filtered = (complaints.data ?? []).filter((c) =>
-    c.subject.toLowerCase().includes(search.toLowerCase()) ||
-    c.description.toLowerCase().includes(search.toLowerCase()) ||
-    c.resolution?.toLowerCase().includes(search.toLowerCase())
+    (c.subject.toLowerCase().includes(q) ||
+      c.description.toLowerCase().includes(q) ||
+      (c.resolution ?? '').toLowerCase().includes(q)) &&
+    inRange(c.receivedAt, range.from, range.to)
   );
+  const hasFilters = Boolean(category || status || priority || partnerId || search || range.from || range.to);
+  const clearFilters = () => { setCategory(''); setStatus(''); setPriority(''); setPartnerId(''); setSearch(''); setRange({ from: '', to: '' }); };
 
   const resetForm = () => setForm({ partnerId: '', category: 'other', subject: '', description: '', status: 'open', priority: 'medium', assignedToId: '', resolution: '', receivedDate: '', receivedHour: '', receivedMinute: '', receivedAmPm: 'AM' });
 
@@ -182,27 +190,44 @@ export function ComplaintsPage() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="flex flex-wrap gap-3 p-4">
-          <Select value={category} onValueChange={(v) => setCategory(v as ComplaintCategory | '')}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Category" /></SelectTrigger>
-            <SelectContent>{catOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={status} onValueChange={(v) => setStatus(v as ComplaintStatus | '')}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={priority} onValueChange={(v) => setPriority(v as ComplaintPriority | '')}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="Priority" /></SelectTrigger>
-            <SelectContent>{priorityOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={partnerId} onValueChange={(v) => setPartnerId(v)}>
-            <SelectTrigger className="w-56"><SelectValue placeholder="Complainant (optional)" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">None</SelectItem>
-              {partnersList.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input placeholder="Search subject, description…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-72" />
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <FilterField label="Received from" wide>
+            <Input type="datetime-local" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          </FilterField>
+          <FilterField label="Received to" wide>
+            <Input type="datetime-local" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </FilterField>
+          <FilterField label="Category">
+            <Select value={category} onValueChange={(v) => setCategory(v as ComplaintCategory | '')}>
+              <SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger>
+              <SelectContent>{catOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.value ? `${categoryIcon(o.value)} ${o.label}` : o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Status">
+            <Select value={status} onValueChange={(v) => setStatus(v as ComplaintStatus | '')}>
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Priority">
+            <Select value={priority} onValueChange={(v) => setPriority(v as ComplaintPriority | '')}>
+              <SelectTrigger><SelectValue placeholder="Priority" /></SelectTrigger>
+              <SelectContent>{priorityOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Complainant">
+            <Select value={partnerId} onValueChange={(v) => setPartnerId(v)}>
+              <SelectTrigger><SelectValue placeholder="All complainants" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">All complainants</SelectItem>
+                {partnersList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Search" className="min-w-[140px]">
+            <Input placeholder="Subject, description…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </FilterField>
+          <Button variant="ghost" size="sm" onClick={clearFilters} disabled={!hasFilters}>Clear</Button>
         </CardContent>
       </Card>
 
@@ -212,7 +237,7 @@ export function ComplaintsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-16">Category</TableHead>
+                <TableHead>Category</TableHead>
                 <TableHead>Subject</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Status</TableHead>
@@ -225,7 +250,7 @@ export function ComplaintsPage() {
             <TableBody>
               {filtered.map((c) => (
                 <TableRow key={c.id}>
-                  <TableCell className="text-center">{categoryIcon(c.category)}</TableCell>
+                  <TableCell><span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-xs font-medium"><span aria-hidden>{categoryIcon(c.category)}</span>{categoryLabel(c.category)}</span></TableCell>
                   <TableCell className="font-medium">{c.subject}</TableCell>
                   <TableCell className="text-muted-foreground max-w-xs truncate">{c.description}</TableCell>
                   <TableCell>{statusBadge(c.status)}</TableCell>
@@ -239,7 +264,7 @@ export function ComplaintsPage() {
                 </TableRow>
               ))}
               {filtered.length === 0 && (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No complaints logged yet.{" "}{!complaints.isLoading && <Button variant="ghost" size="sm" onClick={() => setOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Log first complaint</Button>}</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">{(complaints.data ?? []).length > 0 ? 'No complaints match these filters.' : 'No complaints logged yet.'}{" "}{!complaints.isLoading && (complaints.data ?? []).length === 0 && <Button variant="ghost" size="sm" onClick={() => setOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Log first complaint</Button>}</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -257,7 +282,7 @@ export function ComplaintsPage() {
             <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as ComplaintCategory })}>
               <SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger>
               <SelectContent>
-                {['academic', 'behavior', 'facilities', 'staff_conduct', 'communication', 'fees', 'transport', 'meals', 'safety', 'other'].map((c) => <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1).replace('_', ' ')}</SelectItem>)}
+                {['academic', 'behavior', 'facilities', 'staff_conduct', 'communication', 'fees', 'transport', 'meals', 'safety', 'other'].map((c) => <SelectItem key={c} value={c}>{categoryIcon(c as ComplaintCategory)} {categoryLabel(c as ComplaintCategory)}</SelectItem>)}
               </SelectContent>
             </Select>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -280,7 +305,7 @@ export function ComplaintsPage() {
               <SelectTrigger><SelectValue placeholder="Complainant (optional)" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">None</SelectItem>
-                {partnersList.map((p: any) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                {partnersList.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
             <Input placeholder="Assigned to staff ID (optional)" value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })} />

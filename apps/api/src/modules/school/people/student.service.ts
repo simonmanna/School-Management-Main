@@ -467,38 +467,106 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       return out;
     };
 
+    // Lookups repeat across rows (a whole class in one file), so cache them.
+    const classCache = new Map<string, { id: string } | null>();
+    const findClass = async (key: string) => {
+      const k = key.toLowerCase();
+      if (!classCache.has(k)) {
+        classCache.set(
+          k,
+          await this.prisma.client.schoolClass.findFirst({
+            where: { OR: [{ code: { equals: key, mode: 'insensitive' } }, { name: { equals: key, mode: 'insensitive' } }] },
+            select: { id: true },
+          }),
+        );
+      }
+      return classCache.get(k)!;
+    };
+    const categoryCache = new Map<string, { id: string } | null>();
+    const findCategory = async (key: string) => {
+      const k = key.toLowerCase();
+      if (!categoryCache.has(k)) {
+        categoryCache.set(
+          k,
+          await this.prisma.client.studentCategory.findFirst({
+            where: { name: { equals: key, mode: 'insensitive' }, isActive: true },
+            select: { id: true },
+          }),
+        );
+      }
+      return categoryCache.get(k)!;
+    };
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const admissionNo = val(row, 'admissionNo');
-      const name = val(row, 'name');
+      const first = val(row, 'firstName');
+      const last = val(row, 'lastName');
+      const name = val(row, 'name') || [first, last].filter(Boolean).join(' ');
       if (!admissionNo || !name) {
-        skipped.push({ row: i, reason: 'missing admissionNo or name' });
+        skipped.push({ row: i, admissionNo: admissionNo || undefined, reason: 'missing admission number or name' });
         continue;
       }
       try {
         let classId: string | undefined;
         let sectionId: string | undefined;
-        const classCode = val(row, 'classCode').toUpperCase();
-        if (classCode) {
-          const cls = await this.prisma.client.schoolClass.findFirst({ where: { code: classCode } });
-          if (!cls) throw new BadRequestException(`Unknown class code "${classCode}".`);
+        // Class by code or name (both case-insensitive); `className` is an alias.
+        const classKey = val(row, 'classCode') || val(row, 'className');
+        if (classKey) {
+          const cls = await findClass(classKey);
+          if (!cls) throw new BadRequestException(`Unknown class "${classKey}".`);
           classId = cls.id;
-          const sectionCode = val(row, 'sectionCode').toUpperCase();
-          if (sectionCode) {
-            const section = await this.prisma.client.section.findFirst({ where: { classId: cls.id, code: sectionCode } });
-            if (!section) throw new BadRequestException(`Unknown stream code "${sectionCode}" in class ${classCode}.`);
+          const sectionKey = val(row, 'sectionCode') || val(row, 'sectionName');
+          if (sectionKey) {
+            const section = await this.prisma.client.section.findFirst({
+              where: {
+                classId: cls.id,
+                OR: [{ code: { equals: sectionKey, mode: 'insensitive' } }, { name: { equals: sectionKey, mode: 'insensitive' } }],
+              },
+            });
+            if (!section) throw new BadRequestException(`Unknown stream "${sectionKey}" in class ${classKey}.`);
             sectionId = section.id;
           }
         }
+        let studentCategoryId: string | undefined;
+        const categoryName = val(row, 'studentCategory');
+        if (categoryName) {
+          const cat = await findCategory(categoryName);
+          if (!cat) throw new BadRequestException(`Unknown student category "${categoryName}".`);
+          studentCategoryId = cat.id;
+        }
+        const guardianFirst = val(row, 'guardianFirstName') || val(row, 'guardianName');
+        const guardians = guardianFirst
+          ? [{
+              firstName: guardianFirst,
+              lastName: val(row, 'guardianLastName') || undefined,
+              relationship: val(row, 'guardianRelationship').toLowerCase() || undefined,
+              phone: val(row, 'guardianPhone') || undefined,
+              email: val(row, 'guardianEmail') || undefined,
+              occupation: val(row, 'guardianOccupation') || undefined,
+            }]
+          : undefined;
         const student = await this.create({
           name,
           admissionNo,
-          enrollmentDate: val(row, 'enrollmentDate') || new Date().toISOString(),
+          enrollmentDate: importDate(val(row, 'enrollmentDate'), 'enrollment date') || new Date().toISOString(),
           email: val(row, 'email') || undefined,
           phone: val(row, 'phone') || undefined,
-          dateOfBirth: val(row, 'dateOfBirth') || undefined,
-          gender: (val(row, 'gender').toLowerCase() as any) || undefined,
+          dateOfBirth: importDate(val(row, 'dateOfBirth'), 'date of birth'),
+          gender: importGender(val(row, 'gender')),
+          nationality: val(row, 'nationality') || undefined,
+          religion: val(row, 'religion') || undefined,
+          residenceType: importResidence(val(row, 'residenceType')),
           house: val(row, 'house') || undefined,
+          middleName: val(row, 'middleName') || undefined,
+          preferredName: val(row, 'preferredName') || undefined,
+          countryOfBirth: val(row, 'countryOfBirth') || undefined,
+          placeOfBirth: val(row, 'placeOfBirth') || undefined,
+          address: val(row, 'address') || undefined,
+          entryStatus: val(row, 'entryStatus') || undefined,
+          nin: val(row, 'nin') || undefined,
+          studentCategoryId,
+          guardians,
           classId,
           sectionId,
           termId: val(row, 'termId') || undefined,
@@ -508,7 +576,8 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
         });
         created.push(student);
       } catch (e: any) {
-        skipped.push({ row: i, admissionNo, reason: e?.response?.message ?? e?.message ?? 'unknown' });
+        const msg = e?.response?.message ?? e?.message ?? 'unknown';
+        skipped.push({ row: i, admissionNo, reason: Array.isArray(msg) ? msg.join('; ') : String(msg) });
       }
     }
 
@@ -613,4 +682,37 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
       payments,
     };
   }
+}
+
+/**
+ * Import helpers. Spreadsheets carry dates as ISO (`2014-03-09`, what the
+ * .xlsx reader emits for real date cells) or typed day-first (`09/03/2014`).
+ */
+function importDate(raw: string, label: string): string | undefined {
+  if (!raw) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const m = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    const iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    if (!Number.isNaN(Date.parse(iso))) return iso;
+  }
+  throw new BadRequestException(`Invalid ${label} "${raw}" — use YYYY-MM-DD or DD/MM/YYYY.`);
+}
+
+function importGender(raw: string): 'male' | 'female' | 'other' | undefined {
+  const g = raw.trim().toLowerCase();
+  if (!g) return undefined;
+  if (g === 'm' || g === 'male' || g === 'boy') return 'male';
+  if (g === 'f' || g === 'female' || g === 'girl') return 'female';
+  if (g === 'o' || g === 'other') return 'other';
+  throw new BadRequestException(`Invalid gender "${raw}" — use Male, Female or Other.`);
+}
+
+function importResidence(raw: string): 'day' | 'boarder' | undefined {
+  const r = raw.trim().toLowerCase();
+  if (!r) return undefined;
+  if (r.startsWith('day')) return 'day';
+  if (r.startsWith('board')) return 'boarder';
+  throw new BadRequestException(`Invalid residence "${raw}" — use Day or Boarder.`);
 }

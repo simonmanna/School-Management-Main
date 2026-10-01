@@ -13,6 +13,8 @@ import {
   useFrontDeskLogs, useCreateFrontDeskLog, useCheckoutFrontDeskLog,
   usePartners, type FrontDeskLog,
 } from '@/features/school/api';
+import { FilterField } from './_components/filter-field';
+import { inRange } from './_components/in-range';
 
 const timeOf = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—');
 const dateOf = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '');
@@ -33,14 +35,7 @@ const statusBadge = (s: string) => (
   </span>
 );
 
-// Range bounds are datetime-local strings; a set bound excludes rows with no timestamp.
 const emptyRange = { inFrom: '', inTo: '', outFrom: '', outTo: '' };
-const inRange = (d: string | null | undefined, from: string, to: string) => {
-  if (!from && !to) return true;
-  if (!d) return false;
-  const t = new Date(d).getTime();
-  return (!from || t >= new Date(from).getTime()) && (!to || t <= new Date(to).getTime());
-};
 
 const emptyForm = { partnerId: '', visitorName: '', phone: '', purpose: '', personVisited: '', notes: '' };
 
@@ -138,27 +133,31 @@ export function FrontDeskPage() {
 
       {/* Filters */}
       <Card>
-        <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <Select value={status} onValueChange={(v) => setStatus(v as '' | 'in' | 'out')}>
-            <SelectTrigger className="w-48"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Input placeholder="Search visitor, phone, purpose, host…" value={search} onChange={(e) => setSearch(e.target.value)} className="w-72" />
-          <span className="ml-auto text-sm text-muted-foreground">{onSite} on site</span>
-          <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Check-in</span>
-              <Input type="datetime-local" aria-label="Check-in from" value={range.inFrom} onChange={(e) => setRange({ ...range, inFrom: e.target.value })} className="w-52" />
-              <span className="text-muted-foreground">to</span>
-              <Input type="datetime-local" aria-label="Check-in to" value={range.inTo} onChange={(e) => setRange({ ...range, inTo: e.target.value })} className="w-52" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Check-out</span>
-              <Input type="datetime-local" aria-label="Check-out from" value={range.outFrom} onChange={(e) => setRange({ ...range, outFrom: e.target.value })} className="w-52" />
-              <span className="text-muted-foreground">to</span>
-              <Input type="datetime-local" aria-label="Check-out to" value={range.outTo} onChange={(e) => setRange({ ...range, outTo: e.target.value })} className="w-52" />
-            </div>
-            {hasRange && <Button variant="ghost" size="sm" onClick={() => setRange(emptyRange)}>Clear times</Button>}
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <FilterField label="Status">
+            <Select value={status} onValueChange={(v) => setStatus(v as '' | 'in' | 'out')}>
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>{statusOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </FilterField>
+          <FilterField label="Search" className="min-w-[140px]">
+            <Input placeholder="Visitor, phone, purpose, host…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </FilterField>
+          <FilterField label="Check-in from" wide>
+            <Input type="datetime-local" value={range.inFrom} onChange={(e) => setRange({ ...range, inFrom: e.target.value })} />
+          </FilterField>
+          <FilterField label="Check-in to" wide>
+            <Input type="datetime-local" value={range.inTo} onChange={(e) => setRange({ ...range, inTo: e.target.value })} />
+          </FilterField>
+          <FilterField label="Check-out from" wide>
+            <Input type="datetime-local" value={range.outFrom} onChange={(e) => setRange({ ...range, outFrom: e.target.value })} />
+          </FilterField>
+          <FilterField label="Check-out to" wide>
+            <Input type="datetime-local" value={range.outTo} onChange={(e) => setRange({ ...range, outTo: e.target.value })} />
+          </FilterField>
+          <div className="flex flex-col items-end gap-1">
+            <span className="whitespace-nowrap text-xs text-muted-foreground">{onSite} on site</span>
+            <Button variant="ghost" size="sm" onClick={() => setRange(emptyRange)} disabled={!hasRange}>Clear times</Button>
           </div>
         </CardContent>
       </Card>

@@ -117,7 +117,7 @@ export class AdmissionsConfigController {
 
   // ── Enquiries / leads ──
   @Get('enquiries')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   listEnquiries(@Query('status') status?: string) {
     return this.config.listEnquiries(status);
   }
@@ -154,13 +154,13 @@ export class AdmissionsConfigController {
   }
 
   @Get(':id/reviewers')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   listReviews(@Param('id') id: string) {
     return this.committee.listReviews(id);
   }
 
   @Get(':id/committee-summary')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   committeeSummary(@Param('id') id: string, @Query('quorum') quorum?: string) {
     return this.committee.committeeSummary(id, quorum ? Number(quorum) : 1);
   }
@@ -172,7 +172,7 @@ export class AdmissionsConfigController {
   }
 
   @Get('reviewers/:reviewerId/queue')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   myQueue(@Param('reviewerId') reviewerId: string, @Query('status') status?: string) {
     return this.committee.myQueue(reviewerId, status);
   }

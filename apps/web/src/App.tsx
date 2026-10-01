@@ -32,6 +32,7 @@ import { CrmDashboardPage } from '@/pages/crm/dashboard';
 import { SchoolDashboardPage } from '@/pages/school/dashboard';
 import { SchoolGuidePage } from '@/pages/school/guide';
 import { SchoolStudentsPage } from '@/pages/school/students';
+import { SchoolStudentImportPage } from '@/pages/school/student-import';
 import { SchoolStudentAdmitPage } from '@/pages/school/student-admit-form';
 import { SchoolStudent360Page } from '@/pages/school/student-360';
 import { SchoolFeesPage } from '@/pages/school/fees';
@@ -533,6 +534,7 @@ export function App() {
           <Route path="/school/students" element={<SchoolStudentsPage />} />
           <Route path="/school/students/new" element={<SchoolStudentAdmitPage mode="admit" />} />
           <Route path="/school/students/register" element={<SchoolStudentAdmitPage mode="register" />} />
+          <Route path="/school/students/import" element={<SchoolStudentImportPage />} />
           <Route path="/school/students/:id" element={<SchoolStudent360Page />} />
           <Route path="/school/fees" element={<SchoolFeesPage />} />
           <Route path="/school/fees/categories" element={<SchoolFeeCategoriesPage />} />

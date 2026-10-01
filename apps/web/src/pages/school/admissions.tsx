@@ -26,7 +26,10 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { notify } from '@/lib/notify';
-import { ACTION_LABELS, NEEDS_REASON, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, STATUS_META, statusMeta } from './_components/admission-status';
+import { ListPager } from '@/components/query-state';
+
+const PAGE_SIZE = 50;
 import { EnrollApplicationDialog } from './_components/enroll-application-dialog';
 import { DecisionDialog } from './_components/DecisionDialog';
 import { ApplicationFeeDialog, applicationFeeBadge } from './fees-integrity';
@@ -41,7 +44,11 @@ export function SchoolAdmissionsPage() {
   const [feeFor, setFeeFor] = useState<AdmissionApplication | null>(null);
 
   const navigate = useNavigate();
-  const { data, isLoading } = useAdmissions({ pageSize: 50 });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  // Status and search are applied by the API so they reach every application,
+  // not only the page that happens to be loaded.
+  const { data, isLoading } = useAdmissions({ page, pageSize: PAGE_SIZE, status: statusFilter || undefined, search: search.trim() || undefined });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
@@ -49,11 +56,8 @@ export function SchoolAdmissionsPage() {
   const acceptOffer = useAcceptAdmissionOffer();
   const declineOffer = useDeclineAdmissionOffer();
 
-  const allRows = useMemo(() => data?.data ?? [], [data]);
-  const rows = useMemo(
-    () => (statusFilter ? allRows.filter((a) => a.status === statusFilter) : allRows),
-    [allRows, statusFilter],
-  );
+  const rows = useMemo(() => data?.data ?? [], [data]);
+  const total = data?.meta?.total ?? 0;
   const yearNameById = useMemo(
     () => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])),
     [years],
@@ -153,13 +157,19 @@ export function SchoolAdmissionsPage() {
           <p className="text-sm text-muted-foreground">Applications, review workflow, offers and enrollment.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Input
+            className="w-56"
+            placeholder="Search name or number…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
           <select
             className="rounded-md border bg-card px-3 py-2 text-sm"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           >
             <option value="">All statuses</option>
-            {[...new Set(allRows.map((a) => a.status))].map((s) => (
+            {Object.keys(STATUS_META).map((s) => (
               <option key={s} value={s}>{statusMeta(s).label}</option>
             ))}
           </select>
@@ -190,7 +200,7 @@ export function SchoolAdmissionsPage() {
                 )}
                 {!isLoading && rows.length === 0 && (
                   <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    {statusFilter ? 'No applications in this status.' : 'No applications yet. Create the first one.'}
+                    {statusFilter || search ? 'No applications match.' : 'No applications yet. Create the first one.'}
                   </td></tr>
                 )}
                 {rows.map((a) => {
@@ -319,6 +329,7 @@ export function SchoolAdmissionsPage() {
               </tbody>
             </table>
           </div>
+          <ListPager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="applications" />
         </CardContent>
       </Card>
 

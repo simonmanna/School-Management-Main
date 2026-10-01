@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { notify } from '@/lib/notify';
-import { statusMeta } from './_components/admission-status';
+import { isApplicationLocked, statusMeta } from './_components/admission-status';
 import { ApplicationDocuments } from './_components/ApplicationDocuments';
 import { IdentityMatchesPanel } from './_components/IdentityMatchesPanel';
 
@@ -51,10 +51,12 @@ export function SchoolApplicationFormPage() {
   // Read-only view when an id is present and the URL asks for view (default for
   // row-click / View button). Explicit ?mode=edit enables editing. New
   // applications (?no id) are always editable.
-  const viewOnly = isEdit && searchParams.get('mode') !== 'edit';
+  const { data: existing } = useAdmission(id);
+  // A closed application (enrolled, rejected, …) is always read-only.
+  const locked = isApplicationLocked(existing?.status);
+  const viewOnly = isEdit && (searchParams.get('mode') !== 'edit' || locked);
   const navigate = useNavigate();
 
-  const { data: existing } = useAdmission(id);
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const { data: cycles } = useAdmissionCycles();
@@ -118,6 +120,21 @@ export function SchoolApplicationFormPage() {
       studentCategoryId,
     });
     setOwnCf({ ...cf });
+    // Load the saved guardians so an edit shows — and re-sends — the real set.
+    const saved = (existing.guardians ?? []).map((g) => ({
+      firstName: g.firstName ?? '',
+      lastName: g.lastName ?? '',
+      relationship: g.relationship,
+      phone: g.phone ?? '',
+      altPhone: g.altPhone ?? undefined,
+      email: g.email ?? undefined,
+      occupation: g.occupation ?? undefined,
+      address: g.address ?? undefined,
+      isPrimary: g.isPrimary ?? false,
+      isEmergency: g.isEmergency ?? false,
+      financiallyResponsible: g.financiallyResponsible ?? false,
+    }));
+    setGuardians(saved.length ? saved : [emptyGuardian()]);
   }, [existing]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -202,6 +219,7 @@ export function SchoolApplicationFormPage() {
           entryStatus: form.entryStatus || undefined,
           address: form.address || undefined,
           studentCategoryId: form.studentCategoryId || undefined,
+          guardians: validGuardians(),
           customFields: collectExtras(),
         };
         await update.mutateAsync({ id: id!, dto });
@@ -239,7 +257,7 @@ export function SchoolApplicationFormPage() {
         </div>
       );
     }
-    return <ViewApplication app={existing} years={years?.data ?? []} studentCategories={studentCategories ?? []} history={history ?? []} committee={committee} onEdit={() => navigate(`/school/applications/${id}?mode=edit`)} onBack={() => navigate('/school/applications')} classNameFor={className} />;
+    return <ViewApplication app={existing} years={years?.data ?? []} studentCategories={studentCategories ?? []} history={history ?? []} committee={committee} onEdit={locked ? undefined : () => navigate(`/school/applications/${id}?mode=edit`)} onBack={() => navigate('/school/applications')} classNameFor={className} />;
   }
 
   return (
@@ -495,7 +513,8 @@ function ViewApplication({
   studentCategories: any[];
   history: any[];
   committee: any;
-  onEdit: () => void;
+  /** Absent when the application is closed and can no longer be edited. */
+  onEdit?: () => void;
   onBack: () => void;
   classNameFor: (cid?: string | null) => string;
 }) {
@@ -522,7 +541,13 @@ function ViewApplication({
         </div>
         <div className="flex items-center gap-2">
           <Badge className={statusMeta(app.status).cls}>{statusMeta(app.status).label}</Badge>
-          <Button size="sm" onClick={onEdit}><Pencil className="h-4 w-4" /> Edit</Button>
+          {onEdit ? (
+            <Button size="sm" onClick={onEdit}><Pencil className="h-4 w-4" /> Edit</Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {app.status === 'enrolled' ? 'Enrolled — correct details on the pupil record.' : 'Closed — read-only.'}
+            </span>
+          )}
         </div>
       </div>
 

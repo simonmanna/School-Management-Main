@@ -22,7 +22,11 @@ import {
 // Single source of truth for the lifecycle. This page previously carried its own
 // copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
 // 7 of the 15 backend states.
-import { ACTION_LABELS, NEEDS_REASON, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, isApplicationLocked, statusMeta } from './_components/admission-status';
+import { ListPager } from '@/components/query-state';
+import { Input } from '@/components/ui/input';
+
+const PAGE_SIZE = 50;
 import { EnrollApplicationDialog } from './_components/enroll-application-dialog';
 
 /** Handled by the admissions pipeline page, which owns the offer dialogs.
@@ -45,7 +49,9 @@ import { DecisionDialog } from './_components/DecisionDialog';
 
 export function SchoolApplicationsPage() {
   const navigate = useNavigate();
-  const { data, isLoading } = useAdmissions({ pageSize: 50 });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const { data, isLoading } = useAdmissions({ page, pageSize: PAGE_SIZE, search: search.trim() || undefined });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
@@ -53,6 +59,7 @@ export function SchoolApplicationsPage() {
   const [enrollFor, setEnrollFor] = useState<AdmissionApplication | null>(null);
 
   const rows = useMemo(() => data?.data ?? [], [data]);
+  const total = data?.meta?.total ?? 0;
   const yearNameById = useMemo(() => Object.fromEntries((years?.data ?? []).map((y) => [y.id, y.name])), [years]);
   const classNameById = useMemo(() => Object.fromEntries((classes?.data ?? []).map((c) => [c.id, c.name])), [classes]);
 
@@ -93,9 +100,17 @@ export function SchoolApplicationsPage() {
           <h1 className="text-xl font-semibold">Applications</h1>
           <p className="text-sm text-muted-foreground">Front-desk student applications linked to Admissions.</p>
         </div>
-        <Button onClick={() => navigate('/school/applications/new')}>
-          <Plus className="h-4 w-4" /> New application
-        </Button>
+        <div className="flex items-center gap-2">
+          <Input
+            className="w-56"
+            placeholder="Search name or number…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
+          <Button onClick={() => navigate('/school/applications/new')}>
+            <Plus className="h-4 w-4" /> New application
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -116,7 +131,7 @@ export function SchoolApplicationsPage() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
               )}
               {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">No applications yet. Create the first one.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{search ? 'No applications match.' : 'No applications yet. Create the first one.'}</td></tr>
               )}
               {rows.map((a) => (
                 <tr
@@ -145,13 +160,15 @@ export function SchoolApplicationsPage() {
                       >
                         <Eye className="h-3.5 w-3.5" /> View
                       </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => navigate(`/school/applications/${a.id}?mode=edit`)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" /> Edit
-                      </Button>
+                      {!isApplicationLocked(a.status) && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => navigate(`/school/applications/${a.id}?mode=edit`)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> Edit
+                        </Button>
+                      )}
                       <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="sm">
@@ -206,6 +223,7 @@ export function SchoolApplicationsPage() {
               ))}
             </tbody>
           </table>
+          <ListPager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} noun="applications" />
         </CardContent>
       </Card>
 

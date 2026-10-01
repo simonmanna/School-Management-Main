@@ -42,6 +42,15 @@ export function statusMeta(status: AdmissionStatus | string) {
   return STATUS_META[status as AdmissionStatus] ?? { cls: 'bg-slate-100 text-slate-700', label: String(status) };
 }
 
+/**
+ * Statuses whose application record is frozen — mirrors LOCKED_APPLICATION_STATUSES
+ * in admissions.service.ts. An enrolled applicant is corrected on the pupil record.
+ */
+const LOCKED_STATUSES: ReadonlySet<string> = new Set(['enrolled', 'rejected', 'withdrawn', 'offer_declined']);
+export function isApplicationLocked(status: AdmissionStatus | string | undefined | null) {
+  return !!status && LOCKED_STATUSES.has(status);
+}
+
 export type ActionTone = 'default' | 'success' | 'danger';
 
 export interface AdmissionActionSpec {

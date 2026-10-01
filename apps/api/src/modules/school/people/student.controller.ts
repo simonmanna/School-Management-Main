@@ -1,9 +1,12 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { UPLOAD_OPTIONS } from '../../../kernel/files/upload-limits';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { StudentService } from './student.service';
 import { CreateStudentDto, StudentListQueryDto, UpdateStudentDto } from './dto.types';
 import { RegisterStudentDto, StudentAdmissionService } from './student-admission.service';
+import { MAX_IMPORT_ROWS, parseStudentSheet } from './student-import-parser';
 
 @Controller('school/students')
 export class StudentController {
@@ -82,12 +85,25 @@ export class StudentController {
   @Post('bulk-import')
   @RequirePermissions(PERMISSIONS.school.manageStudents)
   bulkImport(@Body() body: { rows: Array<Record<string, string>> }) {
+    if (!Array.isArray(body?.rows)) throw new BadRequestException('rows must be an array.');
+    if (body.rows.length > MAX_IMPORT_ROWS) throw new BadRequestException(`Import at most ${MAX_IMPORT_ROWS} rows at a time.`);
     const rows = (body.rows ?? []).map((r) => {
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(r)) out[k.toLowerCase()] = v;
       return out;
     });
     return this.students.bulkImport(rows);
+  }
+
+  /**
+   * Read an uploaded .xlsx / .csv into headings + rows for the import page's
+   * column mapping. Writes nothing; the mapped rows go to `bulk-import`.
+   */
+  @Post('bulk-import/parse')
+  @RequirePermissions(PERMISSIONS.school.manageStudents)
+  @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
+  parseImportFile(@UploadedFile() file: any) {
+    return parseStudentSheet(file);
   }
 
   @Delete(':id')

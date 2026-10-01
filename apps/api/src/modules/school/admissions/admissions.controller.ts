@@ -1,6 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
-import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { AdmissionsService } from './admissions.service';
 import { AdmissionFeeService } from './admission-fee.service';
@@ -8,6 +7,7 @@ import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import {
   AddExamScoreDto,
+  AdmissionListQueryDto,
   BulkEnrollDto,
   ChargeFeeDto,
   PayApplicationFeeDto,
@@ -39,13 +39,13 @@ export class AdmissionsController {
    * the right buttons without an N+1 of per-application workflow requests.
    */
   @Get()
-  @RequirePermissions(PERMISSIONS.school.read)
-  list(@Query() q: PaginationDto) {
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
+  list(@Query() q: AdmissionListQueryDto) {
     return this.admissions.listWithWorkflow(q);
   }
 
   @Get('by-status/:status')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   byStatus(@Param('status') status: string) {
     return this.admissions.byStatus(status);
   }
@@ -63,7 +63,7 @@ export class AdmissionsController {
   }
 
   @Get(':id/identity-matches')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   identityMatches(@Param('id') id: string) {
     return this.admissions.identityMatches(id);
   }
@@ -114,7 +114,7 @@ export class AdmissionsController {
 
   /** The append-only status timeline for one application. */
   @Get(':id/history')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   history(@Param('id') id: string) {
     return this.admissions.statusHistory(id);
   }
@@ -209,7 +209,7 @@ export class AdmissionsController {
 
   /** Fee position read from the invoice subledger: invoice, allocations, state. */
   @Get(':id/fee')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   applicationFeeStatus(@Param('id') id: string) {
     return this.admissionFees.status(id);
   }
@@ -310,7 +310,7 @@ export class AdmissionsController {
   }
 
   @Get(':id/eligibility')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   enrollmentEligibility(@Param('id') id: string) {
     return this.admissions.enrollmentEligibility(id);
   }
@@ -323,7 +323,7 @@ export class AdmissionsController {
    * `eligibility`. Guidance only: every mutating endpoint re-checks all of it.
    */
   @Get(':id/workflow')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   applicationWorkflow(@Param('id') id: string) {
     return this.admissions.applicationWorkflow(id);
   }
@@ -362,7 +362,7 @@ export class AdmissionsController {
   // Registered AFTER the static collection routes (cycles, nationalities, …) so
   // Express matches those before this catch-all `:id` param route.
   @Get(':id')
-  @RequirePermissions(PERMISSIONS.school.read)
+  @RequirePermissions(PERMISSIONS.school.readAdmissions)
   findOne(@Param('id') id: string) {
     return this.admissions.findOne(id);
   }

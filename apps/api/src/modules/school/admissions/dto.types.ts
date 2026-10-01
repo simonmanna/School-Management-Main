@@ -19,9 +19,12 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { EXTERNAL_REFERENCE_TYPES, type ExternalReferenceType } from '@erp/shared';
+import { AdmissionStatus } from '@prisma/client';
+import { PaginationDto } from '../../../kernel/common/pagination.dto';
 
 const GENDERS = ['male', 'female', 'other'] as const;
 const RESIDENCE = ['day', 'boarder'] as const;
+const ADMISSION_STATUSES = Object.values(AdmissionStatus);
 
 export class AdmissionGuardianDto {
   @IsString() @IsNotEmpty() firstName!: string;
@@ -269,4 +272,9 @@ export class PayApplicationFeeDto {
 
 export class WaiveApplicationFeeDto {
   @IsOptional() @IsString() reason?: string;
+}
+
+/** `GET /school/admissions` — the paged worklist, filterable by status server-side. */
+export class AdmissionListQueryDto extends PaginationDto {
+  @IsOptional() @IsIn(ADMISSION_STATUSES) status?: string;
 }

@@ -418,6 +418,10 @@ export const PERMISSIONS = {
     runAcademicMigration: 'school:academics:migrate',
     manageStaff: 'school:staff:write',
     manageAdmissions: 'school:admissions:write',
+    /// Read applicant records (identity, guardians, documents, history). Split
+    /// from `school:read`, which every class teacher holds: an application is
+    /// pre-enrolment PII about a child who is not (yet) the school's pupil.
+    readAdmissions: 'school:admissions:read',
     /// Accept / reject / waitlist an application. Separate from processing it,
     /// so the person who gathers the documents is not the person who decides.
     decideAdmissions: 'school:admissions:decide',
@@ -994,6 +998,7 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:programmes:write': { label: 'Manage programmes & cohorts', description: 'Academic programmes, annual class cohorts and section/stream grouping modes.', group: 'School', subgroup: 'Enrollment' },
   'school:academics:migrate': { label: 'Run academic backfill', description: 'Execute enrollment/placement backfills and resolve the migration exception queue.', group: 'School', subgroup: 'Enrollment' },
   'school:staff:write': { label: 'Manage staff', description: 'CRUD staff profiles.', group: 'School', subgroup: 'Staff' },
+  'school:admissions:read': { label: 'Read admission applications', description: 'View applicant records, guardians, documents and history. Not implied by School read.', group: 'School', subgroup: 'Admissions' },
   'school:admissions:write': { label: 'Manage admissions', description: 'CRUD admission applications.', group: 'School', subgroup: 'Admissions' },
   'school:admissions:decide': { label: 'Decide admissions', description: 'Accept, reject or waitlist an application.', group: 'School', subgroup: 'Admissions', risk: 'high' },
   'school:students:override_duplicate': { label: 'Override duplicate pupil check', description: 'Register a pupil who matches an existing name and date of birth, with a written reason.', group: 'School', subgroup: 'Students', risk: 'high' },
@@ -1205,6 +1210,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:reports:documents:publish',
       'school:promotion:decide',
       'school:promotion:apply',
+      'school:admissions:read',
       'school:admissions:decide',
       'school:enrollment:reactivate',
       // Re-audit P1-1: closing and archiving a year is the head's decision.
@@ -1258,6 +1264,8 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
     dataScope: 'school',
     permissions: [
       'school:read',
+      // Takes the application fee, so must be able to find the applicant.
+      'school:admissions:read',
       'school:fees:write',
       'school:fees:collect',
       'school:fees:reconcile',
@@ -1305,6 +1313,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // repeats learners, so the enrollment/placement grants live here.
       'school:enrollment:write',
       'school:programmes:write',
+      'school:admissions:read',
       'school:admissions:write',
       'school:admissions:interview',
       'school:admissions:offer',
@@ -1426,6 +1435,7 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:grades:approve',
       'school:results:approve',
       'school:promotion:decide',
+      'school:admissions:read',
       'school:admissions:decide',
       'school:analytics:read',
       'school:analytics:export',

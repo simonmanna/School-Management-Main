@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { HeaderComms } from './header-comms';
 import {
   LayoutDashboard,
+  FileUp,
   Building2,
   Users,
   Package,
@@ -221,6 +222,7 @@ const NAV_SECTIONS: NavSection[] = [
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
       { to: '/school/students', label: 'Students', icon: GraduationCap, permission: PERMISSIONS.school.read },
+      { to: '/school/students/import', label: 'Import Students', icon: FileUp, permission: PERMISSIONS.school.manageStudents },
       // Nursery. One screen for the four things a nursery does that a primary
       // school does not: account for the day, control who collects a child,
       // write down what happened, and chase immunisation.
@@ -240,7 +242,7 @@ const NAV_SECTIONS: NavSection[] = [
       // somebody decides, the applicant is enrolled and seated. Configuration
       // and analytics sit below it rather than beside it.
       { to: '/school/applications', label: 'Applications', icon: FileText, permission: PERMISSIONS.school.manageAdmissions },
-      { to: '/school/admissions', label: 'Review & Enrol', icon: FilePlus2, permission: PERMISSIONS.school.read },
+      { to: '/school/admissions', label: 'Review & Enrol', icon: FilePlus2, permission: PERMISSIONS.school.readAdmissions },
       // Phase 1 canonical enrollment spine (ADR-018 / ADR-019). Separate from the
       // admissions funnel above: admissions decides who joins, this decides where
       // they sit and keeps the history of every move.

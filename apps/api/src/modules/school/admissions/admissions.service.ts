@@ -8,7 +8,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
 import { EncryptionService } from '../../../kernel/encryption/encryption.service';
 import { BaseCrudService, type CrudDelegate } from '../../../kernel/common/base-crud.service';
-import { EVENTS, PERMISSIONS } from '@erp/shared';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, EVENTS, MAX_PAGE_SIZE, PERMISSIONS } from '@erp/shared';
 import type {
   AddExamScoreDto,
   BulkEnrollDto,
@@ -72,6 +72,9 @@ const TITLE_BY_DOC_TYPE: Record<string, string> = {
  * before writing. The WorkflowRegistry in school.module.ts mirrors this for
  * documentation/other consumers.
  */
+/** Statuses whose application record is frozen (see `update`). */
+const LOCKED_APPLICATION_STATUSES: ReadonlySet<string> = new Set(['enrolled', 'rejected', 'withdrawn', 'offer_declined']);
+
 const ADMISSION_TRANSITIONS: Record<string, ReadonlyArray<string>> = {
   // Phase 1: a draft is a not-yet-submitted application (portal or front desk).
   draft: ['submit', 'withdraw'],
@@ -228,64 +231,99 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * columns rather than written as a plaintext field, and `guardians` is a
    * relation the flat updateMany cannot set — so both are transformed/stripped
    * here before delegating.
+   *
+   * A closed application is read-only. Once `enrolled`, the pupil, guardians and
+   * placement were created FROM it, so editing the application would leave two
+   * records that disagree; corrections go through the pupil record instead. The
+   * other terminal statuses are an audit trail of a decision and stay frozen.
+   *
+   * The field write and the guardian replacement run in one transaction so a
+   * failed guardian insert cannot leave the old set deleted and the new one half
+   * written.
    */
   async update(id: string, dto: UpdateApplicationDto): Promise<AdmissionApplication> {
     const { nin, guardians, admissionCycleId, ...rest } = dto as any;
+    const organizationId = this.tenant.organizationId;
 
-    // Admission-cycle validation (Task 2): if the caller is (re)assigning a
-    // cycle, it must exist and belong to this organization. A closed cycle may
-    // not be (re)attached to an application.
-    if (admissionCycleId !== undefined && admissionCycleId !== null) {
-      const organizationId = this.tenant.organizationId;
-      const cycle = await this.prisma.client.admissionCycle.findFirst({
-        where: { id: admissionCycleId, organizationId },
-      });
-      if (!cycle) {
-        throw new BadRequestException(
-          `Admission cycle ${admissionCycleId} does not exist or belongs to another organization.`,
+    await this.prisma.client.$transaction(async (tx: any) => {
+      const current = await tx.admissionApplication.findFirst({ where: { id } });
+      if (!current) throw new NotFoundException(`AdmissionApplication ${id} not found`);
+      if (LOCKED_APPLICATION_STATUSES.has(current.status)) {
+        throw new ConflictException(
+          current.status === 'enrolled'
+            ? `Application ${current.applicationNumber} is enrolled and can no longer be edited. Correct the pupil's record under Students instead.`
+            : `Application ${current.applicationNumber} is ${current.status} and can no longer be edited.`,
         );
       }
-      if (cycle.status === 'closed') {
-        throw new BadRequestException(
-          `Admission cycle ${cycle.name} is closed and cannot be assigned to an application.`,
-        );
-      }
-      rest.admissionCycleId = admissionCycleId;
-    }
 
-    const data: Record<string, unknown> = { ...rest };
-    if (nin !== undefined) {
-      const enc = this.encryption.encrypt(nin);
-      data.ninCiphertext = enc?.ciphertext ?? null;
-      data.ninIv = enc?.iv ?? null;
-      data.ninTag = enc?.tag ?? null;
-    }
-    const res = await this.prisma.client.admissionApplication.updateMany({ where: { id }, data });
-    if (res.count === 0) throw new NotFoundException(`AdmissionApplication ${id} not found`);
-    // Replace the structured guardians when the caller sends a new set.
-    if (Array.isArray(guardians)) {
-      const app = await this.prisma.client.admissionApplication.findFirst({ where: { id }, select: { organizationId: true } });
-      await this.prisma.client.admissionGuardian.deleteMany({ where: { applicationId: id, contactId: null } });
-      for (const g of guardians) {
-        await this.prisma.client.admissionGuardian.create({
-          data: {
-            organizationId: app!.organizationId,
-            applicationId: id,
-            firstName: g.firstName,
-            lastName: g.lastName ?? null,
-            relationship: g.relationship,
-            phone: g.phone ?? null,
-            altPhone: g.altPhone ?? null,
-            email: g.email ?? null,
-            occupation: g.occupation ?? null,
-            address: g.address ?? null,
-            isPrimary: g.isPrimary ?? false,
-            isEmergency: g.isEmergency ?? false,
-            financiallyResponsible: g.financiallyResponsible ?? false,
-          },
+      // Admission-cycle validation (Task 2): if the caller is (re)assigning a
+      // cycle, it must exist and belong to this organization. A closed cycle may
+      // not be (re)attached to an application.
+      if (admissionCycleId !== undefined && admissionCycleId !== null) {
+        const cycle = await tx.admissionCycle.findFirst({
+          where: { id: admissionCycleId, organizationId },
         });
+        if (!cycle) {
+          throw new BadRequestException(
+            `Admission cycle ${admissionCycleId} does not exist or belongs to another organization.`,
+          );
+        }
+        if (cycle.status === 'closed') {
+          throw new BadRequestException(
+            `Admission cycle ${cycle.name} is closed and cannot be assigned to an application.`,
+          );
+        }
+        rest.admissionCycleId = admissionCycleId;
       }
-    }
+
+      const data: Record<string, unknown> = { ...rest };
+      if (nin !== undefined) {
+        const enc = this.encryption.encrypt(nin);
+        data.ninCiphertext = enc?.ciphertext ?? null;
+        data.ninIv = enc?.iv ?? null;
+        data.ninTag = enc?.tag ?? null;
+      }
+      // Guarded on the status read above so a concurrent enroll cannot slip between.
+      const res = await tx.admissionApplication.updateMany({ where: { id, status: current.status }, data });
+      if (res.count === 0) throw new ConflictException(`Application ${current.applicationNumber} changed while saving. Reload and try again.`);
+
+      // Replace the structured guardians when the caller sends a new set. Rows
+      // already linked to a contact are the promoted record and are kept.
+      if (Array.isArray(guardians)) {
+        await tx.admissionGuardian.deleteMany({ where: { applicationId: id, contactId: null } });
+        for (const g of guardians) {
+          await tx.admissionGuardian.create({
+            data: {
+              organizationId: current.organizationId,
+              applicationId: id,
+              firstName: g.firstName,
+              lastName: g.lastName ?? null,
+              relationship: g.relationship,
+              phone: g.phone ?? null,
+              altPhone: g.altPhone ?? null,
+              email: g.email ?? null,
+              occupation: g.occupation ?? null,
+              address: g.address ?? null,
+              isPrimary: g.isPrimary ?? false,
+              isEmergency: g.isEmergency ?? false,
+              financiallyResponsible: g.financiallyResponsible ?? false,
+            },
+          });
+        }
+      }
+
+      const { ninCiphertext: _c, ninIv: _i, ninTag: _t, ...changed } = data;
+      await this.audit.recordInTx(tx, {
+        entity: 'AdmissionApplication',
+        entityId: id,
+        action: 'update',
+        newValues: {
+          ...changed,
+          ...(nin !== undefined ? { nin: '[changed]' } : {}),
+          ...(Array.isArray(guardians) ? { guardians: guardians.length } : {}),
+        },
+      });
+    });
     return this.findOne(id);
   }
 
@@ -2298,9 +2336,33 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * Eligibility is deliberately NOT included: it hits capacity and documents per
    * application and belongs on the detail view, where the Enroll dialog fetches it.
    */
-  async listWithWorkflow(query: any) {
-    const page = await this.list(query);
-    const rows: any[] = page.data ?? [];
+  async listWithWorkflow(query: { page?: number; pageSize?: number; search?: string; status?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }) {
+    const pageNo = Math.max(1, Number(query.page) || DEFAULT_PAGE);
+    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(query.pageSize) || DEFAULT_PAGE_SIZE));
+    const where: Record<string, unknown> = {};
+    if (query.status) where.status = query.status;
+    if (query.search) {
+      where.OR = this.searchFields.map((field) => ({ [field]: { contains: query.search, mode: 'insensitive' } }));
+    }
+    const orderBy = query.sortBy ? { [query.sortBy]: query.sortOrder ?? 'asc' } : this.defaultOrderBy;
+    // Worklist projection: the table needs the row's own columns only. Guardians,
+    // documents and exam results stay on the detail read, and the encrypted NIN
+    // columns never leave the service on a list.
+    const [found, total] = await Promise.all([
+      this.prisma.client.admissionApplication.findMany({
+        where,
+        orderBy: orderBy as any,
+        skip: (pageNo - 1) * pageSize,
+        take: pageSize,
+        omit: { ninCiphertext: true, ninIv: true, ninTag: true },
+      }),
+      this.prisma.client.admissionApplication.count({ where }),
+    ]);
+    const page = {
+      data: found as any[],
+      meta: { page: pageNo, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
+    const rows: any[] = page.data;
     if (!rows.length) return page;
 
     const ids = rows.map((r) => r.id);
