@@ -1087,8 +1087,24 @@ export function AppShell() {
     </nav>
   );
 
+  const collapseToggle = (collapsed: boolean) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className={cn(railButton, 'h-8 w-8 shrink-0 rounded-lg text-[color:var(--sb-muted)]')}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</TooltipContent>
+    </Tooltip>
+  );
+
   const brand = (collapsed: boolean, onClose?: () => void) => (
-    <div className={cn('flex h-16 shrink-0 items-center gap-3', collapsed ? 'justify-center px-2' : 'px-4')}>
+    <div className={cn('flex shrink-0 items-center', collapsed ? 'flex-col justify-center gap-2 px-2 py-3' : 'h-16 gap-3 px-4')}>
       <div
         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-[0_4px_12px_-2px_rgba(0,0,0,0.35)] ring-1 ring-white/20"
         style={{ background: sb.brandBg }}
@@ -1103,29 +1119,11 @@ export function AppShell() {
           <span className="truncate text-[11px] leading-tight text-[color:var(--sb-muted)]">School Management</span>
         </div>
       )}
-      {onClose && (
+      {onClose ? (
         <button type="button" onClick={onClose} className={cn(railButton, 'h-8 w-8')} aria-label="Close menu">
           <X className="h-4 w-4" />
         </button>
-      )}
-    </div>
-  );
-
-  const sidebarFooter = (collapsed: boolean) => onTerminal ? null : (
-    <div className={cn('flex shrink-0 border-t border-[color:var(--sb-border)] px-3 py-3', collapsed ? 'justify-center px-2' : 'justify-end')}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            className={cn(railButton, 'h-8 w-8 rounded-lg text-[color:var(--sb-muted)]')}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</TooltipContent>
-      </Tooltip>
+      ) : !onTerminal && collapseToggle(collapsed)}
     </div>
   );
 
@@ -1146,7 +1144,6 @@ export function AppShell() {
               {renderExpandedNav()}
             </>
           )}
-          {sidebarFooter(sidebarCollapsed)}
         </aside>
 
         {/* Mobile drawer */}
