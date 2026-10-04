@@ -21,7 +21,7 @@ export interface SidebarModule {
 export const SIDEBAR_MODULES: SidebarModule[] = [
   { key: 'frontdesk', section: 'Frontdesk', description: 'Visitors, phone calls, complaints, CRM', defaultOn: true },
   { key: 'studentManagement', section: 'Student Management', description: 'Students, nursery day, categories, promotion, portals', defaultOn: true },
-  { key: 'admissions', section: 'Admissions', description: 'Applications, review & enrol, placement', defaultOn: true },
+  { key: 'admissions', section: 'Admissions & Enrollment', description: 'Applications, review & enrol, placement', defaultOn: true },
   { key: 'academicManagement', section: 'Academic Management', description: 'Years, terms, classes, subjects, departments', defaultOn: true },
   { key: 'teachingAssessment', section: 'Teaching & Assessment', description: 'Assessments, gradebook, exams, results', defaultOn: true },
   { key: 'attendances', section: 'Attendances', description: 'Student registers and attendance reports', defaultOn: true },

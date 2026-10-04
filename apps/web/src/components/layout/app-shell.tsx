@@ -234,7 +234,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Admissions',
+    title: 'Admissions & Enrollment',
     icon: FilePlus2,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
@@ -1111,40 +1111,21 @@ export function AppShell() {
     </div>
   );
 
-  const userCard = (collapsed: boolean, inDrawer = false) => (
-    <div className={cn('shrink-0 border-t border-[color:var(--sb-border)]', collapsed ? 'flex flex-col items-center gap-1 px-2 py-3' : 'flex items-center gap-2.5 px-3 py-3')}>
-      {!collapsed && (
-        <>
-          <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white ring-2 ring-white/15"
-            style={{ background: sb.brandBg }}
-            aria-hidden
+  const sidebarFooter = (collapsed: boolean) => onTerminal ? null : (
+    <div className={cn('flex shrink-0 border-t border-[color:var(--sb-border)] px-3 py-3', collapsed ? 'justify-center px-2' : 'justify-end')}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className={cn(railButton, 'h-8 w-8 rounded-lg text-[color:var(--sb-muted)]')}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {initials}
-          </span>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[13px] font-medium text-[color:var(--sb-active)]">
-              {user?.firstName} {user?.lastName}
-            </div>
-            <div className="truncate text-[11.5px] text-[color:var(--sb-muted)]">{user?.email}</div>
-          </div>
-        </>
-      )}
-      {!onTerminal && !inDrawer && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              className={cn(railButton, 'h-8 w-8 rounded-lg text-[color:var(--sb-muted)]')}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</TooltipContent>
-        </Tooltip>
-      )}
+            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</TooltipContent>
+      </Tooltip>
     </div>
   );
 
@@ -1165,7 +1146,7 @@ export function AppShell() {
               {renderExpandedNav()}
             </>
           )}
-          {userCard(sidebarCollapsed)}
+          {sidebarFooter(sidebarCollapsed)}
         </aside>
 
         {/* Mobile drawer */}
@@ -1178,7 +1159,6 @@ export function AppShell() {
             >
               {brand(false, () => setMobileOpen(false))}
               {renderExpandedNav(() => setMobileOpen(false))}
-              {userCard(false, true)}
             </aside>
           </div>
         )}
