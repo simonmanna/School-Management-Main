@@ -61,10 +61,10 @@ export function normalizeStudent<T extends Partial<Student>>(s: T): T {
   return { ...s, currentClassId: s.currentClass?.id ?? null, currentSectionId: s.currentSection?.id ?? null };
 }
 
-export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean }
-export interface Term { id: string; academicYearId: string; name: string; isCurrent: boolean }
-export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null }
-export interface Section { id: string; classId: string; name: string; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null } | null }
+export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean; status?: 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED' }
+export interface Term { id: string; academicYearId: string; name: string; isCurrent: boolean; startDate?: string; endDate?: string }
+export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null; capacity?: number | null; allowsStreams?: boolean; isActive?: boolean; displayOrder?: number; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null }
+export interface Section { id: string; classId: string; name: string; capacity?: number | null; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null } | null }
 
 export interface Guardian {
   id: string;
@@ -1258,11 +1258,19 @@ export interface EnrollAdmissionInput {
   student?: { name?: string; email?: string; phone?: string; gender?: 'male' | 'female' | 'other'; dateOfBirth?: string; residenceType?: 'day' | 'boarder'; studentCategoryId?: string; customFields?: Record<string, unknown> };
   /** Required when `student` contradicts the application. */
   confirmOverrides?: boolean;
+  /** NEW / TRANSFER_IN for an applicant; RE_ENTRY / CONTINUING only for a confirmed existing pupil. */
+  enrollmentType?: 'NEW' | 'TRANSFER_IN' | 'RE_ENTRY' | 'CONTINUING';
+  /** Effective date (YYYY-MM-DD); the placement starts here, clamped to the term start. */
+  enrollmentDate?: string;
+  enrollmentStatus?: 'PENDING' | 'ACTIVE';
+  notes?: string;
+  previousSchool?: { name?: string; location?: string; lastClass?: string; lastYear?: string; transferCertificateRef?: string };
 }
 
 export interface EnrollAdmissionResult {
   studentProfileId: string;
-  studentProfile: { id: string };
+  studentProfile: { id: string; admissionNo?: string };
+  enrollment?: { id: string; status: string; enrollmentType: string; admissionDate: string } | null;
   conversionSummary?: { carried: string[]; overridden: string[] };
 }
 

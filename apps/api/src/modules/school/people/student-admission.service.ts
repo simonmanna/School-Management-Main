@@ -86,8 +86,15 @@ export interface AdmissionPlacement {
   effectiveFrom?: string | null;
   overrideCapacity?: boolean;
   overrideReason?: string;
-  /** NEW by default; TRANSFER_IN for a learner arriving from another school. */
-  enrollmentType?: 'NEW' | 'TRANSFER_IN';
+  /**
+   * NEW by default; TRANSFER_IN for a learner arriving from another school;
+   * RE_ENTRY / CONTINUING for an existing pupil admitted again.
+   */
+  enrollmentType?: 'NEW' | 'TRANSFER_IN' | 'RE_ENTRY' | 'CONTINUING';
+  /** PENDING or ACTIVE (default). */
+  status?: 'PENDING' | 'ACTIVE';
+  /** Stored on the StudentEnrollment. */
+  notes?: string | null;
 }
 
 /** Everything needed to create a learner (Partner + StudentProfile) and seat them. */
@@ -328,6 +335,8 @@ export class StudentAdmissionService {
           academicYearId: term.academicYearId,
           admissionDate,
           enrollmentType: input.placement.enrollmentType ?? 'NEW',
+          status: input.placement.status ?? 'ACTIVE',
+          notes: input.placement.notes ?? undefined,
           admissionApplicationId: input.applicationId ?? undefined,
           placement: {
             termId: term.id,
@@ -456,6 +465,8 @@ export class StudentAdmissionService {
         academicYearId: term.academicYearId,
         admissionDate,
         enrollmentType: input.placement.enrollmentType ?? 'RE_ENTRY',
+        status: input.placement.status ?? 'ACTIVE',
+        notes: input.placement.notes ?? undefined,
         admissionApplicationId: input.applicationId ?? undefined,
         placement: {
           termId: term.id,

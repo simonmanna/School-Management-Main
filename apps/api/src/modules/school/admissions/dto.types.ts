@@ -7,6 +7,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsISO8601,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -14,6 +15,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -161,6 +163,16 @@ export class GuardianDto {
   @IsOptional() @IsBoolean() receivesStatements?: boolean;
 }
 
+export class PreviousSchoolDto {
+  @IsOptional() @IsString() @MaxLength(200) name?: string;
+  @IsOptional() @IsString() @MaxLength(200) location?: string;
+  @IsOptional() @IsString() @MaxLength(60) lastClass?: string;
+  @IsOptional() @IsString() @MaxLength(20) lastYear?: string;
+  @IsOptional() @IsString() @MaxLength(120) transferCertificateRef?: string;
+}
+
+export const APPLICATION_ENROLLMENT_TYPES = ['NEW', 'TRANSFER_IN', 'RE_ENTRY', 'CONTINUING'] as const;
+
 export class EnrollApplicationDto {
   @IsString() @IsNotEmpty() applicationId!: string;
   @IsString() @IsNotEmpty() classId!: string;
@@ -175,7 +187,22 @@ export class EnrollApplicationDto {
 
   /** Required when `student` changes something the application already says. */
   @IsOptional() @IsBoolean() confirmOverrides?: boolean;
+
+  /**
+   * How the learner joins the year. An applicant is NEW or TRANSFER_IN; a
+   * confirmed existing pupil may re-enter (RE_ENTRY) or continue (CONTINUING).
+   */
+  @IsOptional() @IsIn([...APPLICATION_ENROLLMENT_TYPES]) enrollmentType?: (typeof APPLICATION_ENROLLMENT_TYPES)[number];
+  /** Effective enrollment date; the placement starts here (clamped to the term start). */
+  @IsOptional() @IsISO8601() enrollmentDate?: string;
+  /** PENDING or ACTIVE only — later statuses are reached through the enrollment FSM. */
+  @IsOptional() @IsIn(['PENDING', 'ACTIVE']) enrollmentStatus?: 'PENDING' | 'ACTIVE';
+  /** Enrollment remarks and internal notes, stored on the StudentEnrollment. */
+  @IsOptional() @IsString() @MaxLength(4000) notes?: string;
+  /** Where a new or transfer-in learner came from. Stored on the learner record. */
+  @IsOptional() @ValidateNested() @Type(() => PreviousSchoolDto) previousSchool?: PreviousSchoolDto;
 }
+
 
 export class ScheduleInterviewDto {
   @IsOptional() @IsString() interviewerId?: string;

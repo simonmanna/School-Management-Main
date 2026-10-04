@@ -923,6 +923,14 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         throw new BadRequestException('The applicant is confirmed as more than one existing pupil. Dismiss the wrong match.');
       }
       const existingStudentProfileId = (confirmed[0] as string | undefined) ?? null;
+      // Re-entry and continuing describe a learner the school already has. A
+      // brand-new applicant claiming either would mint a fresh pupil labelled
+      // as a returner — the history reports would then be wrong.
+      if (!existingStudentProfileId && (dto.enrollmentType === 'RE_ENTRY' || dto.enrollmentType === 'CONTINUING')) {
+        throw new BadRequestException(
+          'Re-entry and continuing enrollments are for an existing pupil. Confirm the identity match first, or enrol as a new admission or transfer-in.',
+        );
+      }
 
       // Concurrency-safe seat claim. `claimedSeats` is the SINGLE seat ledger (see the
       // capacity state contract on `resolveCapacity`): it counts every seat consumed by a
@@ -961,6 +969,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         // Separate admission/student numbers: admissionNo is generated (STU-...)
         // unless explicitly supplied; do NOT reuse applicationNumber.
         admissionNo: undefined,
+        enrollmentDate: dto.enrollmentDate ?? null,
         customFields: mapped.customFields,
         guardians: dto.student?.guardians,
         existingStudentProfileId,
@@ -969,6 +978,11 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
           classId: dto.classId,
           sectionId: dto.sectionId ?? null,
           rollNumber: dto.rollNumber,
+          effectiveFrom: dto.enrollmentDate ?? null,
+          // Unset keeps the path defaults: NEW for a new pupil, RE_ENTRY for an existing one.
+          enrollmentType: dto.enrollmentType,
+          status: dto.enrollmentStatus ?? 'ACTIVE',
+          notes: dto.notes?.trim() || null,
         },
       };
 
@@ -981,6 +995,7 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
       // customFields and were dropped on the floor at enrollment, so every
       // enrolled student had zero guardians (no fee payer, no emergency contact).
       await this.promoteGuardians(tx, app.id, organizationId, profile.partnerId, profile.id);
+      await this.recordPreviousSchool(tx, profile, app, dto, !!existingStudentProfileId);
       await this.copyApplicationDocuments(tx, app.id, profile.id);
       // Re-audit #3 P1-16: the application fee follows the pupil onto their own
       // statement, portal and clearance.
@@ -1011,6 +1026,27 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
         conversionSummary: mapped.summary,
       };
     });
+  }
+
+  /**
+   * Previous-school details live on the learner record (they describe the
+   * child, not this year's membership), under the system key `previousSchool`.
+   * The family's free-text answer on the public form seeds the name. Blank
+   * input leaves an existing record untouched.
+   */
+  private async recordPreviousSchool(tx: any, profile: any, app: any, dto: EnrollApplicationDto, returning: boolean) {
+    const given = dto.previousSchool ?? {};
+    // A returning pupil's record already says where they came from.
+    const fromApp = !returning && typeof app.customFields?.previousSchool === 'string' ? app.customFields.previousSchool : undefined;
+    const entry = Object.fromEntries(
+      Object.entries({ name: fromApp, ...given })
+        .map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v])
+        .filter(([, v]) => v),
+    );
+    if (!Object.keys(entry).length) return;
+    const current = await tx.studentProfile.findFirst({ where: { id: profile.id }, select: { customFields: true } });
+    const customFields = { ...((current?.customFields as Record<string, unknown>) ?? {}), previousSchool: entry };
+    await tx.studentProfile.update({ where: { id: profile.id }, data: { customFields } });
   }
 
   /**

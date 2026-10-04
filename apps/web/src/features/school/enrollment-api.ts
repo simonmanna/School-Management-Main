@@ -214,6 +214,29 @@ export function useGradeLevels() {
   });
 }
 
+/** A band of grades (Nursery, Primary, …) with its grades, in display order. */
+export interface AcademicLevel {
+  id: string;
+  name: string;
+  code?: string;
+  displayOrder?: number;
+  gradeLevels?: Array<{ id: string; name: string; order: number }>;
+}
+
+export function useAcademicLevels() {
+  return useQuery({
+    queryKey: ['school', 'academic-levels'],
+    queryFn: async () => {
+      const res = await api.get<{ data?: AcademicLevel[] } | AcademicLevel[]>(`${S}/academic-levels`, {
+        params: { pageSize: 200 },
+      });
+      const body = res.data;
+      const rows: AcademicLevel[] = Array.isArray(body) ? body : (body?.data ?? []);
+      return [...rows].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+    },
+  });
+}
+
 /* ───────────────────────────── Programmes ──────────────────────────── */
 
 export function useProgrammes(includeInactive = false) {
