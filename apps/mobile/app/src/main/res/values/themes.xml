@@ -1,0 +1,19 @@
+<resources>
+    <!--
+      Colour, type and shape all live in Compose (ui/theme). This XML theme exists
+      only so the window the activity opens into is already the right colour and
+      edge-to-edge, which is what stops the white flash before the first frame.
+    -->
+    <style name="Theme.SchoolPortal" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.SchoolPortal.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/brand</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_crest</item>
+        <item name="postSplashScreenTheme">@style/Theme.SchoolPortal</item>
+    </style>
+</resources>

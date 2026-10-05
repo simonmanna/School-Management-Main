@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A mortarboard: the one mark that reads as "school" at launcher size. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30L28,41.5L54,53L80,41.5Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,48.5L36,63C36,63 43,70 54,70C65,70 72,63 72,63L72,48.5L54,57Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,45L78,62L82,62L82,45Z" />
+</vector>
