@@ -28,6 +28,7 @@ const NAV = [
   { to: '/academics', label: 'Academics' },
   { to: '/admissions', label: 'Admissions' },
   { to: '/news', label: 'News' },
+  { to: '/gallery', label: 'Gallery' },
   { to: '/contact', label: 'Contact' },
 ];
 

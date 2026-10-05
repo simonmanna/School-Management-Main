@@ -122,8 +122,14 @@ export class TransportEnrollmentService {
   async listAssignments(studentProfileId?: string) {
     return this.prisma.client.studentTransportAssignment.findMany({
       where: { organizationId: this.orgId, ...(studentProfileId ? { studentProfileId } : {}) },
-      orderBy: { createdAt: 'desc' },
-      include: { student: true, route: true, stop: true, pickupStop: true, dropoffStop: true },
+      orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        student: { include: { partner: { select: { name: true } } } },
+        route: true,
+        stop: { include: { zone: true } },
+        pickupStop: true,
+        dropoffStop: true,
+      },
     });
   }
   async getAssignment(id: string) {

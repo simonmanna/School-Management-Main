@@ -12,7 +12,7 @@ export class SchoolPolicyService extends BaseCrudService<
 > {
   protected readonly entityName = 'SchoolPolicy';
   protected readonly searchFields = ['key', 'name', 'category'];
-  protected readonly defaultOrderBy = { category: 'asc' as const, key: 'asc' as const };
+  protected readonly defaultOrderBy: Array<Record<string, 'asc' | 'desc'>> = [{ category: 'asc' }, { key: 'asc' }];
 
   constructor(prisma: PrismaService) {
     super(prisma.client.schoolPolicy as unknown as CrudDelegate);

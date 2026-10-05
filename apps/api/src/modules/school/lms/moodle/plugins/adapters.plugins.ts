@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { CourseModule } from '@prisma/client';
 import { PrismaService } from '../../../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../../../kernel/tenancy/tenant-context.service';
@@ -7,6 +7,7 @@ import { LmsGradeBridgeService } from '../grade/grade-bridge.service';
 import { BaseActivityPlugin } from './plugin-base';
 import { LmsFileService } from '../files/lms-file.service';
 import type { CompletionState, GradeDefinition, PluginCtx } from '../plugin.types';
+import { CAP } from '../capabilities';
 
 /**
  * mod_assign (ADR-014 §4) — gradable. Stores only the submission artefact; the mark
@@ -294,9 +295,89 @@ export class ModForumPlugin extends BaseActivityPlugin {
           data: { organizationId: this.org, discussionId, authorId: ctx.userId ?? null, parentPostId: (dto.parentPostId as string) ?? null, body: (dto.body as string) ?? '' },
         });
       }
+      // ── Moderation. ──
+      //
+      // A primary-school forum is read by children, so a teacher needs to be
+      // able to shut a thread or remove a post without waiting for an
+      // administrator. These verbs arrive on the same route as `reply`, which
+      // is guarded only by `activityView` — every enrolled learner holds that —
+      // so each one re-checks `mod/forum:manage` against the capability set the
+      // spine resolved. Without that check, adding them here would have let any
+      // pupil lock a thread or delete a classmate's post.
+      case 'lock':
+      case 'unlock': {
+        this.assertMayManage(ctx);
+        const disc = await this.requireDiscussion(dto.discussionId as string, cm.id);
+        return this.db.discussion.update({
+          where: { id: disc.id },
+          data: { locked: action === 'lock' },
+        });
+      }
+      case 'pin':
+      case 'unpin': {
+        this.assertMayManage(ctx);
+        const disc = await this.requireDiscussion(dto.discussionId as string, cm.id);
+        return this.db.discussion.update({
+          where: { id: disc.id },
+          data: { pinned: action === 'pin' },
+        });
+      }
+      case 'deletePost': {
+        const postId = dto.postId as string;
+        if (!postId) throw new BadRequestException('deletePost requires postId');
+        const post = await this.db.discussionPost.findFirst({
+          where: { id: postId, organizationId: this.org },
+          include: { discussion: true },
+        });
+        if (!post || post.discussion?.courseModuleId !== cm.id) {
+          throw new NotFoundException('Post not found in this forum');
+        }
+        // An author may retract their own post; anyone else needs the
+        // moderation capability.
+        const isAuthor = Boolean(ctx.userId && post.authorId === ctx.userId);
+        if (!isAuthor) this.assertMayManage(ctx);
+        // A hard delete: DiscussionPost carries no deletedAt, and a thread whose
+        // replies are gone must not keep orphaned children — the self-relation
+        // is by id, so the children are re-parented to this post's parent
+        // rather than disappearing with it.
+        await this.db.discussionPost.updateMany({
+          where: { parentPostId: post.id },
+          data: { parentPostId: post.parentPostId },
+        });
+        await this.db.discussionPost.delete({ where: { id: post.id } });
+        return { ok: true, deletedPostId: post.id };
+      }
+      case 'deleteDiscussion': {
+        this.assertMayManage(ctx);
+        const disc = await this.requireDiscussion(dto.discussionId as string, cm.id);
+        // Soft, unlike a post: Discussion has `deletedAt`, and a removed thread
+        // is the kind of thing a head teacher later asks to see.
+        return this.db.discussion.update({
+          where: { id: disc.id },
+          data: { deletedAt: new Date() },
+        });
+      }
       default:
         throw new BadRequestException(`Unknown mod_forum action '${action}'`);
     }
+  }
+
+  /** Moderation needs `mod/forum:manage`, whatever else the caller holds. */
+  private assertMayManage(ctx: PluginCtx): void {
+    if (!ctx.capabilities?.[CAP.forumManage]) {
+      throw new ForbiddenException('You cannot moderate this discussion');
+    }
+  }
+
+  private async requireDiscussion(discussionId: string, courseModuleId: string) {
+    if (!discussionId) throw new BadRequestException('This action requires discussionId');
+    const disc = await this.db.discussion.findFirst({
+      where: { id: discussionId, organizationId: this.org, courseModuleId, deletedAt: null },
+    });
+    // Scoped to THIS forum: the capability was resolved against this activity's
+    // course, so a thread from another course must not be reachable by id.
+    if (!disc) throw new NotFoundException('Discussion not found in this forum');
+    return disc;
   }
 
   async evaluateCompletion(ctx: PluginCtx, cm: CourseModule): Promise<CompletionState> {

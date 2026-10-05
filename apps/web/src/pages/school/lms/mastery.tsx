@@ -38,7 +38,7 @@ export function SchoolLmsMasteryPage() {
           <CardContent className="space-y-2">{!mastery?.length && <p className="text-sm text-muted-foreground">No computed mastery yet.</p>}
             {mastery?.map((m: any) => (
               <div key={m.id} className="rounded-md border px-3 py-2 text-sm flex items-center justify-between">
-                <span className="font-mono text-xs">{m.learningObjectiveId.slice(0, 8)} · {m.studentProfileId.slice(0, 8)}</span>
+                <span className="min-w-0 truncate"><span className="font-medium">{m.studentName ?? m.studentProfileId.slice(0, 8)}</span><span className="text-muted-foreground"> · {m.objective ?? m.learningObjectiveId.slice(0, 8)}</span></span>
                 <div className="flex items-center gap-2"><div className="h-2 w-24 overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.min(100, Number(m.masteryPct))}%` }} /></div><Badge variant="outline">{Number(m.masteryPct).toFixed(0)}%</Badge></div>
               </div>
             ))}</CardContent></Card>
@@ -46,7 +46,7 @@ export function SchoolLmsMasteryPage() {
           <CardContent className="space-y-2">{!progress?.length && <p className="text-sm text-muted-foreground">No course progress yet.</p>}
             {progress?.map((p: any) => (
               <div key={p.id} className="rounded-md border px-3 py-2 text-sm flex items-center justify-between">
-                <span className="font-mono text-xs">{p.courseOfferingId.slice(0, 8)} · {p.studentProfileId.slice(0, 8)}</span>
+                <span className="min-w-0 truncate"><span className="font-medium">{p.studentName ?? p.studentProfileId.slice(0, 8)}</span><span className="text-muted-foreground"> · {p.courseName ?? p.courseOfferingId.slice(0, 8)}</span></span>
                 <Badge variant="outline">{Number(p.progressPct).toFixed(0)}%</Badge>
               </div>
             ))}</CardContent></Card>

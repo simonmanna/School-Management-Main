@@ -339,4 +339,49 @@ export class LmsOpsController {
   rollover(@Body() dto: { fromTermId: string; toTermId: string; offeringIds?: string[] }) {
     return this.backup.rollover(dto);
   }
+
+  // ── Course templates (ADR-034) ──
+  //
+  // A template is a named, structure-only course bundle. Saving one is a read of
+  // the course plus a write of the template, so it is gated by the same
+  // `courseBackup` capability as an export; applying one writes a course's
+  // structure, so it needs the authoring capability.
+
+  @Post('courses/:id/save-as-template')
+  @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseBackup, 'courseParam')
+  saveAsTemplate(
+    @Param('id') id: string,
+    @Body() dto: { name: string; code?: string; description?: string; coverImageFileId?: string },
+  ) {
+    return this.backup.saveAsTemplate(id, dto);
+  }
+
+  /** Listing omits each template's bundle, which can be hundreds of kilobytes. */
+  @Get('course-templates')
+  @RequirePermissions(PERMISSIONS.school.lmsRead)
+  listTemplates(@Query('subjectId') subjectId?: string, @Query('gradeLevelId') gradeLevelId?: string) {
+    return this.backup.listTemplates({ subjectId, gradeLevelId });
+  }
+
+  @Get('course-templates/:id')
+  @RequirePermissions(PERMISSIONS.school.manageCourses)
+  getTemplate(@Param('id') id: string) {
+    return this.backup.getTemplate(id);
+  }
+
+  @Delete('course-templates/:id')
+  @RequirePermissions(PERMISSIONS.school.manageCourses)
+  deleteTemplate(@Param('id') id: string) {
+    return this.backup.deleteTemplate(id);
+  }
+
+  @Post('courses/:id/apply-template')
+  @RequirePermissions(PERMISSIONS.school.manageCourses)
+  @UseGuards(LmsCapabilityGuard)
+  @RequireCapability(CAP.courseManageActivities, 'courseParam')
+  applyTemplate(@Param('id') id: string, @Body() dto: { templateId: string }) {
+    return this.backup.applyTemplate(id, dto.templateId);
+  }
 }

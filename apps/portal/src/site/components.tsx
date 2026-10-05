@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { PHOTOS, type PhotoKey } from '@/site/content';
 
 /**
  * Public-site primitives.
@@ -278,10 +279,9 @@ export function Reveal({
 /**
  * The background behind dark sections and the hero.
  *
- * Drawn rather than photographed. A school site normally leans on stock
- * photography, and shipping a 400 KB hero image to a parent on mobile data to
- * decorate a page they opened to find a phone number is the wrong trade. This
- * is a few hundred bytes of SVG and gradient.
+ * A few hundred bytes of SVG and gradient. Pages that open on a photograph
+ * (`PageHero image`, the home hero) lay this over the photo as a tint, so the
+ * brand colour still carries the white text when the photo is busy or fails.
  */
 export function BrandBackdrop({ className }: { className?: string }) {
   // The home page draws this twice (hero and closing band). A hard-coded pattern
@@ -332,6 +332,57 @@ export function Crest({ className }: { className?: string }) {
       />
       <path d="M12.5 19.5 18 25l10-11" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+/* ── Photography ── */
+
+/** Public URL of one size of a photo. */
+function photoSrc(key: PhotoKey, size: 'lg' | 'sm' = 'lg'): string {
+  return `/site/photos/${key}-${size}.webp`;
+}
+
+/**
+ * A responsive, self-hosted photo.
+ *
+ * Both widths go in `srcset` with an honest `sizes`, so a phone takes the 720px
+ * file and a desktop the 1440px one. Width and height are always set from the
+ * manifest: the browser reserves the box before the bytes arrive, and the text
+ * underneath never jumps. Lazy unless `priority` — only the hero is above the fold.
+ */
+export function Photo({
+  photo,
+  sizes = '(min-width: 1024px) 50vw, 100vw',
+  priority = false,
+  className,
+  imgClassName,
+  alt,
+}: {
+  photo: PhotoKey;
+  sizes?: string;
+  priority?: boolean;
+  className?: string;
+  imgClassName?: string;
+  /** Override the manifest's alt text; pass '' for a purely decorative use. */
+  alt?: string;
+}) {
+  const meta = PHOTOS[photo];
+  return (
+    <div className={cn('overflow-hidden bg-muted', className)}>
+      <img
+        src={photoSrc(photo, 'lg')}
+        srcSet={`${photoSrc(photo, 'sm')} 720w, ${photoSrc(photo, 'lg')} 1440w`}
+        sizes={sizes}
+        width={meta.w}
+        height={meta.h}
+        alt={alt ?? meta.alt}
+        loading={priority ? 'eager' : 'lazy'}
+        decoding="async"
+        // React 18 does not know the camelCase prop; the lowercase attribute passes through.
+        {...(priority ? { fetchpriority: 'high' } : {})}
+        className={cn('h-full w-full object-cover', imgClassName)}
+      />
+    </div>
   );
 }
 

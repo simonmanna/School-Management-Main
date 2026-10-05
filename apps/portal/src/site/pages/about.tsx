@@ -1,7 +1,7 @@
 import { ArrowRight, Compass, HeartHandshake, Target } from 'lucide-react';
-import { LEADERSHIP, SITE, STATS, WHY_US } from '@/site/content';
+import { HEAD_MESSAGE, LEADERSHIP, SITE, STATS, WHY_US } from '@/site/content';
 import {
-  BrandBackdrop, Container, CtaLink, IconPlate, Panel, Reveal, Section, SectionHeading,
+  BrandBackdrop, Container, CtaLink, IconPlate, Panel, Photo, Reveal, Section, SectionHeading,
 } from '@/site/components';
 import { usePageTitle } from '@/site/site-shell';
 import { PageHero } from '@/site/pages/_hero';
@@ -32,6 +32,7 @@ export default function AboutPage() {
       <PageHero
         eyebrow="About us"
         title={`A school built around the child, not the timetable`}
+        image="campus"
         lede={`${SITE.name} has taught in Kampala since ${SITE.foundedYear}. One campus, nursery to A-Level, day and boarding — small enough that the head knows the pupils, large enough to run three science laboratories and a full games programme.`}
       />
 
@@ -62,18 +63,53 @@ export default function AboutPage() {
             </div>
 
             <div className="space-y-4">
-              {STATS.map((s, i) => (
-                <Reveal key={s.label} delay={i * 60}>
-                  <div className="flex items-baseline justify-between gap-4 rounded-2xl border bg-card px-6 py-5">
-                    <div>
-                      <div className="font-semibold">{s.label}</div>
+              <Reveal>
+                <div className="grid grid-cols-5 gap-3">
+                  <Photo
+                    photo="classroom-full"
+                    className="col-span-3 aspect-[3/4] rounded-2xl"
+                    sizes="(min-width: 1024px) 300px, 60vw"
+                  />
+                  <div className="col-span-2 grid gap-3">
+                    <Photo photo="girl-reading" className="aspect-square rounded-2xl" sizes="(min-width: 1024px) 200px, 40vw" />
+                    <Photo photo="graduation" className="aspect-square rounded-2xl" sizes="(min-width: 1024px) 200px, 40vw" />
+                  </div>
+                </div>
+              </Reveal>
+              <div className="grid grid-cols-2 gap-3">
+                {STATS.map((s, i) => (
+                  <Reveal key={s.label} delay={i * 60}>
+                    <div className="h-full rounded-2xl border bg-card px-5 py-4">
+                      <div className="font-display text-2xl font-bold tabular-nums text-primary">{s.value}</div>
+                      <div className="pt-1 text-sm font-semibold">{s.label}</div>
                       <div className="pt-0.5 text-xs text-muted-foreground">{s.sub}</div>
                     </div>
-                    <div className="font-display text-3xl font-bold tabular-nums text-primary">{s.value}</div>
-                  </div>
-                </Reveal>
-              ))}
+                  </Reveal>
+                ))}
+              </div>
             </div>
+          </div>
+        </Container>
+      </Section>
+
+      {/* ── The head's welcome ── */}
+      <Section tone="brand" className="relative isolate overflow-hidden">
+        <BrandBackdrop className="text-white" />
+        <Container className="relative">
+          <div className="grid items-center gap-10 lg:grid-cols-[1fr_1.2fr] lg:gap-16">
+            <Reveal>
+              <Photo photo="hero-classroom" className="aspect-[4/3] rounded-3xl shadow-2xl" sizes="(min-width: 1024px) 480px, 100vw" />
+            </Reveal>
+            <Reveal delay={80}>
+              <SectionHeading invert eyebrow="From the head" title="Ordinary days, done well" />
+              <div className="space-y-4 pt-6 text-base leading-relaxed text-white/80">
+                {HEAD_MESSAGE.paragraphs.map((p, i) => (
+                  <p key={i}>{p}</p>
+                ))}
+              </div>
+              <p className="pt-6 font-display text-lg font-bold">{HEAD_MESSAGE.name}</p>
+              <p className="text-sm text-white/65">{HEAD_MESSAGE.role}</p>
+            </Reveal>
           </div>
         </Container>
       </Section>

@@ -1,7 +1,9 @@
-import { BookOpen, CalendarClock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BookOpen, CalendarClock, ChevronRight } from 'lucide-react';
 import { useAuthStore, useActiveStudent } from '@/stores/auth.store';
 import { useMyCourses, useDueSoon, type DueItem } from '@/lib/portal-api';
 import { Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, Badge } from '@/components/ui';
+import { coursePath, modulePath } from '@/lib/learner-paths';
 
 /**
  * Courses and what is due.
@@ -9,6 +11,9 @@ import { Card, CardContent, CardHeader, CardTitle, Skeleton, Empty, PageTitle, B
  * Reads `school/lms/my/*`, which resolves the learner from the token and accepts
  * `asStudent` only for a guardian naming one of their own children. Progress is
  * real completion, not "modules that exist".
+ *
+ * Every card is a way in: the list used to be the end of the road, so a pupil
+ * could see that homework existed and had no screen on which to do it.
  */
 export default function StudentCourses() {
   const kind = useAuthStore((s) => s.portal?.kind);
@@ -19,7 +24,7 @@ export default function StudentCourses() {
   const { data: courses, isLoading, isError, error, refetch } = useMyCourses(asStudent);
   const { data: due } = useDueSoon(asStudent);
 
-  const dueItems: DueItem[] = Array.isArray(due) ? due : due?.items ?? [];
+  const dueItems: DueItem[] = Array.isArray(due) ? due : (due as any)?.items ?? [];
 
   if (isLoading) return <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>;
 
@@ -50,9 +55,8 @@ export default function StudentCourses() {
           </CardHeader>
           <CardContent className="space-y-2 pt-0">
             {dueItems.map((d) => {
-              const overdue = d.dueAt ? new Date(d.dueAt) < new Date() : false;
-              return (
-                <div key={d.id} className="flex items-center gap-2 rounded-lg border p-3">
+              const row = (
+                <div className="flex items-center gap-2 rounded-lg border p-3">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{d.name}</div>
                     <div className="truncate text-xs text-muted-foreground">
@@ -60,10 +64,17 @@ export default function StudentCourses() {
                       {d.dueAt && ` · ${new Date(d.dueAt).toLocaleDateString()}`}
                     </div>
                   </div>
-                  {d.submitted
-                    ? <Badge variant="success">handed in</Badge>
-                    : <Badge variant={overdue ? 'destructive' : 'warning'}>{overdue ? 'overdue' : 'due'}</Badge>}
+                  <Badge variant={d.overdue ? 'destructive' : 'warning'}>{d.overdue ? 'overdue' : 'due'}</Badge>
                 </div>
+              );
+              // Everything on this list is still to do — the server has already
+              // dropped work that is handed in, hidden or not yet open.
+              return d.courseId ? (
+                <Link key={d.id} to={modulePath(kind, d.courseId, d.id)} className="block">
+                  {row}
+                </Link>
+              ) : (
+                <div key={d.id}>{row}</div>
               );
             })}
           </CardContent>
@@ -79,27 +90,37 @@ export default function StudentCourses() {
       ) : (
         <div className="space-y-2">
           {list.map((c) => (
-            <Card key={c.courseOfferingId}>
-              <CardContent className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{c.name}</div>
-                    {c.shortName && <div className="truncate text-xs text-muted-foreground">{c.shortName}</div>}
+            <Link key={c.id} to={coursePath(kind, c.id)} className="block">
+              <Card>
+                <CardContent className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{c.name}</div>
+                      {c.subject && <div className="truncate text-xs text-muted-foreground">{c.subject}</div>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="text-sm font-semibold tabular-nums">
+                        {Math.round(c.progress?.percent ?? 0)}%
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold tabular-nums">{c.progressPercent}%</span>
-                </div>
-                <div
-                  className="h-2 w-full overflow-hidden rounded-full bg-muted"
-                  role="progressbar"
-                  aria-valuenow={c.progressPercent}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label={`${c.name} progress`}
-                >
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${c.progressPercent}%` }} />
-                </div>
-              </CardContent>
-            </Card>
+                  <div
+                    className="h-2 w-full overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-valuenow={Math.round(c.progress?.percent ?? 0)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${c.name} progress`}
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${c.progress?.percent ?? 0}%` }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
       )}

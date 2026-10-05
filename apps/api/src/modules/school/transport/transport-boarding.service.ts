@@ -98,12 +98,25 @@ export class TransportBoardingService {
           sequence: ev.sequence ?? null,
         },
       });
-      // Manifest status follows the latest event.
-      const status = ev.eventType === 'board' ? 'boarded' : ev.eventType === 'drop_off' ? 'dropped_off' : (ev.eventType as any);
-      await tx.transportTripPassenger.updateMany({
-        where: { tripId, studentProfileId: ev.studentProfileId },
-        data: { status },
-      });
+      // Manifest status follows the latest event. The event vocabulary is wider
+      // than the manifest's: an `absent` pupil (parent told the school) is
+      // excused, a `refused` boarding counts as a no-show, and a manual override
+      // records a correction without changing where the pupil is. Writing the
+      // event type straight through failed the whole sync on the first absence.
+      const PASSENGER_STATUS: Record<string, 'boarded' | 'dropped_off' | 'no_show' | 'excused'> = {
+        board: 'boarded',
+        drop_off: 'dropped_off',
+        no_show: 'no_show',
+        refused: 'no_show',
+        absent: 'excused',
+      };
+      const status = PASSENGER_STATUS[ev.eventType];
+      if (status) {
+        await tx.transportTripPassenger.updateMany({
+          where: { tripId, studentProfileId: ev.studentProfileId },
+          data: { status },
+        });
+      }
     });
 
     this.publishBoarding(orgId, tripId, ev);

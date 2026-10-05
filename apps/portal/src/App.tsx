@@ -38,6 +38,7 @@ const AdmissionsPage = lazy(() => import('@/site/pages/admissions'));
 const NewsPage = lazy(() => import('@/site/pages/news'));
 const NewsItemPage = lazy(() => import('@/site/pages/news-item'));
 const ContactPage = lazy(() => import('@/site/pages/contact'));
+const GalleryPage = lazy(() => import('@/site/pages/gallery'));
 const PortalsPage = lazy(() => import('@/site/pages/portals'));
 const VerifyPage = lazy(() => import('@/site/pages/verify'));
 const ApplyPage = lazy(() => import('@/site/pages/apply'));
@@ -55,9 +56,16 @@ const ParentFees = lazy(() => import('@/routes/parent/fees'));
 const ParentAttendance = lazy(() => import('@/routes/parent/attendance'));
 const ParentResults = lazy(() => import('@/routes/parent/results'));
 const ParentGoingHome = lazy(() => import('@/routes/parent/going-home'));
+const ParentLearning = lazy(() => import('@/routes/parent/learning'));
 
 const StudentHome = lazy(() => import('@/routes/student/home'));
 const StudentCourses = lazy(() => import('@/routes/student/courses'));
+// The course page and activity page are mounted under BOTH /student and
+// /parent: they are the same screens, but `RequireAudience` keeps a guardian
+// out of /student entirely, so a shared URL would bounce them.
+const StudentCourse = lazy(() => import('@/routes/student/course'));
+const StudentModule = lazy(() => import('@/routes/student/module'));
+const StudentQuiz = lazy(() => import('@/routes/student/quiz'));
 const StudentResults = lazy(() => import('@/routes/student/results'));
 const StudentAttendance = lazy(() => import('@/routes/student/attendance'));
 
@@ -83,6 +91,7 @@ export default function App() {
           <Route path="/admissions" element={SITE_READY ? <AdmissionsPage /> : <UnconfiguredSitePage />} />
           <Route path="/news" element={SITE_READY ? <NewsPage /> : <UnconfiguredSitePage />} />
           <Route path="/news/:slug" element={SITE_READY ? <NewsItemPage /> : <UnconfiguredSitePage />} />
+          <Route path="/gallery" element={SITE_READY ? <GalleryPage /> : <UnconfiguredSitePage />} />
           <Route path="/contact" element={SITE_READY ? <ContactPage /> : <UnconfiguredSitePage />} />
           <Route path="/portals" element={<PortalsPage />} />
           <Route path="/verify" element={<VerifyPage />} />
@@ -114,6 +123,11 @@ export default function App() {
               <Route path="attendance" element={<ParentAttendance />} />
               <Route path="results" element={<ParentResults />} />
               <Route path="going-home" element={<ParentGoingHome />} />
+              <Route path="learning" element={<ParentLearning />} />
+              {/* Read-only: the API refuses a guardian submitting work, ticking
+                  completion or sitting a quiz, so there is no quiz route here. */}
+              <Route path="learning/courses/:id" element={<StudentCourse />} />
+              <Route path="learning/courses/:cid/modules/:id" element={<StudentModule />} />
               <Route path="notices" element={<PortalNotices />} />
             </Route>
           </Route>
@@ -122,6 +136,9 @@ export default function App() {
             <Route path="/student" element={<PortalShell audience="student" />}>
               <Route index element={<StudentHome />} />
               <Route path="courses" element={<StudentCourses />} />
+              <Route path="courses/:id" element={<StudentCourse />} />
+              <Route path="courses/:cid/modules/:id" element={<StudentModule />} />
+              <Route path="quiz/:id" element={<StudentQuiz />} />
               <Route path="results" element={<StudentResults />} />
               <Route path="attendance" element={<StudentAttendance />} />
               <Route path="notices" element={<PortalNotices />} />

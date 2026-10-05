@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { PortalContext } from '@/stores/auth.store';
+import type { CourseHeader, CourseModuleView, CoursePageView, ModuleViewEnvelope } from '@/lib/lms-types';
 
 /**
  * Every endpoint the portal talks to.
@@ -370,11 +371,17 @@ export function useStudentDashboard(studentProfileId?: string) {
 
 /* ── LMS ("my learning") — already self-scoped, `asStudent` is re-checked ── */
 
-export interface MyCourse {
-  courseOfferingId: string;
-  name: string;
-  progressPercent: number;
-  shortName?: string | null;
+/**
+ * One enrolled course.
+ *
+ * The server returns the course header spread with its progress
+ * (`learner.service.ts#myCourses`), so `id` is the course offering's id and the
+ * figure to show is `progress.percent`. An earlier shape here claimed
+ * `courseOfferingId` and `progressPercent`, neither of which the API sends —
+ * which is why the course list rendered "undefined%".
+ */
+export interface MyCourse extends CourseHeader {
+  progress: { completed: number; tracked: number; percent: number };
 }
 
 export function useMyCourses(asStudent?: string) {
@@ -389,12 +396,18 @@ export function useMyCourses(asStudent?: string) {
   });
 }
 
-export interface DueItem {
-  id: string;
-  name: string;
-  dueAt: string | null;
-  courseName?: string | null;
-  submitted?: boolean;
+/**
+ * A piece of work that is actually actionable.
+ *
+ * The server already drops anything hidden, unavailable, handed in or marked,
+ * so there is no `submitted` flag to read — if it is in this list, it is still
+ * to do. It is a module view spread with its course, so it carries completion,
+ * availability and grade too.
+ */
+export interface DueItem extends CourseModuleView {
+  courseId: string | null;
+  courseName: string | null;
+  overdue: boolean;
 }
 
 export function useDueSoon(asStudent?: string, days = 14) {
@@ -406,6 +419,229 @@ export function useDueSoon(asStudent?: string, days = 14) {
           params: { ...(asStudent ? { asStudent } : {}), days },
         })
       ).data,
+  });
+}
+
+/**
+ * Marks that have actually been released.
+ *
+ * The server returns only APPROVED marks whose assessment is past its release
+ * date (`learner.service.ts#recentGrades`), so nothing on this list is
+ * provisional. `score` can still be null for a mark approved without a figure.
+ */
+export interface ReleasedGrade {
+  assessmentId: string;
+  title: string;
+  score: number | null;
+  maxScore: number;
+  percentage: number | null;
+  at: string;
+}
+
+export function useRecentGrades(asStudent?: string) {
+  return useQuery({
+    queryKey: ['portal', 'lms', 'grades', asStudent],
+    // The route takes no limit — the server fixes the window at ten.
+    queryFn: async () =>
+      (
+        await api.get<ReleasedGrade[]>(`${S}/lms/my/grades`, {
+          params: asStudent ? { asStudent } : undefined,
+        })
+      ).data,
+  });
+}
+
+/* ── Course consumption ──────────────────────────────────────────────────── */
+
+/**
+ * The course page, the activity page, and the actions a learner may run.
+ *
+ * These are the same `school/lms/*` routes the staff app calls — not a second,
+ * learner-only API. The server resolves the subject from the token's portal
+ * claim and accepts `asStudent` only when a guardian names one of their own
+ * children, so what comes back is already scoped; the envelope's `viewingAs`
+ * says who the server thinks is looking.
+ */
+export function useCoursePage(courseId?: string, asStudent?: string) {
+  return useQuery({
+    queryKey: ['portal', 'lms', 'course', courseId, asStudent],
+    enabled: !!courseId,
+    queryFn: async () =>
+      (
+        await api.get<CoursePageView>(`${S}/lms/courses/${courseId}`, {
+          params: asStudent ? { asStudent } : undefined,
+        })
+      ).data,
+  });
+}
+
+export function useModuleView(moduleId?: string, asStudent?: string) {
+  return useQuery({
+    queryKey: ['portal', 'lms', 'module', moduleId, asStudent],
+    enabled: !!moduleId,
+    queryFn: async () =>
+      (
+        await api.get<ModuleViewEnvelope>(`${S}/lms/modules/${moduleId}/view`, {
+          params: asStudent ? { asStudent } : undefined,
+        })
+      ).data,
+  });
+}
+
+/**
+ * Run a plugin-defined verb on an activity — `submit` for homework, `post` for
+ * a forum reply. The action list belongs to the activity's plugin, so this
+ * takes the verb as data rather than exposing one hook per verb.
+ */
+export function useModuleAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      moduleId,
+      action,
+      body,
+      asStudent,
+    }: {
+      moduleId: string;
+      action: string;
+      body?: Record<string, unknown>;
+      asStudent?: string;
+    }) =>
+      (
+        await api.post(`${S}/lms/modules/${moduleId}/action/${action}`, {
+          ...(body ?? {}),
+          ...(asStudent ? { asStudent } : {}),
+        })
+      ).data,
+    // Progress, due lists and the course page all move when an activity does.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'lms'] }),
+  });
+}
+
+/** Tick (or untick) a manually-completed activity. */
+export function useSetCompletion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      moduleId,
+      state,
+      asStudent,
+    }: {
+      moduleId: string;
+      state: 'complete' | 'incomplete';
+      asStudent?: string;
+    }) =>
+      (
+        await api.post(`${S}/lms/modules/${moduleId}/completion`, {
+          state,
+          ...(asStudent ? { asStudent } : {}),
+        })
+      ).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['portal', 'lms'] }),
+  });
+}
+
+/* ── Files ───────────────────────────────────────────────────────────────── */
+
+export interface LmsFileRef {
+  id: string;
+  filename: string;
+  contentType?: string | null;
+  byteSize?: number | null;
+}
+
+/**
+ * Fetch a short-lived signed URL and hand the browser the download.
+ *
+ * The file id alone is not authority: the server checks the caller may see this
+ * file (a classmate's submission is not course content) before it signs
+ * anything, and the URL it returns expires.
+ */
+export async function downloadLmsFile(fileId: string, filename?: string): Promise<void> {
+  const { data } = await api.post<{ url: string; filename: string }>(`${S}/lms/files/${fileId}/url`);
+  const a = document.createElement('a');
+  a.href = data.url;
+  a.download = filename ?? data.filename ?? 'download';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** Upload one file and return the reference an activity action expects. */
+export async function uploadFile(file: File): Promise<LmsFileRef> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post<any>('/files/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return {
+    id: data.id,
+    filename: data.filename ?? data.originalName ?? file.name,
+    contentType: data.contentType ?? file.type,
+    byteSize: data.byteSize ?? file.size,
+  };
+}
+
+export function formatBytes(bytes?: number | null): string {
+  if (bytes === null || bytes === undefined) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* ── Sitting a quiz ──────────────────────────────────────────────────────── */
+
+/**
+ * The CBT engine owns attempt lifecycle, response persistence, marking and
+ * server-authoritative expiry. The portal navigates, autosaves and submits; it
+ * never scores anything and never decides that time is up.
+ */
+export function useStartAttempt() {
+  return useMutation({
+    /**
+     * `studentProfileId` is required by the DTO even though the server replaces
+     * a pupil's with their own and refuses anyone else's — so it is sent from
+     * the portal context, not trusted from it.
+     */
+    mutationFn: async (dto: { paperId: string; studentProfileId: string }) =>
+      (await api.post<any>(`${S}/cbt/start`, dto)).data,
+  });
+}
+
+export function useAttempt(attemptId?: string) {
+  return useQuery({
+    queryKey: ['portal', 'cbt', 'attempt', attemptId],
+    enabled: !!attemptId,
+    // The attempt is live state the learner is editing; refetching it under them
+    // would overwrite an answer they are part way through typing.
+    staleTime: Infinity,
+    queryFn: async () => (await api.get<any>(`${S}/cbt/attempts/${attemptId}`)).data,
+  });
+}
+
+export function useSaveResponse() {
+  return useMutation({
+    mutationFn: async (dto: {
+      attemptId: string;
+      questionId: string;
+      /** Shape is the marker's contract: {optionId} | {optionIds} | {value} | {text}. */
+      response: Record<string, unknown>;
+      sequenceNumber: number;
+      clientEventId?: string;
+    }) => (await api.post<any>(`${S}/cbt/response`, dto)).data,
+  });
+}
+
+export function useSubmitAttempt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { attemptId: string; idempotencyKey?: string }) =>
+      (await api.post<any>(`${S}/cbt/submit`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['portal', 'cbt'] });
+      qc.invalidateQueries({ queryKey: ['portal', 'lms'] });
+    },
   });
 }
 

@@ -153,8 +153,17 @@ export class TransportTripService {
   }
 
   async listTrips(date?: string) {
+    // A trip's `date` is the school's local midnight (generate() works in the
+    // server's zone), so `?date=2026-10-02` must match the day, not the instant
+    // 00:00Z — in Kampala that is 21:00 the previous evening. ±12h around UTC
+    // midnight covers every local midnight from UTC−12 to UTC+12.
+    let range: { gte: Date; lt: Date } | undefined;
+    if (date) {
+      const utcMidnight = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+      range = { gte: new Date(utcMidnight.getTime() - 12 * 3_600_000), lt: new Date(utcMidnight.getTime() + 12 * 3_600_000) };
+    }
     return this.prisma.client.transportTrip.findMany({
-      where: { organizationId: this.orgId, ...(date ? { date: new Date(date) } : {}) },
+      where: { organizationId: this.orgId, ...(range ? { date: range } : {}) },
       orderBy: { plannedDeparture: 'asc' },
       include: {
         routeVersion: { include: { route: true } },

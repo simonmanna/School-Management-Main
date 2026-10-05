@@ -24,6 +24,8 @@ export interface NewsItem {
   excerpt: string;
   /** Paragraphs. An array so the page never has to parse markdown. */
   body: string[];
+  /** Cover photo, a key of `PHOTOS`. */
+  photo: PhotoKey;
 }
 
 export interface Programme {
@@ -32,7 +34,41 @@ export interface Programme {
   ages: string;
   summary: string;
   highlights: string[];
+  photo: PhotoKey;
 }
+
+/* ── Photography ──
+   Every photo is self-hosted under /site/photos in two widths (`-lg` 1440px,
+   `-sm` 720px WebP, ~30–180 KB), so a page never makes a third-party request
+   and a phone never downloads the desktop size. The sample set is free-licence
+   Unsplash photography (see public/site/photos/CREDITS.md). TODO: replace with
+   the school's own photographs — same file names, and nothing else changes. */
+
+export const PHOTOS = {
+  'hero-classroom': { alt: 'A teacher at the blackboard while pupils raise their hands to answer', w: 1440, h: 960 },
+  'classroom-desks': { alt: 'Pupils at wooden desks listening during a lesson', w: 1440, h: 810 },
+  'classroom-full': { alt: 'A full primary classroom of pupils in green uniform', w: 1440, h: 958 },
+  'pupils-writing': { alt: 'Pupils writing in their exercise books', w: 1440, h: 958 },
+  'pupils-smiling': { alt: 'A smiling pupil surrounded by classmates', w: 1440, h: 958 },
+  'boys-uniform': { alt: 'Two pupils in school uniform laughing together', w: 1440, h: 810 },
+  'girls-uniform': { alt: 'Young pupils in green and yellow uniform smiling at the camera', w: 1440, h: 954 },
+  'nursery-graduate': { alt: 'A nursery pupil in a green graduation gown and cap', w: 1440, h: 960 },
+  'primary-reading': { alt: 'A teacher reading aloud to a primary class', w: 1440, h: 961 },
+  'olevel-lesson': { alt: 'A teacher explaining a worked problem to secondary students', w: 1440, h: 960 },
+  'alevel-maths': { alt: 'A student drawing a graph with a ruler', w: 1440, h: 960 },
+  library: { alt: 'The library reading room with tall windows and study tables', w: 1440, h: 1080 },
+  'girl-reading': { alt: 'A pupil sitting cross-legged, absorbed in a book', w: 1440, h: 960 },
+  graduation: { alt: 'Graduates in gowns throwing their caps in the air', w: 1440, h: 960 },
+  campus: { alt: 'Classroom blocks around a tree-lined courtyard', w: 1440, h: 960 },
+  'campus-courtyard': { alt: 'A school building with a court in front of it', w: 1440, h: 1920 },
+  'games-field': { alt: 'Children playing ball games on the grass', w: 1440, h: 997 },
+  football: { alt: 'Pupils playing football on the school pitch', w: 1440, h: 2160 },
+  boarding: { alt: 'A tidy boarding dormitory with bunk beds', w: 1440, h: 961 },
+  music: { alt: 'Pupils seated on the floor in a music lesson', w: 1440, h: 2160 },
+  friends: { alt: 'A group of pupils crowding in for a photograph', w: 1440, h: 960 },
+} as const;
+
+export type PhotoKey = keyof typeof PHOTOS;
 
 const env = import.meta.env;
 
@@ -91,6 +127,7 @@ export const PROGRAMMES: Programme[] = [
     summary:
       'Baby, Middle and Top class. Play-led literacy and numeracy, in a room a small child is happy to be left in.',
     highlights: ['Baby, Middle, Top', 'Daily reading circle', 'Structured play', 'Termly progress meeting'],
+    photo: 'nursery-graduate',
   },
   {
     key: 'primary',
@@ -99,6 +136,7 @@ export const PROGRAMMES: Programme[] = [
     summary:
       'The national primary curriculum, taught in classes small enough that no child sits at the back unnoticed.',
     highlights: ['Thematic curriculum P1–P3', 'Full subjects P4–P7', 'PLE preparation', 'Weekly reading assessment'],
+    photo: 'primary-reading',
   },
   {
     key: 'olevel',
@@ -107,6 +145,7 @@ export const PROGRAMMES: Programme[] = [
     summary:
       'The lower secondary competency-based curriculum, with sciences taught in equipped laboratories from S1.',
     highlights: ['Competency-based curriculum', 'Three science laboratories', 'ICT from S1', 'UCE candidature'],
+    photo: 'olevel-lesson',
   },
   {
     key: 'alevel',
@@ -114,6 +153,7 @@ export const PROGRAMMES: Programme[] = [
     ages: 'S5 – S6',
     summary: 'Science, arts and mixed combinations, with careers guidance that starts before subjects are chosen.',
     highlights: ['PCM · PCB · BCM · HEG · MEG', 'Sub-ICT and General Paper', 'University guidance', 'UACE candidature'],
+    photo: 'alevel-maths',
   },
 ];
 
@@ -221,6 +261,7 @@ export const NEWS: NewsItem[] = [
       'Fees for the term fall due on Friday 25 September. Guardians can see the exact amount, any balance carried forward and every receipt on the portal, rather than waiting for a printed statement.',
       'Class teachers will hold a short introductory meeting for each class in the first week. Times go out by SMS and are posted on the portal.',
     ],
+    photo: 'classroom-full',
   },
   {
     slug: 'uneb-2025-results',
@@ -234,6 +275,7 @@ export const NEWS: NewsItem[] = [
       'The sciences carried the year: Physics, Chemistry and Biology each improved on 2024, which the department credits to laboratory time being timetabled rather than borrowed.',
       'Result slips are available from the office and on each pupil’s portal account.',
     ],
+    photo: 'graduation',
   },
   {
     slug: 'science-laboratory-opens',
@@ -245,6 +287,7 @@ export const NEWS: NewsItem[] = [
       'The new Physics laboratory opened at the start of Term 2, taking pressure off the shared science room and letting practicals be timetabled for every stream from S1 rather than only for candidate classes.',
       'The room seats 40 at 20 benches, with a preparation room and a lockable chemical store to the standard required of UNEB practical centres.',
     ],
+    photo: 'pupils-writing',
   },
   {
     slug: 'inter-house-sports',
@@ -256,6 +299,7 @@ export const NEWS: NewsItem[] = [
       'The annual inter-house gala runs on Saturday 3 October, from 8:00 am to 4:00 pm on the school field and in the pool.',
       'Guardians are welcome for the whole day. Parking is on the lower field and the canteen will be open. Pupils compete in house colours; kit lists have gone out through class teachers.',
     ],
+    photo: 'games-field',
   },
   {
     slug: 'parent-portal-launch',
@@ -268,6 +312,7 @@ export const NEWS: NewsItem[] = [
       'Accounts are created by the school office against your child’s record and sent to the email address we hold for you. If the invite has not arrived, check the address on file with the office — we cannot create an account from a request alone.',
       'The portal works in any phone browser and can be added to the home screen like an app.',
     ],
+    photo: 'boys-uniform',
   },
 ];
 
@@ -320,4 +365,103 @@ export const PORTAL_AUDIENCES = [
     body: 'Take the register, enter marks and see your classes without opening the back-office system.',
     points: ['Daily class register', 'Marks entry for your classes', 'Class lists and profiles', 'Your teaching timetable'],
   },
+];
+
+/** The head's welcome, on the home page and About. TODO: the real head's words and name. */
+export const HEAD_MESSAGE = {
+  name: 'The Head Teacher',
+  role: `Head of School, ${SITE.name}`,
+  photo: 'friends' as PhotoKey,
+  paragraphs: [
+    'Thank you for taking the time to look at our school. Whether you are a family thinking about joining us or a guardian checking on next week, you are welcome here.',
+    'We are a school of ordinary days done well: lessons that start on time, homework that is marked, and adults who notice when a child is not themselves. Results follow from that, and so does confidence.',
+    'The best way to know us is to visit on a normal morning. Walk the corridors, sit at the back of a lesson, and ask the pupils what they think. We will be glad to show you round.',
+  ],
+};
+
+/** Words from families and former pupils. TODO: real, consented quotes. */
+export const TESTIMONIALS: Array<{ quote: string; name: string; role: string }> = [
+  {
+    quote:
+      'Our daughter joined in P4 barely reading. By P6 she was borrowing two library books a week. Her class teacher called us before we ever had to call her.',
+    name: 'A Primary parent',
+    role: 'Guardian of a P6 pupil',
+  },
+  {
+    quote:
+      'I can see the fee balance and the marks on my phone the same week they are entered. I no longer find out about a problem at the end of term.',
+    name: 'A Secondary guardian',
+    role: 'Guardian of two S3 students',
+  },
+  {
+    quote:
+      'The science teachers gave up their Saturdays before UACE. I am now studying medicine, and I still message my Biology teacher my results.',
+    name: 'A former student',
+    role: 'Class of 2024, PCB',
+  },
+];
+
+/** The campus, with a photo each. Shown on Academics and the home page. */
+export const FACILITIES: Array<{ title: string; body: string; photo: PhotoKey }> = [
+  {
+    title: 'Library & reading room',
+    body: 'Over 8,000 titles, daily reading periods for primary classes and a quiet study room open until evening prep for boarders.',
+    photo: 'library',
+  },
+  {
+    title: 'Science & ICT',
+    body: 'Physics, Chemistry and Biology laboratories to UNEB practical-centre standard, and a 40-seat computer lab used from P5.',
+    photo: 'pupils-writing',
+  },
+  {
+    title: 'Field, courts & pool',
+    body: 'A full football pitch, netball and volleyball courts, an athletics track and a supervised swimming pool.',
+    photo: 'games-field',
+  },
+  {
+    title: 'Boarding houses',
+    body: 'Single-sex houses from P5, each with a resident matron, supervised prep, and a nurse on campus day and night.',
+    photo: 'boarding',
+  },
+  {
+    title: 'Music & performing arts',
+    body: 'A music room with instruments to borrow, a school choir, traditional dance troupe and an annual drama production.',
+    photo: 'music',
+  },
+  {
+    title: 'A green, gated campus',
+    body: 'Classroom blocks around shaded courtyards, a single staffed gate and a signed-in visitor policy.',
+    photo: 'campus',
+  },
+];
+
+/** Clubs and activities — every pupil takes at least one. */
+export const ACTIVITIES: string[] = [
+  'Football', 'Netball', 'Athletics', 'Swimming', 'Volleyball', 'Chess',
+  'Debate & public speaking', 'Choir', 'Traditional dance', 'Drama', 'Coding club',
+  'Science club', 'Scouts & Guides', 'Writers’ club', 'Environment club', 'Red Cross',
+];
+
+export type GalleryCategory = 'Classroom' | 'Campus' | 'Sport & arts' | 'Celebrations';
+
+/** The gallery page, in display order. */
+export const GALLERY: Array<{ photo: PhotoKey; category: GalleryCategory; caption: string }> = [
+  { photo: 'hero-classroom', category: 'Classroom', caption: 'Hands up in a P5 English lesson' },
+  { photo: 'girls-uniform', category: 'Campus', caption: 'Lower primary at morning break' },
+  { photo: 'football', category: 'Sport & arts', caption: 'Junior football training' },
+  { photo: 'library', category: 'Campus', caption: 'The library reading room' },
+  { photo: 'graduation', category: 'Celebrations', caption: 'Senior Six graduation day' },
+  { photo: 'pupils-writing', category: 'Classroom', caption: 'Silent writing, P6' },
+  { photo: 'music', category: 'Sport & arts', caption: 'Music lesson in the arts block' },
+  { photo: 'nursery-graduate', category: 'Celebrations', caption: 'Top class graduation' },
+  { photo: 'campus', category: 'Campus', caption: 'The main classroom courtyard' },
+  { photo: 'olevel-lesson', category: 'Classroom', caption: 'S2 Mathematics' },
+  { photo: 'games-field', category: 'Sport & arts', caption: 'Games afternoon' },
+  { photo: 'friends', category: 'Celebrations', caption: 'Inter-house gala, 2025' },
+  { photo: 'classroom-desks', category: 'Classroom', caption: 'P7 revision before PLE' },
+  { photo: 'girl-reading', category: 'Classroom', caption: 'Reading period' },
+  { photo: 'boarding', category: 'Campus', caption: 'A girls’ boarding house' },
+  { photo: 'campus-courtyard', category: 'Campus', caption: 'Courts behind the secondary block' },
+  { photo: 'boys-uniform', category: 'Celebrations', caption: 'First day of term' },
+  { photo: 'alevel-maths', category: 'Classroom', caption: 'Graph work, S5' },
 ];

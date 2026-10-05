@@ -24,6 +24,7 @@ export default function ContactPage() {
       <PageHero
         eyebrow="Contact"
         title="Talk to the school"
+        image="campus-courtyard"
         lede="One office line, one inbox, and a rule that nothing from a guardian waits more than two working days."
       />
 

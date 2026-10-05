@@ -367,6 +367,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead, group: 'Planning' },
       { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: Award, permission: PERMISSIONS.school.read, group: 'Outcomes' },
       { to: '/school/lms/courses', label: 'Advanced Courses', icon: GraduationCap, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
+      { to: '/school/lms/my', label: 'My Learning', icon: BookOpen, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
       { to: '/school/lms/coverage', label: 'Curriculum Coverage', icon: GitBranch, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
       { to: '/school/lms/mastery', label: 'Mastery & Evidence', icon: Target, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
       { to: '/school/lms/discussions', label: 'Discussions', icon: MessagesSquare, permission: PERMISSIONS.school.lmsRead, group: 'Advanced LMS', flag: 'VITE_ENABLE_ADVANCED_LMS' },
@@ -661,9 +662,25 @@ const VISIBLE_SECTIONS = NAV_SECTIONS.filter((s) => flagEnabled(s.flag));
  * Longest matching menu path wins; routes with no menu entry need none.
  */
 type RequiredPermission = string | readonly string[];
-const ROUTE_PERMISSIONS: Array<[string, RequiredPermission]> = NAV_SECTIONS.flatMap((section) =>
-  section.items.filter((i) => i.permission).map((i) => [i.to, i.permission!] as [string, RequiredPermission]),
-).sort((a, b) => b[0].length - a[0].length);
+
+/**
+ * Routes with no menu entry because they are entered from inside a course, not
+ * from the rail: an activity page, the SCORM player, the per-module grading
+ * workbench, a quiz attempt. Deriving gates from the menu alone would leave
+ * these ungated, so they are named here. The server is still the authority —
+ * this only stops a typed URL rendering a screen that will 403 on every call.
+ */
+const UNLISTED_ROUTE_PERMISSIONS: Array<[string, RequiredPermission]> = [
+  ['/school/lms/modules', PERMISSIONS.school.lmsRead],
+  ['/school/lms/quiz', PERMISSIONS.school.lmsRead],
+];
+
+const ROUTE_PERMISSIONS: Array<[string, RequiredPermission]> = [
+  ...NAV_SECTIONS.flatMap((section) =>
+    section.items.filter((i) => i.permission).map((i) => [i.to, i.permission!] as [string, RequiredPermission]),
+  ),
+  ...UNLISTED_ROUTE_PERMISSIONS,
+].sort((a, b) => b[0].length - a[0].length);
 
 /** True when `has` satisfies the requirement (any one of an array). */
 export function satisfies(required: RequiredPermission | undefined, has: (p: string) => boolean): boolean {

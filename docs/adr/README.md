@@ -33,8 +33,18 @@ once Accepted; to change a decision, add a new ADR that supersedes it.
 | [025](./ADR-025-report-document-provenance.md) | Report-Document Provenance | Proposed |
 | [026](./ADR-026-lms-academic-core-boundary.md) | LMS as a Consumer of the Academic Core | Proposed |
 | [027](./ADR-027-legacy-academic-retirement.md) | Legacy Academic Retirement Strategy | Proposed |
-| [028](./ADR-028-examination-operations-integrity.md) | Examination Operations and Result Integrity | Proposed |
+| [028a](./ADR-028-academic-level-replaces-programme-banding.md) | Academic Level Replaces Programme Banding | Proposed |
+| [028b](./ADR-028-examination-operations-integrity.md) | Examination Operations and Result Integrity | Proposed |
+| [029a](./ADR-029-section-is-the-single-subdivision.md) | Section is the Single Subdivision | Proposed |
+| [029b](./ADR-029-statutory-submissions-and-candidate-identity.md) | Statutory Submissions and Candidate Identity | Proposed |
+| [030](./ADR-030-capacity-enforcement-with-override.md) | Capacity is Enforced, with an Audited Override | Proposed |
+| [031](./ADR-031-school-configurable-result-and-access-policy.md) | School-Configurable Result and Access Policy | Proposed |
 | [032](./ADR-032-launch-safety-policies.md) | Launch Safety Policies | Accepted |
 | [033](./ADR-033-finance-controls-gl-reconciliation-and-period-lock.md) | Finance Controls: Mandatory Posting, GL Bank Reconciliation, Period Lock | Accepted |
+| [034](./ADR-034-learner-portal-surface-and-plan-paper-trail.md) | The Learner's LMS Surface Lives in the Portal, and Plans Leave a Paper Trail | Proposed |
+
+**Numbering note.** 028 and 029 were each used twice by concurrent work and are
+listed above as 028a/028b and 029a/029b. The filenames are authoritative; cite an
+ADR by filename rather than by number alone.
 
 Template: **Context → Decision → Consequences → Alternatives considered.**

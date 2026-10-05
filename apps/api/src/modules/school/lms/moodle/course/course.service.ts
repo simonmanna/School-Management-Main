@@ -103,7 +103,8 @@ export class CourseService {
 
   async updateSettings(id: string, dto: Partial<Pick<CourseOffering,
     'format' | 'numSections' | 'summary' | 'visible' | 'groupMode' | 'forceGroupMode' |
-    'completionEnabled' | 'showGradesToStudents' | 'categoryId' | 'startDate' | 'endDate'>>) {
+    'completionEnabled' | 'showGradesToStudents' | 'categoryId' | 'startDate' | 'endDate' |
+    'coverImageFileId'>>) {
     await this.getOffering(id);
     const updated = await this.prisma.client.courseOffering.update({
       where: { id },

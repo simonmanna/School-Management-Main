@@ -5,13 +5,16 @@ import {
 } from 'lucide-react';
 import {
   useAcademicYears, useAssessmentBoard, useClasses, useClassSubjects, useSubmitAssessmentMarks,
-  useTerms, ASSESSMENT_KINDS, BOARD_STAGES, KIND_LABEL, STAGE_LABEL,
+  useTeacherOverview, useTerms, ASSESSMENT_KINDS, BOARD_STAGES, KIND_LABEL, STAGE_LABEL,
   type BoardRow,
 } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
+import { PERMISSIONS } from '@erp/shared';
+import { useMyStaffIdentity } from '@/features/hr/api';
+import { useAuthStore } from '@/stores/auth.store';
 import { EmptyState, Picker, Progress, fmtDate, useDefaulted, useStickyState } from './_components/exam-workflow';
 import { CreateAssessmentDialog } from './_components/assessment-form';
 
@@ -61,7 +64,14 @@ export function SchoolAssessmentsPage() {
   useDefaulted(termId, setTermId, termList.find((t) => t.isCurrent)?.id ?? termList[0]?.id);
 
   const classList = classes?.data ?? [];
-  useDefaulted(classId, setClassId, classList[0]?.id);
+  // A teacher's board opens on a class they teach. The first class in the
+  // school (Baby Class) is refused by the class scope for most teachers, and
+  // an empty board on arrival reads as "nothing works".
+  const seesAllClasses = useAuthStore((s) => s.hasPermission(PERMISSIONS.school.manageAssessments));
+  const { data: me } = useMyStaffIdentity();
+  const { data: myTeaching } = useTeacherOverview(seesAllClasses ? undefined : me?.staffProfileId ?? undefined);
+  const ownClassId = myTeaching?.classes[0]?.classId;
+  useDefaulted(classId, setClassId, seesAllClasses ? classList[0]?.id : ownClassId);
   const { data: subjects } = useClassSubjects(classId || undefined);
 
   const { data: board, isLoading } = useAssessmentBoard({

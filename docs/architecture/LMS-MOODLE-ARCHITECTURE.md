@@ -689,13 +689,19 @@ fails loudly otherwise.
 filtering, `Assessment` creation and mark writes, completion persistence, event logging, file
 ACL. A plugin that writes `StudentAssessment` directly is a review reject.
 
+The spine resolves the caller's capabilities once per action and passes them on
+`PluginCtx.capabilities`. A plugin still must not RESOLVE a capability — no
+plugin queries roles — but a verb that is moderation rather than participation
+has to be able to refuse, because `modules/:id/action/:action` is guarded once
+with `activityView`, which every enrolled learner holds.
+
 ### Plugin roster & mapping
 
 | Plugin | Instance table | Reuses |
 |---|---|---|
 | `mod_assign` | `ModAssign` | existing `Assignment` + `AssignmentSubmission` (+ rubric service) |
 | `mod_quiz` | `ModQuiz` | existing `QuestionPaper` / `QuizAttempt` / `QuizResponse` + §3.6 |
-| `mod_forum` | `ModForum` | existing `Discussion` / `DiscussionPost` + subscriptions, ratings |
+| `mod_forum` | `ModForum` | existing `Discussion` / `DiscussionPost` + subscriptions, ratings; moderation verbs (`lock`/`unlock`, `pin`/`unpin`, `deletePost`, `deleteDiscussion`) gated on `mod/forum:manage` |
 | `mod_resource` | `ModResource` | `LearningResource` (file) |
 | `mod_url` | `ModUrl` | `LearningResource` (link) |
 | `mod_folder` | `ModFolder` | `LmsFile` set |
@@ -811,6 +817,32 @@ Moodle's screens, mapped to routes under `apps/web/src/pages/school/lms/`.
   /lesson-plans …               planning suite (EXISTS: plans, templates, coverage,
                                 scheduled lessons, mastery)
 ```
+
+### The learner's and guardian's surface (ADR-034)
+
+The routes above are the STAFF app. Pupils and guardians sign in to
+`apps/portal`, which calls the same `school/lms/*` endpoints — there is no
+learner-only API — and mounts the course screens twice, because
+`RequireAudience` keeps a guardian out of `/student/*`:
+
+```text
+apps/portal/src/routes/
+  student/courses                      enrolled courses + what is due
+  student/courses/:id                  the course page (sections, ticks, progress)
+  student/courses/:cid/modules/:id     the activity: read, download, hand in
+  student/quiz/:id                     the attempt runner (CBT engine)
+
+  parent/learning                      per-child progress, coming up, released marks
+  parent/learning/courses/:id          the same course page, read-only
+  parent/learning/courses/:cid/modules/:id
+```
+
+Links are built by `apps/portal/src/lib/learner-paths.ts` so neither tree
+hard-codes the other's URLs. The envelope types are mirrored in
+`apps/portal/src/lib/lms-types.ts` — a third copy alongside the server's and the
+admin app's, which must move together. `describeGrade()` there is the single
+place that decides how a mark reads, so no learner screen can render an
+unreleased mark as a blank or a zero.
 
 **Edit mode** is the Moodle idiom worth copying exactly: one toggle flips the whole course page
 into drag-and-drop with "Add an activity or resource" per section. Everything is inline — no

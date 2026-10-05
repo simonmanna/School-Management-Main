@@ -140,11 +140,105 @@ Fixing the last group surfaced three genuine production bugs — see §1.
   console health are verified; the logged-in journeys are covered by the DB-backed
   integration suite rather than a browser driver. Running it needs a real login,
   so it is a task for someone with credentials.
+  **Update 2026-10-04:** the spec now exists but has not been RUN — see
+  "Learner surface" below.
 - **Three stale migration entries** (`lms_moodle_spine`,
   `lms_mod_assign_submission`, `gradeentry_readonly`) — the tables exist but the
   ledger does not record them, from an earlier `db push`. Reconcile before the
   next deploy; `migrate resolve --applied` would tidy it but would also mask real
   drift, so check first.
+  **Update 2026-10-04:** checked against the `schooldb-planet` development
+  database — all three rows are present and `finished_at` is set, so this was
+  resolved at some point after 2026-08-27. Still prove it per environment with
+  the prove-from-empty recipe in `apps/api/prisma/README.md` before trusting it
+  elsewhere.
+- **S3 storage is not implemented.** `FilesService` throws at construction when
+  `STORAGE_DRIVER=s3` (`apps/api/src/kernel/files/files.service.ts`), so LMS
+  files and SCORM packages live on local disk and the API is therefore
+  single-host until that driver is written. A second API replica would serve
+  404s for files uploaded to the other one.
+
+### Learner surface (ADR-034), 2026-10-04
+
+Until this pass a pupil had nowhere to do the work: the course page, activity
+page and quiz runner existed only in `apps/web`, the staff app, while pupils and
+guardians sign in to `apps/portal` — whose only LMS screen was a read-only list
+of course names. Homework could be set and could not be handed in.
+
+- `apps/portal` now has the course page, the activity page (read, download, hand
+  in, tick complete) and the quiz runner, plus a guardian `Learning` tab. These
+  call the same `school/lms/*` endpoints as the staff app; no learner-only API
+  was added.
+- A browser spec for those journeys is at `apps/portal/e2e/lms-learner.spec.ts`
+  with a Playwright config beside it. **It has not been run** — it needs real
+  pupil and guardian portal accounts:
+  ```bash
+  E2E_PUPIL_EMAIL=... E2E_PUPIL_PASSWORD=... \
+  E2E_GUARDIAN_EMAIL=... E2E_GUARDIAN_PASSWORD=... \
+    pnpm --filter @erp/portal exec playwright test
+  ```
+  Mint the accounts from the admin app's **Portals & Promotion Gate** screen and
+  seed a course with `apps/api/prisma/seed-lms-demo.ts` (idempotent).
+- A bug fixed on the way: the portal's `MyCourse`/`DueItem` types claimed fields
+  the API does not send (`courseOfferingId`, `progressPercent`, `submitted`), so
+  the pupil's course list rendered "undefined%". The server returns the course
+  header spread with `progress`.
+- Both clients now re-sanitise rich text on render and drop any iframe whose src
+  is not an allowlisted https player. The web client previously added `iframe` to
+  DOMPurify's allowlist with no source check.
+
+### Turn-on, verified 2026-10-04
+
+- The API boots with `ENABLE_ADVANCED_LMS=true` and `LmsMoodleModule` mounts:
+  `GET school/lms/courses` answers 401 rather than 404, and `ActivityRegistry`'s
+  boot validation (every `LmsActivityType` row has a live plugin, and the
+  reverse) passes without the loud failure it is designed to raise.
+- **Role grants are the blocker to watch.** `SCHOOL_ROLE_PRESETS` are seeded with
+  `update: {}` (`prisma/seed.ts`), so a role seeded before a permission key
+  existed never gains it. In the development database:
+  - `Head Teacher` (4 organizations) and `Deputy Head` hold
+    `school:courses:write` and `school:courses:enrol` but **not**
+    `school:lms:read`. Every LMS controller gates on `school:lms:read` first, so
+    their course-management grant is dead and every LMS screen 403s.
+  - Some `Class Teacher` and `Subject Teacher` roles lack
+    `school:courses:teach`, which their preset now carries.
+  - Two `Student`/`Parent` roles lack `school:portal:self`, so those tenants'
+    portal users cannot read `school/lms/my/*` at all.
+  A grant migration is needed per the precedent of
+  `20261003100000_admissions_read_grant`. It had not been written at the time of
+  this note.
+- **`StartAttemptDto.studentProfileId` is required by validation** even though the
+  controller substitutes a pupil's own id and refuses anyone else's. A client that
+  posts only `{ paperId }` gets a 400 before the controller runs — which is what
+  `useCbtStartAttempt` in `apps/web` does, so the staff app's quiz-sitting path is
+  broken for a pupil. The portal sends the learner's own id from the portal
+  context, which the server then re-checks.
+
+### Evidence from this pass
+
+- **Migrations reproduce the schema.** Prove-from-empty per
+  `apps/api/prisma/README.md`: fresh database → `prisma migrate deploy` (183
+  migrations) → `prisma migrate diff --from-url <probe> --to-schema-datamodel`
+  → `No difference detected.`
+- **Unit:** 17 LMS and lesson-planning suites, 236 tests, green — including four
+  new ones: `lms-forum-moderation` (22), `lms-course-template` (21),
+  `lms-notify-guardian` (13), `lesson-plan-week-generate` (18),
+  `lesson-plan-pdf` (10).
+- **Integration (DB-backed):** `school-lms-{authz,e2e,grade-bridge,teacher-identity}`
+  plus `academics-foundation` and `school-assessment-core` — 6 suites, 44 tests,
+  green.
+- **Guards:** `web-api-contract`, `route-permission-coverage`,
+  `permission-catalog-drift`, `tenancy-registration` all green.
+- **`pnpm lint:arch`** has one violation, `core/organizations.service.ts →
+  accounting/posting/fiscal-period.service.ts`. It is **pre-existing**,
+  introduced by commit 7c08a3a (wave18 fiscal close, 2026-09-30), and unrelated
+  to the LMS.
+- **`pnpm academics:inventory:check`** fails until the regenerated inventory is
+  committed; the regeneration is the fix. It records +1 model
+  (`LmsCourseTemplate`), +11 endpoints and +3 jobs.
+- `student-import.spec.ts` fails intermittently under a full-suite run (an
+  ExcelJS test against a 5 s timeout) and passes in isolation in ~180 ms. Not an
+  LMS suite and not a regression.
 
 ### LTI 1.3
 

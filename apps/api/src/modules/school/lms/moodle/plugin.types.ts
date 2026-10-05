@@ -27,6 +27,18 @@ export interface PluginCtx {
   courseModule?: CourseModule;
   /** LmsContext.id of the activity (or its course), for capability + file ACL. */
   contextId?: string;
+  /**
+   * The caller's effective capabilities on this activity's course, resolved by
+   * the spine.
+   *
+   * The spine still owns capability RESOLUTION — a plugin must never query roles
+   * — but a few plugin verbs are moderation rather than participation (locking a
+   * forum thread, deleting someone else's post) and cannot be told apart from
+   * participation by the route alone: `modules/:id/action/:action` is guarded
+   * once, with `activityView`, which every enrolled learner holds. Passing the
+   * resolved set lets such a verb refuse without the plugin resolving anything.
+   */
+  capabilities?: Record<string, boolean>;
 }
 
 /** The minimum a plugin must expose for the spine to render its card. */

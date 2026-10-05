@@ -22,6 +22,11 @@ const NAV: Record<'parent' | 'student' | 'teacher', NavItem[]> = {
     { to: '/parent', label: 'Home', icon: Home },
     { to: '/parent/fees', label: 'Fees', icon: Wallet },
     { to: '/parent/attendance', label: 'Attendance', icon: CalendarCheck },
+    // Same flag as the learner's Courses tab and the API's ENABLE_ADVANCED_LMS:
+    // a school not running the LMS has no progress to show a parent.
+    ...(import.meta.env.VITE_ENABLE_ADVANCED_LMS === 'true'
+      ? [{ to: '/parent/learning', label: 'Learning', icon: BookOpen }]
+      : []),
     { to: '/parent/results', label: 'Results', icon: GraduationCap },
     { to: '/parent/going-home', label: 'Home time', icon: Bus },
     { to: '/parent/notices', label: 'Messages', icon: Bell },
@@ -36,6 +41,7 @@ const NAV: Record<'parent' | 'student' | 'teacher', NavItem[]> = {
   ],
   teacher: [
     { to: '/teacher', label: 'Today', icon: Home },
+    { to: '/teacher/classes', label: 'Classes', icon: BookOpen },
     { to: '/teacher/register', label: 'Register', icon: ClipboardList },
     { to: '/teacher/marking', label: 'Marking', icon: GraduationCap },
     { to: '/teacher/notices', label: 'Messages', icon: Bell },

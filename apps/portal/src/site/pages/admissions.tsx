@@ -22,6 +22,7 @@ export default function AdmissionsPage() {
       <PageHero
         eyebrow="Admissions"
         title="Applying for a place"
+        image="girls-uniform"
         lede="Six steps, no mystery. We will tell you early and plainly whether the class you want has room, rather than keeping a family waiting on a list that is already full."
       >
         <div className="flex flex-col gap-3 sm:flex-row">

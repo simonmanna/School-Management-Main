@@ -1,14 +1,19 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  Body, Controller, Delete, Get, Param, Post, Put, Query, Res, StreamableFile, UseGuards,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { LessonPlanningService } from './lesson-planning.service';
+import { LessonPlanPdfService } from './lesson-plan-pdf.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import {
   AddCourseOfferingTeacherDto,
   CreateCourseOfferingDto,
   CreateFromTimetableDto,
   CreateLessonPlanDto,
+  GenerateWeekPlansDto,
   ReviewLessonPlanDto,
   SaveTemplateDto,
   SubmitLessonPlanDto,
@@ -21,6 +26,7 @@ export class LessonPlanningController {
   constructor(
     private readonly svc: LessonPlanningService,
     private readonly identity: EmployeeIdentityService,
+    private readonly pdf: LessonPlanPdfService,
   ) {}
 
   // ── CourseOffering ──
@@ -139,6 +145,47 @@ export class LessonPlanningController {
   }
 
   // ── Timetable integration ──
+  /**
+   * Draft a plan for every lesson in a week, from the timetable and the scheme
+   * of work. `ownLessonPlans` is enough: the service refuses to write a plan
+   * the caller does not own unless they hold the departmental grant.
+   */
+  @Post('lesson-plans/generate-week')
+  @RequirePermissions(PERMISSIONS.school.ownLessonPlans)
+  generateWeekPlans(@Body() dto: GenerateWeekPlansDto) {
+    return this.svc.generateWeekPlans(dto);
+  }
+
+  /**
+   * The printable plan, for an inspection file or a head of department's
+   * signature. Read-level grant: printing shows nothing the plan screen does
+   * not, and a teacher must be able to print their own.
+   */
+  @Get('lesson-plans/:id/pdf')
+  @RequirePermissions(PERMISSIONS.school.lmsRead)
+  async lessonPlanPdf(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const { buffer, filename } = await this.pdf.lessonPlanPdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length,
+    });
+    return new StreamableFile(buffer);
+  }
+
+  /** The term's scheme of work for one course, by week. */
+  @Get('course-offerings/:id/scheme/pdf')
+  @RequirePermissions(PERMISSIONS.school.lmsRead)
+  async schemePdf(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const { buffer, filename } = await this.pdf.schemeOfWorkPdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length,
+    });
+    return new StreamableFile(buffer);
+  }
+
   @Post('scheduled-lessons/from-timetable')
   @RequirePermissions(PERMISSIONS.school.manageLessonPlans)
   fromTimetable(@Body() dto: CreateFromTimetableDto) {

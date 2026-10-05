@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, IdCard, Send, Upload } from 'lucide-react';
-import { useClasses, useTerms } from '@/features/school/api';
+import { useClasses, useSchoolProfile, useTerms } from '@/features/school/api';
 import {
   downloadExport, useAssignCandidateNumbers, useCaReadiness, useCandidateReferences,
   useExportRuns, useExportTemplates, useImportIndexNumbers, useMarkExportSubmitted,
@@ -57,7 +57,11 @@ const apiMessage = (err: unknown, fallback: string): string => {
 export function SchoolStatutoryPage() {
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') ?? 'readiness';
-  const level = (params.get('level') ?? 'UCE') as ExamLevel;
+  // A primary school sits PLE and nothing else; opening on UCE showed it an
+  // examination it never enters candidates for.
+  const { data: profile } = useSchoolProfile();
+  const defaultLevel: ExamLevel = ['primary', 'nursery', 'pre_primary'].includes(profile?.educationLevel ?? '') ? 'PLE' : 'UCE';
+  const level = (params.get('level') ?? defaultLevel) as ExamLevel;
   const termId = params.get('term') ?? '';
   const year = Number(params.get('year') ?? new Date().getFullYear());
 

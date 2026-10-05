@@ -49,7 +49,13 @@ export function SchoolLmsCoursesPage() {
   const { data: subjects } = useSubjects();
   const seed = useLmsSeedRoles();
 
-  const filtered = courses ?? [];
+  // Courses with content first: a school opening this screen wants the courses
+  // its teachers are running, not a page of empty shells. Stable otherwise, so
+  // the server's class/subject order holds within each group.
+  const filtered = useMemo(
+    () => [...(courses ?? [])].sort((a, b) => Number(b.counts.modules > 0) - Number(a.counts.modules > 0)),
+    [courses],
+  );
   const anyFilter = q.trim() !== '' || termId !== ANY || classId !== ANY || subjectId !== ANY;
 
   return (

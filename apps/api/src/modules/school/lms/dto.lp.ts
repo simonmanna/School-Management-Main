@@ -156,3 +156,15 @@ export class CreateLearningActivityDto {
   @IsOptional() @IsString() content?: string;
   @IsOptional() @IsString() learningObjectiveId?: string;
 }
+
+export class GenerateWeekPlansDto {
+  @IsString() @IsNotEmpty() courseOfferingId!: string;
+  /** Any date inside the wanted week; the service snaps to that week's Monday. */
+  @IsString() @IsNotEmpty() weekStart!: string;
+  /**
+   * Whose plans these are. Omitted, each plan takes the teacher the timetable
+   * already names for that lesson, so a head of department generating a week
+   * does not become the author of twenty plans.
+   */
+  @IsOptional() @IsString() teacherPartnerId?: string;
+}

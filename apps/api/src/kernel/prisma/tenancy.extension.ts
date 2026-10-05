@@ -701,6 +701,7 @@ export const ORG_SCOPED = new Set<string>([
   'LtiPlatformKey',
   'LtiLaunchSession',
   'ModLessonAttempt',
+  'LmsCourseTemplate',
 
   // Academic structure configuration (ADR-028).
   'AcademicLevel',
@@ -750,6 +751,8 @@ export const SOFT_DELETE = new Set<string>([
   'EmergencyContact',
   'CourseSection',
   'CourseModule',
+  // A retired template is a filtered read, matching the course recycle bin.
+  'LmsCourseTemplate',
 
   'User',
   'Role',

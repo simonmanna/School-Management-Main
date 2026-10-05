@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowRight, CalendarDays } from 'lucide-react';
 import { NEWS, TERM_DATES, type NewsItem } from '@/site/content';
 import {
-  Container, LinkPanel, Panel, Pill, Reveal, Section, SectionHeading, formatDate,
+  Container, LinkPanel, Panel, Photo, Pill, Reveal, Section, SectionHeading, formatDate,
 } from '@/site/components';
 import { usePageTitle } from '@/site/site-shell';
 import { PageHero } from '@/site/pages/_hero';
@@ -23,6 +23,7 @@ export default function NewsPage() {
       <PageHero
         eyebrow="News & events"
         title="What is happening at school"
+        image="pupils-smiling"
         lede="Term notices, results, events and the occasional piece of good news. Anything urgent also goes to guardians by SMS and to the portal."
       />
 
@@ -89,20 +90,28 @@ export default function NewsPage() {
 function LeadStory({ item }: { item: NewsItem }) {
   return (
     <Reveal>
-      <LinkPanel to={`/news/${item.slug}`} className="p-6 sm:p-10">
-        <div className="flex items-center gap-3">
-          <Pill tone={item.category === 'Achievement' ? 'accent' : 'brand'}>{item.category}</Pill>
-          <time className="text-xs text-muted-foreground" dateTime={item.date}>
-            {formatDate(item.date)}
-          </time>
+      <LinkPanel to={`/news/${item.slug}`} className="grid overflow-hidden p-0 lg:grid-cols-2">
+        <Photo
+          photo={item.photo}
+          className="aspect-[16/9] lg:aspect-auto lg:h-full"
+          imgClassName="transition-transform duration-500 group-hover:scale-105"
+          sizes="(min-width: 1024px) 560px, 100vw"
+        />
+        <div className="p-6 sm:p-10">
+          <div className="flex items-center gap-3">
+            <Pill tone={item.category === 'Achievement' ? 'accent' : 'brand'}>{item.category}</Pill>
+            <time className="text-xs text-muted-foreground" dateTime={item.date}>
+              {formatDate(item.date)}
+            </time>
+          </div>
+          <h2 className="max-w-3xl pt-4 font-display text-2xl font-bold leading-snug tracking-tight sm:text-3xl">
+            {item.title}
+          </h2>
+          <p className="max-w-2xl pt-3 text-base leading-relaxed text-muted-foreground">{item.excerpt}</p>
+          <span className="inline-flex items-center gap-1.5 pt-6 text-sm font-semibold text-primary">
+            Read the notice <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+          </span>
         </div>
-        <h2 className="max-w-3xl pt-4 font-display text-2xl font-bold leading-snug tracking-tight sm:text-3xl">
-          {item.title}
-        </h2>
-        <p className="max-w-2xl pt-3 text-base leading-relaxed text-muted-foreground">{item.excerpt}</p>
-        <span className="inline-flex items-center gap-1.5 pt-6 text-sm font-semibold text-primary">
-          Read the notice <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-        </span>
       </LinkPanel>
     </Reveal>
   );
@@ -110,18 +119,26 @@ function LeadStory({ item }: { item: NewsItem }) {
 
 function StoryCard({ item }: { item: NewsItem }) {
   return (
-    <LinkPanel to={`/news/${item.slug}`} className="flex h-full flex-col">
-      <div className="flex items-center gap-3">
-        <Pill tone={item.category === 'Achievement' ? 'accent' : 'brand'}>{item.category}</Pill>
-        <time className="text-xs text-muted-foreground" dateTime={item.date}>
-          {formatDate(item.date)}
-        </time>
+    <LinkPanel to={`/news/${item.slug}`} className="flex h-full flex-col overflow-hidden p-0">
+      <Photo
+        photo={item.photo}
+        className="aspect-[16/9]"
+        imgClassName="transition-transform duration-500 group-hover:scale-105"
+        sizes="(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw"
+      />
+      <div className="flex flex-1 flex-col p-6">
+        <div className="flex items-center gap-3">
+          <Pill tone={item.category === 'Achievement' ? 'accent' : 'brand'}>{item.category}</Pill>
+          <time className="text-xs text-muted-foreground" dateTime={item.date}>
+            {formatDate(item.date)}
+          </time>
+        </div>
+        <h3 className="pt-4 font-display text-lg font-bold leading-snug tracking-tight">{item.title}</h3>
+        <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{item.excerpt}</p>
+        <span className="mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold text-primary">
+          Read more <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+        </span>
       </div>
-      <h3 className="pt-4 font-display text-lg font-bold leading-snug tracking-tight">{item.title}</h3>
-      <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{item.excerpt}</p>
-      <span className="mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold text-primary">
-        Read more <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-      </span>
     </LinkPanel>
   );
 }

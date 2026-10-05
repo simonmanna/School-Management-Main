@@ -19,6 +19,9 @@ const notFound = (what: string) => new NotFoundException(`${what} not found`);
  * Default mastery policy weights (configurable later): ASSESSMENT 40, QUIZ 30,
  * ASSIGNMENT 20, OBSERVATION 10.
  */
+/** Rows an unfiltered mastery/progress report returns — the top of the ranking. */
+const REPORT_SAMPLE = 300;
+
 @Injectable()
 export class LmsExecutionService {
   constructor(
@@ -369,25 +372,66 @@ export class LmsExecutionService {
       family === null
         ? opts.studentProfileId ? { studentProfileId: opts.studentProfileId } : {}
         : { studentProfileId: { in: opts.studentProfileId ? family.filter((id) => id === opts.studentProfileId) : family } };
-    return this.prisma.client.learningObjectiveProgress.findMany({
+    const rows = await this.prisma.client.learningObjectiveProgress.findMany({
       where: {
         organizationId: this.org,
         ...studentFilter,
         ...(opts.learningObjectiveId ? { learningObjectiveId: opts.learningObjectiveId } : {}),
       },
       orderBy: { masteryPct: 'desc' },
+      // Unfiltered, a school returns tens of thousands of rows; the screen
+      // shows a ranked sample, and a filter narrows it.
+      ...(opts.studentProfileId || opts.learningObjectiveId ? {} : { take: REPORT_SAMPLE }),
     });
+    const [names, objectives] = await Promise.all([
+      this.studentNames(rows.map((r) => r.studentProfileId)),
+      this.prisma.client.learningObjective.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.learningObjectiveId))] } },
+        select: { id: true, description: true },
+      }),
+    ]);
+    const objective = new Map(objectives.map((o) => [o.id, o.description]));
+    return rows.map((r) => ({
+      ...r,
+      studentName: names.get(r.studentProfileId) ?? null,
+      objective: objective.get(r.learningObjectiveId) ?? null,
+    }));
+  }
+
+  /** Pupil names by StudentProfile id, for report rows that carry only ids. */
+  private async studentNames(ids: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Map();
+    const profiles = await this.prisma.client.studentProfile.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, partner: { select: { name: true } } },
+    });
+    return new Map(profiles.map((p) => [p.id, p.partner?.name ?? '']));
   }
 
   async courseProgressList(opts: { courseOfferingId?: string } = {}) {
     const family = await this.familyStudentScope();
-    return this.prisma.client.studentCourseProgress.findMany({
+    const rows = await this.prisma.client.studentCourseProgress.findMany({
       where: {
         organizationId: this.org,
         ...(opts.courseOfferingId ? { courseOfferingId: opts.courseOfferingId } : {}),
         ...(family === null ? {} : { studentProfileId: { in: family } }),
       },
       orderBy: { progressPct: 'desc' },
+      ...(opts.courseOfferingId || family !== null ? {} : { take: REPORT_SAMPLE }),
     });
+    const [names, courses] = await Promise.all([
+      this.studentNames(rows.map((r) => r.studentProfileId)),
+      this.prisma.client.courseOffering.findMany({
+        where: { id: { in: [...new Set(rows.map((r) => r.courseOfferingId))] } },
+        select: { id: true, name: true },
+      }),
+    ]);
+    const course = new Map(courses.map((c) => [c.id, c.name]));
+    return rows.map((r) => ({
+      ...r,
+      studentName: names.get(r.studentProfileId) ?? null,
+      courseName: course.get(r.courseOfferingId) ?? null,
+    }));
   }
 }

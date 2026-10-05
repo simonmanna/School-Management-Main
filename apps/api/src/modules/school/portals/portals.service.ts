@@ -356,12 +356,26 @@ export class PortalsService {
 
     const sizeByClass = await this.placements.classSizes(classIds);
 
-    const entered = await this.prisma.client.gradeEntry.groupBy({
-      by: ['examScheduleId'],
-      where: { examScheduleId: { in: schedules.map((s) => s.id) }, marksObtained: { not: null } },
-      _count: { _all: true },
+    // Marks live on the assessment spine (B6): each paper's `exam_session`
+    // assessment. `GradeEntry` is a frozen legacy mirror that nothing writes, so
+    // counting it reported every paper as unentered. A recorded absence or
+    // exemption is entered too — there is nothing left to type for that pupil.
+    const papers = await this.prisma.client.assessment.findMany({
+      where: { sourceType: 'exam_session', sourceRef: { in: schedules.map((s) => s.id) }, deletedAt: null },
+      select: { id: true, sourceRef: true },
     });
-    const enteredBy = new Map(entered.map((e) => [e.examScheduleId, e._count._all]));
+    const entered = papers.length
+      ? await this.prisma.client.studentAssessment.groupBy({
+          by: ['assessmentId'],
+          where: {
+            assessmentId: { in: papers.map((p) => p.id) },
+            OR: [{ originalScore: { not: null } }, { participation: { in: ['absent', 'exempt', 'excused'] } }],
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const scheduleOf = new Map(papers.map((p) => [p.id, p.sourceRef]));
+    const enteredBy = new Map(entered.map((e) => [scheduleOf.get(e.assessmentId) ?? '', e._count._all]));
 
     return schedules
       .map((s) => {

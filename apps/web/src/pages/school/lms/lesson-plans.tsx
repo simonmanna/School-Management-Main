@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { Presentation, Plus, Send, Check, RotateCcw, Archive } from 'lucide-react';
+import { Presentation, Plus, Send, Check, RotateCcw, Archive, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { useLessonPlans, useCreateLessonPlan, useUpdateLessonPlan, useTransitionLessonPlan, useArchiveLessonPlan } from '@/features/school/api';
+import {
+  useLessonPlans, useCreateLessonPlan, useUpdateLessonPlan, useTransitionLessonPlan,
+  useArchiveLessonPlan, downloadLessonPlanPdf,
+} from '@/features/school/api';
 import { useCourseOutcomeOptions, useMyCourses, useSchemeOfWork } from '@/features/school/teaching-api';
 import { notify } from '@/lib/notify';
 
@@ -133,6 +136,20 @@ export function SchoolLmsLessonPlansPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={(STATUS_COLORS[p.workflowStatus] as any) ?? 'outline'}>{p.workflowStatus}</Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    title="Print this plan"
+                    onClick={async () => {
+                      try {
+                        await downloadLessonPlanPdf(p.id);
+                      } catch (e: any) {
+                        notify.error(e?.response?.data?.message ?? 'Could not print this plan');
+                      }
+                    }}
+                  >
+                    <Printer className="h-3 w-3" /> Print
+                  </Button>
                   {p.workflowStatus === 'draft' && <Button size="sm" variant="outline" onClick={() => doTransition(p.id, 'submitted', p.version)}><Send className="h-3 w-3" /> Submit</Button>}
                   {p.workflowStatus === 'submitted' && <><Button size="sm" onClick={() => doTransition(p.id, 'approved', p.version)}><Check className="h-3 w-3" /> Approve</Button><Button size="sm" variant="destructive" onClick={() => doTransition(p.id, 'needs_revision', p.version, 'Please revise')}><RotateCcw className="h-3 w-3" /> Revise</Button></>}
                   {p.workflowStatus === 'needs_revision' && <Button size="sm" onClick={() => doTransition(p.id, 'submitted', p.version)}><Send className="h-3 w-3" /> Resubmit</Button>}

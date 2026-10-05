@@ -1245,6 +1245,12 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:documents:write',
       'school:certificates:issue',
       'hr:self',
+      // The head approves the bills the bursar raises and reads the books.
+      'expense:read',
+      'expense:approve',
+      'journal_entry:read',
+      'report:accounting',
+      'report:ar',
       'approvals:decide',
       'approvals:manage',
       'audit_log:read',
@@ -1291,6 +1297,18 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // were held by no preset.
       'school:meals:billing',
       'school:meals:wallet',
+      // The fee office also raises and pays the school's bills and keeps the
+      // books; without these a Bursar could not open Expenses or the P&L.
+      // Approval stays with the Head Teacher (expense SoD: raiser ≠ approver ≠ payer).
+      'expense:read',
+      'expense:create',
+      'expense:update',
+      'expense:post',
+      'expense:cancel',
+      'journal:read',
+      'journal_entry:read',
+      'report:accounting',
+      'report:ar',
       'hr:self',
       // Report centre (ADR-017). New grants do not reach existing tenants by
       // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.

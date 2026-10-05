@@ -22,6 +22,15 @@ export interface CourseBundle {
   userData?: { completions: unknown[]; submissions: unknown[] };
 }
 
+/** A stable, readable identity for a template whose author gave none. */
+function slugCode(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || 'template';
+}
+
 /**
  * Course backup, restore and year rollover (L8 / ADR-014 §5).
  *
@@ -309,6 +318,151 @@ export class CourseBackupService {
     }
     this.logger.log(`Rollover ${dto.fromTermId} → ${dto.toTermId}: ${rolled.length} course(s), ${unmatched.length} skipped`);
     return { rolled, unmatched };
+  }
+
+  // ── Templates (ADR-034) ─────────────────────────────────────────────────
+  //
+  // A template is a NAMED export, not a new kind of thing: the bundle is the
+  // same structure-only JSON rollover already uses. That is the whole point —
+  // reuse without a second source of course naming, and without any way for
+  // pupils, submissions or marks to travel, because `export` omits user data
+  // unless asked and these never ask.
+
+  /** Save a course's structure for reuse next term. */
+  async saveAsTemplate(
+    courseOfferingId: string,
+    dto: { name: string; code?: string; description?: string; coverImageFileId?: string },
+  ) {
+    const offering = await this.prisma.client.courseOffering.findFirst({
+      where: { id: courseOfferingId, organizationId: this.org, deletedAt: null },
+    });
+    if (!offering) throw new NotFoundException('Course not found');
+
+    const name = dto.name?.trim();
+    if (!name) throw new BadRequestException('A template needs a name');
+
+    const bundle = await this.export(courseOfferingId, { includeUserData: false });
+    if (bundle.modules.length === 0 && bundle.sections.length === 0) {
+      throw new BadRequestException('This course has nothing in it to save');
+    }
+
+    // `code` is the operator-facing identity: a re-save under the same code
+    // replaces that template rather than making a second copy of it.
+    const code = (dto.code?.trim() || slugCode(name)).slice(0, 60);
+    const data = {
+      organizationId: this.org,
+      code,
+      name,
+      description: dto.description ?? null,
+      // What the template is FOR, taken from the course it came from.
+      subjectId: offering.subjectId ?? null,
+      coverImageFileId: dto.coverImageFileId ?? offering.coverImageFileId ?? null,
+      bundle: bundle as unknown as object,
+      sectionCount: bundle.sections.length,
+      moduleCount: bundle.modules.length,
+      createdById: this.tenant.userId ?? null,
+      deletedAt: null,
+    };
+
+    const existing = await this.prisma.client.lmsCourseTemplate.findFirst({
+      where: { organizationId: this.org, code },
+    });
+    const row = existing
+      ? await this.prisma.client.lmsCourseTemplate.update({ where: { id: existing.id }, data })
+      : await this.prisma.client.lmsCourseTemplate.create({ data });
+
+    await this.events.log({
+      eventName: 'core_backup.template_saved',
+      component: 'core_backup',
+      action: existing ? 'updated' : 'created',
+      target: 'course',
+      courseOfferingId,
+      other: { templateId: row.id, code, modules: data.moduleCount },
+    });
+    return this.summarise(row);
+  }
+
+  /** Templates available to this school, newest first. */
+  async listTemplates(opts: { subjectId?: string; gradeLevelId?: string } = {}) {
+    const rows = await this.prisma.client.lmsCourseTemplate.findMany({
+      where: {
+        organizationId: this.org,
+        deletedAt: null,
+        ...(opts.subjectId ? { subjectId: opts.subjectId } : {}),
+        ...(opts.gradeLevelId ? { gradeLevelId: opts.gradeLevelId } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    // The bundle can be hundreds of kilobytes; a listing must not carry it.
+    return rows.map((r: any) => this.summarise(r));
+  }
+
+  async getTemplate(id: string) {
+    const row = await this.prisma.client.lmsCourseTemplate.findFirst({
+      where: { id, organizationId: this.org, deletedAt: null },
+    });
+    if (!row) throw new NotFoundException('Template not found');
+    return row;
+  }
+
+  /** Retire a template. Soft, like the course recycle bin. */
+  async deleteTemplate(id: string) {
+    const row = await this.getTemplate(id);
+    await this.prisma.client.lmsCourseTemplate.update({
+      where: { id: row.id },
+      data: { deletedAt: new Date() },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Build a course from a template.
+   *
+   * Delegates to `import`, which refuses a target that already has activities —
+   * so applying a template twice cannot silently double a course, and the
+   * failure names the reason.
+   */
+  async applyTemplate(targetOfferingId: string, templateId: string) {
+    const template = await this.getTemplate(templateId);
+    const bundle = template.bundle as unknown as CourseBundle;
+    if (bundle?.formatVersion !== 1) {
+      throw new BadRequestException('This template was saved in an unsupported format');
+    }
+    const existing = await this.prisma.client.courseModule.count({
+      where: { organizationId: this.org, courseOfferingId: targetOfferingId, deletedAt: null },
+    });
+    if (existing > 0) {
+      throw new BadRequestException(
+        'That course already has activities. Apply a template to an empty course.',
+      );
+    }
+    const result = await this.import(targetOfferingId, bundle, { includeUserData: false });
+
+    // The course keeps its own name — a template supplies structure, not
+    // identity — but a template's picture is part of the structure a teacher
+    // chose, so it travels when the course has none.
+    if (template.coverImageFileId) {
+      await this.prisma.client.courseOffering.updateMany({
+        where: { id: targetOfferingId, organizationId: this.org, coverImageFileId: null },
+        data: { coverImageFileId: template.coverImageFileId },
+      });
+    }
+
+    await this.events.log({
+      eventName: 'core_backup.template_applied',
+      component: 'core_backup',
+      action: 'created',
+      target: 'course',
+      courseOfferingId: targetOfferingId,
+      other: { templateId, ...result },
+    });
+    return result;
+  }
+
+  /** A template without its bundle. */
+  private summarise(row: any) {
+    const { bundle: _bundle, ...rest } = row;
+    return rest;
   }
 
   /** Rewrite module ids inside an availability tree. */

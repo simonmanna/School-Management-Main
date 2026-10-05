@@ -26,74 +26,34 @@
  *
  * Run (from apps/api, with DATABASE_URL present):
  *   pnpm db:seed:green-valley
+ *   pnpm db:seed:sunrise          (same structure seed, Sunrise Academy profile)
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import { TERMS, YEARS, activeSchool } from './demo-green-valley/schools';
 
 const prisma = new PrismaClient();
 
-const ORG_CODE = 'GREENVALLEY';
-const ORG_NAME = 'Green Valley Primary School (DEMO)';
+/** `--school=sunrise` builds Sunrise Academy instead; see demo-green-valley/schools.ts. */
+const SCHOOL = activeSchool();
+const ORG_CODE = SCHOOL.orgCode;
+const ORG_NAME = SCHOOL.orgName;
 
 const log = (m: string) => console.log(`  - ${m}`);
 const ok = (m: string) => console.log(`\x1b[32mOK\x1b[0m ${m}`);
 
 /**
- * The structure, as DATA.
+ * The structure, as DATA: `SCHOOL.structure` in demo-green-valley/schools.ts.
  *
- * None of these names mean anything to the code. "Pre-Primary", "Baby Class" and
+ * None of the names mean anything to the code. "Pre-Primary", "Baby Class" and
  * "North" are seed values exactly like "Junior School", "Reception" and "Red"
  * would be. The only thing the application understands is the SHAPE:
- * level → grade → class → stream.
+ * level, grade, class, stream.
  *
- * `streams: []` on a grade is a real configuration, not an omission — it produces
+ * `streams: []` on a grade is a real configuration, not an omission: it produces
  * a class with `allowsStreams: false`, which is how a small school runs.
  */
-interface GradeSeed {
-  code: string;
-  name: string;
-  /** Streams within this grade's class. Empty means the class is not subdivided. */
-  streams: string[];
-  /** Seats per stream, or for the whole class when it has no streams. */
-  capacity?: number;
-}
-
-interface LevelSeed {
-  code: string;
-  name: string;
-  description: string;
-  stage: 'PRE_PRIMARY' | 'PRIMARY';
-  grades: GradeSeed[];
-}
-
-const STRUCTURE: LevelSeed[] = [
-  {
-    code: 'PRE_PRIMARY',
-    name: 'Pre-Primary',
-    description: 'Nursery classes. Assessment here is developmental, not mark-based.',
-    stage: 'PRE_PRIMARY',
-    grades: [
-      { code: 'BABY', name: 'Baby Class', streams: ['North', 'South'], capacity: 25 },
-      { code: 'MIDDLE', name: 'Middle Class', streams: ['North', 'South'], capacity: 25 },
-      { code: 'TOP', name: 'Top Class', streams: ['North', 'South', 'East'], capacity: 25 },
-    ],
-  },
-  {
-    code: 'PRIMARY',
-    name: 'Primary',
-    description: 'Primary One through Primary Seven.',
-    stage: 'PRIMARY',
-    grades: [
-      { code: 'P1', name: 'Primary 1', streams: ['North', 'South', 'East'], capacity: 35 },
-      { code: 'P2', name: 'Primary 2', streams: ['North', 'South', 'East'], capacity: 35 },
-      { code: 'P3', name: 'Primary 3', streams: ['North', 'South', 'East', 'West'], capacity: 35 },
-      { code: 'P4', name: 'Primary 4', streams: ['North', 'South', 'East', 'West'], capacity: 35 },
-      { code: 'P5', name: 'Primary 5', streams: ['North', 'South', 'East'], capacity: 35 },
-      { code: 'P6', name: 'Primary 6', streams: ['North', 'South', 'East'], capacity: 35 },
-      { code: 'P7', name: 'Primary 7', streams: ['North', 'South', 'East'], capacity: 35 },
-    ],
-  },
-];
+const STRUCTURE = SCHOOL.structure;
 
 /**
  * Stream display order.
@@ -103,28 +63,14 @@ const STRUCTURE: LevelSeed[] = [
  * which is not how any of these schools list them. Anything not named here falls
  * to the end, in the order it was seeded.
  */
-const STREAM_ORDER = ['North', 'South', 'East', 'West'];
+const STREAM_ORDER = SCHOOL.streamOrder;
 const streamOrder = (name: string): number => {
   const i = STREAM_ORDER.indexOf(name);
   return i === -1 ? STREAM_ORDER.length : i;
 };
 
-/** Academic years. Exactly one ACTIVE, per the brief. */
-const YEARS = [
-  { name: '2025', status: 'CLOSED' as const, isCurrent: false },
-  { name: '2026', status: 'ACTIVE' as const, isCurrent: true },
-  { name: '2027', status: 'PLANNING' as const, isCurrent: false },
-];
-
-/** Three terms per year, as Ugandan schools run them. Dates are illustrative. */
-const TERMS = [
-  { name: 'Term 1', start: '02-01', end: '04-30' },
-  { name: 'Term 2', start: '05-15', end: '08-15' },
-  { name: 'Term 3', start: '09-01', end: '12-05' },
-];
-
 async function main(): Promise<void> {
-  console.log('\n=== Green Valley — academic structure (DEMO DATA) ===\n');
+  console.log(`\n=== ${ORG_NAME} — academic structure (DEMO DATA) ===\n`);
 
   // ── organization ──────────────────────────────────────────────────────────
   const org = await prisma.organization.upsert({
@@ -140,21 +86,25 @@ async function main(): Promise<void> {
   const O = org.id;
   ok(`organization ${ORG_CODE} (${O})`);
 
+  // A nursery-and-primary school calls its subdivisions Streams. The domain
+  // still calls them Sections; only the label changes (ADR-029). The shape
+  // fields are refreshed on every run, so a school seeded earlier as something
+  // else (Sunrise was once "mixed", UCE) reads as the primary school it is.
+  const shape = {
+    educationLevel: 'primary',
+    gradingSystem: 'PLE',
+    attendanceMode: 'daily',
+    terminology: { section: 'Stream', sectionPlural: 'Streams', learner: 'Pupil' },
+  };
   await prisma.schoolProfile.upsert({
     where: { organizationId: O },
-    update: {},
+    update: shape,
     create: {
       organizationId: O,
-      name: 'Green Valley Primary School',
-      motto: 'Learning, together',
-      address: 'Kampala, Uganda',
+      ...SCHOOL.profile,
       country: 'UG',
       currencyCode: 'UGX',
-      educationLevel: 'primary',
-      attendanceMode: 'daily',
-      // A nursery-and-primary school calls its subdivisions Streams. The domain
-      // still calls them Sections; only the label changes (ADR-029).
-      terminology: { section: 'Stream', sectionPlural: 'Streams', learner: 'Pupil' },
+      ...shape,
     },
   });
   ok('school profile');
@@ -184,7 +134,9 @@ async function main(): Promise<void> {
             name: t.name,
           },
         },
-        update: {},
+        // Dates follow the calendar here, so a school seeded earlier on other
+        // dates lines up with the enrolment and assessment stages.
+        update: { startDate: new Date(`${y.name}-${t.start}`), endDate: new Date(`${y.name}-${t.end}`) },
         create: {
           organizationId: O,
           academicYearId: year.id,
@@ -331,7 +283,7 @@ async function main(): Promise<void> {
     terms: await prisma.term.count({ where: { organizationId: O } }),
   };
   console.log('\n' + JSON.stringify(counts, null, 2));
-  console.log('\nDEMO DATA — fictional school. Learners arrive in Phase 6.\n');
+  console.log(`\nDEMO DATA — fictional school. Next: tsx prisma/demo-green-valley/index.ts --school=${SCHOOL.key}\n`);
 }
 
 main()

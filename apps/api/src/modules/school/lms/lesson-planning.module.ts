@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AssessmentModule } from '../assessment/assessment.module';
 import { LessonPlanningController } from './lesson-planning.controller';
 import { LessonPlanningService } from './lesson-planning.service';
+import { LessonPlanPdfService } from './lesson-plan-pdf.service';
 import { LmsExecutionController } from './lms-execution.controller';
 import { LmsExecutionService } from './lms-execution.service';
 
@@ -10,7 +11,7 @@ import { LmsExecutionService } from './lms-execution.service';
   // through its ledger, not by writing derived scores directly.
   imports: [AssessmentModule],
   controllers: [LessonPlanningController, LmsExecutionController],
-  providers: [LessonPlanningService, LmsExecutionService],
-  exports: [LessonPlanningService, LmsExecutionService],
+  providers: [LessonPlanningService, LmsExecutionService, LessonPlanPdfService],
+  exports: [LessonPlanningService, LmsExecutionService, LessonPlanPdfService],
 })
 export class LessonPlanningModule {}

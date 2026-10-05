@@ -48,6 +48,7 @@ export default function NewsItemPage() {
       <PageHero
         eyebrow={item.category}
         title={item.title}
+        image={item.photo}
         lede={
           <span className="inline-flex items-center gap-2">
             <time dateTime={item.date}>{formatDate(item.date)}</time>

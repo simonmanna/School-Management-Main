@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { CalendarCheck, Play, Check, X } from 'lucide-react';
+import { CalendarCheck, Play, Check, X, Printer, Wand2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { useScheduledLessons, useCreateScheduledLesson, useDeliverLesson } from '@/features/school/api';
+import {
+  useScheduledLessons, useCreateScheduledLesson, useDeliverLesson,
+  useGenerateWeekPlans, downloadSchemeOfWorkPdf,
+} from '@/features/school/api';
 import { notify } from '@/lib/notify';
 
 const sel = 'rounded-md border bg-card px-3 py-2 text-sm';
@@ -15,8 +18,10 @@ export function SchoolLmsScheduledLessonsPage() {
   const { data: lessons } = useScheduledLessons();
   const create = useCreateScheduledLesson();
   const deliver = useDeliverLesson();
+  const generateWeek = useGenerateWeekPlans();
   const [form, setForm] = useState({ courseOfferingId: '', plannedDate: '', lessonPlanId: '' });
   const [refl, setRefl] = useState<Record<string, string>>({});
+  const [week, setWeek] = useState({ courseOfferingId: '', weekStart: '' });
 
   return (
     <div className="space-y-4">
@@ -28,6 +33,67 @@ export function SchoolLmsScheduledLessonsPage() {
           <div className="col-span-2"><Label>Lesson Plan ID (optional)</Label><Input value={form.lessonPlanId} onChange={(e) => setForm({ ...form, lessonPlanId: e.target.value })} placeholder="uuid" /></div>
           <div className="col-span-2"><Button disabled={!form.courseOfferingId || !form.plannedDate || create.isPending} onClick={async () => { try { await create.mutateAsync(form); notify.success('Scheduled'); setForm({ courseOfferingId: '', plannedDate: '', lessonPlanId: '' }); } catch (e: any) { notify.error(e?.message ?? 'Failed'); } }}>Schedule</Button></div>
         </CardContent></Card>
+      {/* Plan a whole week in one action. The lessons themselves come from the
+          timetable (POST school/teaching/week/generate); this fills each one
+          with a DRAFT plan prefilled from the scheme of work, and skips any
+          lesson that already has one. */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Plan a week</CardTitle></CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Course Offering ID</Label>
+            <Input
+              value={week.courseOfferingId}
+              onChange={(e) => setWeek({ ...week, courseOfferingId: e.target.value })}
+              placeholder="uuid"
+            />
+          </div>
+          <div>
+            <Label>Any date in the week</Label>
+            <Input
+              type="date"
+              value={week.weekStart}
+              onChange={(e) => setWeek({ ...week, weekStart: e.target.value })}
+            />
+          </div>
+          <div className="col-span-2 flex items-center gap-2">
+            <Button
+              disabled={!week.courseOfferingId || !week.weekStart || generateWeek.isPending}
+              onClick={async () => {
+                try {
+                  const r = await generateWeek.mutateAsync({
+                    courseOfferingId: week.courseOfferingId,
+                    weekStart: new Date(week.weekStart).toISOString(),
+                  });
+                  notify.success(
+                    r.created === 0
+                      ? `Nothing to add — ${r.skipped} lesson(s) already planned`
+                      : `Drafted ${r.created} plan(s)${r.skipped ? `, skipped ${r.skipped}` : ''}`,
+                  );
+                } catch (e: any) {
+                  notify.error(e?.response?.data?.message ?? e?.message ?? 'Failed');
+                }
+              }}
+            >
+              <Wand2 className="h-4 w-4" /> Draft this week&rsquo;s plans
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!week.courseOfferingId}
+              onClick={async () => {
+                try {
+                  await downloadSchemeOfWorkPdf(week.courseOfferingId);
+                } catch (e: any) {
+                  notify.error(e?.response?.data?.message ?? 'No scheme of work to print');
+                }
+              }}
+            >
+              <Printer className="h-4 w-4" /> Print scheme of work
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card><CardHeader><CardTitle className="text-base">Lessons</CardTitle></CardHeader>
         <CardContent className="space-y-2">{!lessons?.length && <p className="text-sm text-muted-foreground">No scheduled lessons.</p>}
           {lessons?.map((l: any) => (

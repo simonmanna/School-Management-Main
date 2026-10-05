@@ -4283,6 +4283,8 @@ model File {
   // HR (Phase 1): personnel documents + typed-credential scans route through
   // the same File vault. Bare `documentId String?` columns became real FKs.
   hrEmployeeDocuments HrEmployeeDocument[] @relation("HrEmployeeDocumentFile")
+  courseCoverImages   CourseOffering[]     @relation("courseCoverImage")
+  templateCoverImages LmsCourseTemplate[]  @relation("templateCoverImage")
   hrExperienceDocs    HrExperience[]       @relation("HrExperienceDoc")
   hrQualificationDocs HrQualification[]    @relation("HrQualificationDoc")
   hrCertificationDocs HrCertification[]    @relation("HrCertificationDoc")
@@ -11086,6 +11088,7 @@ model GradeLevel {
   @@index([organizationId])
   @@index([nextGradeLevelId])
   @@index([academicLevelId])
+  lmsCourseTemplates LmsCourseTemplate[]
 }
 
 model SchoolClass {
@@ -11223,6 +11226,7 @@ model Subject {
   @@index([subjectCategoryId])
   @@index([academicLevelId])
   @@index([organizationId, isActive, displayOrder])
+  lmsCourseTemplates LmsCourseTemplate[]
 }
 
 model Period {
@@ -12478,6 +12482,7 @@ model AcademicLevel {
   @@index([organizationId])
   @@index([organizationId, isActive, displayOrder])
   @@index([defaultProgrammeId])
+  lmsCourseTemplates LmsCourseTemplate[]
 }
 
 /// A versioned academic programme (P1–P3, P4–P7, S1–S4, S5–S6, …). Uganda rules
@@ -12960,6 +12965,9 @@ model CourseOffering {
   completionEnabled    Boolean                     @default(true)
   showGradesToStudents Boolean                     @default(true)
   categoryId           String?
+  /// Course tile image. A file in the LMS area, not a URL: a course picture a
+  /// teacher uploads must obey the same ACL as the rest of the course content.
+  coverImageFileId     String?
   createdAt            DateTime                    @default(now())
   updatedAt            DateTime                    @updatedAt
   deletedAt            DateTime?
@@ -12990,6 +12998,7 @@ model CourseOffering {
   groupings          LmsGrouping[]
   completionCriteria CourseCompletionCriteria[]
   assessments        Assessment[]
+  coverImage         File?                      @relation("courseCoverImage", fields: [coverImageFileId], references: [id])
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -20018,6 +20027,53 @@ model ModLessonAttempt {
 
   @@unique([lessonId, studentProfileId])
   @@index([organizationId, courseModuleId])
+}
+
+/// A course structure saved to be reused next term (ADR-034).
+///
+/// The spec this came from wanted a `Course` entity between `Subject` and
+/// `CourseOffering`. We did not add one: `CourseOffering` already carries the
+/// course identity (name, code, summary, dates, format, sections, category) and
+/// `Curriculum`/`CurriculumSubject`/`Topic`/`Unit` already is the year-independent
+/// per-grade layer, so a third naming truth would only create drift between them.
+///
+/// What was actually missing was reuse — a teacher rebuilding the same fourteen
+/// weeks every January. `bundle` is the structure-only JSON that
+/// `CourseBackupService.export` already produced for rollover, so a template is
+/// a NAMED export rather than a new kind of thing. It holds no cohort, no
+/// submissions and no marks, by construction: the exporter omits user data
+/// unless asked, and this never asks.
+model LmsCourseTemplate {
+  id             String    @id @default(uuid())
+  organizationId String
+  /// Operator-facing identity, used for idempotent seeding.
+  code           String
+  name           String
+  description    String?
+  /// What this template is FOR. All optional: a template may be school-wide.
+  subjectId      String?
+  gradeLevelId   String?
+  academicLevelId String?
+  coverImageFileId String?
+  /// The structure-only course bundle (CourseBundle, formatVersion 1).
+  bundle         Json
+  /// Denormalised so a listing need not parse every bundle to show its size.
+  sectionCount   Int       @default(0)
+  moduleCount    Int       @default(0)
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  subject       Subject?        @relation(fields: [subjectId], references: [id])
+  gradeLevel    GradeLevel?     @relation(fields: [gradeLevelId], references: [id])
+  academicLevel AcademicLevel?  @relation(fields: [academicLevelId], references: [id])
+  coverImage    File?           @relation("templateCoverImage", fields: [coverImageFileId], references: [id])
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, subjectId])
+  @@index([organizationId, gradeLevelId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,12 +1,14 @@
 import { Link } from 'react-router-dom';
 import {
   ArrowRight, Wallet, CalendarCheck, GraduationCap, BookOpen, ClipboardList,
-  Users, ShieldCheck, Sparkles, PhoneCall, CheckCircle2,
+  Users, ShieldCheck, Sparkles, PhoneCall, CheckCircle2, Quote, Images,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
-import { NEWS, PROGRAMMES, SITE, STATS, WHY_US, PORTAL_AUDIENCES } from '@/site/content';
 import {
-  BrandBackdrop, Container, CtaLink, IconPlate, LinkPanel, Panel, Pill,
+  FACILITIES, GALLERY, HEAD_MESSAGE, NEWS, PROGRAMMES, SITE, STATS, TESTIMONIALS, WHY_US, PORTAL_AUDIENCES,
+} from '@/site/content';
+import {
+  BrandBackdrop, Container, CtaLink, IconPlate, LinkPanel, Panel, Photo, Pill,
   Reveal, Section, SectionHeading, formatDate,
 } from '@/site/components';
 import { usePageTitle } from '@/site/site-shell';
@@ -20,6 +22,10 @@ import { usePageTitle } from '@/site/site-shell';
  * anyway. So the portal doors sit directly under the hero, above the marketing —
  * a parent should reach "sign in" without scrolling on a phone, and a
  * prospective family loses nothing by meeting the school one screen later.
+ *
+ * Below the doors the page is for the prospective family, and leans on
+ * photographs: a parent choosing a school wants to see the classrooms and the
+ * children in them before they read a word about pastoral care.
  */
 
 const AUDIENCE_ICON = {
@@ -34,13 +40,27 @@ export default function HomePage() {
   usePageTitle('Home');
   const signedIn = useAuthStore((s) => !!s.accessToken);
   const latest = NEWS.slice(0, 3);
+  const strip = GALLERY.slice(0, 6);
 
   return (
     <>
       {/* ── Hero ── */}
       <section className="relative isolate overflow-hidden bg-[hsl(var(--brand-deep))] text-white">
+        <Photo
+          photo="hero-classroom"
+          alt=""
+          priority
+          sizes="100vw"
+          className="absolute inset-0 -z-10 bg-transparent"
+          imgClassName="object-[center_30%]"
+        />
+        {/* Heavier on the left where the type sits; the photo shows through on the right. */}
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 bg-gradient-to-r from-[hsl(var(--brand-deep)/0.96)] via-[hsl(var(--brand-deep)/0.8)] to-[hsl(var(--brand-deep)/0.35)]"
+        />
         <BrandBackdrop className="text-white" />
-        <Container className="relative py-20 sm:py-28 lg:py-32">
+        <Container className="relative pb-28 pt-20 sm:pb-36 sm:pt-28 lg:pb-40 lg:pt-32">
           <div className="max-w-3xl">
             <Reveal>
               <Pill tone="onDark">
@@ -56,27 +76,27 @@ export default function HomePage() {
             </Reveal>
 
             <Reveal delay={120}>
-              <p className="max-w-2xl pt-5 text-base leading-relaxed text-white/75 sm:text-lg">{SITE.intro}</p>
+              <p className="max-w-2xl pt-5 text-base leading-relaxed text-white/80 sm:text-lg">{SITE.intro}</p>
             </Reveal>
 
             <Reveal delay={180}>
               <div className="flex flex-col gap-3 pt-8 sm:flex-row sm:items-center">
-                <CtaLink to={signedIn ? '/home' : '/login'} variant="onDark" className="px-7">
-                  {signedIn ? 'Go to my portal' : 'Sign in to the portal'}
+                <CtaLink to="/admissions" variant="onDark" className="px-7">
+                  Apply for a place
                   <ArrowRight className="h-4 w-4" />
                 </CtaLink>
                 <CtaLink
-                  to="/admissions"
+                  to="/contact"
                   variant="ghost"
-                  className="border border-white/25 text-white hover:bg-white/10"
+                  className="border border-white/30 text-white hover:bg-white/10"
                 >
-                  Apply for a place
+                  Book a school visit
                 </CtaLink>
               </div>
             </Reveal>
 
             <Reveal delay={240}>
-              <ul className="flex flex-wrap gap-x-6 gap-y-2 pt-10 text-sm text-white/70">
+              <ul className="flex flex-wrap gap-x-6 gap-y-2 pt-10 text-sm text-white/80">
                 {['Nursery to A-Level', 'Day & boarding', 'Results online', 'Fees online'].map((t) => (
                   <li key={t} className="inline-flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-[hsl(var(--accent))]" />
@@ -87,16 +107,13 @@ export default function HomePage() {
             </Reveal>
           </div>
         </Container>
-
-        {/* Soften the edge into the page below rather than stopping the colour dead. */}
-        <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-background/10" />
       </section>
 
       {/* ── The portal doors ──
           Lifted out of the page flow so they overlap the hero: on a phone this
           is the first thing under the fold, which is where a returning parent's
           thumb already is. */}
-      <Container className="relative z-10 -mt-10 sm:-mt-14">
+      <Container className="relative z-10 -mt-16 sm:-mt-20">
         <div className="grid gap-4 sm:grid-cols-3">
           {PORTAL_AUDIENCES.map((a, i) => {
             const Icon = AUDIENCE_ICON[a.key];
@@ -144,8 +161,48 @@ export default function HomePage() {
         </Container>
       </Section>
 
+      {/* ── Welcome from the head ── */}
+      <Section className="pt-12 sm:pt-16">
+        <Container>
+          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <Reveal>
+              <div className="relative">
+                <Photo
+                  photo={HEAD_MESSAGE.photo}
+                  className="aspect-[4/3] rounded-3xl shadow-lg"
+                  sizes="(min-width: 1024px) 560px, 100vw"
+                />
+                <div className="absolute -bottom-6 right-4 hidden rounded-2xl border bg-card px-5 py-4 shadow-lg sm:block">
+                  <p className="font-display text-2xl font-bold text-primary">Since {SITE.foundedYear}</p>
+                  <p className="text-xs text-muted-foreground">One campus, nursery to A-Level</p>
+                </div>
+              </div>
+            </Reveal>
+            <Reveal delay={80}>
+              <div>
+                <SectionHeading eyebrow="Welcome" title="A word from the head" />
+                <div className="space-y-4 pt-6 text-base leading-relaxed text-muted-foreground">
+                  {HEAD_MESSAGE.paragraphs.map((p, i) => (
+                    <p key={i}>{p}</p>
+                  ))}
+                </div>
+                <div className="pt-6">
+                  <p className="font-display text-lg font-bold">{HEAD_MESSAGE.name}</p>
+                  <p className="text-sm text-muted-foreground">{HEAD_MESSAGE.role}</p>
+                </div>
+                <div className="pt-6">
+                  <CtaLink to="/about" variant="outline">
+                    About the school <ArrowRight className="h-4 w-4" />
+                  </CtaLink>
+                </div>
+              </div>
+            </Reveal>
+          </div>
+        </Container>
+      </Section>
+
       {/* ── Programmes ── */}
-      <Section className="pt-8 sm:pt-10">
+      <Section tone="muted">
         <Container>
           <div className="flex flex-wrap items-end justify-between gap-6">
             <SectionHeading
@@ -161,10 +218,18 @@ export default function HomePage() {
           <div className="grid gap-4 pt-12 sm:grid-cols-2 lg:grid-cols-4">
             {PROGRAMMES.map((p, i) => (
               <Reveal key={p.key} delay={i * 60}>
-                <LinkPanel to="/academics" className="h-full">
-                  <Pill tone="brand">{p.ages}</Pill>
-                  <h3 className="pt-4 font-display text-xl font-bold tracking-tight">{p.name}</h3>
-                  <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{p.summary}</p>
+                <LinkPanel to="/academics" className="flex h-full flex-col overflow-hidden p-0">
+                  <Photo
+                    photo={p.photo}
+                    className="aspect-[4/3]"
+                    imgClassName="transition-transform duration-500 group-hover:scale-105"
+                    sizes="(min-width: 1024px) 280px, (min-width: 640px) 50vw, 100vw"
+                  />
+                  <div className="flex flex-1 flex-col p-6">
+                    <Pill tone="brand" className="self-start">{p.ages}</Pill>
+                    <h3 className="pt-4 font-display text-xl font-bold tracking-tight">{p.name}</h3>
+                    <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{p.summary}</p>
+                  </div>
                 </LinkPanel>
               </Reveal>
             ))}
@@ -173,7 +238,7 @@ export default function HomePage() {
       </Section>
 
       {/* ── Why ── */}
-      <Section tone="muted">
+      <Section>
         <Container>
           <SectionHeading
             eyebrow="Why families choose us"
@@ -200,8 +265,73 @@ export default function HomePage() {
         </Container>
       </Section>
 
-      {/* ── News ── */}
+      {/* ── Campus life ── */}
+      <Section tone="brand" className="relative isolate overflow-hidden">
+        <BrandBackdrop className="text-white" />
+        <Container className="relative">
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <SectionHeading
+              invert
+              eyebrow="Campus life"
+              title="Where the day happens"
+              lede="Classrooms, laboratories, a library, playing fields and boarding houses — all on one gated campus."
+            />
+            <CtaLink to="/gallery" variant="onDark" className="shrink-0">
+              <Images className="h-4 w-4" /> Photo gallery
+            </CtaLink>
+          </div>
+          <div className="grid gap-4 pt-12 sm:grid-cols-2 lg:grid-cols-3">
+            {FACILITIES.map((f, i) => (
+              <Reveal key={f.title} delay={i * 50}>
+                <figure className="group relative h-72 overflow-hidden rounded-2xl">
+                  <Photo
+                    photo={f.photo}
+                    className="absolute inset-0"
+                    imgClassName="transition-transform duration-700 group-hover:scale-105"
+                    sizes="(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw"
+                  />
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent"
+                  />
+                  <figcaption className="absolute inset-x-0 bottom-0 p-5">
+                    <h3 className="font-display text-lg font-bold">{f.title}</h3>
+                    <p className="pt-1 text-sm leading-relaxed text-white/80">{f.body}</p>
+                  </figcaption>
+                </figure>
+              </Reveal>
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      {/* ── Testimonials ── */}
       <Section>
+        <Container>
+          <SectionHeading
+            align="center"
+            eyebrow="In their words"
+            title="What families and former pupils say"
+          />
+          <div className="grid gap-4 pt-12 lg:grid-cols-3">
+            {TESTIMONIALS.map((t, i) => (
+              <Reveal key={t.name} delay={i * 70}>
+                <figure className="flex h-full flex-col rounded-2xl border bg-card p-7 shadow-sm">
+                  <Quote className="h-8 w-8 text-primary/30" aria-hidden />
+                  <blockquote className="flex-1 pt-4 text-base leading-relaxed">“{t.quote}”</blockquote>
+                  <figcaption className="pt-6">
+                    <p className="font-semibold">{t.name}</p>
+                    <p className="text-sm text-muted-foreground">{t.role}</p>
+                  </figcaption>
+                </figure>
+              </Reveal>
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      {/* ── News ── */}
+      <Section tone="muted">
         <Container>
           <div className="flex flex-wrap items-end justify-between gap-6">
             <SectionHeading eyebrow="Latest" title="News & notices" />
@@ -213,19 +343,57 @@ export default function HomePage() {
           <div className="grid gap-4 pt-12 lg:grid-cols-3">
             {latest.map((n, i) => (
               <Reveal key={n.slug} delay={i * 60}>
-                <LinkPanel to={`/news/${n.slug}`} className="flex h-full flex-col">
-                  <div className="flex items-center gap-3">
-                    <Pill tone={n.category === 'Achievement' ? 'accent' : 'brand'}>{n.category}</Pill>
-                    <time className="text-xs text-muted-foreground" dateTime={n.date}>
-                      {formatDate(n.date)}
-                    </time>
+                <LinkPanel to={`/news/${n.slug}`} className="flex h-full flex-col overflow-hidden p-0">
+                  <Photo
+                    photo={n.photo}
+                    className="aspect-[16/9]"
+                    imgClassName="transition-transform duration-500 group-hover:scale-105"
+                    sizes="(min-width: 1024px) 380px, 100vw"
+                  />
+                  <div className="flex flex-1 flex-col p-6">
+                    <div className="flex items-center gap-3">
+                      <Pill tone={n.category === 'Achievement' ? 'accent' : 'brand'}>{n.category}</Pill>
+                      <time className="text-xs text-muted-foreground" dateTime={n.date}>
+                        {formatDate(n.date)}
+                      </time>
+                    </div>
+                    <h3 className="pt-4 font-display text-lg font-bold leading-snug tracking-tight">{n.title}</h3>
+                    <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{n.excerpt}</p>
+                    <span className="mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold text-primary">
+                      Read more <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                    </span>
                   </div>
-                  <h3 className="pt-4 font-display text-lg font-bold leading-snug tracking-tight">{n.title}</h3>
-                  <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{n.excerpt}</p>
-                  <span className="mt-auto inline-flex items-center gap-1.5 pt-5 text-sm font-semibold text-primary">
-                    Read more <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                  </span>
                 </LinkPanel>
+              </Reveal>
+            ))}
+          </div>
+        </Container>
+      </Section>
+
+      {/* ── Gallery strip ── */}
+      <Section className="pb-12 sm:pb-16">
+        <Container>
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <SectionHeading eyebrow="Gallery" title="A look around" />
+            <CtaLink to="/gallery" variant="outline" className="shrink-0">
+              See all photos <ArrowRight className="h-4 w-4" />
+            </CtaLink>
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-10 sm:grid-cols-3 lg:grid-cols-6">
+            {strip.map((g, i) => (
+              <Reveal key={g.photo} delay={i * 40}>
+                <Link
+                  to="/gallery"
+                  className="group block overflow-hidden rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Photo
+                    photo={g.photo}
+                    alt={g.caption}
+                    className="aspect-square"
+                    imgClassName="transition-transform duration-500 group-hover:scale-110"
+                    sizes="(min-width: 1024px) 190px, (min-width: 640px) 33vw, 50vw"
+                  />
+                </Link>
               </Reveal>
             ))}
           </div>
@@ -235,8 +403,17 @@ export default function HomePage() {
       {/* ── Closing call ── */}
       <Section className="pb-20 pt-0">
         <Container>
-          <div className="relative isolate overflow-hidden rounded-3xl bg-[hsl(var(--brand-deep))] px-6 py-14 text-white sm:px-12 sm:py-16">
-            <BrandBackdrop className="text-white" />
+          <div className="relative isolate overflow-hidden rounded-3xl bg-[hsl(var(--brand-deep))] px-6 py-14 text-white sm:px-12 sm:py-20">
+            <Photo
+              photo="graduation"
+              alt=""
+              className="absolute inset-0 -z-10 bg-transparent"
+              sizes="(min-width: 1152px) 1100px, 100vw"
+            />
+            <div
+              aria-hidden
+              className="absolute inset-0 -z-10 bg-gradient-to-r from-[hsl(var(--brand-deep)/0.97)] via-[hsl(var(--brand-deep)/0.85)] to-[hsl(var(--brand-deep)/0.4)]"
+            />
             <div className="relative max-w-2xl">
               <SectionHeading
                 invert
@@ -251,7 +428,7 @@ export default function HomePage() {
                 <CtaLink
                   to={`tel:${SITE.contact.phone.replace(/\s/g, '')}`}
                   variant="ghost"
-                  className="border border-white/25 text-white hover:bg-white/10"
+                  className="border border-white/30 text-white hover:bg-white/10"
                 >
                   <PhoneCall className="h-4 w-4" /> {SITE.contact.phone}
                 </CtaLink>

@@ -104,6 +104,23 @@ export class LmsNotifyService {
             payload: { courseModuleId: cm.id, courseOfferingId: cm.courseOfferingId, dueAt: cm.dueAt },
           })
           .catch(() => undefined);
+        // The pupil is the one who must act, but in a nursery or primary school
+        // the person who makes it happen is at home. The guardians get the same
+        // notice, keyed to the same event row so the idempotency above covers
+        // both — a second sweep re-notifies neither.
+        for (const guardianUserId of await this.guardianUsersFor(organizationId, studentProfileId)) {
+          await this.notifications
+            .send({
+              organizationId,
+              userId: guardianUserId,
+              channel: 'in_app',
+              category: 'lms_due_soon',
+              title: 'Work due soon',
+              body: `Your child has an activity due on ${cm.dueAt!.toLocaleString()}.`,
+              payload: { courseModuleId: cm.id, courseOfferingId: cm.courseOfferingId, dueAt: cm.dueAt, studentProfileId },
+            })
+            .catch(() => undefined);
+        }
         await this.prisma.raw.lmsEvent.create({
           data: {
             organizationId, eventName: 'core_reminder.due_soon', component: 'core_reminder',
@@ -141,24 +158,47 @@ export class LmsNotifyService {
     ]);
     if (!assessment || assessment.hiddenFromStudents) return;
 
-    const userId = await this.portalUserFor(this.org, studentProfileId);
-    if (!userId) return;
-
     const released = mark?.approvalStatus === 'approved' && !!assessment.marksReleaseAt && assessment.marksReleaseAt <= new Date();
-    await this.notifications
-      .send({
-        organizationId: this.org,
-        userId,
-        channel: 'in_app',
-        category: 'lms_graded',
-        title: released ? 'Your work has been marked' : 'Your work has been reviewed',
-        body: released && mark?.effectiveScore != null
-          ? `${assessment.title}: ${Number(mark.effectiveScore)} out of ${Number(assessment.maxScore)}.`
-          // No score here on purpose — moderation has not released it yet.
-          : `${assessment.title} has been marked. Your result will appear once it is released.`,
-        payload: { courseModuleId, courseOfferingId: cm.courseOfferingId },
-      })
-      .catch(() => undefined);
+    const score = released && mark?.effectiveScore != null
+      ? `${Number(mark.effectiveScore)} out of ${Number(assessment.maxScore)}`
+      : null;
+
+    const userId = await this.portalUserFor(this.org, studentProfileId);
+    if (userId) {
+      await this.notifications
+        .send({
+          organizationId: this.org,
+          userId,
+          channel: 'in_app',
+          category: 'lms_graded',
+          title: released ? 'Your work has been marked' : 'Your work has been reviewed',
+          body: score
+            ? `${assessment.title}: ${score}.`
+            // No score here on purpose — moderation has not released it yet.
+            : `${assessment.title} has been marked. Your result will appear once it is released.`,
+          payload: { courseModuleId, courseOfferingId: cm.courseOfferingId },
+        })
+        .catch(() => undefined);
+    }
+
+    // Rule 2 applies to a guardian exactly as it does to a pupil: a notification
+    // must not become a side channel around the release gate. The same `score`
+    // is reused rather than recomputed, so the two messages cannot disagree.
+    for (const guardianUserId of await this.guardianUsersFor(this.org, studentProfileId)) {
+      await this.notifications
+        .send({
+          organizationId: this.org,
+          userId: guardianUserId,
+          channel: 'in_app',
+          category: 'lms_graded',
+          title: released ? 'A mark has been released' : 'Work has been reviewed',
+          body: score
+            ? `${assessment.title}: ${score}.`
+            : `${assessment.title} has been marked. The result will appear once the school releases it.`,
+          payload: { courseModuleId, courseOfferingId: cm.courseOfferingId, studentProfileId },
+        })
+        .catch(() => undefined);
+    }
   }
 
   /** Tell participants about a new forum post, excluding its author. */
@@ -214,5 +254,37 @@ export class LmsNotifyService {
       select: { userId: true },
     });
     return identity?.userId ?? null;
+  }
+
+  /**
+   * The login accounts of this pupil's guardians.
+   *
+   * Resolved live from `StudentGuardian`, never from a cached list, so revoking
+   * a guardianship stops the notices at once rather than at token expiry — the
+   * same rule `PortalIdentityService` applies to reads.
+   *
+   * Channel is `in_app` only, as it is for pupils. Escalating a reminder to SMS
+   * or WhatsApp would need the consent ledger (ADR-016) and a policy decision
+   * about who pays for the message, so it is deliberately not done here.
+   */
+  private async guardianUsersFor(organizationId: string, studentProfileId: string): Promise<string[]> {
+    const links = await this.prisma.raw.studentGuardian.findMany({
+      where: { organizationId, studentProfileId },
+      select: { guardianContactId: true },
+    });
+    const contactIds = links.map((l: any) => l.guardianContactId).filter((x: unknown): x is string => Boolean(x));
+    if (contactIds.length === 0) return [];
+
+    const identities = await this.prisma.raw.portalIdentity.findMany({
+      where: {
+        organizationId,
+        subjectType: 'guardian',
+        guardianContactId: { in: contactIds },
+        revokedAt: null,
+      },
+      select: { userId: true },
+    });
+    // A guardian of two children in the same course would otherwise be told twice.
+    return [...new Set(identities.map((i: any) => i.userId as string))];
   }
 }

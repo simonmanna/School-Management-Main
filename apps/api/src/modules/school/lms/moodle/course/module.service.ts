@@ -309,7 +309,16 @@ export class CourseModuleService {
     // or posting as the pupil would corrupt the academic record.
     if (principal.kind === 'guardian') throw new ForbiddenException('Guardians cannot submit or post on behalf of a student');
     const studentProfileId = await this.resolveSubject(opts.asStudent);
-    const pctx: PluginCtx = { organizationId: this.org, userId: this.tenant.userId, studentProfileId, courseModule: cm };
+    // Resolved once, by the spine, so a plugin verb that is moderation rather
+    // than participation can refuse a learner who merely holds `activityView`.
+    const capabilities = await this.caps.effectiveAtCourse(principal, cm.courseOfferingId);
+    const pctx: PluginCtx = {
+      organizationId: this.org,
+      userId: this.tenant.userId,
+      studentProfileId,
+      courseModule: cm,
+      capabilities,
+    };
     // Student-authored bodies (forum posts, wiki edits, glossary definitions) run
     // through the same cleaner as teacher content — a peer reading a post is just
     // as exposed as a student reading a page.

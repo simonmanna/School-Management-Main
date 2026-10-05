@@ -10,10 +10,10 @@
         "exec",
         "vite",
         "--port",
-        "5175",
+        "5186",
         "--strictPort"
       ],
-      "port": 5175,
+      "port": 5186,
       "autoPort": false
     },
     {

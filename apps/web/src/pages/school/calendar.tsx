@@ -168,7 +168,7 @@ export function SchoolCalendarPage() {
                 const iso = toISO(d);
                 const inMonth = d.getMonth() === view.month;
                 const isToday = iso === toISO(today);
-                const dayEvents = filtered.filter((e) => e.startDate <= iso && e.endDate >= iso);
+                const dayEvents = filtered.filter((e) => e.startDate.slice(0, 10) <= iso && e.endDate.slice(0, 10) >= iso);
                 return (
                   <div
                     key={iso}

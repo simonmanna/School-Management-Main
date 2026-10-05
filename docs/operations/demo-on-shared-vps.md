@@ -25,16 +25,40 @@ The aliases are prefixed (`sd-*`) because Avida's own services are also named
 
 ## Demo logins (organization `SUNRISE`)
 
+Sunrise Academy is a nursery + primary school (Baby/Middle/Top Class, P.1–P.7,
+colour streams, ~700 pupils) with 2025 history and 2026 Terms 1–2 results and
+report cards published. Term 3 is live: Beginning-of-Term exam closed, P.7 Mock
+results ready, Mid-Term in marking (approval queue), End-of-Term timetabled;
+68 P.7 candidates registered for PLE. Also: NCDC topics, learning outcomes and
+competency judgements, weekly homework, 40 built-out LMS courses (P.4–P.7, every
+stream) with quiz attempts, schemes of work and lesson plans, rooms, the 2026
+calendar (holidays, visiting days, PLE), notices and school policies.
+
+Teaching & Assessment trail: every teacher has a login (`<key>@sunrise.test`,
+e.g. `ct-p1-red@` for the P.1 Red class teacher, `eng@`/`sci@` for subject
+teachers, all `Staff@123`); marks carry who entered, submitted and approved
+them; question papers with a hash-chained custody log; Mid Term scripts
+allocated to markers; moderation samples; exam incidents and SNE extra time;
+2025→2026 promotion decisions; merit and nursery-completion certificates; and
+schemes of work + weekly lesson plans for nursery and P.1–P.3 as well as
+P.4–P.7. Lesson plans are reviewed by `deputy@` (Deputy Head role).
+
 | Who | Email | Password |
 |---|---|---|
 | Administrator | admin@sunrise.test | Admin@123 |
 | Head teacher | head@sunrise.test | Staff@123 |
+| Deputy head | deputy@sunrise.test | Staff@123 |
+| Director of studies | dos@sunrise.test | Staff@123 |
 | Bursar | bursar@sunrise.test | Staff@123 |
 | Registrar | registrar@sunrise.test | Staff@123 |
-| Subject teacher | teacher@sunrise.test | Teacher@123 |
+| P.5 Red class teacher | teacher@sunrise.test | Staff@123 |
+| Mathematics teacher | mtc@sunrise.test | Staff@123 |
+| Pupil (portal) | pupil@sunrise.test | Portal@123 |
+| Parent (portal, 2 children) | parent@sunrise.test | Portal@123 |
 
-These are seeded demo passwords on demo data. Set `SEED_*_PASSWORD` when
-building the dump if the demo link will circulate widely. `reset` restores them.
+These are seeded demo passwords on demo data. Set `SEED_*_PASSWORD` /
+`DEMO_STAFF_PASSWORD` / `DEMO_PORTAL_PASSWORD` when building the dump if the
+demo link will circulate widely. `reset` restores them.
 
 ## Build (Windows workstation, Docker Desktop ≥ 8 GB)
 
@@ -57,8 +81,11 @@ export DATABASE_URL=postgresql://school_owner:seedpw@localhost:55440/school?sche
 npx prisma migrate deploy
 RLS_APP_PASSWORD=x RLS_SYSTEM_PASSWORD=y pnpm rls:setup-role   # roles + grants
 pnpm db:seed                                                  # base catalogue (chart of accounts …)
-pnpm exec tsx ../../scripts/seed-school.ts                    # Sunrise Academy, 200 pupils enrolled
-pnpm exec tsx ../../scripts/seed-sunrise-academics.ts         # roles, logins, Term 3, P.1 A course
+pnpm exec tsx ../../scripts/seed-school.ts                    # Sunrise org, accounting, fee catalogue
+pnpm exec tsx ../../scripts/seed-sunrise-academics.ts         # roles, admin login
+pnpm db:reset:sunrise-academics -- --apply                    # drop the legacy P.1 A … S.6 shape
+pnpm db:seed:sunrise                                          # nursery + primary structure
+pnpm db:seed:sunrise-demo                                     # pupils, staff, marks, results, LMS, planning
 docker exec sd-seed-db pg_dump -U school_owner -d school -Fc -f /tmp/school-demo.dump
 docker cp sd-seed-db:/tmp/school-demo.dump .
 ```

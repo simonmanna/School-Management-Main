@@ -1789,11 +1789,13 @@ export function useStudentMeals(studentProfileId: string | undefined) {
 
 export interface TransportRow {
   id: string;
-  route?: { name?: string; monthlyFee?: number | string } | null;
-  stop?: { name?: string; pickupTime?: string; dropoffTime?: string } | null;
+  termId?: string | null;
+  route?: { name?: string; code?: string | null } | null;
+  stop?: { name?: string; landmark?: string | null; zone?: { name?: string } | null } | null;
   startDate: string;
-  isActive?: boolean;
-  monthlyFee?: number | string;
+  endDate?: string | null;
+  status?: string;
+  serviceMode?: string | null;
 }
 
 export function useReportCards(studentProfileId: string | undefined) {
@@ -1808,7 +1810,7 @@ export function useStudentTransport(studentProfileId: string | undefined) {
   return useQuery({
     queryKey: ['school', 'transport', 'by-student', studentProfileId],
     enabled: !!studentProfileId,
-    queryFn: async () => (await api.get<TransportRow[]>(`${S}/transport/assignments/by-student/${studentProfileId}`)).data,
+    queryFn: async () => (await api.get<TransportRow[]>(`${S}/transport/assignments`, { params: { studentProfileId } })).data,
   });
 }
 
@@ -1820,26 +1822,53 @@ export interface Vehicle {
   id: string;
   code: string;
   plateNumber: string;
+  fleetNumber?: string | null;
   type?: string | null;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
   seatedCapacity?: number | null;
+  operationalCapacity?: number | null;
+  odometerKm?: number | string | null;
   status?: string | null;
 }
 export interface Route {
   id: string;
   name: string;
   code?: string | null;
+  description?: string | null;
   direction?: string | null;
   monthlyFee?: number | null;
   status?: string | null;
+  distanceKm?: number | string | null;
+  estimatedDurationMin?: number | null;
+  currentVersionId?: string | null;
+}
+export interface TransportZone {
+  id: string;
+  code: string;
+  name: string;
 }
 export interface Stop {
   id: string;
-  routeId?: string | null;
   name: string;
   code?: string | null;
-  order?: number | null;
-  pickupTime?: string | null;
-  dropoffTime?: string | null;
+  zoneId?: string | null;
+  zone?: TransportZone | null;
+  landmark?: string | null;
+  address?: string | null;
+  status?: string | null;
+}
+export interface RouteStop {
+  id: string;
+  stopId: string;
+  sequence: number;
+  plannedArrival?: string | null;
+  plannedDeparture?: string | null;
+  stop?: Stop | null;
+}
+export interface RouteDetail extends Route {
+  versions?: Array<{ id: string; versionNo: number; status: string; effectiveFrom: string; routeStops?: RouteStop[] }>;
 }
 export interface StudentTransportAssignment {
   id: string;
@@ -1850,10 +1879,37 @@ export interface StudentTransportAssignment {
   startDate: string;
   endDate?: string | null;
   status?: string;
+  serviceMode?: string | null;
   monthlyFee?: number | null;
   student?: { id: string; partner?: { name: string } | null; admissionNo?: string } | null;
   route?: { id: string; name?: string } | null;
-  stop?: { id: string; name?: string } | null;
+  stop?: { id: string; name?: string; zone?: TransportZone | null } | null;
+}
+export interface TransportTrip {
+  id: string;
+  direction: string;
+  status: string;
+  date: string;
+  plannedDeparture?: string | null;
+  actualDeparture?: string | null;
+  actualArrival?: string | null;
+  delayMinutes?: number;
+  routeVersion?: { route?: { name?: string; code?: string | null } | null } | null;
+  vehicle?: { plateNumber?: string; code?: string } | null;
+  driver?: { name?: string } | null;
+  attendant?: { name?: string } | null;
+  passengers?: Array<{ id: string; status: string }>;
+}
+export interface TransportIncident {
+  id: string;
+  type: string;
+  severity: string;
+  status: string;
+  occurredAt: string;
+  description?: string | null;
+  resolutionNotes?: string | null;
+  vehicle?: { plateNumber?: string } | null;
+  actions?: Array<{ id: string; action: string; createdAt: string }>;
 }
 
 export function useVehicles() {
@@ -1866,16 +1922,27 @@ export function useCreateVehicle() {
 export function useRoutes() {
   return useQuery({ queryKey: ['school', 'transport', 'routes'], queryFn: async () => (await api.get<Route[]>(`${S}/transport/routes`)).data });
 }
+/** One route with its versions and their ordered stops. */
+export function useRoute(routeId: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'transport', 'routes', routeId],
+    enabled: !!routeId,
+    queryFn: async () => (await api.get<RouteDetail>(`${S}/transport/routes/${routeId}`)).data,
+  });
+}
 export function useCreateRoute() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: async (dto: { name: string; monthlyFee?: number; code?: string }) => (await api.post<Route>(`${S}/transport/routes`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'routes'] }) });
+}
+export function useTransportZones() {
+  return useQuery({ queryKey: ['school', 'transport', 'zones'], queryFn: async () => (await api.get<TransportZone[]>(`${S}/transport/zones`)).data });
 }
 export function useStops() {
   return useQuery({ queryKey: ['school', 'transport', 'stops'], queryFn: async () => (await api.get<Stop[]>(`${S}/transport/stops`)).data });
 }
 export function useCreateStop() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: async (dto: { routeId: string; name: string; order?: number; pickupTime?: string; dropoffTime?: string }) => (await api.post<Stop>(`${S}/transport/stops`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'stops'] }) });
+  return useMutation({ mutationFn: async (dto: { code: string; name: string; zoneId?: string; landmark?: string }) => (await api.post<Stop>(`${S}/transport/stops`, dto)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'stops'] }) });
 }
 export function useStudentTransportAssignments() {
   return useQuery({ queryKey: ['school', 'transport', 'assignments'], queryFn: async () => (await api.get<StudentTransportAssignment[]>(`${S}/transport/assignments`)).data });
@@ -1887,6 +1954,16 @@ export function useAssignStudentTransport() {
       (await api.post<StudentTransportAssignment>(`${S}/transport/assignments`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'transport', 'assignments'] }),
   });
+}
+export function useTransportTrips(date: string | undefined) {
+  return useQuery({
+    queryKey: ['school', 'transport', 'trips', date],
+    enabled: !!date,
+    queryFn: async () => (await api.get<TransportTrip[]>(`${S}/transport/trips`, { params: { date } })).data,
+  });
+}
+export function useTransportIncidents() {
+  return useQuery({ queryKey: ['school', 'transport', 'incidents'], queryFn: async () => (await api.get<TransportIncident[]>(`${S}/transport/incidents`)).data });
 }
 
 export interface StudentActivity {
@@ -5969,6 +6046,54 @@ export function useArchiveLessonPlan() {
   return useMutation({ mutationFn: async (id: string) => (await api.post<any>(`${LP}/lesson-plans/${id}/archive`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] }) });
 }
 
+/**
+ * Draft a plan for every lesson in one week, from the timetable and the scheme
+ * of work. Idempotent — a lesson that already has a plan is skipped — so the
+ * button is safe to press twice.
+ */
+export function useGenerateWeekPlans() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { courseOfferingId: string; weekStart: string; teacherPartnerId?: string }) =>
+      (await api.post<{ weekStart: string; created: number; skipped: number; planIds: string[] }>(
+        `${LP}/lesson-plans/generate-week`, dto,
+      )).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'lp', 'lesson-plans'] });
+      qc.invalidateQueries({ queryKey: ['school', 'lp', 'scheduled-lessons'] });
+    },
+  });
+}
+
+/**
+ * Download a printable plan or scheme.
+ *
+ * The PDF is rendered server-side with pdfkit, not in the browser: a plan that
+ * goes into an inspection file has to come out the same whoever prints it.
+ */
+async function downloadPdf(url: string, fallbackName: string): Promise<void> {
+  const res = await api.get(url, { responseType: 'blob' });
+  const disposition = String(res.headers?.['content-disposition'] ?? '');
+  const match = /filename="?([^"]+)"?/.exec(disposition);
+  const href = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = match?.[1] ?? fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on the next tick so the click has taken the blob.
+  setTimeout(() => URL.revokeObjectURL(href), 0);
+}
+
+export function downloadLessonPlanPdf(id: string): Promise<void> {
+  return downloadPdf(`${LP}/lesson-plans/${id}/pdf`, 'lesson-plan.pdf');
+}
+
+export function downloadSchemeOfWorkPdf(courseOfferingId: string): Promise<void> {
+  return downloadPdf(`${LP}/course-offerings/${courseOfferingId}/scheme/pdf`, 'scheme-of-work.pdf');
+}
+
 export interface LessonPlanTemplate { id: string; name: string; subjectId: string; templateJson: any; isPublic: boolean }
 export function useLessonPlanTemplates() {
   return useQuery({ queryKey: ['school', 'lp', 'templates'], queryFn: async () => (await api.get<LessonPlanTemplate[]>(`${LP}/templates`)).data });
@@ -6757,6 +6882,72 @@ export function useLmsExportCourse() {
   return useMutation({
     mutationFn: async ({ id, includeUserData }: { id: string; includeUserData?: boolean }) =>
       (await api.post(`${LMS}/courses/${id}/export`, { includeUserData })).data,
+  });
+}
+
+/**
+ * Course templates (ADR-034).
+ *
+ * A template is a named, structure-only course bundle — the same JSON rollover
+ * uses — so a teacher builds fourteen weeks once and reuses them each term. It
+ * carries no cohort, no submissions and no marks.
+ */
+export interface LmsCourseTemplate {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  subjectId: string | null;
+  gradeLevelId: string | null;
+  coverImageFileId: string | null;
+  sectionCount: number;
+  moduleCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useLmsCourseTemplates(params: { subjectId?: string; gradeLevelId?: string } = {}) {
+  return useQuery({
+    queryKey: ['lms', 'course-templates', params],
+    queryFn: async () => (await api.get<LmsCourseTemplate[]>(`${LMS}/course-templates`, { params })).data,
+  });
+}
+
+/** Save this course's structure for reuse. Re-saving one code replaces it. */
+export function useLmsSaveAsTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...dto
+    }: {
+      id: string;
+      name: string;
+      code?: string;
+      description?: string;
+      coverImageFileId?: string;
+    }) => (await api.post<LmsCourseTemplate>(`${LMS}/courses/${id}/save-as-template`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'course-templates'] }),
+  });
+}
+
+/** Build an EMPTY course from a template. Refused if the course has activities. */
+export function useLmsApplyTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, templateId }: { id: string; templateId: string }) =>
+      (await api.post<{ sections: number; modules: number; skipped: number }>(
+        `${LMS}/courses/${id}/apply-template`, { templateId },
+      )).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms'] }),
+  });
+}
+
+export function useLmsDeleteCourseTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${LMS}/course-templates/${id}`)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lms', 'course-templates'] }),
   });
 }
 

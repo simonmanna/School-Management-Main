@@ -1009,11 +1009,11 @@ function TransportTab({ rows }: { rows?: any[] }) {
             <div className="font-medium">{t.route?.name ?? 'Route'}</div>
             <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-muted-foreground">
               <span>Stop: {t.stop?.name ?? '—'}</span>
-              <span>Pickup: {t.stop?.pickupTime ?? '—'}</span>
-              <span>Monthly fee: {money(t.monthlyFee)}</span>
-              <span>From: {fmtDate(t.startDate)}</span>
+              <span>Zone: {t.stop?.zone?.name ?? '—'}</span>
+              <span>Service: {t.serviceMode === 'both' ? 'Morning & afternoon' : (t.serviceMode ?? '—').replace(/_/g, ' ')}</span>
+              <span>{fmtDate(t.startDate)} → {t.endDate ? fmtDate(t.endDate) : 'open'}</span>
             </div>
-            <div className="mt-2"><Badge variant={t.isActive ? 'default' : 'secondary'}>{t.isActive ? 'active' : 'ended'}</Badge></div>
+            <div className="mt-2"><Badge variant={t.status === 'active' ? 'default' : 'secondary'}>{t.status ?? 'active'}</Badge></div>
           </div>
         ))}
       </CardContent>

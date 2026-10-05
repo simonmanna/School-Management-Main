@@ -80,7 +80,14 @@ function build(opts: {
   const availability = {
     evaluate: jest.fn(async () => ({ available, reasons: available ? [] : ['Not available until 1 Sept'] })),
   } as any;
-  const caps = { canAtCourse: jest.fn(async (_p: any, cap: string) => capabilities.includes(cap)) } as any;
+  const caps = {
+    canAtCourse: jest.fn(async (_p: any, cap: string) => capabilities.includes(cap)),
+    // The action path resolves the whole set once and hands it to the plugin, so
+    // a moderation verb can refuse a caller who only holds `activityView`.
+    effectiveAtCourse: jest.fn(async () =>
+      Object.fromEntries(capabilities.map((c: string) => [c, true])),
+    ),
+  } as any;
   const events = { log: jest.fn() } as any;
 
   // The envelope service only decorates the response; these tests are about WHO

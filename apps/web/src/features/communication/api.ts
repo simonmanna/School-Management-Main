@@ -16,9 +16,10 @@ function uuid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-export function useConversations() {
+export function useConversations(opts: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: [...COMM_PREFIX, 'conversations'],
+    enabled: opts.enabled ?? true,
     queryFn: async () => (await api.get<ConversationSummary[]>('/communication/conversations')).data,
     // Fallback poll; SSE keeps this fresh when connected.
     refetchInterval: 30_000,

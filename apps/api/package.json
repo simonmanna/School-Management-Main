@@ -22,10 +22,18 @@
     "test": "jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",
     "test:tenancy": "jest --selectProjects unit --testPathPattern 'kernel/prisma'",
-    "_comment_test_e2e": "E2E lives at the repo root (vitest, tests/e2e) — run `pnpm test:e2e` from there. There is no jest e2e config in this package.",
+    "_comment_test_e2e": "E2E lives at the repo root (vitest, tests/e2e) \u2014 run `pnpm test:e2e` from there. There is no jest e2e config in this package.",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "test:unit": "jest --selectProjects unit",
-    "test:all": "jest --runInBand"
+    "test:all": "jest --runInBand",
+    "db:seed:green-valley-demo": "tsx prisma/demo-green-valley/index.ts",
+    "db:reset:sunrise-academics": "tsx prisma/demo-green-valley/reset-academics.ts --school=sunrise",
+    "db:seed:sunrise": "tsx prisma/seed-green-valley.ts --school=sunrise",
+    "db:seed:sunrise-demo": "tsx prisma/demo-green-valley/index.ts --school=sunrise",
+    "db:reset:sunrise-ops": "tsx prisma/demo-green-valley/ops/reset.ts --school=sunrise",
+    "db:seed:sunrise-ops": "node prisma/demo-green-valley/ops/run.cjs --school=sunrise",
+    "db:reset:sunrise-admissions": "tsx prisma/demo-green-valley/admissions/reset.ts --school=sunrise",
+    "db:seed:sunrise-admissions": "node prisma/demo-green-valley/admissions/run.cjs --school=sunrise"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -71,7 +79,7 @@
     "uuid": "^11.0.5",
     "web-push": "^3.6.7"
   },
-  "//optionalDependencies": "EXPERIMENTAL WhatsApp transport (WHATSAPP_TRANSPORT=baileys). Lazy-loaded; see providers/whatsapp/baileys/baileys-lib.ts — absence is handled gracefully.",
+  "//optionalDependencies": "EXPERIMENTAL WhatsApp transport (WHATSAPP_TRANSPORT=baileys). Lazy-loaded; see providers/whatsapp/baileys/baileys-lib.ts \u2014 absence is handled gracefully.",
   "optionalDependencies": {
     "@whiskeysockets/baileys": "^6.7.9"
   },

@@ -8,11 +8,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
+import { PERMISSIONS } from '@erp/shared';
 import { useConversations } from '@/features/communication/api';
+import { useAuthStore } from '@/stores/auth.store';
 
 export function HeaderComms() {
   const navigate = useNavigate();
-  const { data: conversations } = useConversations();
+  // Every page renders this header. Polling an inbox the user may not read
+  // raised a "Permission denied" toast every 30 seconds for teachers and
+  // office staff; such users simply see no unread count.
+  const canRead = useAuthStore((s) => s.hasPermission(PERMISSIONS.communication.conversationRead));
+  const { data: conversations } = useConversations({ enabled: canRead });
   const list = conversations ?? [];
   const unread = list.reduce((s, c) => s + (c.unread ?? 0), 0);
 

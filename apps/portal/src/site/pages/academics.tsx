@@ -1,7 +1,7 @@
-import { ArrowRight, CalendarDays, Check, Clock, FlaskConical, Music4, Trophy } from 'lucide-react';
-import { PROGRAMMES, TERM_DATES } from '@/site/content';
+import { ArrowRight, CalendarDays, Check, Clock } from 'lucide-react';
+import { ACTIVITIES, FACILITIES, PROGRAMMES, TERM_DATES } from '@/site/content';
 import {
-  Container, CtaLink, IconPlate, Panel, Pill, Reveal, Section, SectionHeading,
+  Container, CtaLink, IconPlate, Panel, Photo, Pill, Reveal, Section, SectionHeading,
 } from '@/site/components';
 import { usePageTitle } from '@/site/site-shell';
 import { PageHero } from '@/site/pages/_hero';
@@ -17,11 +17,6 @@ const SCHOOL_DAY = [
   { time: '17:00', label: 'Day pupils leave', note: 'Boarders go to supervised prep at 19:00' },
 ];
 
-const FACILITIES = [
-  { icon: FlaskConical, title: 'Three science laboratories', body: 'Physics, Chemistry and Biology, each equipped to UNEB practical-centre standard, timetabled from S1.' },
-  { icon: Trophy, title: 'Field, courts and pool', body: 'Football, netball, volleyball, athletics and swimming, with inter-house competition every term.' },
-  { icon: Music4, title: 'Music and drama', body: 'A music room with instruments to borrow, a school choir, and a drama production each year.' },
-];
 
 export default function AcademicsPage() {
   usePageTitle('Academics');
@@ -31,6 +26,7 @@ export default function AcademicsPage() {
       <PageHero
         eyebrow="Academics"
         title="Nursery to A-Level on one campus"
+        image="olevel-lesson"
         lede="The national curriculum, taught in classes small enough to notice an individual child, and examined honestly enough that the report card means something."
       />
 
@@ -45,20 +41,23 @@ export default function AcademicsPage() {
           <div className="grid gap-4 pt-12 sm:grid-cols-2">
             {PROGRAMMES.map((p, i) => (
               <Reveal key={p.key} delay={i * 60}>
-                <Panel className="h-full">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-display text-2xl font-bold tracking-tight">{p.name}</h3>
-                    <Pill tone="brand">{p.ages}</Pill>
+                <Panel className="h-full overflow-hidden p-0">
+                  <Photo photo={p.photo} className="aspect-[16/9]" sizes="(min-width: 640px) 50vw, 100vw" />
+                  <div className="p-6">
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-display text-2xl font-bold tracking-tight">{p.name}</h3>
+                      <Pill tone="brand">{p.ages}</Pill>
+                    </div>
+                    <p className="pt-3 text-sm leading-relaxed text-muted-foreground">{p.summary}</p>
+                    <ul className="grid gap-2 pt-5 sm:grid-cols-2">
+                      {p.highlights.map((h) => (
+                        <li key={h} className="flex items-start gap-2 text-sm">
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                          <span>{h}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <p className="pt-3 text-sm leading-relaxed text-muted-foreground">{p.summary}</p>
-                  <ul className="grid gap-2 pt-5 sm:grid-cols-2">
-                    {p.highlights.map((h) => (
-                      <li key={h} className="flex items-start gap-2 text-sm">
-                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                        <span>{h}</span>
-                      </li>
-                    ))}
-                  </ul>
                 </Panel>
               </Reveal>
             ))}
@@ -104,19 +103,51 @@ export default function AcademicsPage() {
       {/* ── Facilities ── */}
       <Section>
         <Container>
-          <SectionHeading eyebrow="Beyond the classroom" title="What the campus holds" align="center" />
-          <div className="grid gap-4 pt-12 sm:grid-cols-3">
+          <SectionHeading
+            eyebrow="Beyond the classroom"
+            title="What the campus holds"
+            lede="Everything a pupil needs between the first bell and evening prep, inside one gate."
+            align="center"
+          />
+          <div className="grid gap-4 pt-12 sm:grid-cols-2 lg:grid-cols-3">
             {FACILITIES.map((f, i) => (
-              <Reveal key={f.title} delay={i * 70}>
-                <Panel className="h-full">
-                  <IconPlate>
-                    <f.icon className="h-5 w-5" />
-                  </IconPlate>
-                  <h3 className="pt-4 font-semibold">{f.title}</h3>
-                  <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{f.body}</p>
+              <Reveal key={f.title} delay={i * 60}>
+                <Panel className="h-full overflow-hidden p-0">
+                  <Photo
+                    photo={f.photo}
+                    className="aspect-[3/2]"
+                    sizes="(min-width: 1024px) 380px, (min-width: 640px) 50vw, 100vw"
+                  />
+                  <div className="p-6">
+                    <h3 className="font-semibold">{f.title}</h3>
+                    <p className="pt-2 text-sm leading-relaxed text-muted-foreground">{f.body}</p>
+                  </div>
                 </Panel>
               </Reveal>
             ))}
+          </div>
+
+          <div className="mt-16 grid items-center gap-10 rounded-3xl border bg-muted/40 p-6 sm:p-10 lg:grid-cols-[1.3fr_1fr]">
+            <div>
+              <SectionHeading
+                eyebrow="Clubs & activities"
+                title="Every pupil takes at least one"
+                lede="Clubs run from 4:00 pm every weekday, with fixtures and performances on Saturdays."
+              />
+              <ul className="flex flex-wrap gap-2 pt-6">
+                {ACTIVITIES.map((a) => (
+                  <li key={a}>
+                    <Pill tone="brand">{a}</Pill>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <Photo
+              photo="football"
+              className="aspect-[4/3] rounded-2xl"
+              imgClassName="object-[center_35%]"
+              sizes="(min-width: 1024px) 420px, 100vw"
+            />
           </div>
         </Container>
       </Section>

@@ -5,6 +5,9 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
 import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
+import { weekStartOf } from '../teaching/scheme-of-work.service';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const LP_WORKFLOW: Record<string, string[]> = {
   draft: ['submitted', 'archived'],
@@ -517,6 +520,160 @@ export class LessonPlanningService {
     await this.prisma.client.lessonPlanReview.create({
       data: { organizationId: this.org, lessonPlanId: id, reviewerId: this.tenant.userId ?? undefined, fromStatus: from, toStatus: to, comment, requestedChanges },
     });
+  }
+
+  // ───────────── Bulk weekly planning ─────────────
+
+  /**
+   * Draft a plan for every lesson in one week.
+   *
+   * A teacher with four streams and five periods a week was writing twenty plans
+   * by hand, each repeating the same scheme-of-work content. This fills the week
+   * from what the school has already decided — the timetable says when the
+   * lessons are, the scheme of work says what they cover — and leaves a DRAFT
+   * per lesson for the teacher to edit and submit. It never approves anything,
+   * and it never touches a plan that already exists.
+   *
+   * Idempotent by construction: a scheduled lesson that already has a plan is
+   * skipped, so pressing the button twice adds nothing. `ScheduledLesson` rows
+   * themselves come from `POST school/teaching/week/generate`, which is the
+   * timetable's own materialiser — this does not duplicate it, and reports
+   * plainly when the week has not been materialised yet.
+   */
+  async generateWeekPlans(dto: { courseOfferingId: string; weekStart: string; teacherPartnerId?: string }) {
+    await this.assertMayWritePlan(dto.teacherPartnerId);
+
+    const offering = await this.prisma.client.courseOffering.findFirst({
+      where: { id: dto.courseOfferingId, organizationId: this.org },
+      include: { subject: { select: { name: true } } },
+    });
+    if (!offering) throw new NotFoundException('CourseOffering not found');
+    // LessonPlan.subjectId is required, and a non-subject offering (an activity
+    // or a pastoral slot) has nothing to plan against.
+    if (!offering.subjectId) {
+      throw new BadRequestException('This course has no subject, so there is nothing to plan.');
+    }
+
+    const start = weekStartOf(new Date(dto.weekStart));
+    const end = new Date(start.getTime() + 7 * DAY_MS);
+
+    const [lessons, schemeWeek] = await Promise.all([
+      this.prisma.client.scheduledLesson.findMany({
+        where: {
+          organizationId: this.org,
+          courseOfferingId: offering.id,
+          plannedDate: { gte: start, lt: end },
+          status: { notIn: ['cancelled', 'rescheduled'] },
+        },
+        orderBy: { plannedDate: 'asc' },
+      }),
+      this.prisma.client.schemeOfWorkWeek.findFirst({
+        where: { schemeOfWork: { courseOfferingId: offering.id }, weekStart: { gte: start, lt: end } },
+        include: { items: { orderBy: { order: 'asc' } } },
+      }),
+    ]);
+
+    if (lessons.length === 0) {
+      throw new BadRequestException(
+        'This week has no lessons yet. Generate the week from the timetable first.',
+      );
+    }
+
+    const items = schemeWeek?.items ?? [];
+    const subjectName = offering.subject?.name ?? 'Lesson';
+    const created: string[] = [];
+    let skipped = 0;
+
+    for (const [i, lesson] of lessons.entries()) {
+      if (lesson.lessonPlanId) {
+        skipped += 1;
+        continue;
+      }
+
+      // One scheme item per lesson where the week supplies enough of them;
+      // otherwise the week's items are shared across the lessons in order.
+      const item = items.length > 0 ? items[Math.min(i, items.length - 1)] : null;
+      const dayLabel = lesson.plannedDate.toLocaleDateString('en-GB', { weekday: 'long' });
+      const title = item?.title
+        ? item.title
+        : schemeWeek
+          ? `${subjectName} — week ${schemeWeek.weekNumber}, ${dayLabel}`
+          : `${subjectName} — ${dayLabel}`;
+
+      const plan = await this.prisma.client.lessonPlan.create({
+        data: {
+          organizationId: this.org,
+          courseOfferingId: offering.id,
+          subjectId: offering.subjectId,
+          classId: offering.classId,
+          termId: offering.termId,
+          schemeOfWorkWeekId: schemeWeek?.id,
+          // The lesson's own teacher wins: a substitute is who actually teaches
+          // it, and the caller may be a head of department planning for others.
+          teacherPartnerId: lesson.teacherPartnerId ?? dto.teacherPartnerId,
+          title,
+          weekOf: start,
+          objectives: items.length > 0 ? items.map((it) => `• ${it.title}`).join('\n') : undefined,
+          topicId: item?.topicId ?? undefined,
+          unitId: item?.unitId ?? undefined,
+          workflowStatus: 'draft',
+          version: 1,
+        },
+      });
+
+      // Carry the scheme's outcome links through, so coverage reporting counts
+      // this plan without the teacher re-selecting what the scheme already said.
+      const outcomeIds = [...new Set(items.map((it) => it.learningOutcomeId).filter(Boolean))] as string[];
+      if (outcomeIds.length > 0) {
+        await this.prisma.client.lessonPlanOutcome.createMany({
+          data: outcomeIds.map((learningOutcomeId) => ({
+            organizationId: this.org,
+            lessonPlanId: plan.id,
+            learningOutcomeId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      const objectiveIds = [...new Set(items.map((it) => it.learningObjectiveId).filter(Boolean))] as string[];
+      if (objectiveIds.length > 0) {
+        await this.prisma.client.lessonPlanObjective.createMany({
+          data: objectiveIds.map((learningObjectiveId) => ({
+            organizationId: this.org,
+            lessonPlanId: plan.id,
+            learningObjectiveId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      await this.prisma.client.scheduledLesson.update({
+        where: { id: lesson.id },
+        data: { lessonPlanId: plan.id },
+      });
+      await this.snapshot(plan.id, 1, plan.teacherPartnerId ?? undefined);
+      created.push(plan.id);
+    }
+
+    await this.audit.record({
+      entity: 'LessonPlan',
+      entityId: offering.id,
+      action: 'create',
+      newValues: {
+        reason: 'generate-week',
+        courseOfferingId: offering.id,
+        weekStart: start.toISOString(),
+        created: created.length,
+        skipped,
+      },
+    });
+
+    return {
+      weekStart: start.toISOString(),
+      created: created.length,
+      skipped,
+      schemeWeek: schemeWeek ? { id: schemeWeek.id, weekNumber: schemeWeek.weekNumber, items: items.length } : null,
+      planIds: created,
+    };
   }
 
   // ───────────── Timetable integration ─────────────
