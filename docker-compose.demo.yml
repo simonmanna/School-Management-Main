@@ -104,6 +104,11 @@ services:
         VITE_ENABLE_RENTAL: "false"
         VITE_ENABLE_REPAIR: "false"
         VITE_ENABLE_LIVE_MOBILE_MONEY: "false"
+        # Shown and pre-filled on the sign-in form. Must match the seeded
+        # admin (SEED_ADMIN_PASSWORD when building the dump).
+        VITE_DEMO_LOGIN_ORG: SUNRISE
+        VITE_DEMO_LOGIN_EMAIL: admin@sunrise.test
+        VITE_DEMO_LOGIN_PASSWORD: admin
 
   portal:
     image: school-demo/portal:latest

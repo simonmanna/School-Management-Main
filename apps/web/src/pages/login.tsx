@@ -114,6 +114,17 @@ interface LoginResponse {
 
 type View = 'login' | 'mfa' | 'forgot' | 'forgot-sent';
 
+// Demo builds only (docker-compose.demo.yml): a login baked in at build time is
+// pre-filled and shown on the form. Unset everywhere else, so a production
+// login screen still advertises nothing.
+const DEMO_LOGIN = import.meta.env.VITE_DEMO_LOGIN_EMAIL
+  ? {
+      orgCode: import.meta.env.VITE_DEMO_LOGIN_ORG ?? '',
+      email: import.meta.env.VITE_DEMO_LOGIN_EMAIL,
+      password: import.meta.env.VITE_DEMO_LOGIN_PASSWORD ?? '',
+    }
+  : null;
+
 function readRemembered(key: string): string {
   try {
     return localStorage.getItem(key) ?? '';
@@ -134,9 +145,9 @@ export function LoginPage() {
   // Remember the school code and email this browser last signed in with. The
   // form used to arrive pre-filled with the DEMO tenant's admin account
   // (Wave 7): a production login screen must not advertise a known login.
-  const [orgCode, setOrgCode] = useState(() => readRemembered('login.orgCode'));
-  const [email, setEmail] = useState(() => readRemembered('login.email'));
-  const [password, setPassword] = useState('');
+  const [orgCode, setOrgCode] = useState(() => readRemembered('login.orgCode') || (DEMO_LOGIN?.orgCode ?? ''));
+  const [email, setEmail] = useState(() => readRemembered('login.email') || (DEMO_LOGIN?.email ?? ''));
+  const [password, setPassword] = useState(DEMO_LOGIN?.password ?? '');
   const [mfaToken, setMfaToken] = useState('');
   const [mfaCode, setMfaCode] = useState('');
   const [showPwd, setShowPwd] = useState(false);
@@ -331,6 +342,22 @@ export function LoginPage() {
                 >
                   Forgot password?
                 </button>
+                {DEMO_LOGIN && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrgCode(DEMO_LOGIN.orgCode);
+                      setEmail(DEMO_LOGIN.email);
+                      setPassword(DEMO_LOGIN.password);
+                    }}
+                    className="block w-full rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-3 text-left text-xs text-emerald-100 hover:bg-emerald-400/15 transition-colors"
+                  >
+                    <span className="block font-bold text-emerald-300 mb-1">Demo login</span>
+                    <span className="block font-mono">
+                      {DEMO_LOGIN.orgCode} · {DEMO_LOGIN.email} · {DEMO_LOGIN.password}
+                    </span>
+                  </button>
+                )}
               </form>
             )}
 

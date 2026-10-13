@@ -45,7 +45,7 @@ P.4–P.7. Lesson plans are reviewed by `deputy@` (Deputy Head role).
 
 | Who | Email | Password |
 |---|---|---|
-| Administrator | admin@sunrise.test | Admin@123 |
+| Administrator (pre-filled and shown on the sign-in form) | admin@sunrise.test | admin |
 | Head teacher | head@sunrise.test | Staff@123 |
 | Deputy head | deputy@sunrise.test | Staff@123 |
 | Director of studies | dos@sunrise.test | Staff@123 |
@@ -82,7 +82,7 @@ npx prisma migrate deploy
 RLS_APP_PASSWORD=x RLS_SYSTEM_PASSWORD=y pnpm rls:setup-role   # roles + grants
 pnpm db:seed                                                  # base catalogue (chart of accounts …)
 pnpm exec tsx ../../scripts/seed-school.ts                    # Sunrise org, accounting, fee catalogue
-pnpm exec tsx ../../scripts/seed-sunrise-academics.ts         # roles, admin login
+SEED_ADMIN_PASSWORD=admin pnpm exec tsx ../../scripts/seed-sunrise-academics.ts   # roles, admin login (matches VITE_DEMO_LOGIN_* in docker-compose.demo.yml)
 pnpm db:reset:sunrise-academics -- --apply                    # drop the legacy P.1 A … S.6 shape
 pnpm db:seed:sunrise                                          # nursery + primary structure
 pnpm db:seed:sunrise-demo                                     # pupils, staff, marks, results, LMS, planning
