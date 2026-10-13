@@ -86,6 +86,8 @@ SEED_ADMIN_PASSWORD=admin pnpm exec tsx ../../scripts/seed-sunrise-academics.ts 
 pnpm db:reset:sunrise-academics -- --apply                    # drop the legacy P.1 A … S.6 shape
 pnpm db:seed:sunrise                                          # nursery + primary structure
 pnpm db:seed:sunrise-demo                                     # pupils, staff, marks, results, LMS, planning
+pnpm --filter @erp/api build && pnpm db:seed:sunrise-ops       # fees, books, HR, expenses, transport, meals, library, store, purchasing (drives dist/)
+pnpm db:seed:sunrise-admissions                               # admissions pipeline
 docker exec sd-seed-db pg_dump -U school_owner -d school -Fc -f /tmp/school-demo.dump
 docker cp sd-seed-db:/tmp/school-demo.dump .
 ```

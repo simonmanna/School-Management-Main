@@ -59,7 +59,24 @@ const BURSARIES = [
   { code: 'ORPHAN', name: 'Orphan Support Bursary (40%)', percent: 40, count: 4, grades: PRIMARY, awardedBy: 'Board of Governors' },
 ];
 
-type PayerProfile = 'prompt' | 'instalments' | 'late' | 'defaulter' | 'sponsored';
+const FEE_CATEGORIES: Array<[code: string, name: string, type: 'mandatory' | 'optional']> = [
+  ['LUNCH', 'Lunch', 'mandatory'],
+  ['PORRIDGE', 'Break Tea / Porridge', 'optional'],
+  ['DEVELOPMENT', 'Development Fee', 'mandatory'],
+  ['ADMISSION', 'Admission Fee', 'mandatory'],
+  ['EXAM', 'Examination Fee', 'mandatory'],
+  ['MEDICAL', 'Medical / Health Fee', 'mandatory'],
+  ['BOARDING', 'Boarding Fees', 'mandatory'],
+  ['ACTIVITIES', 'Co-curricular Activities', 'optional'],
+  ['TRIP', 'Educational Trip', 'optional'],
+  ['PLE', 'PLE / Candidate Fee', 'mandatory'],
+  ['COACHING', 'Extra Coaching', 'optional'],
+  ['CARE', 'After-school Care', 'optional'],
+  ['MUSIC', 'Music / Instrument', 'optional'],
+  ['UNIFORM_EXTRA', 'Extra Uniform Set', 'optional'],
+];
+
+type PayerProfile ='prompt' | 'instalments' | 'late' | 'defaulter' | 'sponsored';
 type Method = 'bank' | 'mtn' | 'airtel' | 'cash';
 
 export interface FeesHandle {
@@ -76,6 +93,16 @@ export async function seedFees(ctx: Ctx, tl: Timeline, books: Books, roster: Ros
   const payments = ctx.svc('modules/school/fees/billing.service', 'SchoolPaymentService');
   const advanced = ctx.svc('modules/school/fees/advanced.service', 'AdvancedFinanceService');
 
+  // The catalogue below links every component to a fee category. A fresh
+  // database only has the base eight (seed-school.ts), so add the rest here
+  // rather than depend on a category someone once created by hand.
+  for (const [i, [code, name, type]] of FEE_CATEGORIES.entries()) {
+    await prisma.feeCategory.upsert({
+      where: { organizationId_code: { organizationId: O, code } },
+      update: {},
+      create: { organizationId: O, code, name, type, paymentOrder: 9 + i },
+    });
+  }
   const categories = new Map(
     (await prisma.feeCategory.findMany({ where: { organizationId: O } })).map((c) => [c.code.toUpperCase(), c]),
   );

@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   const fileIds = await prisma.$queryRawUnsafe<Array<{ fileId: string }>>(
     `select "fileId" from "StudentDocument" where "organizationId" = $1`, O,
   );
-  const staleGrades = await prisma.gradeLevel.count({ where: { organizationId: O, code: { notIn: keptGradeCodes } } });
+  const staleGrades = await prisma.gradeLevel.count({ where: { organizationId: O, OR: [{ code: null }, { code: { notIn: keptGradeCodes } }] } });
   const levels = await prisma.academicLevel.count({ where: { organizationId: O } });
 
   const nonEmpty = plan.filter(([, n]) => n > 0);
@@ -177,7 +177,7 @@ async function main(): Promise<void> {
       // Kept grades are re-attached to their level by the structure seed.
       await tx.gradeLevel.updateMany({ where: { organizationId: O }, data: { academicLevelId: null, nextGradeLevelId: null } });
       await tx.lmsCourseTemplate.deleteMany({ where: { organizationId: O } });
-      await tx.gradeLevel.deleteMany({ where: { organizationId: O, code: { notIn: keptGradeCodes } } });
+      await tx.gradeLevel.deleteMany({ where: { organizationId: O, OR: [{ code: null }, { code: { notIn: keptGradeCodes } }] } });
       await tx.academicLevel.deleteMany({ where: { organizationId: O } });
     },
     { timeout: 600_000, maxWait: 30_000 },
