@@ -158,7 +158,10 @@ export class PaymentService {
       // was semantically wrong (checked a supplier balance for a customer refund).
       if (direction === 'outbound' && counterType === 'payable') {
         const outstanding = await tx.document.aggregate({
-          where: { organizationId, partnerId: dto.partnerId, documentType: 'vendor_bill', status: { in: ['posted', 'partial'] } },
+          // 'partial' is a paymentStatus, never a DocumentStatus: passing it here
+          // made Prisma reject the whole aggregate, so every supplier payment
+          // crashed. A part-paid bill stays 'posted' and keeps its residual.
+          where: { organizationId, partnerId: dto.partnerId, documentType: 'vendor_bill', status: { in: ['posted', 'paid'] } },
           _sum: { amountResidual: true },
         });
         const currentOutstanding = new Prisma.Decimal(outstanding._sum.amountResidual ?? 0);

@@ -32,10 +32,22 @@ const TABLES = [
   'MealAttendance', 'MealSession', 'MealWaste', 'MealConsumption', 'MealProductionItem', 'MealProductionPlan',
   'MealAccountTransaction', 'MealPurchase', 'MealAccount', 'MealPlanAssignment',
   'Sponsorship', 'Scholarship', 'StudentOptionalFee', 'Budget',
+  // Library lending (the catalogue and its copies are configuration and stay)
+  'Borrowing',
+  // Store, purchasing and other revenue
+  'InventoryCountLine', 'InventoryCountSession',
+  'StockOutItem', 'StockOut', 'WasteItem', 'WasteRecord',
+  'StockAdjustmentItem', 'StockAdjustment', 'StockTransferItem', 'StockTransfer',
+  'StockReservation', 'InventorySerial', 'InventoryLedger', 'StockItem', 'InventoryBatch',
+  'DebitNoteLine', 'DebitNote', 'VendorBillLink', 'PurchasePayment',
+  'GoodsReceiptLine', 'GoodsReceiptNote', 'PurchaseOrderLine', 'PurchaseOrder',
+  'PurchaseRequestLine', 'PurchaseRequest', 'Income',
 ];
 
 /** Numbering this demo consumes. */
 const SEQUENCES = [
+  'libraryfine_2026', 'inv_count', 'stock_out', 'stock_adj', 'stock_transfer', 'stock_waste',
+  'waste_doc', 'income_2026', 'pr_2026', 'po_2026', 'grn_2026', 'debitnote_2026', 'creditnote_2026', 'vendorbill_2026',
   'expense_2026', 'feecredit_2026', 'hr_advance', 'hr_bank_payment', 'hr_leave_request', 'hr_loan', 'hr_payroll_run',
   'hr_payslip', 'invoice_2026', 'journal_BANK_2026', 'journal_CASH_2026', 'journal_GEN_2026', 'journal_SALES_2026',
   'payment_2026', 'schoolfeeinvoice_2026',
@@ -75,6 +87,9 @@ async function main() {
       pending = failed;
     }
     if (pending.length) throw new Error(`Could not clear: ${pending.join(', ')}`);
+
+    // Lending history is gone; every copy is back on the shelf.
+    await prisma.bookCopy.updateMany({ where: { organizationId: O }, data: { status: 'available' } });
 
     const short = O.replace(/-/g, '').slice(0, 8);
     for (const s of SEQUENCES) {

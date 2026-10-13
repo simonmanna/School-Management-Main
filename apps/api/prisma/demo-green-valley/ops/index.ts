@@ -12,6 +12,10 @@
  *   16  expenses    suppliers, categories, a year of approved and paid expenses
  *   17  transport   zones, stops, routes, buses, crew, riders, trips, transport fees
  *   18  meals       meal types, plans, menus, kitchen, daily service, tuck-shop cards
+ *   19  library     catalogue, copies, lending, returns, overdue fines
+ *   20  store       stores, units, stock items, opening stock, issues, counts
+ *   21  purchasing  suppliers, requisitions, orders, deliveries, bills, payments
+ *   22  revenue     income heads, other income, institutional sales, credit notes
  *
  * Every stage first writes its configuration, then puts its dated events on one
  * timeline; the timeline replays January → yesterday in order with the clock
@@ -36,6 +40,10 @@ import { ensureSupportStaff, seedHr, OPS_LOGINS } from './15-hr';
 import { seedExpenses } from './16-expenses';
 import { seedTransport } from './17-transport';
 import { seedMeals } from './18-meals';
+import { seedLibrary } from './19-library';
+import { seedStore } from './20-store';
+import { seedPurchasing } from './21-purchasing';
+import { seedRevenue } from './22-revenue';
 import { loadRoster } from './roster';
 
 export async function runOps(host: OpsHost): Promise<void> {
@@ -80,6 +88,24 @@ export async function runOps(host: OpsHost): Promise<void> {
     if (run(18)) {
       console.log('\n── 18. Meals & cafeteria ──');
       await seedMeals(ctx, tl, books, roster);
+    }
+
+    if (run(19)) {
+      console.log('\n── 19. Library ──');
+      await seedLibrary(ctx, tl, roster);
+    }
+    let store: Awaited<ReturnType<typeof seedStore>> | null = null;
+    if (run(20) || run(21) || run(22)) {
+      console.log('\n── 20. School store ──');
+      store = await seedStore(ctx, tl, books, roster);
+    }
+    if (run(21) && store) {
+      console.log('\n── 21. Purchasing ──');
+      await seedPurchasing(ctx, tl, books, store, roster);
+    }
+    if (run(22) && store) {
+      console.log('\n── 22. Revenue beyond fees ──');
+      await seedRevenue(ctx, tl, books, store, roster);
     }
 
     console.log(`\n── Replaying the year (${tl.size} events) ──`);
@@ -148,6 +174,19 @@ async function restampCreatedAt(prisma: PrismaClient, O: string, since: Date): P
     ['production plans', `UPDATE "MealProductionPlan" SET "createdAt" = "date" - interval '9 hours' WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
     ['waste', `UPDATE "MealWaste" w SET "createdAt" = p."date" + interval '11 hours', "recordedAt" = p."date" + interval '11 hours' FROM "MealProductionPlan" p WHERE p.id = w."mealProductionPlanId" AND w."organizationId" = $1 AND w."createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
     ['sponsorships', `UPDATE "Sponsorship" SET "createdAt" = "validFrom" + interval '9 days' WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['library loans', `UPDATE "Borrowing" SET "borrowedAt" = "dueAt" - interval '14 days' WHERE "organizationId" = $1 AND "borrowedAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['other income', `UPDATE "Income" SET "createdAt" = "incomeDate" WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['purchase orders', `UPDATE "PurchaseOrder" SET "createdAt" = "orderDate" WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['goods receipts', `UPDATE "GoodsReceiptNote" SET "createdAt" = COALESCE("postedAt", "receivedAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['supplier payments', `UPDATE "PurchasePayment" SET "createdAt" = "paidAt" WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['debit notes', `UPDATE "DebitNote" SET "createdAt" = COALESCE("postedAt", "issueDate") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock issues', `UPDATE "StockOut" SET "createdAt" = COALESCE("postedAt", "approvedAt", "createdAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock waste', `UPDATE "WasteRecord" SET "createdAt" = COALESCE("postedAt", "approvedAt", "createdAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock adjustments', `UPDATE "StockAdjustment" SET "createdAt" = COALESCE("postedAt", "approvedAt", "createdAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock transfers', `UPDATE "StockTransfer" SET "createdAt" = COALESCE("completedAt", "postedAt", "approvedAt", "createdAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock counts', `UPDATE "InventoryCountSession" SET "createdAt" = COALESCE("submittedAt", "startedAt"), "startedAt" = COALESCE("submittedAt", "startedAt") WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock ledger', `UPDATE "InventoryLedger" il SET "createdAt" = je."postingDate" FROM "JournalEntry" je WHERE je."organizationId" = il."organizationId" AND je."sourceId" = il."referenceId" AND il."organizationId" = $1 AND il."createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
+    ['stock batches', `UPDATE "InventoryBatch" SET "createdAt" = "receivedAt" WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
     ['scholarships', `UPDATE "Scholarship" SET "createdAt" = "validFrom" + interval '9 days' WHERE "organizationId" = $1 AND "createdAt" >= ($2::timestamptz AT TIME ZONE 'UTC')`],
   ];
   const done: string[] = [];
@@ -225,6 +264,23 @@ async function summary(prisma: PrismaClient, O: string): Promise<void> {
     productionPlans: await prisma.mealProductionPlan.count({ where: { organizationId: O } }),
     tuckShopCards: await prisma.mealAccount.count({ where: { organizationId: O } }),
     tuckShopTxns: await prisma.mealAccountTransaction.count({ where: { organizationId: O } }),
+    libraryTitles: await prisma.bookMetadata.count({ where: { organizationId: O } }),
+    libraryCopies: await prisma.bookCopy.count({ where: { organizationId: O } }),
+    borrowings: await prisma.borrowing.count({ where: { organizationId: O } }),
+    libraryFines: await prisma.borrowing.count({ where: { organizationId: O, fineAmount: { gt: 0 } } }),
+    stockItems: await prisma.product.count({ where: { organizationId: O, trackInventory: true, productType: 'stockable' } }),
+    stockLedger: await prisma.inventoryLedger.count({ where: { organizationId: O } }),
+    stockIssues: await prisma.stockOut.count({ where: { organizationId: O } }),
+    stockTransfers: await prisma.stockTransfer.count({ where: { organizationId: O } }),
+    stockCounts: await prisma.inventoryCountSession.count({ where: { organizationId: O } }),
+    purchaseRequests: await prisma.purchaseRequest.count({ where: { organizationId: O } }),
+    purchaseOrders: await prisma.purchaseOrder.count({ where: { organizationId: O } }),
+    goodsReceipts: await prisma.goodsReceiptNote.count({ where: { organizationId: O } }),
+    debitNotes: await prisma.debitNote.count({ where: { organizationId: O } }),
+    vendorBills: await prisma.document.count({ where: { organizationId: O, documentType: 'vendor_bill' } }),
+    creditNotes: await prisma.document.count({ where: { organizationId: O, documentType: 'credit_note' } }),
+    supplierPayments: await prisma.payment.count({ where: { organizationId: O, direction: 'outbound' } }),
+    otherIncome: await prisma.income.count({ where: { organizationId: O } }),
   };
   console.log('\n' + JSON.stringify(counts, null, 2));
 }

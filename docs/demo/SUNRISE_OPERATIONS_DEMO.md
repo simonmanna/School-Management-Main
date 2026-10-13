@@ -6,7 +6,8 @@
 
 A Kampala nursery-and-primary day-and-boarding school (~710 pupils, 82 staff)
 with nine months of 2026 money and operations in it: fees, the books, HR and
-payroll, expenses, transport and meals. Sits on top of the academic demo
+payroll, expenses, transport, meals, the library, the school store, purchasing
+and revenue beyond fees. Sits on top of the academic demo
 (`db:seed:sunrise-demo`).
 
 ## Seeding
@@ -37,6 +38,7 @@ whole shillings — printed to the console.
 | `transport@sunrise.test` | Transport Manager | Fleet, routes, pupils on buses, trips, incidents |
 | `kitchen@sunrise.test` | Catering | Menus, meal attendance, kitchen production, tuck shop |
 | `nurse@sunrise.test` | Nurse | Sick-bay role |
+| `registrar@sunrise.test` | Registrar / Librarian desk | Library lending, returns, fines; sick-bay requisitions |
 
 ## What is in it (as of 4 Oct 2026)
 
@@ -86,6 +88,50 @@ class by class (~79,000 meals served), daily kitchen production with cost per
 plate and waste. Tuck-shop cards since Term 2: 168 pupils, MoMo top-ups,
 ~5,800 card transactions.
 
+**Library.** 51 titles catalogued (MK / Fountain / Longhorn course books, NCDC
+readers, a reference shelf, class readers and nursery picture books, bound
+journals and magazines) with 621 numbered copies shelved by section. Lending
+every Monday and Wednesday of the three terms: 505 loans — 342 returned on
+time, 68 returned late and fined UGX 500/day (68 posted AR fine invoices, UGX
+392,000 still to collect), 73 still out today and 22 reported lost and charged
+at replacement cost.
+
+**School store (inventory).** 5 stores (main store, scholastic & uniform store,
+cleaners' store, sick bay cupboard, sports & boarding store), 12 units of
+measure and 49 stock items valued at AVCO (~UGX 89m on hand). Opening stock is
+the 2025 closing count; the main store feeds the other stores by transfer (9);
+86 issue vouchers take chalk, paper, markers, cleaning materials and sick-bay
+drugs out of the stores, and the term's school-shop sales out of the uniform
+store; 5 waste records for expiry and breakage; 4 end-of-term physical counts
+submitted with their variances posted as adjustments, a spot count still open on
+the storekeeper's desk, and 3 standalone cycle-count adjustments. Posting rules
+per product group send an issue to stationery, cleaning, sick-bay or cost of
+sales, so the P&L reads the way a school's does. Inventory in the GL ties to the
+stock valuation to the shilling.
+
+**Purchasing.** 10 goods suppliers with TINs, 18 requisitions, 24 purchase
+orders, 21 goods receipts, 3 debit notes, 7 vendor bills and 5 supplier
+payments. Requisition → head teacher's
+approval → purchase order → delivery received into a store (which capitalises
+the stock and accrues the payable) → payment from the Centenary account. The
+year's tail is realistic: two part deliveries, three invoices still unpaid, an
+order cancelled on a price increase, one requisition rejected and one approved
+and still waiting for a quotation, plus three debit notes returning goods to
+suppliers. Service suppliers (audit, borehole, ICT support, landscaping,
+guards, tents) are billed as vendor bills and settled through supplier
+payments, so AP aging and supplier statements have content.
+
+**Revenue beyond fees.** 13 income heads on their own revenue accounts: school
+shop (uniforms and scholastic materials), hall and grounds hire, bus hire,
+donations and sponsorships, PTA development contributions, farm produce,
+photocopying, scrap, library fines, admission forms, certificates and bank
+interest. 187 Other Income receipts (cash, MTN / Airtel, bank: school shop
+UGX 14.8m, donations and PTA 29.7m, farm, forms, photocopying, scrap, interest)
+and nine sales invoices to institutions (UGX 11.25m, 3.1m still open) — a parish, an NGO, two SACCOs, a
+neighbouring nursery school, the division education office, a choir association
+— paid by bank, cheque and mobile money, one part paid, three still open, and
+one reduced by a credit note.
+
 ## A 15-minute walk-through
 
 1. `bursar@` → Fees: a P.5 pupil's statement (invoices, receipts by method,
@@ -96,9 +142,21 @@ plate and waste. Tuck-shop cards since Term 2: 168 pupils, MoMo top-ups,
 4. `hr@` → Payroll runs → September payslips; leave calendar; staff loans.
 5. `transport@` → Transport → Trips for 2 October; Incidents.
 6. `kitchen@` → Meals → today's menu, attendance, production and waste.
+7. `registrar@` → Library: dashboard, overdue list with fines, a pupil's
+   borrowing history.
+8. `bursar@` → Inventory → Stock levels by store, stock ledger for exercise
+   books, the Term 2 count and its variance adjustment.
+9. `bursar@` → Purchasing → Purchases: a received-and-paid order, a part
+   delivery, the cancelled order; then Supplier Payments and AP aging.
+10. `bursar@` → Revenue → Other Income (school shop, farm, forms) and
+    Sales/Invoices filtered to the institutional customers; the credit note.
 
 ## Known gaps
 
 - No depreciation run, so the surplus is higher than a real school's.
-- Procurement / stock: food is expensed on purchase (periodic method); kitchen
-  production records quantities and cost but does not move inventory.
+- Kitchen provisions stay on the periodic method: food is expensed on purchase
+  (stage 16) and kitchen production records quantities and cost per plate but
+  does not move inventory, so the kitchen is deliberately outside the store's
+  perpetual stock. Everything in the five stores above is perpetual (AVCO).
+- Orders (the restaurant/POS order module) is not seeded — a school books its
+  sales as invoices or Other Income instead.
