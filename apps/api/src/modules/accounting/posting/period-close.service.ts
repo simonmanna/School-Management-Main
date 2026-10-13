@@ -44,7 +44,7 @@ export class PeriodCloseService {
   ) {}
 
   /** Close the period: post the closing journal, flip status to closed. */
-  async close(periodId: string): Promise<{ journalEntryId: string; netIncome: string }> {
+  async close(periodId: string): Promise<{ journalEntryId: string | null; netIncome: string }> {
     const organizationId = this.tenant.organizationId;
     return this.prisma.client.$transaction(async (tx) => {
       // Wave 18: FOR UPDATE here pairs with FOR SHARE in assertOpen — postings
@@ -60,6 +60,31 @@ export class PeriodCloseService {
       if (period.status !== 'open') {
         throw new BadRequestException(
           `Fiscal period '${period.name}' is ${period.status}; only open periods can be closed`,
+        );
+      }
+
+      // Wave 19: periods close in date order. Closing June while May is open
+      // would let May's late postings change June's opening balances after
+      // June was signed off.
+      const earlierOpen = await tx.fiscalPeriod.findFirst({
+        where: { deletedAt: null, id: { not: period.id }, status: 'open', endDate: { lt: period.startDate } },
+        orderBy: { startDate: 'asc' },
+      });
+      if (earlierOpen) {
+        throw new BadRequestException(
+          `Close '${earlierOpen.name}' first: periods are closed in date order`,
+        );
+      }
+
+      // A draft journal dated in the period could never be approved once the
+      // period closes; the maker must post or discard it first.
+      const drafts = await tx.journalEntry.count({
+        where: { status: 'draft', postingDate: { gte: period.startDate, lte: period.endDate } },
+      });
+      if (drafts > 0) {
+        throw new BadRequestException(
+          `Cannot close '${period.name}': ${drafts} draft journal entr${drafts === 1 ? 'y is' : 'ies are'} dated in this period. ` +
+            'Approve or discard them first.',
         );
       }
 
@@ -149,10 +174,29 @@ export class PeriodCloseService {
         if (!bal.isZero()) closingLines.push(closing);
       }
 
+      // A period with no revenue or expense (a school holiday month) still
+      // closes — it just needs no closing entry. Refusing it left every later
+      // period unclosable under the date-order rule.
       if (closingLines.length === 0) {
-        throw new BadRequestException(
-          `Nothing to close for '${period.name}': no posted revenue or expense in this period`,
-        );
+        await tx.fiscalPeriod.updateMany({
+          where: { id: period.id, status: 'open' },
+          data: { status: 'closed', closedAt: new Date(), closedBy: this.tenant.userId ?? null },
+        });
+        await this.audit.recordInTx(tx, {
+          entity: 'FiscalPeriod',
+          entityId: period.id,
+          action: 'update',
+          oldValues: { status: 'open' },
+          newValues: { status: 'closed', netIncome: '0', closingEntryId: null },
+        });
+        this.events.publish('fiscal_period.closed', {
+          organizationId,
+          periodId: period.id,
+          periodName: period.name,
+          closingEntryId: null,
+          netIncome: '0',
+        });
+        return { journalEntryId: null, netIncome: '0' };
       }
 
       // Net income = (revenue − contra_revenue) − (expense + cogs).

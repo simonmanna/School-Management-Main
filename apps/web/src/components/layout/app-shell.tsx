@@ -542,6 +542,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/accounts/posting-rules', label: 'Posting Rules', icon: FileText, permission: PERMISSIONS.inventoryPostingRule.read },
       { to: '/journals', label: 'Journals', icon: BookText, permission: PERMISSIONS.journal.read },
       { to: '/journal-entries', label: 'Journal Entries', icon: ScrollText, permission: PERMISSIONS.journalEntry.read },
+      { to: '/opening-balances', label: 'Opening Balances', icon: BookOpen, permission: PERMISSIONS.journalEntry.read },
       { to: '/accounting/reports', label: 'Reports', icon: FileBarChart, permission: PERMISSIONS.report.accounting },
       { to: '/trial-balance', label: 'Trial Balance', icon: Scale, permission: PERMISSIONS.report.accounting },
       { to: '/general-ledger', label: 'General Ledger', icon: ArrowUpDown, permission: PERMISSIONS.report.accounting },

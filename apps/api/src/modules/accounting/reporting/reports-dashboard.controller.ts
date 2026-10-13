@@ -64,7 +64,7 @@ export class ReportsDashboardController {
         JOIN "AccountCategory" ac ON ac.id = a."categoryId"
         JOIN "JournalEntry" je ON je.id = jl."journalEntryId"
         WHERE jl."organizationId" = ${orgId}
-          AND je.status = 'posted'
+          AND je.status IN ('posted', 'reversed')
           AND ac."isCashEquivalent" = true
       `,
       this.aggSectionSince(orgId, ['revenue', 'other_income'], startOfMonth),
@@ -182,8 +182,12 @@ export class ReportsDashboardController {
       JOIN "Account" a ON a.id = jl."accountId"
       JOIN "AccountCategory" ac ON ac.id = a."categoryId"
       JOIN "JournalEntry" je ON je.id = jl."journalEntryId"
+      JOIN "Journal" j ON j.id = je."journalId"
       WHERE jl."organizationId" = ${orgId}
-        AND je.status = 'posted'
+        -- A reversed original and its reversal both count, or a reversal alone
+        -- shows as negative revenue; the closing journal is not activity.
+        AND je.status IN ('posted', 'reversed')
+        AND j."journalType" <> 'closing'
         AND je."postingDate" >= ${since}
         AND ac."reportSection"::text = ANY(${sections})
     `;

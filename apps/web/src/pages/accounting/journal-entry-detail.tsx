@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, ArrowLeft, ScrollText, FileText, RotateCcw, ExternalLink } from 'lucide-react';
+import { ChevronRight, ArrowLeft, ScrollText, FileText, RotateCcw, ExternalLink, CheckCircle2, Trash2 } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,7 +25,10 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { money, date } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth.store';
-import { useJournalEntry, useReverseJournalEntry } from '@/features/accounting/api';
+import {
+  MANUAL_SOURCE_TYPES, useDiscardJournalEntry, useJournalEntry, usePostJournalEntry, useReverseJournalEntry,
+} from '@/features/accounting/api';
+import { notify } from '@/lib/notify';
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   posted: 'default',
@@ -59,7 +62,10 @@ export function JournalEntryDetailPage() {
   const navigate = useNavigate();
   const { data: entry, isLoading } = useJournalEntry(id);
   const reverse = useReverseJournalEntry();
+  const approve = usePostJournalEntry();
+  const discard = useDiscardJournalEntry();
   const has = useAuthStore((s) => s.hasPermission);
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const [reverseConfirm, setReverseConfirm] = useState(false);
 
   if (isLoading) {
@@ -92,6 +98,39 @@ export function JournalEntryDetailPage() {
     const reversal = await reverse.mutateAsync(entry.id);
     navigate(`/journal-entries/${reversal.id}`);
   };
+
+  const errorText = (e: any) => {
+    const m = e?.response?.data?.message;
+    return Array.isArray(m) ? m.join(', ') : (m ?? e?.message ?? 'Request failed');
+  };
+
+  const onApprove = async () => {
+    try {
+      await approve.mutateAsync(entry.id);
+      notify.success('Entry posted to the ledger');
+    } catch (e) {
+      notify.error('Could not post', errorText(e));
+    }
+  };
+
+  const onDiscard = async () => {
+    if (!window.confirm('Discard this draft? It has not affected any balance and will be deleted.')) return;
+    try {
+      await discard.mutateAsync(entry.id);
+      notify.success('Draft discarded');
+      navigate('/journal-entries');
+    } catch (e) {
+      notify.error('Could not discard', errorText(e));
+    }
+  };
+
+  // Document postings are corrected from their document (the server refuses
+  // a GL-only reversal); manual entries and opening balances reverse here.
+  const isManual =
+    entry.sourceType === 'opening_balance'
+      ? entry.journal?.code === 'OPENING'
+      : MANUAL_SOURCE_TYPES.includes(entry.sourceType ?? null);
+  const isOwnDraft = !!currentUserId && entry.createdBy === currentUserId;
 
   const sourceLink = entry.sourceType && entry.sourceId
     ? getSourceLink(entry.sourceType, entry.sourceId)
@@ -130,7 +169,25 @@ export function JournalEntryDetailPage() {
             <Button variant="outline" size="sm" onClick={() => navigate('/journal-entries')}>
               Back to List
             </Button>
-            {entry.status === 'posted' && has(PERMISSIONS.journalEntry.reverse) && (
+            {entry.status === 'draft' && has(PERMISSIONS.journalEntry.create) && (
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={onDiscard} disabled={discard.isPending}>
+                <Trash2 className="h-4 w-4" />
+                {discard.isPending ? 'Discarding…' : 'Discard'}
+              </Button>
+            )}
+            {entry.status === 'draft' && has(PERMISSIONS.journalEntry.post) && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={onApprove}
+                disabled={approve.isPending || isOwnDraft}
+                title={isOwnDraft ? 'Another user must approve an entry you created (maker-checker)' : undefined}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {approve.isPending ? 'Posting…' : 'Approve & Post'}
+              </Button>
+            )}
+            {entry.status === 'posted' && isManual && has(PERMISSIONS.journalEntry.reverse) && (
               <Button variant="outline" size="sm" className="border-amber-300 text-amber-700 hover:bg-amber-50 gap-1.5" onClick={() => setReverseConfirm(true)} disabled={reverse.isPending}>
                 <RotateCcw className="h-4 w-4" />
                 {reverse.isPending ? 'Reversing…' : 'Reverse'}

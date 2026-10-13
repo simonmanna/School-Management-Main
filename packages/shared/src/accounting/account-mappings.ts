@@ -261,6 +261,14 @@ export const ACCOUNT_MAPPING_REGISTRY: readonly AccountMappingDef[] = [
     required: true,
     description: 'Period-close target for the P&L roll-up.',
   },
+  {
+    key: 'opening_balance_equity',
+    label: 'Opening Balance Equity',
+    group: 'system',
+    expectedCategories: ['equity'],
+    required: false,
+    description: 'Balancing account for go-live opening balances; clear it to capital or retained earnings once the load is complete.',
+  },
 
   // ------------------------------------------------------------ inventory ---
   {

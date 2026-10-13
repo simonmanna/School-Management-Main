@@ -10,10 +10,15 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import { SequenceService } from '../../../kernel/sequence/sequence.service';
+import { Prisma } from '@prisma/client';
 import { dec, ZERO } from '../../../kernel/common/money';
 import { FiscalPeriodService } from './fiscal-period.service';
 import { normalizeLines, totals, validateLines, type NormalizedLine } from './posting.math';
-import type { PostingRequest } from './posting.types';
+import {
+  SUBLEDGER_CONTROL_MAPPING_KEYS,
+  SUBLEDGER_CONTROL_TYPES,
+  type PostingRequest,
+} from './posting.types';
 import { CurrencyService } from '../currency/currency.service';
 import { AccountResolverService, toMeta } from './account-resolver.service';
 
@@ -95,19 +100,7 @@ export class PostingService {
     const date = new Date(request.date);
     await this.fiscalPeriod.assertOpen(date, client);
 
-    // Phase C: resolve FX rate from the posted currency → org base at the
-    // posting date. If no rate is configured, fall back to 1:1 (single-currency
-    // orgs / dev installs).
-    const org = await client.organization.findUnique({ where: { id: this.tenant.organizationId } });
-    const baseCode = org?.currencyCode ?? 'USD';
-    let rate = dec(request.exchangeRate ?? 1);
-    if (request.currencyId && request.currencyId !== baseCode) {
-      try {
-        rate = await this.currency.getRate(request.currencyId, baseCode, date);
-      } catch {
-        // No rate configured — keep the caller-supplied rate (or 1).
-      }
-    }
+    const rate = await this.resolveRate(request, date, client);
     const lines = normalizeLines(request.lines, rate);
 
     const lineErrors = validateLines(lines);
@@ -284,6 +277,94 @@ export class PostingService {
     return reversal;
   }
 
+  // ─── Currency ─────────────────────────────────────────────────────────────
+
+  /**
+   * Rate from the entry currency to the org's functional currency at `date`.
+   *
+   * Documents carry `currencyId` as the Currency row id, not its code; comparing
+   * that id with the base code never matched, the code lookup threw, and every
+   * foreign-currency entry was silently booked at 1:1 (wave 19). The id or code
+   * is resolved to a code first. A missing rate now refuses the posting unless
+   * the caller supplied one — a guessed 1:1 corrupts every base-currency report.
+   */
+  private async resolveRate(request: PostingRequest, date: Date, client: any): Promise<Prisma.Decimal> {
+    if (!request.currencyId) return dec(request.exchangeRate ?? 1);
+    const org = await client.organization.findUnique({
+      where: { id: this.tenant.organizationId },
+      select: { currencyCode: true },
+    });
+    const baseCode = org?.currencyCode ?? 'USD';
+    const currency = await client.currency.findFirst({
+      where: { OR: [{ id: request.currencyId }, { code: request.currencyId }] },
+      select: { code: true },
+    });
+    const code = currency?.code ?? request.currencyId;
+    if (code === baseCode) return dec(1);
+    try {
+      return await this.currency.getRate(code, baseCode, date);
+    } catch {
+      if (request.exchangeRate !== undefined && request.exchangeRate !== null) return dec(request.exchangeRate);
+      throw new BadRequestException(
+        `No exchange rate from ${code} to ${baseCode} on or before ${date.toISOString().slice(0, 10)}; ` +
+          'record one under Accounting > Currencies before posting',
+      );
+    }
+  }
+
+  // ─── Manual-entry rules ───────────────────────────────────────────────────
+
+  /**
+   * Accounts on a person's journal entry: postable, active, open to manual
+   * posting, and not a sub-ledger control account. Receivables, payables and
+   * stock are moved by their documents (fee invoices and receipts, bills,
+   * stock moves); a manual line there puts the GL out of step with the
+   * sub-ledger, and the tie-out reports a difference nobody can trace.
+   */
+  private async assertManualAccounts(accountIds: string[], client: any): Promise<void> {
+    const accounts = await client.account.findMany({
+      where: { id: { in: accountIds } },
+      include: { category: true },
+    });
+    if (accounts.length !== accountIds.length) {
+      throw new BadRequestException('One or more accounts do not exist in this organization');
+    }
+    for (const a of accounts as any[]) {
+      this.accounts.assertPostable(toMeta(a), { systemContext: false });
+    }
+    const controlIds = await this.subledgerControlIds(client);
+    const hit = (accounts as any[]).find(
+      (a) => controlIds.has(a.id) || (SUBLEDGER_CONTROL_TYPES as readonly string[]).includes(a.controlAccountType),
+    );
+    if (hit) {
+      throw new BadRequestException(
+        `Account ${hit.code} ${hit.name} is a sub-ledger control account (receivables, payables or stock). ` +
+          'Post through the originating document (fee invoice, receipt, waiver, supplier bill or stock adjustment) ' +
+          'so the sub-ledger stays in agreement with the ledger.',
+      );
+    }
+  }
+
+  /** Control accounts named by mapping or by a partner-level override. */
+  private async subledgerControlIds(client: any): Promise<Set<string>> {
+    const [mapped, partners] = await Promise.all([
+      client.accountMapping.findMany({
+        where: { key: { in: [...SUBLEDGER_CONTROL_MAPPING_KEYS] }, deletedAt: null },
+        select: { accountId: true },
+      }),
+      client.partner.findMany({
+        where: { OR: [{ receivableAccountId: { not: null } }, { payableAccountId: { not: null } }] },
+        select: { receivableAccountId: true, payableAccountId: true },
+      }),
+    ]);
+    const ids = new Set<string>(mapped.map((m: any) => m.accountId));
+    for (const p of partners as any[]) {
+      if (p.receivableAccountId) ids.add(p.receivableAccountId);
+      if (p.payableAccountId) ids.add(p.payableAccountId);
+    }
+    return ids;
+  }
+
   // ─── Idempotency ──────────────────────────────────────────────────────────
 
   /**
@@ -386,36 +467,23 @@ export class PostingService {
     if (!journal) throw new BadRequestException(`Journal '${request.journalCode}' not found`);
 
     const date = new Date(request.date);
-    const org = await client.organization.findUnique({ where: { id: this.tenant.organizationId } });
-    const baseCode = org?.currencyCode ?? 'USD';
-    let rate = dec(request.exchangeRate ?? 1);
-    if (request.currencyId && request.currencyId !== baseCode) {
-      try {
-        rate = await this.currency.getRate(request.currencyId, baseCode, date);
-      } catch {
-        // keep caller-supplied rate
-      }
-    }
+    if (Number.isNaN(date.getTime())) throw new BadRequestException('Invalid posting date');
+    const rate = await this.resolveRate(request, date, client);
     const lines = normalizeLines(request.lines, rate);
     const lineErrors = validateLines(lines);
     if (lineErrors.length > 0) throw new BadRequestException(lineErrors[0].message);
 
-    const accountIds = [...new Set(lines.map((l) => l.accountId))];
-    const accounts = await client.account.findMany({
-      where: { id: { in: accountIds } },
-      include: { category: true },
-    });
-    if (accounts.length !== accountIds.length) {
-      throw new BadRequestException('One or more accounts do not exist in this organization');
+    // Wave 19: a person's entry is held to the manual-posting rules (the engine's
+    // own entries pass `systemContext`) and must balance exactly — the rounding
+    // line exists for FX/percentage residue in machine postings, not to absorb
+    // a typing error.
+    await this.assertManualAccounts([...new Set(lines.map((l) => l.accountId))], client);
+    const t = totals(lines);
+    if (!t.debit.equals(t.credit)) {
+      throw new BadRequestException(
+        `Unbalanced entry: total debit ${t.debit.toString()} != total credit ${t.credit.toString()}`,
+      );
     }
-    // Postability is category-aware now: group / inactive / deprecated accounts
-    // are rejected, as are accounts whose category forbids manual posting.
-    // Entries produced by the engine itself pass `systemContext`.
-    for (const a of accounts as any[]) {
-      this.accounts.assertPostable(toMeta(a), { systemContext: true });
-    }
-
-    await this.applyRounding(lines, client);
 
     const organizationId = this.tenant.organizationId;
     const entryDims = this.normalizeDimensions(request.dimensions);
@@ -472,6 +540,19 @@ export class PostingService {
     if (draft.status !== 'draft') throw new BadRequestException('Only draft entries can be posted');
     if (draft.createdBy && this.tenant.userId && draft.createdBy === this.tenant.userId) {
       throw new ForbiddenException('The user who created a journal entry cannot post it (maker-checker).');
+    }
+
+    // Accounts can be deactivated, deprecated or wired into a sub-ledger between
+    // staging and approval; the checker approves what the rules allow today.
+    const draftLines = await client.journalLine.findMany({
+      where: { journalEntryId: draft.id },
+      select: { accountId: true, baseDebit: true, baseCredit: true },
+    });
+    await this.assertManualAccounts([...new Set<string>(draftLines.map((l: any) => l.accountId as string))], client);
+    const dr = draftLines.reduce((t: Prisma.Decimal, l: any) => t.plus(l.baseDebit), ZERO);
+    const cr = draftLines.reduce((t: Prisma.Decimal, l: any) => t.plus(l.baseCredit), ZERO);
+    if (draftLines.length < 2 || !dr.equals(cr)) {
+      throw new BadRequestException('Draft entry is unbalanced; discard it and enter it again');
     }
 
     const date = new Date(draft.postingDate);

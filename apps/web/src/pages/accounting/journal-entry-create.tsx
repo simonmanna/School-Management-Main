@@ -77,7 +77,7 @@ export function JournalEntryCreatePage() {
     } catch (e) {
       const message =
         (e as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
-      setError(Array.isArray(message) ? message.join(', ') : (message ?? 'Failed to post entry'));
+      setError(Array.isArray(message) ? message.join(', ') : (message ?? 'Failed to save entry'));
     }
   });
 
@@ -90,7 +90,7 @@ export function JournalEntryCreatePage() {
             {balanced ? 'Balanced' : `Diff ${money(diff)}`}
           </Badge>
           <Button type="submit" disabled={!canSubmit}>
-            {createEntry.isPending ? 'Posting...' : 'Post entry'}
+            {createEntry.isPending ? 'Saving...' : 'Save draft for approval'}
           </Button>
         </div>
       </div>

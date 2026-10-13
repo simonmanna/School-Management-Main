@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, X } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
@@ -28,7 +28,8 @@ export function JournalEntriesPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
 
   // Filters from URL
-  const filterJournalCode = searchParams.get('journalCode') || '';
+  const filterJournalId = searchParams.get('journalId') || '';
+  const filterOrigin = (searchParams.get('origin') || '') as '' | 'manual' | 'system';
   const filterStatus = searchParams.get('status') || '';
   const filterFrom = searchParams.get('from') || '';
   const filterTo = searchParams.get('to') || '';
@@ -36,24 +37,21 @@ export function JournalEntriesPage() {
 
   const [page, setPage] = useState(1);
   const { data: journalsData } = useJournals();
-  const { data, isLoading } = useJournalEntries({ page, pageSize: 15, search: filterSearch || undefined });
+  // Filters run on the server: filtering one fetched page hid matches on
+  // every other page and made the page count meaningless.
+  const { data, isLoading } = useJournalEntries({
+    page,
+    pageSize: 15,
+    search: filterSearch || undefined,
+    status: filterStatus || undefined,
+    journalId: filterJournalId || undefined,
+    origin: filterOrigin || undefined,
+    from: filterFrom || undefined,
+    to: filterTo || undefined,
+  });
 
   const journals = journalsData?.data ?? [];
-  const entries = useMemo(() => {
-    let result = data?.data ?? [];
-    if (filterJournalCode) result = result.filter((e) => e.journal?.code === filterJournalCode);
-    if (filterStatus) result = result.filter((e) => e.status === filterStatus);
-    if (filterFrom) {
-      const from = new Date(filterFrom);
-      result = result.filter((e) => new Date(e.postingDate) >= from);
-    }
-    if (filterTo) {
-      const to = new Date(filterTo);
-      to.setHours(23, 59, 59, 999);
-      result = result.filter((e) => new Date(e.postingDate) <= to);
-    }
-    return result;
-  }, [data?.data, filterJournalCode, filterStatus, filterFrom, filterTo]);
+  const entries = data?.data ?? [];
 
   const setFilter = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams);
@@ -68,7 +66,7 @@ export function JournalEntriesPage() {
     setPage(1);
   };
 
-  const hasActiveFilters = filterJournalCode || filterStatus || filterFrom || filterTo || filterSearch;
+  const hasActiveFilters = filterJournalId || filterOrigin || filterStatus || filterFrom || filterTo || filterSearch;
 
   const columns: Column<JournalEntryRow>[] = [
     {
@@ -107,7 +105,7 @@ export function JournalEntriesPage() {
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Journal Entries</h1>
           <p className="text-sm text-gray-500">Every posting — from invoices, payments, inventory adjustments and manual entries.</p>
         </div>
-        {hasPermission(PERMISSIONS.journalEntry.post) && (
+        {hasPermission(PERMISSIONS.journalEntry.create) && (
           <Button onClick={() => navigate('/journal-entries/new')}>
             <Plus className="h-4 w-4" /> New Entry
           </Button>
@@ -118,13 +116,25 @@ export function JournalEntriesPage() {
       <div className="flex flex-wrap items-center gap-3 p-3 bg-white border rounded-lg shadow-sm">
         {/* Journal */}
         <div className="min-w-[180px]">
-          <Select value={filterJournalCode} onValueChange={(v) => setFilter('journalCode', v === '_all' ? '' : v)}>
+          <Select value={filterJournalId} onValueChange={(v) => setFilter('journalId', v === '_all' ? '' : v)}>
             <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="All Journals" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="_all">All Journals</SelectItem>
               {journals.map((j) => (
-                <SelectItem key={j.id} value={j.code}>{j.code} — {j.name}</SelectItem>
+                <SelectItem key={j.id} value={j.id}>{j.code} — {j.name}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Origin */}
+        <div className="min-w-[150px]">
+          <Select value={filterOrigin} onValueChange={(v) => setFilter('origin', v === '_all' ? '' : v)}>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="All Origins" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All Origins</SelectItem>
+              <SelectItem value="manual">Manual entries</SelectItem>
+              <SelectItem value="system">From documents</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -19,6 +19,8 @@ import { AccountCategoryService } from './account-category/account-category.serv
 import { PostingService } from './posting/posting.service';
 import { JournalEntryService } from './journal-entry/journal-entry.service';
 import { JournalEntryController } from './journal-entry/journal-entry.controller';
+import { OpeningBalanceService } from './opening-balance/opening-balance.service';
+import { OpeningBalanceController } from './opening-balance/opening-balance.controller';
 import { BankAccountService } from './treasury/bank-account.service';
 import { TreasuryService } from './treasury/treasury.service';
 import { TreasuryController } from './treasury/treasury.controller';
@@ -67,6 +69,7 @@ import { FinancialReportsController } from './reporting/financial-reports.contro
     JournalController,
     AccountMappingController,
     JournalEntryController,
+    OpeningBalanceController,
     TreasuryController,
     CashRegisterController,
     CashSessionController,
@@ -92,6 +95,7 @@ import { FinancialReportsController } from './reporting/financial-reports.contro
     AccountDeterminationService,
     PostingService,
     JournalEntryService,
+    OpeningBalanceService,
     BankAccountService,
     TreasuryService,
     CashFlowService,

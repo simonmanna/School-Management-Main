@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
-import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
+import { BALANCE_AFFECTING_STATUSES, EXCLUDE_CLOSING_JOURNAL } from '../posting/posting.types';
 import { AccountResolverService } from '../posting/account-resolver.service';
 import { displayBalance } from './account-classification';
 
@@ -78,7 +78,13 @@ export class PnLReportService {
   private async livePnl(range: DateRange) {
     const grouped = await this.prisma.client.journalLine.groupBy({
       by: ['accountId'],
-      where: { entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] }, postingDate: this.rangeFilter(range) } },
+      where: {
+        entry: {
+          status: { in: [...BALANCE_AFFECTING_STATUSES] },
+          postingDate: this.rangeFilter(range),
+          ...EXCLUDE_CLOSING_JOURNAL,
+        },
+      },
       _sum: { baseDebit: true, baseCredit: true },
     });
     const meta = await this.accounts.meta((grouped as any[]).map((g) => g.accountId));

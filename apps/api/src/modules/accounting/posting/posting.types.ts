@@ -12,6 +12,36 @@
  */
 export const BALANCE_AFFECTING_STATUSES = ['posted', 'reversed'] as const;
 
+/**
+ * Journal-entry filter that leaves out the period-closing journal — the closing
+ * entry AND the reversal a reopen posts into the same journal. Performance
+ * statements (P&L, revenue/expense analysis, ratios, KPIs) read activity before
+ * closing; including the closing entry made every closed period report zero
+ * profit (wave 19). Balance views — trial balance, balance sheet, ledgers —
+ * keep the closing entries.
+ */
+export const EXCLUDE_CLOSING_JOURNAL = { journal: { journalType: { not: 'closing' as const } } };
+
+/**
+ * `sourceType` values a person creates through the journal-entry screens. Every
+ * other source posted the entry on behalf of a document (fee invoice, bill,
+ * payment, payroll…) and is corrected from that document, never from the GL.
+ */
+export const MANUAL_SOURCE_TYPES: ReadonlyArray<string | null> = [null, 'manual', 'opening_balance'];
+
+/**
+ * Accounts whose balance a sub-ledger owns (pupil/customer receivables, supplier
+ * payables, stock). A manual journal on one of them puts the GL out of step with
+ * the sub-ledger the tie-out compares it to.
+ */
+export const SUBLEDGER_CONTROL_TYPES = ['ar', 'ap', 'inventory'] as const;
+export const SUBLEDGER_CONTROL_MAPPING_KEYS = [
+  'accounts_receivable',
+  'accounts_payable',
+  'inventory',
+  'stock_valuation',
+] as const;
+
 export interface PostingLineInput {
   accountId: string;
   /** Transaction-currency amount. Exactly one of debit/credit must be > 0. */

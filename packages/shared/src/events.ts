@@ -462,7 +462,7 @@ export interface DomainEventMap {
   'cash.session.reconciled': { organizationId: string; sessionId: string; cashRegisterId: string };
   'cash.movement.recorded': { organizationId: string; sessionId: string; movementId: string; movementType: string; amount: string };
   'cash.banking.recorded': { organizationId: string; sessionId: string; amount: string; bankName: string };
-  'fiscal_period.closed': { organizationId: string; periodId: string; periodName: string; closingEntryId: string; netIncome: string };
+  'fiscal_period.closed': { organizationId: string; periodId: string; periodName: string; closingEntryId: string | null; netIncome: string };
   'fiscal_period.locked': { organizationId: string; periodId: string; periodName: string };
   'fiscal_period.reopened': {
     organizationId: string;

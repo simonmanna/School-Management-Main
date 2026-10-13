@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, UseInterceptors } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
-import { PaginationDto } from '../../../kernel/common/pagination.dto';
+import { ListJournalEntriesDto } from './dto/list-journal-entries.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { Idempotent } from '../../../kernel/idempotency/idempotent.decorator';
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
@@ -14,7 +14,7 @@ export class JournalEntryController {
 
   @Get()
   @RequirePermissions(PERMISSIONS.journalEntry.read)
-  list(@Query() query: PaginationDto) {
+  list(@Query() query: ListJournalEntriesDto) {
     return this.entries.list(query);
   }
 

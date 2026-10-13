@@ -55,6 +55,8 @@ export interface Account {
   parentAccountId?: string;
   sortOrder?: number;
   currencyId?: string;
+  /** Sub-ledger control type (ar / ap / inventory …); such accounts take no manual lines. */
+  controlAccountType?: string | null;
   cashFlowCategory?: string;
   bankName?: string;
   accountNumber?: string;
@@ -795,7 +797,20 @@ export interface JournalEntryDetail extends JournalEntryRow {
   lines: JournalLine[];
 }
 
-export function useJournalEntries(params: { page?: number; pageSize?: number; search?: string }) {
+export interface JournalEntryFilters {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  journalId?: string;
+  /** `manual` = people's entries and opening balances; `system` = document postings. */
+  origin?: 'manual' | 'system';
+  accountId?: string;
+  from?: string;
+  to?: string;
+}
+
+export function useJournalEntries(params: JournalEntryFilters) {
   return useQuery({
     queryKey: ['journal-entries', params],
     queryFn: async () =>
@@ -936,6 +951,38 @@ export function useCreateJournalEntry() {
     },
   });
 }
+
+/** Checker: approve + post a draft. The server refuses the user who created it. */
+export function usePostJournalEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.post<JournalEntryDetail>(`/journal-entries/${id}/post`, {})).data,
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      qc.invalidateQueries({ queryKey: ['journal-entry', id] });
+      qc.invalidateQueries({ queryKey: ['trial-balance'] });
+      qc.invalidateQueries({ queryKey: ['opening-balances'] });
+    },
+  });
+}
+
+/** Discard a draft that was never posted. */
+export function useDiscardJournalEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/journal-entries/${id}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+      qc.invalidateQueries({ queryKey: ['opening-balances'] });
+    },
+  });
+}
+
+/** Entries people make; everything else was posted by a document and is corrected there. */
+export const MANUAL_SOURCE_TYPES: ReadonlyArray<string | null> = [null, 'manual', 'opening_balance'];
 
 export function useReverseJournalEntry() {
   const qc = useQueryClient();
@@ -1277,3 +1324,42 @@ export function useRestoreFiscalPosition() {
   });
 }
 
+
+/* ───────────────────────── Opening balances (go-live) ───────────────────────── */
+
+export interface OpeningBalanceSummary {
+  entries: Array<{
+    id: string;
+    entryNumber: string;
+    postingDate: string;
+    description: string | null;
+    status: 'draft' | 'posted' | 'reversed';
+    createdBy: string | null;
+    postedBy: string | null;
+    postedAt: string | null;
+    _count: { lines: number };
+  }>;
+  openingBalanceEquity: { id: string; code: string; name: string; balance: string } | null;
+}
+
+export function useOpeningBalances() {
+  return useQuery({
+    queryKey: ['opening-balances'],
+    queryFn: async () => (await api.get<OpeningBalanceSummary>('/opening-balances')).data,
+  });
+}
+
+export function useStageOpeningBalances() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      date: string;
+      description?: string;
+      lines: Array<{ accountId: string; debit?: number; credit?: number }>;
+    }) => (await api.post<JournalEntryDetail>('/opening-balances', input)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['opening-balances'] });
+      qc.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+}

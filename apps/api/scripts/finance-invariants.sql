@@ -75,3 +75,41 @@ SELECT je."organizationId", je.id, je."entryNumber", fp.name, fp.status
    AND fp."closedAt" IS NOT NULL
    AND je."postedAt" > fp."closedAt"
    AND je."sourceType" IS DISTINCT FROM 'period_close';
+
+-- Wave 19.
+
+\echo '10. Manual journal lines on sub-ledger control accounts (receivables, payables, stock)'
+SELECT je."organizationId", je.id, je."entryNumber", a.code, a.name
+  FROM "JournalLine" jl
+  JOIN "JournalEntry" je ON je.id = jl."journalEntryId"
+  JOIN "Account" a ON a.id = jl."accountId"
+  JOIN "Journal" j ON j.id = je."journalId"
+ WHERE je.status IN ('posted', 'reversed')
+   -- People's entries: manual journals and Opening Balances screen loads
+   -- (OPENING journal). Engine-posted openings matched by a sub-ledger
+   -- document (e.g. a stock opening count) are not flagged.
+   AND (je."sourceType" IS NULL OR je."sourceType" = 'manual'
+        OR (je."sourceType" = 'opening_balance' AND j."journalType" = 'opening'))
+   AND (a."controlAccountType" IN ('ar', 'ap', 'inventory')
+        OR a.id IN (SELECT m."accountId" FROM "AccountMapping" m
+                     WHERE m."organizationId" = je."organizationId" AND m."deletedAt" IS NULL
+                       AND m.key IN ('accounts_receivable', 'accounts_payable', 'inventory', 'stock_valuation')));
+
+\echo '11. Draft journal entries dated inside a closed or locked period'
+SELECT je."organizationId", je.id, je."postingDate", fp.name, fp.status
+  FROM "JournalEntry" je
+  JOIN "FiscalPeriod" fp
+    ON fp."organizationId" = je."organizationId"
+   AND je."postingDate" >= fp."startDate" AND je."postingDate" <= fp."endDate"
+ WHERE je.status = 'draft'
+   AND fp."deletedAt" IS NULL
+   AND fp.status IN ('closed', 'locked');
+
+\echo '12. Open fiscal periods older than a closed or locked period (closed out of order)'
+SELECT o."organizationId", o.name AS open_period, c.name AS later_closed_period
+  FROM "FiscalPeriod" o
+  JOIN "FiscalPeriod" c
+    ON c."organizationId" = o."organizationId"
+   AND c."startDate" > o."endDate"
+ WHERE o.status = 'open' AND o."deletedAt" IS NULL
+   AND c.status IN ('closed', 'locked') AND c."deletedAt" IS NULL;

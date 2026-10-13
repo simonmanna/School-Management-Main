@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../kernel/prisma/prisma.service';
-import { BALANCE_AFFECTING_STATUSES } from '../../posting/posting.types';
+import { BALANCE_AFFECTING_STATUSES, EXCLUDE_CLOSING_JOURNAL } from '../../posting/posting.types';
 import { AccountResolverService } from '../../posting/account-resolver.service';
 import { displayBalance, isProfitAndLoss } from '../account-classification';
 
@@ -102,7 +102,10 @@ export class SnapshotRebuildService {
 
     const grouped = await this.prisma.client.journalLine.groupBy({
       by: ['accountId'],
-      where: { entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] }, postingDate: { lte: asOf } } },
+      // Same basis as the live P&L: activity before the closing journal.
+      where: {
+        entry: { status: { in: [...BALANCE_AFFECTING_STATUSES] }, postingDate: { lte: asOf }, ...EXCLUDE_CLOSING_JOURNAL },
+      },
       _sum: { baseDebit: true, baseCredit: true },
     });
     const meta = await this.accounts.meta((grouped as any[]).map((g) => g.accountId));

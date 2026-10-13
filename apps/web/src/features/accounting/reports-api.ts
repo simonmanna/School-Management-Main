@@ -382,7 +382,7 @@ export function useExpenseAnalysis(params: PeriodParams) {
 export interface EquityStatement {
   period: Period;
   rows: Array<{
-    accountId: string;
+    accountId: string | null;
     code: string;
     name: string;
     opening: string;

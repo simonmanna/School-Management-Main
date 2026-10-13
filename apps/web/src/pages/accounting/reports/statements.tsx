@@ -400,7 +400,7 @@ export const EquityStatementReport: React.FC<ReportProps> = ({ from, to }) => {
               ) : (
                 <>
                   {data.rows.map((r) => (
-                    <tr key={r.accountId}>
+                    <tr key={r.accountId ?? `synthetic-${r.name}`}>
                       <td>
                         <span className="acct-code">{r.code}</span> {r.name}
                       </td>

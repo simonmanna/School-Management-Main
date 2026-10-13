@@ -4,7 +4,7 @@ import { REPORT_SECTION_BY_KEY, type ReportSection } from '@erp/shared';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { orgTimeZone, reportEnd, reportStart } from '../../../kernel/common/report-range';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
-import { BALANCE_AFFECTING_STATUSES } from '../posting/posting.types';
+import { BALANCE_AFFECTING_STATUSES, EXCLUDE_CLOSING_JOURNAL } from '../posting/posting.types';
 import { AccountResolverService, type AccountMeta } from '../posting/account-resolver.service';
 import {
   BALANCE_SHEET_SECTIONS,
@@ -123,6 +123,8 @@ export class FinancialReportsService {
     accountIds?: string[];
     branchId?: string;
     costCenterId?: string;
+    /** Leave out the period-closing journal — for statements of performance. */
+    excludeClosing?: boolean;
   }): Promise<Map<string, Movement>> {
     const postingDate: any = {};
     if (where.from) postingDate.gte = where.from;
@@ -137,6 +139,7 @@ export class FinancialReportsService {
         entry: {
           status: { in: [...BALANCE_AFFECTING_STATUSES] },
           ...(Object.keys(postingDate).length ? { postingDate } : {}),
+          ...(where.excludeClosing ? EXCLUDE_CLOSING_JOURNAL : {}),
         },
       } as any,
       _sum: { baseDebit: true, baseCredit: true },
@@ -280,8 +283,10 @@ export class FinancialReportsService {
     const prior = this.priorPeriod(from, to);
 
     const [current, comparative, metaById] = await Promise.all([
-      this.movements({ from, to }),
-      opts.compare === false ? Promise.resolve(new Map<string, Movement>()) : this.movements(prior),
+      this.movements({ from, to, excludeClosing: true }),
+      opts.compare === false
+        ? Promise.resolve(new Map<string, Movement>())
+        : this.movements({ ...prior, excludeClosing: true }),
       this.accounts.allMeta(),
     ]);
 
@@ -1148,8 +1153,8 @@ export class FinancialReportsService {
     const prior = this.priorPeriod(from, to);
 
     const [current, comparative, metaById] = await Promise.all([
-      this.movements({ from, to }),
-      this.movements(prior),
+      this.movements({ from, to, excludeClosing: true }),
+      this.movements({ ...prior, excludeClosing: true }),
       this.accounts.allMeta(),
     ]);
 
@@ -1252,9 +1257,12 @@ export class FinancialReportsService {
     const { from, to } = await this.resolvePeriod(range);
     const openingCutoff = new Date(from.getTime() - 1);
 
+    // The period's movements leave the closing journal out: the profit line
+    // below carries the period's earnings once, instead of once as profit and
+    // again as the closing transfer into retained earnings.
     const [opening, period, metaById] = await Promise.all([
       this.movements({ to: openingCutoff }),
-      this.movements({ from, to }),
+      this.movements({ from, to, excludeClosing: true }),
       this.accounts.allMeta(),
     ]);
 
@@ -1279,8 +1287,28 @@ export class FinancialReportsService {
       });
     }
 
-    // Profit for the period is the equity movement the ledger has not closed
-    // out yet — shown as its own line so the statement reconciles.
+    // Earnings before the period that were never closed into retained earnings
+    // are still equity; leaving them out understated opening equity whenever
+    // an earlier period was open (wave 19).
+    let unclosedEarnings = ZERO;
+    for (const meta of metaById.values()) {
+      if (!isProfitAndLoss(meta.classification)) continue;
+      unclosedEarnings = unclosedEarnings.plus(earningsValue(this.net(this.get(opening, meta.id))));
+    }
+    if (!unclosedEarnings.isZero()) {
+      openingTotal = openingTotal.plus(unclosedEarnings);
+      rows.push({
+        accountId: null,
+        code: '',
+        name: 'Earnings not yet closed (brought forward)',
+        opening: unclosedEarnings.toString(),
+        movement: '0',
+        closing: unclosedEarnings.toString(),
+      });
+    }
+
+    // Profit for the period, before any closing entry — shown as its own line
+    // so the statement reconciles.
     let profit = ZERO;
     for (const meta of metaById.values()) {
       if (!isProfitAndLoss(meta.classification)) continue;
@@ -1313,7 +1341,7 @@ export class FinancialReportsService {
 
     const [asOfMoves, periodMoves, metaById] = await Promise.all([
       this.movements({ to }),
-      this.movements({ from, to }),
+      this.movements({ from, to, excludeClosing: true }),
       this.accounts.allMeta(),
     ]);
 
