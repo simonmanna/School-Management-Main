@@ -70,8 +70,11 @@ sources, so the demo database is also built here and shipped as a dump.
 ```bash
 # images, from a clean export of the committed tree
 git archive HEAD | tar -x -C "$BUILD"          # + docker-compose.demo.yml
-docker compose -p school-demo --env-file .env.build \
-  -f docker-compose.yml -f docker-compose.demo.yml build api web portal
+# one image at a time: building api and web together kills BuildKit in an 8 GB VM
+for s in portal web api; do
+  docker compose -p school-demo --env-file .env.build \
+    -f docker-compose.yml -f docker-compose.demo.yml build $s
+done
 docker save school-demo/api school-demo/web school-demo/portal | gzip > sd-images.tar.gz
 
 # seeded database, in a throwaway Postgres 16
@@ -102,13 +105,100 @@ docker cp sd-seed-db:/tmp/school-demo.dump .
    `scripts/demo/vps-demo.sh`, `school-demo.dump`, `sd-images.tar.gz`.
 3. `bash vps-demo.sh up` — generates `.env.demo` (mode 600) on first run,
    loads images, creates the roles, restores the dump, starts the stack.
-4. `bash vps-demo.sh wire-caddy avida-caddy` — backs up the live Caddyfile,
+4. `bash vps-demo.sh wire-caddy avida-prod-caddy-1` — backs up the live Caddyfile,
    attaches Caddy to `school-demo-edge`, appends the two blocks, validates and
    reloads (zero downtime). Validation failure restores the backup.
 
+## Update an existing deploy (over SSH)
+
+Always `ssh avida-vps` / `scp … avida-vps:` (Tailscale). Port 22 on the public
+IP is blocked on some networks, and the timeout looks like a ban.
+
+**1. Workstation** (Git Bash, Docker Desktop running, repo clean and pushed):
+
+```bash
+BUILD=$(mktemp -d); git archive HEAD | tar -x -C "$BUILD"; cd "$BUILD"
+cp /path/to/.env.build .                     # dummy values; keys as in .env.demo.example
+for s in portal web api; do
+  docker compose -p school-demo --env-file .env.build \
+    -f docker-compose.yml -f docker-compose.demo.yml build $s
+done
+docker save school-demo/api school-demo/web school-demo/portal | gzip > sd-images.tar.gz
+sha256sum sd-images.tar.gz
+```
+
+**2. Upload** to a dated folder:
+
+```bash
+D=/opt/school-demo/incoming-$(date +%Y%m%d)
+ssh avida-vps "mkdir -p $D"
+echo "reput sd-images.tar.gz $D/sd-images.tar.gz" | sftp -b - avida-vps   # resumable; rerun if the link drops
+scp docker-compose.yml docker-compose.demo.yml scripts/demo/vps-demo.sh \
+    infra/docker/Caddyfile.demo-ip avida-vps:$D/
+scp school-demo.dump avida-vps:$D/           # only when shipping new demo data (see Build)
+```
+
+**3. Server**: back up, then load (`ssh avida-vps`, `cd /opt/school-demo`):
+
+```bash
+D=incoming-YYYYMMDD
+sha256sum $D/sd-images.tar.gz                # must match step 1
+S=$(date +%Y%m%d-%H%M%S); mkdir -p backups
+docker exec school-demo-db pg_dump -U school_owner -d school -Fc -f /tmp/pre.dump
+docker cp school-demo-db:/tmp/pre.dump backups/pre-$S.dump
+for f in docker-compose.yml docker-compose.demo.yml vps-demo.sh .env.demo; do cp $f backups/$f.$S; done
+for i in api web portal; do docker tag school-demo/$i:latest school-demo/$i:prev-$S; done
+cp $D/docker-compose.yml $D/docker-compose.demo.yml $D/vps-demo.sh $D/Caddyfile.demo-ip .
+gunzip -c $D/sd-images.tar.gz | docker load
+DC="docker compose -p school-demo --env-file .env.demo -f docker-compose.yml -f docker-compose.demo.yml"
+$DC config --quiet                           # fails on a new required key: add it to .env.demo
+```
+
+**4. Server**: then **one** of:
+
+```bash
+# A. keep the data, apply new migrations (owner role; the app role cannot migrate)
+set -a; . ./.env.demo; set +a
+$DC run --rm --no-deps --entrypoint sh \
+  -e DATABASE_URL="postgresql://school_owner:${DEMO_DB_OWNER_PASSWORD}@db:5432/school?schema=public" \
+  api -c "cd apps/api && ./node_modules/.bin/prisma migrate deploy"
+$DC up -d --no-build api web portal portal-ip
+
+# B. new demo data: replace the dump and restore it (drops the live demo DB)
+mv school-demo.dump backups/school-demo.dump.$S && cp $D/school-demo.dump school-demo.dump
+bash vps-demo.sh reset
+$DC up -d --no-build web portal portal-ip
+```
+
+**5. Check**:
+
+```bash
+docker exec school-demo-api wget -qO- http://127.0.0.1:3000/api/v1/health/live
+$DC ps
+docker exec school-demo-db psql -U school_owner -d school -qAtc \
+  "select count(*) from _prisma_migrations where finished_at is null"   # 0
+curl -s -o /dev/null -w '%{http_code}\n' http://169.58.5.88:8095/     # portal by IP: 200
+```
+
+Then sign in to the staff app with the demo login shown on the form. If the
+dump's admin password differs from `VITE_DEMO_LOGIN_PASSWORD`, set it. Make the
+hash in `apps/api` with `node -e "console.log(require('bcryptjs').hashSync('admin',12))"`:
+
+```bash
+docker exec school-demo-db psql -U school_owner -d school -c \
+  "UPDATE \"User\" SET \"passwordHash\"='<hash>' WHERE email='admin@sunrise.test'"
+```
+
+**Rollback**: `docker tag school-demo/<svc>:prev-$S school-demo/<svc>:latest`
+per image, copy the `backups/*.$S` files back, restore `backups/pre-$S.dump`
+with `pg_restore --clean`, then `$DC up -d --no-build api web portal portal-ip`.
+
+**Clean up** once happy: old `incoming-*` folders, old `prev-*` tags, backups
+older than the last two.
+
 ### Surviving an Avida redeploy
 
-`deploy.sh` rebuilds `avida-caddy`, which drops both the appended blocks (the
+`deploy.sh` rebuilds Avida's Caddy (container `avida-prod-caddy-1`), which drops both the appended blocks (the
 Caddyfile is baked into that image) and the extra network. To make it
 permanent, in the Avida repo: append `Caddyfile.demo-snippet` to its
 Caddyfile, and give its caddy service
@@ -120,7 +210,9 @@ networks:
     external: true
 ```
 
-Until then, rerun `wire-caddy` after every Avida deploy.
+Until then, rerun `bash vps-demo.sh wire-caddy avida-prod-caddy-1` after every
+Avida deploy. Check with `docker network inspect school-demo-edge`: Caddy must
+be listed.
 
 ## Operate
 
@@ -129,7 +221,7 @@ Until then, rerun `wire-caddy` after every Avida deploy.
 | Fresh demo data | `bash vps-demo.sh reset` |
 | Logs | `docker logs -f school-demo-api` |
 | Resource use | `docker stats --no-stream $(docker ps -qf name=school-demo)` |
-| Remove | delete the two blocks from Avida's Caddyfile, reload, `docker network disconnect school-demo-edge avida-caddy`, then `bash vps-demo.sh down` |
+| Remove | delete the two blocks from Avida's Caddyfile, reload, `docker network disconnect school-demo-edge avida-prod-caddy-1`, then `bash vps-demo.sh down` |
 
 Not included on purpose: SMTP (emails are recorded as not sent), SMS, live
 mobile money, operator backup and provisioning APIs, backups of the demo
