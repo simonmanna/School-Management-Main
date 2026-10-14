@@ -212,8 +212,6 @@ const NAV_SECTIONS: NavSection[] = [
       // "Applications" used to appear here AND under Admissions, so the starting
       // point of the school's single most important workflow was ambiguous.
       // Admissions owns it; the front desk reaches it from there.
-      { to: '/crm', label: 'CRM Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.crm.dashboardRead },
-      { to: '/crm/deals', label: 'Deals', icon: Handshake, permission: PERMISSIONS.crm.dealRead },
     ],
   },
   {
