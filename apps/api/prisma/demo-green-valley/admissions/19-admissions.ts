@@ -374,6 +374,7 @@ export async function seedAdmissions(ctx: Ctx): Promise<void> {
           closesAt: spec.closes,
         }),
       ));
+    if (!row) throw new Error(`Admission cycle ${spec.name} could not be created`);
     // The window and the workflow are configuration: refreshed every run so an
     // edited spec takes effect without a reset.
     await prisma.admissionCycle.update({
@@ -997,6 +998,8 @@ async function loadRoll(prisma: PrismaClient, O: string): Promise<RollEntry[]> {
 
 function buildApplicants(school: School, roll: RollEntry[], asOf: string): Applicant[] {
   const out: Applicant[] = [];
+  // One name per cycle and class — the API flags a repeat as a likely duplicate.
+  const usedNames = new Set<string>();
   // Siblings come from the current roll, so the "elder sibling" link points at a
   // pupil the client can actually open.
   const siblingPool = roll.filter((p) => ['P3', 'P4', 'P5', 'P6', 'P7'].includes(p.gradeCode));
@@ -1022,8 +1025,13 @@ function buildApplicants(school: School, roll: RollEntry[], asOf: string): Appli
       const streams = school.sectionsByClassCode(gradeCode);
       const section = streams.length ? streams[i % streams.length] : null;
       const gender: 'male' | 'female' = r() < 0.5 ? 'male' : 'female';
-      const first = pick(gender === 'male' ? D.BOY_NAMES : D.GIRL_NAMES, r);
-      const last = pick(D.SURNAMES, r);
+      // Siblings of pupils on the roll keep the roll's (Ugandan) family; the rest
+      // split between Ugandan and Eritrean households, as a Kampala register does.
+      const eritrean = i % 4 !== 1 && r() < 0.5;
+      let first = eritrean
+        ? pick(gender === 'male' ? D.ERITREAN_BOY_NAMES : D.ERITREAN_GIRL_NAMES, r)
+        : pick(gender === 'male' ? D.BOY_NAMES : D.GIRL_NAMES, r);
+      const last = pick(eritrean ? D.ERITREAN_FATHER_NAMES : D.SURNAMES, r);
 
       // Received date: far enough back that the journey finishes by `anchor`,
       // with the oldest applications spread across the opening weeks.
@@ -1035,25 +1043,38 @@ function buildApplicants(school: School, roll: RollEntry[], asOf: string): Appli
 
       // Every fourth applicant is a younger sibling of somebody on the roll —
       // which is also where most of a Ugandan day school's intake comes from.
-      const sibling = i % 4 === 1 && siblingPool.length ? siblingPool[siblingCursor++ % siblingPool.length] : null;
+      const sibling = !eritrean && i % 4 === 1 && siblingPool.length ? siblingPool[siblingCursor++ % siblingPool.length] : null;
       const surname = sibling ? sibling.name.trim().split(/\s+/).slice(-1)[0] : last;
+      const givenPool = eritrean
+        ? gender === 'male' ? D.ERITREAN_BOY_NAMES : D.ERITREAN_GIRL_NAMES
+        : gender === 'male' ? D.BOY_NAMES : D.GIRL_NAMES;
+      for (let k = 0; usedNames.has(`${cycle.key}|${gradeCode}|${first} ${surname}`) && k < givenPool.length; k += 1) {
+        first = givenPool[(givenPool.indexOf(first as never) + 1) % givenPool.length];
+      }
+      usedNames.add(`${cycle.key}|${gradeCode}|${first} ${surname}`);
       const source = sibling ? 'sibling' : pick(['website', 'walk_in', 'referral', 'agent', 'other'] as const, r);
 
-      const motherFirst = pick(D.MOTHER_NAMES, r);
-      const fatherFirst = pick(D.FATHER_NAMES, r);
-      const area = pick(D.NEIGHBOURHOODS, r);
-      const address = `${pick(['Plot', 'House', 'Block'] as const, r)} ${int(r, 2, 240)}, ${area}, ${area === 'Mukono' || area === 'Seeta' ? 'Mukono' : r() < 0.5 ? 'Kampala' : 'Wakiso'}`;
+      // Eritrean naming is patronymic: the child's second name is the father's
+      // given name, the father carries his own father's name, and the mother
+      // keeps her father's name rather than taking her husband's.
+      const motherFirst = pick(eritrean ? D.ERITREAN_MOTHER_NAMES : D.MOTHER_NAMES, r);
+      const fatherFirst = eritrean ? surname : pick(D.FATHER_NAMES, r);
+      const fatherLast = eritrean ? pick(D.ERITREAN_FATHER_NAMES.filter((n) => n !== surname), r) : surname;
+      const motherLast = eritrean ? pick(D.ERITREAN_FATHER_NAMES.filter((n) => n !== surname), r) : surname;
+      const occupations = eritrean ? D.ERITREAN_OCCUPATIONS : D.OCCUPATIONS;
+      const area = pick(eritrean ? D.ERITREAN_NEIGHBOURHOODS : D.NEIGHBOURHOODS, r);
+      const address = `${pick(['Plot', 'House', 'Block'] as const, r)} ${int(r, 2, 240)}, ${area}, ${area === 'Mukono' || area === 'Seeta' ? 'Mukono' : eritrean || r() < 0.5 ? 'Kampala' : 'Wakiso'}`;
       const motherLed = r() < 0.45;
       const emailHolder = r() < 0.55;
       const guardians: Applicant['guardians'] = [
         {
           firstName: motherLed ? motherFirst : fatherFirst,
-          lastName: surname,
+          lastName: motherLed ? motherLast : fatherLast,
           relationship: motherLed ? 'mother' : 'father',
           phone: D.phone(r, 'mtn'),
           altPhone: r() < 0.4 ? D.phone(r, 'airtel') : undefined,
-          email: emailHolder ? `${(motherLed ? motherFirst : fatherFirst).toLowerCase()}.${surname.toLowerCase()}@example.ug` : undefined,
-          occupation: pick(D.OCCUPATIONS, r),
+          email: emailHolder ? `${(motherLed ? motherFirst : fatherFirst).toLowerCase()}.${(motherLed ? motherLast : fatherLast).toLowerCase()}@example.ug` : undefined,
+          occupation: pick(occupations, r),
           address,
           isPrimary: true,
           isEmergency: true,
@@ -1065,10 +1086,10 @@ function buildApplicants(school: School, roll: RollEntry[], asOf: string): Appli
       if (r() < 0.78) {
         guardians.push({
           firstName: motherLed ? fatherFirst : motherFirst,
-          lastName: surname,
+          lastName: motherLed ? fatherLast : motherLast,
           relationship: motherLed ? 'father' : 'mother',
           phone: D.phone(r, r() < 0.5 ? 'mtn' : 'airtel'),
-          occupation: pick(D.OCCUPATIONS, r),
+          occupation: pick(occupations, r),
           address,
           isPrimary: false,
           isEmergency: true,
@@ -1076,11 +1097,11 @@ function buildApplicants(school: School, roll: RollEntry[], asOf: string): Appli
         });
       } else if (r() < 0.5) {
         guardians.push({
-          firstName: pick(D.MOTHER_NAMES, r),
-          lastName: pick(D.SURNAMES, r),
+          firstName: pick(eritrean ? D.ERITREAN_MOTHER_NAMES : D.MOTHER_NAMES, r),
+          lastName: pick(eritrean ? D.ERITREAN_FATHER_NAMES : D.SURNAMES, r),
           relationship: 'guardian',
           phone: D.phone(r, 'airtel'),
-          occupation: pick(D.OCCUPATIONS, r),
+          occupation: pick(occupations, r),
           address,
           isPrimary: false,
           isEmergency: true,
@@ -1104,8 +1125,8 @@ function buildApplicants(school: School, roll: RollEntry[], asOf: string): Appli
         classId: cls.id,
         sectionId: section?.id ?? null,
         sectionName: section?.name ?? '',
-        nationality: r() < 0.9 ? 'Ugandan' : pick(D.NATIONALITIES.slice(1), r),
-        religion: pick(D.RELIGIONS, r),
+        nationality: eritrean ? 'Eritrean' : r() < 0.92 ? 'Ugandan' : pick(D.NATIONALITIES.slice(1), r),
+        religion: pick(eritrean ? D.ERITREAN_RELIGIONS : D.RELIGIONS, r),
         address,
         source,
         siblingOfStudentId: sibling?.id ?? null,
@@ -1337,9 +1358,19 @@ async function seedEnquiries(
     const gender = r() < 0.5 ? 'male' : 'female';
     const grade = pick(['BABY', 'MIDDLE', 'TOP', 'P1', 'P2', 'P4', 'P6'] as const, r);
     const channel = pick(D.ENQUIRY_CHANNELS, r);
+    const eritrean = i % 2 === 0;
+    const childName = eritrean
+      ? pick(gender === 'male' ? D.ERITREAN_BOY_NAMES : D.ERITREAN_GIRL_NAMES, r)
+      : pick(gender === 'male' ? D.BOY_NAMES : D.GIRL_NAMES, r);
+    const family = pick(eritrean ? D.ERITREAN_FATHER_NAMES : D.SURNAMES, r);
+    const guardianName = eritrean
+      ? r() < 0.5
+        ? `${family} ${pick(D.ERITREAN_FATHER_NAMES.filter((n) => n !== family), r)}`
+        : `${pick(D.ERITREAN_MOTHER_NAMES, r)} ${pick(D.ERITREAN_FATHER_NAMES, r)}`
+      : `${pick(r() < 0.5 ? D.MOTHER_NAMES : D.FATHER_NAMES, r)} ${family}`;
     open.push({
-      name: `${pick(gender === 'male' ? D.BOY_NAMES : D.GIRL_NAMES, r)} ${pick(D.SURNAMES, r)}`,
-      guardian: `${pick(r() < 0.5 ? D.MOTHER_NAMES : D.FATHER_NAMES, r)} ${pick(D.SURNAMES, r)}`,
+      name: `${childName} ${family}`,
+      guardian: guardianName,
       grade,
       status: i % 5 === 0 ? 'closed' : i % 3 === 0 ? 'contacted' : 'new',
       note: channel.note,

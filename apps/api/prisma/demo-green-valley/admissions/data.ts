@@ -61,6 +61,59 @@ export const FATHER_NAMES = [
   'Paul', 'Richard', 'Robert', 'Stephen', 'Tom', 'William',
 ] as const;
 
+/**
+ * Eritrean households — Kampala's large Eritrean community (Kabalagala, Kansanga,
+ * Muyenga, Ntinda, Kiwatule) sends its children to exactly this kind of school.
+ *
+ * Tigrinya naming is patronymic: a child is `<given name> <father's given name>`,
+ * the father is `<his name> <his father's name>`, and a mother keeps her own
+ * father's name. So the "surname" pool below is a pool of fathers' given names.
+ */
+export const ERITREAN_GIRL_NAMES = [
+  'Selam', 'Saba', 'Senait', 'Luwam', 'Rahel', 'Hiwet', 'Feven', 'Eden', 'Mahlet',
+  'Merhawit', 'Delina', 'Ruta', 'Simret', 'Winta', 'Yordanos', 'Semhar', 'Danait',
+  'Lidia', 'Hermon', 'Mekdes', 'Nardos', 'Arsema', 'Soliana', 'Fiyori', 'Milka',
+  'Salina', 'Kisanet', 'Eyerusalem', 'Bilen', 'Yohana', 'Amna', 'Zahra',
+] as const;
+
+export const ERITREAN_BOY_NAMES = [
+  'Yonas', 'Filmon', 'Henok', 'Robel', 'Biniam', 'Abel', 'Yohannes', 'Amanuel',
+  'Natnael', 'Kibrom', 'Mussie', 'Dawit', 'Yafet', 'Eyob', 'Senay', 'Merhawi',
+  'Nahom', 'Mikael', 'Bereket', 'Efrem', 'Aron', 'Ermias', 'Samuel', 'Daniel',
+  'Siem', 'Milkias', 'Saleh', 'Idris',
+] as const;
+
+/** Fathers' (and grandfathers') given names — the second and third names on a register. */
+export const ERITREAN_FATHER_NAMES = [
+  'Tesfay', 'Gebremedhin', 'Haile', 'Tekle', 'Tesfamariam', 'Ghebreyesus', 'Woldemichael',
+  'Berhane', 'Habte', 'Kahsay', 'Mehari', 'Tewelde', 'Asmerom', 'Yemane', 'Ghirmay',
+  'Andemariam', 'Negash', 'Fessehaye', 'Okbazghi', 'Zerai', 'Measho', 'Goitom', 'Araya',
+  'Weldu', 'Tekeste', 'Hagos', 'Kidane', 'Abraha', 'Ghebrehiwet', 'Berhe', 'Mengsteab',
+  'Russom', 'Tsegai', 'Mebrahtu', 'Sium', 'Teclay', 'Asfaha', 'Debesai', 'Ghide',
+  'Hailemariam', 'Osman', 'Idris',
+] as const;
+
+export const ERITREAN_MOTHER_NAMES = [
+  'Abrehet', 'Azieb', 'Mebrat', 'Lemlem', 'Tsega', 'Freweini', 'Akberet', 'Tirhas',
+  'Selamawit', 'Ghenet', 'Weini', 'Mehret', 'Yalem', 'Tsige', 'Elsa', 'Almaz', 'Zewdi',
+  'Mihret', 'Aberash', 'Kudusan', 'Medhin', 'Letay', 'Fatna', 'Halima',
+] as const;
+
+/** Where Eritrean families on the school run actually live. */
+export const ERITREAN_NEIGHBOURHOODS = [
+  'Kabalagala', 'Kansanga', 'Muyenga', 'Ggaba', 'Kisugu', 'Nsambya', 'Ntinda',
+  'Kiwatule', 'Najjera', 'Bukoto', 'Kisaasi', 'Kyanja',
+] as const;
+
+export const ERITREAN_OCCUPATIONS = [
+  'Restaurant owner', 'Café owner', 'Import–export trader', 'Electronics shop owner',
+  'Hardware dealer', 'Hair salon owner', 'Nurse', 'UN programme assistant',
+  'NGO logistics officer', 'Interpreter', 'Accountant', 'Tour operator', 'Mobile money agent',
+  'Clearing agent', 'Pharmacist', 'Businesswoman', 'Businessman', 'Fuel station manager',
+] as const;
+
+export const ERITREAN_RELIGIONS = ['Orthodox', 'Orthodox', 'Orthodox', 'Catholic', 'Muslim'] as const;
+
 /* ───────────────────────── Households and catchment ──────────────────────── */
 
 /** Neighbourhoods inside the school run, as a Kampala parent would write them. */
