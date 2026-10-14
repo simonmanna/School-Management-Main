@@ -56,6 +56,25 @@ export interface ReportCardTermStats {
   division: string | null;
 }
 
+/** The stored `StudentTermResult` fields a card prints. */
+export interface StoredTermResult {
+  gpa?: unknown;
+  meanPercent?: unknown;
+  aggregate?: number | null;
+  division?: string | null;
+  classRank?: number | null;
+  subjectsCount?: number;
+  eligible?: boolean;
+}
+
+/** Bands from a result set's `gradingScaleSnapshot` (`{ bands: [...] }`). */
+export function bandsOfSnapshot(snapshot: unknown): GradeBand[] {
+  const bands = (snapshot as { bands?: unknown } | null)?.bands;
+  return Array.isArray(bands)
+    ? (bands as GradeBand[]).filter((b) => b && typeof b.grade === 'string' && typeof b.min === 'number')
+    : [];
+}
+
 export interface ReportCardLayout {
   /** The grading system in use; drives header text and column layout. */
   system: GradingSystem | string;
@@ -107,7 +126,7 @@ export class ReportCardTemplateService {
   async buildLayout(
     studentProfileId: string,
     termId: string,
-    spine?: { subjects: any[] } | null,
+    spine?: { subjects: any[]; term?: unknown; resultSet?: { gradingScaleSnapshot?: unknown; gradingSystem?: string | null } | null } | null,
     /**
      * The grading system to report under, when the caller knows it better than
      * the school profile does — a published ResultSet records the system its
@@ -132,18 +151,21 @@ export class ReportCardTemplateService {
     const school = await this.prisma.client.schoolProfile.findFirst({
       where: { organizationId: this.tenant.organizationId },
     });
-    const system = (systemOverride ?? school?.gradingSystem ?? 'UCE') as GradingSystem;
+    const system = (systemOverride ?? spine?.resultSet?.gradingSystem ?? school?.gradingSystem ?? 'PLE') as GradingSystem;
 
     const spineSubjects = spine?.subjects ?? [];
-
-    // 1) A published ResultSet is the authoritative, frozen term result.
+    // 1) A published ResultSet is the authoritative, frozen term result. Every
+    // number on the card — grades, points, aggregate, division — is the one it
+    // stored; nothing is re-derived (two derivations once printed two divisions
+    // on one card).
     if (spineSubjects.length > 0) {
-      const subjects = await this.subjectsFromSpine(spineSubjects, system);
+      const subjects = await this.subjectsFromSpine(spineSubjects, system, spine?.resultSet ?? null);
+      const stored = (spine?.term ?? null) as StoredTermResult | null;
       return {
-        layout: this.layoutFor(system, subjects),
+        layout: this.layoutFor(system, subjects, stored),
         layoutSource: 'result_spine',
         subjects,
-        stats: this.termStats(subjects, system),
+        stats: stored ? this.statsFromStored(stored) : this.termStats(subjects, system),
       };
     }
 
@@ -171,9 +193,9 @@ export class ReportCardTemplateService {
     };
   }
 
-  private layoutFor(system: GradingSystem, subjects: SubjectResult[]): ReportCardLayout {
+  private layoutFor(system: GradingSystem, subjects: SubjectResult[], stored: StoredTermResult | null = null): ReportCardLayout {
     switch (system) {
-      case 'PLE': return this.buildPLELayout(subjects);
+      case 'PLE': return this.buildPLELayout(subjects, stored);
       case 'UCE': return this.buildUCELayout(subjects);
       case 'UACE': return this.buildUACELayout(subjects);
       case 'CBC': return this.buildCBCLayout(subjects);
@@ -184,13 +206,42 @@ export class ReportCardTemplateService {
 
   /**
    * Spine path: the published StudentSubjectResult rows, already computed by the
-   * result run under the same policy. Each component becomes one `examScores`
-   * row (its achieved percentage), so the per-exam-type columns still populate.
+   * result run under the same policy. Grade and points are printed AS STORED;
+   * the remark is read off the grading scale snapshotted with that result, not
+   * today's scale — so editing a scale after release can never change a card a
+   * parent already holds. Each component becomes one score column, labelled
+   * with the component's own name ("BOT", "Mid term", "End of term") rather
+   * than its kind, which printed every exam as "Exam".
    */
-  private async subjectsFromSpine(spineSubjects: any[], system: GradingSystem): Promise<SubjectResult[]> {
+  private async subjectsFromSpine(
+    spineSubjects: any[],
+    system: GradingSystem,
+    resultSet?: { gradingScaleSnapshot?: unknown } | null,
+  ): Promise<SubjectResult[]> {
     const subjectIds = [...new Set(spineSubjects.map((s) => s.subjectId))];
     const subjectMeta = await this.prisma.client.subject.findMany({ where: { id: { in: subjectIds } } });
     const metaById = new Map(subjectMeta.map((m) => [m.id, m]));
+
+    const componentIds = [...new Set(spineSubjects.flatMap((s) =>
+      (Array.isArray(s.componentBreakdown) ? s.componentBreakdown : []).map((c: any) => c.componentId).filter(Boolean)))] as string[];
+    const components = componentIds.length
+      ? await this.prisma.client.assessmentComponent.findMany({
+          where: { id: { in: componentIds } },
+          select: { id: true, name: true, kind: true },
+        })
+      : [];
+    const componentName = new Map(components.map((c: any) => [c.id, String(c.name ?? '').trim()]));
+
+    const snapshotBands = bandsOfSnapshot(resultSet?.gradingScaleSnapshot);
+    const remarkFor = async (grade: string | null, pct: number | null): Promise<string | null> => {
+      if (snapshotBands.length) {
+        const byGrade = grade ? snapshotBands.find((b) => b.grade === grade) : undefined;
+        if (byGrade) return byGrade.remark ?? null;
+        const byPct = pct != null ? snapshotBands.find((b) => pct >= b.min && pct <= b.max) : undefined;
+        return byPct?.remark ?? null;
+      }
+      return pct != null ? ((await this.grading.bandFor(pct, 100, system))?.remark ?? null) : null;
+    };
 
     const out: SubjectResult[] = [];
     for (const ssr of spineSubjects) {
@@ -203,18 +254,17 @@ export class ReportCardTemplateService {
       const examScores = [] as SubjectResult['examScores'];
       for (const c of breakdown) {
         const pct = c.componentPercent != null ? Number(c.componentPercent) : null;
-        const band = pct != null ? await this.grading.bandFor(pct, 100, system) : null;
         examScores.push({
-          examType: this.componentLabel(c.kind),
+          examType: componentName.get(c.componentId) || this.componentLabel(c.kind),
           marks: pct != null ? Math.round(pct * 100) / 100 : 0,
           maxMarks: 100,
-          grade: band?.grade ?? null,
-          points: band?.points ?? null,
+          grade: null,
+          points: null,
         });
       }
 
       const totalPercent = ssr.finalPercent != null ? Math.round(Number(ssr.finalPercent)) : 0;
-      const band = ssr.finalPercent != null ? await this.grading.bandFor(totalPercent, 100, system) : null;
+      const grade = ssr.grade ?? null;
       out.push({
         subject: subjectName,
         subjectCode,
@@ -222,10 +272,10 @@ export class ReportCardTemplateService {
         isPrincipal: !isSubsidiarySubject(subjectName, subjectCode, system),
         examScores,
         totalPercent,
-        finalGrade: ssr.grade ?? band?.grade ?? null,
-        finalPoints: ssr.points ?? band?.points ?? null,
-        finalGpa: ssr.gradePoint != null ? Number(ssr.gradePoint) : (band?.gpa ?? null),
-        remark: band?.remark ?? null,
+        finalGrade: grade,
+        finalPoints: ssr.points ?? null,
+        finalGpa: ssr.gradePoint != null ? Number(ssr.gradePoint) : null,
+        remark: await remarkFor(grade, ssr.finalPercent != null ? Number(ssr.finalPercent) : null),
       });
     }
     return out;
@@ -372,15 +422,24 @@ export class ReportCardTemplateService {
       aggregate = this.grading.computeUACEAggregate(
         scored.map((s) => ({ subject: s.subject, points: s.finalPoints, isPrincipal: s.isPrincipal })),
       ).best3Aggregate;
-    } else if (system === 'PLE') {
-      const agg = this.grading.computePLEAggregate(
-        scored.map((s) => ({ subject: s.subject, subjectCode: s.subjectCode, points: s.finalPoints })),
-      );
-      aggregate = agg.best4Aggregate;
-      division = this.grading.divisionPLE(agg.best4Aggregate, agg.eligible);
     }
+    // PLE: no aggregate or division from a live preview. Which subjects count
+    // is the programme's setting, applied only by a result run; a provisional
+    // card states marks and grades and waits for the released result.
 
     return { gpa, meanPercent, subjectsCount: scored.length, aggregate, division };
+  }
+
+  /** Headline figures exactly as the published result stored them. */
+  statsFromStored(stored: StoredTermResult): ReportCardTermStats {
+    const n = (v: unknown) => (v == null ? null : Number(v));
+    return {
+      gpa: n(stored.gpa),
+      meanPercent: n(stored.meanPercent),
+      subjectsCount: stored.subjectsCount ?? 0,
+      aggregate: stored.aggregate ?? null,
+      division: stored.division ?? null,
+    };
   }
 
   private componentLabel(kind: string): string {
@@ -394,32 +453,30 @@ export class ReportCardTemplateService {
   // ── Templates ──────────────────────────────────────────────────────────
 
   /**
-   * PLE — the Ugandan primary leaving card. Four core papers drive the
-   * aggregate and the division; anything else the school teaches still prints
-   * but does not count.
+   * PLE-graded primary card. Subjects carry D1–F9 grades; the aggregate and
+   * division are printed ONLY as the published result stored them — which
+   * subjects make the aggregate is a programme setting, and a class without one
+   * (lower primary, by default) has no aggregate and no division at all. Nothing
+   * here re-derives them, so the card can never disagree with Term Results.
    */
-  private buildPLELayout(subjects: SubjectResult[]): ReportCardLayout {
-    const agg = this.grading.computePLEAggregate(
-      subjects.map((s) => ({ subject: s.subject, subjectCode: s.subjectCode, points: s.finalPoints })),
-    );
-    const division = this.grading.divisionPLE(agg.best4Aggregate, agg.eligible);
+  private buildPLELayout(subjects: SubjectResult[], stored: StoredTermResult | null): ReportCardLayout {
+    const summary: Array<{ label: string; value: string }> = [];
+    let eligible: ReportCardLayout['eligible'];
+    if (stored?.aggregate != null) summary.push({ label: 'Aggregate', value: `${stored.aggregate}` });
+    if (stored?.division) {
+      summary.push({ label: 'Division', value: stored.division });
+      eligible = stored.division === 'U'
+        ? { qualifies: false, reason: 'Ungraded: a paper that counts towards the aggregate has no result.' }
+        : { qualifies: true, reason: `Division ${stored.division}${stored.aggregate != null ? ` on an aggregate of ${stored.aggregate}` : ''}.` };
+    }
     return {
       system: 'PLE',
-      columnHeaders: ['Subject', 'Code', 'CA', 'End of Term', 'Grade', 'Aggregate', 'Remark'],
+      columnHeaders: ['Subject', 'Code', 'Scores', 'Grade', 'Points', 'Remark'],
       sections: [{ title: 'Subjects', subjects }],
-      summary: [
-        { label: 'Aggregate', value: agg.eligible ? `${agg.best4Aggregate} / 36 (best possible = 4)` : '—' },
-        { label: 'Division', value: division },
-        { label: 'Core Papers Sat', value: `${agg.core.length} of 4` },
-      ],
-      eligible: {
-        qualifies: agg.eligible,
-        reason: agg.eligible
-          ? `Division ${division} on an aggregate of ${agg.best4Aggregate}.`
-          : `Ungraded: no mark for ${agg.missing.join(', ')}.`,
-      },
+      summary,
+      eligible,
       footer: [
-        'Issued under the Uganda National Examinations Board (UNEB) PLE grading system.',
+        'Grades follow the school’s D1–F9 scale.',
         'Class teacher: ____________________   Head teacher: ____________________',
       ],
     };

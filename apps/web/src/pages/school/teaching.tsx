@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, CalendarClock, CheckCircle2, ClipboardList, FileSpreadsheet, Send, Undo2 } from 'lucide-react';
-import { useStaff, useTeacherOverview } from '@/features/school/api';
+import { useStaff, useTeacherOverview, useTerms } from '@/features/school/api';
 import { useMyStaffIdentity } from '@/features/hr/api';
 import { useMyCourses } from '@/features/school/teaching-api';
 import { courseLabel } from './teaching/workspace';
@@ -41,7 +41,14 @@ export function SchoolTeachingPage() {
   const { data: overview, isLoading, isError } = useTeacherOverview(activeTeacher || undefined);
   // The course workspace (/school/teaching/:offeringId) is reached ONLY from
   // here — keep this list, or the plan/teach/close screens have no way in.
-  const { data: myCourses = [] } = useMyCourses(canPickAnyTeacher && activeTeacher ? { teacherPartnerId: activeTeacher } : {});
+  // This term's courses only — last term's copies of the same course were
+  // listed alongside, unsorted (review A22).
+  const { data: terms } = useTerms();
+  const currentTermId = (terms?.data ?? []).find((t) => t.isCurrent)?.id;
+  const { data: myCourses = [] } = useMyCourses({
+    ...(canPickAnyTeacher && activeTeacher ? { teacherPartnerId: activeTeacher } : {}),
+    ...(currentTermId ? { termId: currentTermId } : {}),
+  });
   // One row per assessment, not per returned learner.
   const returned = useMemo(() => {
     const byAssessment = new Map<string, { assessmentId: string; title: string; subject: string; count: number }>();
@@ -90,7 +97,7 @@ export function SchoolTeachingPage() {
       {noAllocations && (
         <EmptyState
           title="No classes allocated to you yet"
-          hint="Nothing can be marked until you are allocated to a class and subject. Ask the academic office to add you under Academic Management → Teaching Allocation."
+          hint="Nothing can be marked until you are allocated to a class and subject. Ask the academic office to add you under Academic Management → Teacher Allocation."
         />
       )}
 
@@ -123,7 +130,9 @@ export function SchoolTeachingPage() {
               ) : overview.examPapers.map((p) => (
                 <Row key={p.examScheduleId} title={`${p.subject} · ${p.examName}`} sub=""
                   right={<Progress done={p.entered} total={p.total} />}
-                  onClick={() => navigate('/school/enter-marks')} />
+                  onClick={() => navigate(p.examId && p.subjectId
+                    ? `/school/enter-marks?exam=${p.examId}&class=${p.classId}&subject=${p.subjectId}${p.termId ? `&term=${p.termId}` : ''}`
+                    : '/school/enter-marks')} />
               )))}
 
               {view === 'due' && (overview.dueSoon.length === 0 ? (

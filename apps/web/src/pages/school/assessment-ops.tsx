@@ -73,7 +73,7 @@ function RostersTab() {
               <span className="text-xs text-muted-foreground">{(r as any).memberCount ?? (r as any).members?.length ?? 0} pupils</span>
             </button>
           ))}
-          <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+          <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}</select>
           <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <Input placeholder="Name this class list" value={name} onChange={(e) => setName(e.target.value)} />
           <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => {

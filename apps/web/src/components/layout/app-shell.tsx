@@ -4,6 +4,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { HeaderComms } from './header-comms';
 import {
   LayoutDashboard,
+  LayoutGrid,
   FileUp,
   Building2,
   Users,
@@ -88,6 +89,7 @@ import {
   FileStack,
   CalendarCheck,
   MessagesSquare,
+  MessageSquareText,
   Target,
   GitBranch,
   Copy,
@@ -247,11 +249,11 @@ const NAV_SECTIONS: NavSection[] = [
       // Nursery. One screen for the four things a nursery does that a primary
       // school does not: account for the day, control who collects a child,
       // write down what happened, and chase immunisation.
-      { to: '/school/early-years', label: 'Nursery Day', icon: Baby, permission: PERMISSIONS.school.read },
+      { to: '/school/early-years', label: 'Nursery Day', icon: Baby, permission: [PERMISSIONS.school.manageCareLogs, PERMISSIONS.school.managePickup, PERMISSIONS.school.releaseChild, PERMISSIONS.school.reviewIncidents, PERMISSIONS.school.manageImmunisations] },
       { to: '/school/management/student-categories', label: 'Student Categories', icon: Tag, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/promotion', label: 'Promote & Roll Over', icon: TrendingUp, permission: PERMISSIONS.school.manageStudents },
-      { to: '/school/portals', label: 'Parent & Pupil Portals', icon: GraduationCap, permission: PERMISSIONS.school.read },
-      { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/portals', label: 'Parent & Pupil Portals', icon: GraduationCap, permission: PERMISSIONS.school.managePortalAccounts },
+      { to: '/school/analytics', label: 'Analytics', icon: BarChart3, permission: PERMISSIONS.school.readAnalytics },
     ],
   },
   {
@@ -271,8 +273,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/enrollment/programmes', label: 'Programmes & Classes', icon: Layers, permission: PERMISSIONS.school.manageProgrammes, group: 'Setup' },
       { to: '/school/admissions/config', label: 'Admissions Config', icon: FileText, permission: PERMISSIONS.school.manageAdmissions, group: 'Setup' },
       { to: '/school/admissions/workflow', label: 'Admission Workflow', icon: Workflow, permission: PERMISSIONS.school.manageAdmissions, group: 'Setup' },
-      { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Reports' },
-      { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3, group: 'Reports' },
+      { to: '/school/admissions/analytics', label: 'Admissions Analytics', icon: BarChart3, permission: PERMISSIONS.school.readAdmissions, group: 'Reports' },
+      { to: '/school/admissions/enrollment-summary', label: 'Enrollment Summary', icon: BarChart3, permission: [PERMISSIONS.school.readAdmissions, PERMISSIONS.school.manageEnrollment], group: 'Reports' },
     ],
   },
   {
@@ -288,7 +290,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/management/sections', label: 'Streams / Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/settings', label: 'School Settings', icon: SettingsIcon, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/campuses', label: 'Campuses', icon: Building2, permission: PERMISSIONS.school.read },
+      { to: '/school/campuses', label: 'Campuses', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
       // Remaining academic-management tools.
       //
       // One Subjects destination. `/school/subjects` is a read-only overview of
@@ -297,7 +299,7 @@ const NAV_SECTIONS: NavSection[] = [
       // subjects screen, but it is no longer a competing menu entry.
       { to: '/school/management/subjects', label: 'Subjects', icon: BookOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/class-teacher', label: 'Class Teachers', icon: Users, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/course-offerings', label: 'Teaching Allocation', icon: Users, permission: PERMISSIONS.school.manageCourses },
+      { to: '/school/teaching-allocation', label: 'Teacher Allocation', icon: Users, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/teacher-cover', label: 'Teacher Cover', icon: CalendarX2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
       // Assessment setup — done once a term by the academic office, before any
@@ -352,8 +354,12 @@ const NAV_SECTIONS: NavSection[] = [
     icon: FileBadge,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
+      // The DOS's whole term on one screen, with every end-of-term step run for all classes.
+      { to: '/school/term-board', label: 'Term Board', icon: LayoutGrid, permission: [PERMISSIONS.school.computeResults, PERMISSIONS.school.publishResults, PERMISSIONS.school.manageAssessments, PERMISSIONS.school.approveGrades] },
       { to: '/school/results', label: 'Term Results', icon: GitBranch, permission: RESULTS_ACCESS },
       { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: [PERMISSIONS.school.manageExams, PERMISSIONS.school.computeResults, PERMISSIONS.school.publishResults, PERMISSIONS.school.publishReportDocuments] },
+      // Comments: the class teacher (own class) and the head teacher.
+      { to: '/school/report-comments', label: 'Report Comments', icon: MessageSquareText, permission: [PERMISSIONS.school.writeReportComments, PERMISSIONS.school.writeHeadComments] },
       { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams },
       { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: [...TEACHING_ACCESS, PERMISSIONS.school.issueCertificates] },
       { to: '/school/certification', label: 'Certificates & Transcripts', icon: FileBadge, permission: [PERMISSIONS.school.issueCertificates, PERMISSIONS.school.revokeCertificates, PERMISSIONS.school.manageExams, PERMISSIONS.school.approveGrades] },
@@ -368,7 +374,7 @@ const NAV_SECTIONS: NavSection[] = [
       // the API scopes which classes (audit R07 acceptance, wave 17).
       { to: '/school/attendance', label: 'Attendance', icon: ClipboardCheck, permission: [PERMISSIONS.school.takeAttendance, PERMISSIONS.school.ownAttendance] },
       { to: '/school/attendance/report', label: 'Attendance Report', icon: BarChart3, permission: PERMISSIONS.school.read },
-      { to: '/school/attendance/statuses', label: 'Statuses', icon: Settings2 },
+      { to: '/school/attendance/statuses', label: 'Statuses', icon: Settings2, permission: PERMISSIONS.school.manageFoundation },
     ],
   },
   {
@@ -392,8 +398,8 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Presentation,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/course-offerings', label: 'Curriculum & Courses', icon: BookCopy, permission: PERMISSIONS.school.manageCourses, group: 'Courses' },
-      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
+      { to: '/school/course-offerings', label: 'Course Offerings', icon: BookCopy, permission: PERMISSIONS.school.manageCourses, group: 'Courses' },
+      { to: '/school/lms/lesson-plans', label: 'Lesson Plans', icon: Presentation, permission: [PERMISSIONS.school.manageLessonPlans, PERMISSIONS.school.ownLessonPlans, PERMISSIONS.school.reviewLessonPlans], group: 'Planning' },
       { to: '/school/lms/templates', label: 'Plan Templates', icon: FileStack, permission: PERMISSIONS.school.manageLessonPlans, group: 'Planning' },
       { to: '/school/lms/scheduled-lessons', label: 'Scheduled Lessons', icon: CalendarCheck, permission: PERMISSIONS.school.lmsRead, group: 'Planning' },
       { to: '/school/learning-outcomes', label: 'Learning Outcomes', icon: Award, permission: PERMISSIONS.school.read, group: 'Outcomes' },
@@ -424,7 +430,7 @@ const NAV_SECTIONS: NavSection[] = [
     icon: Users,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/staff', label: 'Teaching Staff (roster)', icon: Users, permission: PERMISSIONS.school.read },
+      { to: '/school/staff', label: 'Teaching Staff (roster)', icon: Users, permission: [PERMISSIONS.school.manageStaff, PERMISSIONS.school.manageFoundation] },
       { to: '/hr', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.hr.read },
       { to: '/hr/employees', label: 'Employees', icon: Users, permission: PERMISSIONS.hr.employee },
       { to: '/hr/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.hr.employee },
@@ -531,7 +537,7 @@ const NAV_SECTIONS: NavSection[] = [
     icon: ShoppingCart,
     items: [
       { to: '/invoices', label: 'Sales/Invoices', icon: Receipt, permission: PERMISSIONS.invoice.read },
-      { to: '/orders', label: 'Orders', icon: ClipboardList },
+      { to: '/orders', label: 'Orders', icon: ClipboardList, permission: 'orders:read' },
       { to: '/credit-notes', label: 'Credit Notes', icon: FileMinus, permission: PERMISSIONS.creditNote.read },
       { to: '/payments', label: 'Receipts', icon: HandCoins, permission: PERMISSIONS.payment.read },
       { to: '/ar-aging', label: 'Accounts Receivable', icon: Clock, permission: PERMISSIONS.report.ar },
@@ -542,7 +548,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Purchasing',
     icon: Truck,
     items: [
-      { to: '/suppliers', label: 'Suppliers', icon: Building2 },
+      { to: '/suppliers', label: 'Suppliers', icon: Building2, permission: PERMISSIONS.partner.read },
       { to: '/procurement/purchase-orders', label: 'Purchases', icon: ShoppingCart, permission: 'purchase_order:read' },
       { to: '/procurement/goods-receipts', label: 'Goods Receipts', icon: Truck, permission: 'goods_receipt:read' },
       // { to: '/procurement/three-way-match', label: '3-Way Match', icon: Scale, permission: 'three_way_match:read' },
@@ -598,8 +604,8 @@ const NAV_SECTIONS: NavSection[] = [
     icon: MessagesSquare,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/messaging', label: 'Send Message', icon: MessagesSquare, permission: PERMISSIONS.school.read },
-      { to: '/school/messaging?tab=history', label: 'Message History', icon: History, permission: PERMISSIONS.school.read },
+      { to: '/school/messaging', label: 'Send Message', icon: MessagesSquare, permission: PERMISSIONS.school.communicate },
+      { to: '/school/messaging?tab=history', label: 'Message History', icon: History, permission: PERMISSIONS.school.communicate },
     ],
   },
   // ===== Meals & Cafeteria =====
@@ -608,16 +614,16 @@ const NAV_SECTIONS: NavSection[] = [
     icon: UtensilsCrossed,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/meals?tab=today', label: 'Today’s Meals', icon: CalendarDays, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=planning', label: 'Programs & Plans', icon: ClipboardList, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=assignments', label: 'Student Assignments', icon: Users, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=attendance', label: 'Meal Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=menus', label: 'Menus', icon: UtensilsCrossed, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=kitchen', label: 'Kitchen & Production', icon: ChefHat, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=consumption', label: 'Consumption', icon: BarChart3, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=finance', label: 'Meal Finance', icon: HandCoins, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=pos', label: 'Cafeteria POS', icon: CreditCard, permission: PERMISSIONS.school.read },
-      { to: '/school/meals?tab=reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.school.read },
+      { to: '/school/meals?tab=today', label: 'Today’s Meals', icon: CalendarDays, permission: PERMISSIONS.school.mealsRead },
+      { to: '/school/meals?tab=planning', label: 'Programs & Plans', icon: ClipboardList, permission: PERMISSIONS.school.manageMeals },
+      { to: '/school/meals?tab=assignments', label: 'Student Assignments', icon: Users, permission: PERMISSIONS.school.manageMeals },
+      { to: '/school/meals?tab=attendance', label: 'Meal Attendance', icon: ClipboardCheck, permission: PERMISSIONS.school.mealAttendance },
+      { to: '/school/meals?tab=menus', label: 'Menus', icon: UtensilsCrossed, permission: PERMISSIONS.school.manageMeals },
+      { to: '/school/meals?tab=kitchen', label: 'Kitchen & Production', icon: ChefHat, permission: PERMISSIONS.school.manageKitchen },
+      { to: '/school/meals?tab=consumption', label: 'Consumption', icon: BarChart3, permission: PERMISSIONS.school.mealReports },
+      { to: '/school/meals?tab=finance', label: 'Meal Finance', icon: HandCoins, permission: PERMISSIONS.school.mealBilling },
+      { to: '/school/meals?tab=pos', label: 'Cafeteria POS', icon: CreditCard, permission: PERMISSIONS.school.manageCafeteria },
+      { to: '/school/meals?tab=reports', label: 'Reports', icon: BarChart3, permission: PERMISSIONS.school.mealReports },
     ],
   },
   // ===== Supplementary / Assets / Equipment / Settings =====
@@ -631,8 +637,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/inventory/adjustments', label: 'Stock Adjustments', icon: Scale, permission: 'inventory:move' },
       { to: '/inventory/transfers', label: 'Stock Transfers', icon: Truck, permission: 'inventory:move' },
       { to: '/inventory/locations', label: 'Locations', icon: MapPin, permission: PERMISSIONS.inventoryLocation.read },
-      { to: '/products', label: 'Products', icon: Package },
-      { to: '/uom', label: 'Units of Measure', icon: Ruler },
+      { to: '/products', label: 'Products', icon: Package, permission: PERMISSIONS.product.read },
+      { to: '/uom', label: 'Units of Measure', icon: Ruler, permission: PERMISSIONS.uom.read },
     ],
   },
   {
@@ -654,9 +660,9 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Fixed Assets',
     icon: Landmark,
     items: [
-      { to: '/fixed-assets', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/fixed-assets/register', label: 'Asset Register', icon: Building2 },
-      { to: '/fixed-assets/categories', label: 'Categories', icon: Tag },
+      { to: '/fixed-assets', label: 'Dashboard', icon: LayoutDashboard, permission: PERMISSIONS.fixedAsset.read },
+      { to: '/fixed-assets/register', label: 'Asset Register', icon: Building2, permission: PERMISSIONS.fixedAsset.read },
+      { to: '/fixed-assets/categories', label: 'Categories', icon: Tag, permission: PERMISSIONS.fixedAsset.read },
     ],
   },
   {

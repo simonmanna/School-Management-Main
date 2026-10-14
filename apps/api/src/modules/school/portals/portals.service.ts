@@ -289,7 +289,7 @@ export class PortalsService {
         take: 20,
       }),
       // Exam papers for my classes with marks still to enter.
-      this.examPapersToEnter(classIds, subjectIds),
+      this.examPapersToEnter(assignments.map((a) => ({ classId: a.classId, subjectId: a.subjectId }))),
       this.lessonPlanCounts(teacherPartnerId),
     ]);
 
@@ -343,15 +343,24 @@ export class PortalsService {
   }
 
   /** Exam papers (schedules) for these classes with fewer marks than students. */
-  private async examPapersToEnter(classIds: string[], subjectIds: string[]) {
-    if (classIds.length === 0) return [];
-    const schedules = await this.prisma.client.examSchedule.findMany({
+  /**
+   * Exam papers still to be entered for the (class, subject) pairs this teacher
+   * is allocated to — the pairs, not every subject of every class they touch:
+   * a P5 English and P4 Maths teacher has nothing to enter for P5 Maths.
+   */
+  private async examPapersToEnter(pairs: Array<{ classId: string; subjectId: string }>) {
+    if (pairs.length === 0) return [];
+    const classIds = [...new Set(pairs.map((p) => p.classId))];
+    const subjectIds = [...new Set(pairs.map((p) => p.subjectId))];
+    const mine = new Set(pairs.map((p) => `${p.classId}:${p.subjectId}`));
+    const allSchedules = await this.prisma.client.examSchedule.findMany({
       // Locked papers are not work to do. The assessment's lock is authoritative;
       // the schedule column is the legacy mirror.
       where: { classId: { in: classIds }, subjectId: { in: subjectIds }, marksLockedAt: null },
       include: { subject: true, exam: true },
-      take: 40,
+      take: 80,
     });
+    const schedules = allSchedules.filter((s) => mine.has(`${s.classId}:${s.subjectId}`)).slice(0, 40);
     if (schedules.length === 0) return [];
 
     const sizeByClass = await this.placements.classSizes(classIds);
@@ -381,7 +390,10 @@ export class PortalsService {
       .map((s) => {
         const size = sizeByClass.get(s.classId) ?? 0;
         const done = enteredBy.get(s.id) ?? 0;
-        return { examScheduleId: s.id, examName: s.exam?.name ?? '', subject: s.subject?.name ?? '', classId: s.classId, entered: done, total: size };
+        return {
+          examScheduleId: s.id, examId: s.examId, subjectId: s.subjectId, termId: s.exam?.termId ?? null,
+          examName: s.exam?.name ?? '', subject: s.subject?.name ?? '', classId: s.classId, entered: done, total: size,
+        };
       })
       .filter((p) => p.total > 0 && p.entered < p.total);
   }

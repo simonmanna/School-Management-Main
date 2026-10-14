@@ -78,7 +78,7 @@ export function SchoolResultsPage() {
   const canAmend = has(PERMISSIONS.school.amendResults);
   const canApprove = has(PERMISSIONS.school.approveResults);
 
-  const termName = (terms?.data ?? []).find((t) => t.id === termId)?.name;
+  const termName = (terms?.data ?? []).find((t) => t.id === termId)?.label;
 
   // Pupil names for the blocker list. The gate returns ids; the result set we
   // already loaded carries the names, so no extra request is needed.
@@ -121,7 +121,7 @@ export function SchoolResultsPage() {
           </div>
           <select className={`${selectClass} w-56`} value={termId} onChange={(e) => setParam('term', e.target.value)}>
             <option value="">Term…</option>
-            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
           </select>
         </div>
         <WorkflowSteps current={5} />
@@ -344,7 +344,7 @@ export function SchoolResultsPage() {
 
           {/* ── Promotion ── */}
           <TabsContent value="promotion" className="pt-4">
-            <PromotionDecisionsPanel resultSetId={setId} published={published} terms={(terms?.data ?? []).map((t) => ({ id: t.id, name: t.name }))} />
+            <PromotionDecisionsPanel resultSetId={setId} published={published} terms={(terms?.data ?? []).map((t) => ({ id: t.id, name: t.label ?? t.name }))} />
           </TabsContent>
 
           {/* ── Amendments ── */}

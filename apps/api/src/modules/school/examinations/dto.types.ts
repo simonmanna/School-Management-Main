@@ -12,6 +12,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  ArrayMaxSize,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -172,6 +174,20 @@ export class ClassReportCardPdfDto {
   @IsString() @IsNotEmpty() classId!: string;
   @IsString() @IsNotEmpty() termId!: string;
   @IsOptional() @IsString() sectionId?: string;
+}
+
+/** One row of the comment grid. */
+export class ReportCardCommentItemDto {
+  @IsString() @IsNotEmpty() studentProfileId!: string;
+  @IsOptional() @IsString() @MaxLength(1000) classTeacherComment?: string;
+  @IsOptional() @IsString() @MaxLength(1000) principalComment?: string;
+}
+
+/** The comment grid's save: one term, many pupils. */
+export class UpdateReportCardCommentsDto {
+  @IsString() @IsNotEmpty() termId!: string;
+  @IsArray() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => ReportCardCommentItemDto)
+  items!: ReportCardCommentItemDto[];
 }
 
 export class UpdateReportCardCommentDto {

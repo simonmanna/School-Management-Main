@@ -123,7 +123,7 @@ export function SchoolEventsPage() {
         </select>
         <select value={termFilter} onChange={(e) => setTermFilter(e.target.value)} className="h-9 rounded-md border bg-background px-2 text-sm">
           <option value="">All terms</option>
-          {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
         </select>
       </div>
 
@@ -178,7 +178,7 @@ export function SchoolEventsPage() {
                 <div><Label>Term</Label>
                   <select value={form.termId ?? ''} onChange={(e) => setForm({ ...form, termId: e.target.value })} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
                     <option value="">None</option>
-                    {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
                   </select>
                 </div>
               </div>

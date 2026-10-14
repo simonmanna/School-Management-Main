@@ -17,6 +17,8 @@ import { ResultRunService } from '../assessment/result-run.service';
 import { isDescriptorSystem, validateBands } from '../assessment/result-computation';
 import { inferScaleSystem } from '../assessment/grade-bands';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { DataScopeService } from '../../../kernel/auth/data-scope.service';
+import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.service';
 import type {
   BulkGradeEntryDto,
   CreateExamDto,
@@ -546,6 +548,8 @@ export class ReportCardService {
     private readonly audit: AuditService,
     private readonly results: ResultRunService,
     private readonly placements: PlacementLookupService,
+    private readonly dataScope: DataScopeService,
+    private readonly identity: EmployeeIdentityService,
   ) {}
 
   /** Report cards for a student, newest first. */
@@ -995,28 +999,172 @@ export class ReportCardService {
   }
 
   /**
-   * P0-A: capture/overwrite the free-text teacher & principal narratives and
-   * competency levels for a student's report card. Either regenerates the
-   * payload (so the new text appears on the PDF) or, if no card exists yet,
-   * creates a lightweight card holding only the comments until generate runs.
+   * Who may write which comment (owner decision, review A2):
+   *   - the class teacher's comment: `school:reports:comment`, and under a
+   *     class-scoped role only for a pupil whose class (or stream) they are the
+   *     class teacher of in that term;
+   *   - the head teacher's comment: `school:reports:comment:head` only;
+   *   - competency levels: the exams office (`school:exams:write`), as before.
+   * A released card is the record a family holds — unpublish it first.
+   */
+  private async assertMayComment(
+    studentProfileId: string,
+    termId: string,
+    dto: { classTeacherComment?: string; principalComment?: string; competencyLevels?: Record<string, string> },
+  ): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    const has = (p: string) => perms.includes('*') || perms.includes(p);
+    if (dto.principalComment !== undefined && !has(PERMISSIONS.school.writeHeadComments)) {
+      throw new ForbiddenException('Only the head teacher writes the head teacher’s comment.');
+    }
+    if (dto.competencyLevels !== undefined && !has(PERMISSIONS.school.manageExams)) {
+      throw new ForbiddenException('Competency levels are recorded by the exams office.');
+    }
+    if (dto.classTeacherComment === undefined) return;
+    if (!has(PERMISSIONS.school.writeReportComments)) {
+      throw new ForbiddenException('You do not have permission to write report-card comments.');
+    }
+    if (perms.includes('*') || (await this.dataScope.effective()) === 'school') return;
+    const staffProfileId = await this.identity.staffProfileIdForCaller();
+    if (!staffProfileId) throw new ForbiddenException('Your login is not linked to a staff record.');
+    const placed = (await this.placements.resolve([studentProfileId], { termId })).get(studentProfileId);
+    if (!placed) throw new ForbiddenException('This pupil was not placed in a class that term.');
+    const [homeroom, stream] = await Promise.all([
+      this.prisma.client.schoolClass.count({ where: { id: placed.classId, homeroomTeacherId: staffProfileId } }),
+      placed.sectionId
+        ? this.prisma.client.section.count({ where: { id: placed.sectionId, classTeacherId: staffProfileId } })
+        : Promise.resolve(0),
+    ]);
+    if (!homeroom && !stream) {
+      throw new ForbiddenException('Only the class teacher writes the class teacher’s comment for this pupil.');
+    }
+  }
+
+  /**
+   * Capture/overwrite the class teacher's and head teacher's comments (and
+   * competency levels) for a pupil's report card. Updates an existing card's
+   * payload so the PDF shows the new text, or creates a comments-only card that
+   * `generate` later fills.
    */
   async updateComment(dto: UpdateReportCardCommentDto) {
+    await this.assertMayComment(dto.studentProfileId, dto.termId, dto);
+    return this.writeComment(dto);
+  }
+
+  /** Many pupils' comments in one save — the comment grid. Each row is checked. */
+  async updateComments(dto: {
+    termId: string;
+    items: Array<{ studentProfileId: string; classTeacherComment?: string; principalComment?: string }>;
+  }) {
+    const saved: string[] = [];
+    const refused: Array<{ studentProfileId: string; reason: string }> = [];
+    for (const item of dto.items ?? []) {
+      const row = { ...item, termId: dto.termId };
+      try {
+        await this.assertMayComment(item.studentProfileId, dto.termId, row);
+        await this.writeComment(row);
+        saved.push(item.studentProfileId);
+      } catch (e) {
+        if (e instanceof ForbiddenException || e instanceof BadRequestException) {
+          refused.push({ studentProfileId: item.studentProfileId, reason: (e as Error).message });
+        } else throw e;
+      }
+    }
+    return { saved: saved.length, refused };
+  }
+
+  /**
+   * The comment grid for one class (or stream) and term: each pupil with the
+   * released headline the comment is written against, and what is already
+   * written. `canWriteClass` / `canWriteHead` tell the screen which column is
+   * editable for the caller, so nobody meets a box the API will refuse.
+   */
+  async commentSheet(dto: { classId: string; termId: string; sectionId?: string }) {
+    const pupils = await this.classRoll(dto);
+    const ids = pupils.map((p) => p.id);
+    const [cards, results] = await Promise.all([
+      this.prisma.client.reportCard.findMany({
+        where: { termId: dto.termId, studentProfileId: { in: ids } },
+        select: { studentProfileId: true, classTeacherComment: true, principalComment: true, publishedAt: true },
+      }),
+      Promise.all(ids.map((id) => this.results.latestPublished(dto.termId, id).catch(() => null))),
+    ]);
+    const cardOf = new Map(cards.map((c: any) => [c.studentProfileId, c]));
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    const has = (p: string) => perms.includes('*') || perms.includes(p);
+    // Which pupils' class-teacher comment the caller may write: everyone for a
+    // school-wide role or the class's homeroom teacher; only their own stream's
+    // pupils for a stream class teacher.
+    let canWriteClass = has(PERMISSIONS.school.writeReportComments);
+    let writableSections: Set<string> | 'all' = 'all';
+    if (canWriteClass && !perms.includes('*') && (await this.dataScope.effective()) !== 'school') {
+      const staffProfileId = await this.identity.staffProfileIdForCaller();
+      const [homeroom, streams] = staffProfileId
+        ? await Promise.all([
+            this.prisma.client.schoolClass.count({ where: { id: dto.classId, homeroomTeacherId: staffProfileId } }),
+            this.prisma.client.section.findMany({
+              where: { classId: dto.classId, classTeacherId: staffProfileId },
+              select: { id: true },
+            }),
+          ])
+        : [0, [] as Array<{ id: string }>];
+      if (!homeroom) writableSections = new Set(streams.map((s) => s.id));
+      canWriteClass = homeroom > 0 || streams.length > 0;
+    }
+    const sectionOf = writableSections === 'all'
+      ? new Map<string, string | null>()
+      : new Map([...(await this.placements.resolve(ids, { termId: dto.termId })).entries()].map(([id, p]) => [id, p.sectionId ?? null]));
+    return {
+      canWriteClass,
+      canWriteHead: has(PERMISSIONS.school.writeHeadComments),
+      rows: pupils.map((p, i) => {
+        const card: any = cardOf.get(p.id);
+        const r: any = results[i];
+        return {
+          studentProfileId: p.id,
+          name: p.name,
+          admissionNo: p.admissionNo,
+          released: !!r,
+          gradingSystem: r?.resultSet?.gradingSystem ?? null,
+          meanPercent: r?.term?.meanPercent != null ? Number(r.term.meanPercent) : null,
+          aggregate: r?.term?.aggregate ?? null,
+          division: r?.term?.division ?? null,
+          position: r?.term?.classRank ?? null,
+          classTeacherComment: card?.classTeacherComment ?? null,
+          principalComment: card?.principalComment ?? null,
+          cardPublished: !!card?.publishedAt,
+          classCommentEditable:
+            canWriteClass && !card?.publishedAt &&
+            (writableSections === 'all' || writableSections.has(sectionOf.get(p.id) ?? '')),
+        };
+      }),
+    };
+  }
+
+  private async writeComment(dto: UpdateReportCardCommentDto) {
     const organizationId = this.tenant.organizationId;
     const deterministicId = `rc_${dto.studentProfileId.slice(0, 12)}_${dto.termId.slice(0, 12)}`.replace(/-/g, '');
     return this.prisma.client.$transaction(async (tx: any) => {
       const existing = await tx.reportCard.findFirst({ where: { id: deterministicId } });
+      if (existing?.publishedAt) {
+        throw new BadRequestException('This report card has been released to the family. Unpublish it before changing its comments.');
+      }
+      const clean = (v: string | undefined) => (v === undefined ? undefined : v.trim() ? v.trim().slice(0, 1000) : null);
+      const classTeacherComment = clean(dto.classTeacherComment);
+      const principalComment = clean(dto.principalComment);
       const payload = existing?.payload
         ? {
             ...existing.payload,
-            classTeacherComment: dto.classTeacherComment ?? existing.payload.classTeacherComment ?? null,
-            principalComment: dto.principalComment ?? existing.payload.principalComment ?? null,
+            classTeacherComment:
+              classTeacherComment !== undefined ? classTeacherComment : existing.payload.classTeacherComment ?? null,
+            principalComment: principalComment !== undefined ? principalComment : existing.payload.principalComment ?? null,
             competencyLevels: dto.competencyLevels
               ? { ...(existing.payload.competencyLevels ?? {}), ...dto.competencyLevels }
               : existing.payload.competencyLevels ?? {},
           }
         : {
-            classTeacherComment: dto.classTeacherComment ?? null,
-            principalComment: dto.principalComment ?? null,
+            classTeacherComment: classTeacherComment ?? null,
+            principalComment: principalComment ?? null,
             competencyLevels: dto.competencyLevels ?? {},
           };
       const card = await tx.reportCard.upsert({
@@ -1027,8 +1175,8 @@ export class ReportCardService {
           studentProfileId: dto.studentProfileId,
           termId: dto.termId,
           payload: payload as any,
-          classTeacherComment: dto.classTeacherComment ?? null,
-          principalComment: dto.principalComment ?? null,
+          classTeacherComment: (payload as any).classTeacherComment,
+          principalComment: (payload as any).principalComment,
           competencyLevels: (payload as any).competencyLevels ?? {},
         },
         update: {

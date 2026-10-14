@@ -40,7 +40,7 @@ export class SchoolService {
         name: org?.name ?? 'My School',
         currencyCode: org?.currencyCode ?? 'UGX',
         educationLevel: 'mixed',
-        gradingSystem: 'UCE',
+        gradingSystem: 'PLE',
       },
     });
     this.events.publish(EVENTS.SchoolProfileUpdated, {

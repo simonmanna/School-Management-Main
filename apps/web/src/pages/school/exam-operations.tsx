@@ -91,7 +91,7 @@ export function SchoolExamOperationsPage() {
         <div className="flex flex-wrap items-end gap-2">
           <select aria-label="Term" className={`${selectClass} w-44`} value={termId} onChange={(e) => setTermId(e.target.value)}>
             <option value="">All terms</option>
-            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
           </select>
           <select aria-label="Examination" className={`${selectClass} w-72`} value={examId} onChange={(e) => setParam('exam', e.target.value)}>
             <option value="">Choose an examination…</option>

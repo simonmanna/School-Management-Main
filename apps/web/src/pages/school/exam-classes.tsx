@@ -123,7 +123,7 @@ export function SchoolExamClassesPage() {
           <Picker label="Academic year" value={yearId} onChange={(v) => { setYearId(v); setTermId(''); setExamId(''); }}
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} className="min-w-[160px]" />
           <Picker label="Term" value={termId} onChange={(v) => { setTermId(v); setExamId(''); }}
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} className="min-w-[160px]" />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} className="min-w-[160px]" />
           <Picker label="Exam" value={examId} onChange={setExamId}
             options={(exams ?? []).map((e) => ({ value: e.id, label: e.name }))} className="min-w-[220px] flex-1" />
           <div className="min-w-[140px]">

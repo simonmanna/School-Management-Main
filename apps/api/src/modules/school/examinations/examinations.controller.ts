@@ -28,6 +28,7 @@ import {
   UpdateExamTypeDto,
   UpdateGradingScaleDto,
   UpdateReportCardCommentDto,
+  UpdateReportCardCommentsDto,
   GenerateClassReportCardsDto,
 } from './dto.types';
 import { InvigilatorService } from './invigilator.service';
@@ -318,11 +319,34 @@ export class ReportCardController {
     return this.service.unpublish(id);
   }
 
-  /** P0-A: persist teacher/principal comments + competency levels for a card. */
+  // Comments: the route admits `school:read`; which comment the caller may
+  // write (class teacher's — own class only for a class-scoped role — or head
+  // teacher's) is decided per pupil in ReportCardService.assertMayComment.
+
+  /** One pupil's class/head teacher comments (and competency levels). */
   @Post('comment')
-  @RequirePermissions(PERMISSIONS.school.manageExams)
+  @RequirePermissions(PERMISSIONS.school.read)
   updateComment(@Body() dto: UpdateReportCardCommentDto) {
     return this.service.updateComment(dto);
+  }
+
+  /** The comment grid for a class (or stream) and term. */
+  @Get('comments')
+  @ScopedToClass('classId')
+  @RequirePermissions(PERMISSIONS.school.read)
+  commentSheet(
+    @Query('classId') classId: string,
+    @Query('termId') termId: string,
+    @Query('sectionId') sectionId?: string,
+  ) {
+    return this.service.commentSheet({ classId, termId, sectionId: sectionId || undefined });
+  }
+
+  /** Save many pupils' comments at once; each row is checked on its own. */
+  @Post('comments')
+  @RequirePermissions(PERMISSIONS.school.read)
+  updateComments(@Body() dto: UpdateReportCardCommentsDto) {
+    return this.service.updateComments(dto);
   }
 
   @Get('by-student/:studentProfileId')

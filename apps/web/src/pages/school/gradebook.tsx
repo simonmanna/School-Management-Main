@@ -101,7 +101,7 @@ export function SchoolGradebookPage() {
           <Picker label="Year" value={yearId} onChange={(v) => { setYearId(v); setTermId(''); }}
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} className="min-w-[120px]" />
           <Picker label="Term" value={termId} onChange={setTermId}
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} className="min-w-[120px]" />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} className="min-w-[120px]" />
           <Picker label="Class" value={classId} onChange={(v) => { setClassId(v); setSubjectId(''); setStreamId(''); }}
             options={classOptions.map((c) => ({ value: c.id, label: c.name }))} className="min-w-[130px]" />
           <Picker label="Subject" value={subjectId} onChange={setSubjectId}

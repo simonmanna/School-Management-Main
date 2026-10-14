@@ -80,7 +80,7 @@ export function SchoolExamWorkspacePage() {
             label="Term"
             value={termId}
             onChange={setTermId}
-            options={termList.map((t) => ({ value: t.id, label: t.name + (t.isCurrent ? ' (current)' : '') }))}
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) + (t.isCurrent ? ' (current)' : '') }))}
             className="min-w-[180px]"
           />
         </CardContent>
@@ -281,7 +281,7 @@ function NewExamDialog({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">Term</label>
             <select className={selectClass} value={effectiveTerm} onChange={(e) => setTerm(e.target.value)}>
               <option value="">Select a term…</option>
-              {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
             </select>
           </div>
 

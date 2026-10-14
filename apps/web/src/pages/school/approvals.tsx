@@ -87,7 +87,7 @@ export function SchoolApprovalsPage() {
           <Picker label="Year" value={yearId} onChange={setYearId}
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} />
           <Picker label="Term" value={termId} onChange={setTermId}
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} />
           <Picker label="Class" value={classId} onChange={setClassId} placeholder="All classes"
             options={(classes?.data ?? []).map((c) => ({ value: c.id, label: c.name }))} />
         </CardContent>

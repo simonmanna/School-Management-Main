@@ -76,7 +76,7 @@ export function SchoolFeeSchedulesPage() {
                 <option value="">Term…</option>
                 {(terms?.data ?? []).map((t: any) => (
                   <option key={t.id} value={t.id}>
-                    {t.name}
+                    {t.label ?? t.name}
                     {t.isCurrent ? ' (current)' : ''}
                   </option>
                 ))}

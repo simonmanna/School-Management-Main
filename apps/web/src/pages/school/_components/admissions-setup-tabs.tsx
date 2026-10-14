@@ -332,7 +332,7 @@ export function IntakeTab() {
     <>
       <select className={sel} value={v.termId} onChange={(e) => set({ termId: e.target.value })}>
         <option value="">Term</option>
-        {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
       </select>
       <select className={sel} value={v.classId} onChange={(e) => set({ classId: e.target.value, sectionId: '' })}>
         <option value="">Class</option>

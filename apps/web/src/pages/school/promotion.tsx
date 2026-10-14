@@ -269,7 +269,7 @@ export function SchoolPromotionPage() {
             <SelectTrigger className="w-40"><SelectValue placeholder="Select term" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">All terms</SelectItem>
-              {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.label ?? t.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -414,7 +414,7 @@ export function SchoolPromotionPage() {
               <SelectTrigger className="w-44"><SelectValue placeholder="Closing term" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">Select…</SelectItem>
-                {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.label ?? t.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -425,7 +425,7 @@ export function SchoolPromotionPage() {
               <SelectTrigger className="w-44"><SelectValue placeholder="Opening term" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">Select…</SelectItem>
-                {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                {(terms?.data ?? []).map((t) => <SelectItem key={t.id} value={t.id}>{t.label ?? t.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

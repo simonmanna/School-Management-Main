@@ -337,7 +337,7 @@ export function SchoolStudentImportPage() {
                 onChange={(e) => setTermId(e.target.value)}
               >
                 <option value="">Current term</option>
-                {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
+                {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
               </select>
               <span className="text-xs text-muted-foreground">Used only for rows with a class.</span>
             </div>

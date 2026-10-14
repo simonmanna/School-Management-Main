@@ -95,7 +95,7 @@ function RecordTab() {
         <div className="space-y-1">
           <label className="text-xs">Term</label>
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}>
-            <option value="">Select…</option>{(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <option value="">Select…</option>{(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
           </select>
         </div>
       </div>

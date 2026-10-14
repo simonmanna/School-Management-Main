@@ -23,49 +23,21 @@
  * printing a position for a four-year-old would be wrong, not merely unusual.
  */
 import { PrismaClient, Prisma } from '@prisma/client';
-import { defaultBands } from '../../src/modules/school/assessment/grade-bands';
-import { D, createManyChunked, log, ok, programmeCodeFor, rng, type School } from './shared';
+import { resolveScale } from '../../src/modules/school/assessment/grade-bands';
+import {
+  computeResultSet,
+  isDescriptorSystem,
+  type ResultInput,
+  type StudentInput,
+  type SubjectInput,
+} from '../../src/modules/school/assessment/result-computation';
+import { reportingPolicy } from '../../src/modules/school/assessment/reporting-policy';
+import { createManyChunked, log, ok, programmeCodeFor, rng, type School } from './shared';
 import { coreSubjectsFor, type Reference } from './01-reference';
 import type { People } from './02-people';
 import type { Enrollment } from './03-enrollment';
 import type { Teaching } from './04-teaching';
 import type { Assessment } from './05-assessment';
-
-/** The band a percentage falls in, for a given system. */
-function bandFor(system: string, percent: number) {
-  const bands = defaultBands(system);
-  // Bands are ordered high to low and cover [min, next.min).
-  return bands.find((b) => percent >= b.min) ?? bands[bands.length - 1];
-}
-
-/**
- * The PLE division from four subject grades.
- *
- * Uganda aggregates the four examinable subjects' grade points (1–9) and reads
- * a division off the total: 4–12 is Division 1, 13–23 Division 2, 24–29
- * Division 3, 30–34 Division 4, and above that is Ungraded. Worth getting right
- * — a P7 parent reads the division before anything else on the page.
- */
-function pleDivision(aggregate: number): string {
-  if (aggregate <= 12) return 'Division 1';
-  if (aggregate <= 23) return 'Division 2';
-  if (aggregate <= 29) return 'Division 3';
-  if (aggregate <= 34) return 'Division 4';
-  return 'Ungraded';
-}
-
-/** PLE grade points: D1=1 … F9=9, from a percentage. */
-function plePoints(percent: number): number {
-  if (percent >= 85) return 1;
-  if (percent >= 80) return 2;
-  if (percent >= 70) return 3;
-  if (percent >= 65) return 4;
-  if (percent >= 60) return 5;
-  if (percent >= 55) return 6;
-  if (percent >= 50) return 7;
-  if (percent >= 40) return 8;
-  return 9;
-}
 
 export async function seedResults(
   prisma: PrismaClient,
@@ -78,6 +50,14 @@ export async function seedResults(
 ) {
   const { O } = s;
   const head = people.leadership.find((l) => l.role === 'Head Teacher');
+  // `resolveScale` reads through a tenant client; the seed's client is not
+  // scoped, so scope it to this school.
+  const orgScales = {
+    gradingScale: {
+      findMany: (args: { where?: Record<string, unknown> }) =>
+        prisma.gradingScale.findMany({ ...args, where: { ...(args?.where ?? {}), organizationId: O } }),
+    },
+  };
 
   const gradeCodes = [...new Set(people.pupils.map((p) => p.gradeCode))];
 
@@ -155,11 +135,6 @@ export async function seedResults(
       const gradeLevel = s.grades.get(gradeCode);
       if (!cls || !gradeLevel) continue;
 
-      const programme = programmeCodeFor(gradeCode);
-      const system = programme === 'ECD' ? 'ECD' : 'PLE';
-      const descriptor = system === 'ECD';
-      const isP7 = gradeCode === 'P7';
-
       // A historical set belongs to the class those pupils were in LAST year,
       // so it is built from the 2025 enrolment rows for THIS grade.
       const members = run.historical
@@ -177,7 +152,91 @@ export async function seedResults(
       if (existingRun) continue; // already seeded
 
       const rosterId = assessment.rosters.get(`${term.name}:${gradeCode}`) ?? null;
-      const scale = defaultBands(system);
+
+      // The SAME rules the product applies (review A6 / Phase 0.8): the
+      // programme's grading profile through `reportingPolicy`, the school's own
+      // scale through `resolveScale`, and the numbers from the real result
+      // kernel. The demo used to write its own grades, points and divisions,
+      // which printed "80% C3 … Distinction" and P7-only divisions.
+      const programmeCode = programmeCodeFor(gradeCode);
+      const programmeRow = await prisma.academicProgramme.findFirst({
+        where: { organizationId: O, code: programmeCode },
+        select: { stage: true, config: true },
+      });
+      const policy = reportingPolicy(programmeRow, 'PLE');
+      const system = policy.gradingSystem;
+      const descriptor = isDescriptorSystem(system);
+      const aggregateSubjectIds =
+        system === 'PLE'
+          ? [...new Set([
+              ...policy.aggregateSubjectIds,
+              ...policy.aggregateSubjectCodes.map((c) => ref.subjects.get(c)).filter((x): x is string => !!x),
+            ])].sort()
+          : undefined;
+      const scale = await resolveScale(orgScales, system);
+      const weighting = ref.policies.get(programmeCode === 'ECD' ? 'ECD' : programmeCode === 'LOWER_PRIMARY' ? 'LOWER' : 'UPPER')!;
+      const caWeight = weighting.examId ? 40 : 100;
+      const components = [
+        { id: weighting.caId, kind: 'cat', weight: caWeight, aggregation: 'mean' as const },
+        ...(weighting.examId ? [{ id: weighting.examId, kind: 'exam', weight: 100 - caWeight, aggregation: 'mean' as const }] : []),
+      ];
+
+      const sectionOf = new Map(members.map((p) => [p.id, s.sections.get(`${p.gradeCode}:${p.streamCode}`)!.id]));
+      const students: StudentInput[] = [];
+      for (const pupil of members) {
+        const subjects: SubjectInput[] = [];
+        for (const subjectCode of core) {
+          const subjectId = ref.subjects.get(subjectCode);
+          if (!subjectId) continue;
+          let caPercent: number | undefined;
+          let examPercent: number | undefined;
+          if (run.historical) {
+            // No assessment detail last year, so the mark is derived from the
+            // pupil's stable aptitude — through the SAME mapping
+            // `05-assessment` uses, less a few points because they were a year
+            // younger.
+            const r = rng(`hist:${pupil.admissionNo}:${subjectCode}`);
+            const apt = assessment.subjectAptitude(pupil.admissionNo, subjectCode);
+            const fraction = 0.35 + apt * 0.6 + (r() - 0.5) * 0.08;
+            caPercent = Math.round(Math.max(20, Math.min(98, fraction * 100 - 3)));
+            examPercent = caPercent;
+          } else {
+            caPercent = markIndex.get(`${term.id}|${pupil.id}|${subjectCode}|ca`);
+            examPercent = markIndex.get(`${term.id}|${pupil.id}|${subjectCode}|exam`);
+            if (caPercent === undefined && examPercent === undefined) continue; // nothing approved
+          }
+          const datum = (componentId: string, kind: string, pct: number | undefined) =>
+            pct === undefined
+              ? []
+              : [{ componentId, kind, effectiveScore: pct.toFixed(3), maxScore: '100', participation: 'present' }];
+          subjects.push({
+            subjectId,
+            isCompulsory: true,
+            passMark: descriptor ? 0 : 50,
+            components,
+            assessments: [
+              ...datum(weighting.caId, 'cat', caPercent),
+              ...(weighting.examId ? datum(weighting.examId, 'exam', examPercent) : []),
+            ],
+          });
+        }
+        if (subjects.length) {
+          students.push({ studentProfileId: pupil.id, classId: cls.id, sectionId: sectionOf.get(pupil.id), gradeLevelId: gradeLevel.id, termId: term.id, subjects });
+        }
+      }
+      if (students.length === 0) continue;
+
+      const input: ResultInput = {
+        gradingSystem: system as ResultInput['gradingSystem'],
+        bands: scale.bands,
+        bandRounding: scale.rounding,
+        roundingMode: 'half_up',
+        decimalPlaces: 2,
+        rankOn: policy.rankOn,
+        aggregateSubjectIds,
+        students,
+      };
+      const output = computeResultSet(input);
 
       const processing = await prisma.resultProcessingRun.create({
         data: {
@@ -207,13 +266,11 @@ export async function seedResults(
           status: 'published',
           calculationVersion: 'v1',
           gradingSystem: system,
-          policySnapshot: descriptor
-            ? { reporting: 'descriptor', ranksLearners: false }
-            : { passMark: 50, weights: { ca: 40, exam: 60 } },
-          gradingScaleSnapshot: scale as unknown as Prisma.InputJsonValue,
-          rankingPolicySnapshot: descriptor ? { ranksLearners: false } : { rankOn: 'meanPercent' },
-          aggregationSnapshot: { ca: 'mean', exam: 'mean' },
-          studentCount: members.length,
+          policySnapshot: { components, passMark: descriptor ? 0 : 50 } as unknown as Prisma.InputJsonValue,
+          gradingScaleSnapshot: { bands: scale.bands, bandRounding: scale.rounding, scaleId: scale.scaleId } as unknown as Prisma.InputJsonValue,
+          rankingPolicySnapshot: { rankOn: input.rankOn, aggregateSubjectIds: aggregateSubjectIds ?? null } as unknown as Prisma.InputJsonValue,
+          aggregationSnapshot: { cat: 'mean', exam: 'mean' },
+          studentCount: output.students.length,
           publishedAt: term.endDate,
           publishedById: head?.partnerId ?? null,
         },
@@ -221,139 +278,61 @@ export async function seedResults(
       resultSets += 1;
 
       const subjectRows: Array<Record<string, unknown>> = [];
-      const termRows: Array<{
-        pupilId: string;
-        mean: number;
-        aggregate: number;
-        subjectsPassed: number;
-        sectionId: string;
-      }> = [];
-
-      for (const pupil of members) {
-        let total = 0;
-        let counted = 0;
-        let aggregate = 0;
-        let passed = 0;
-        const sectionId = s.sections.get(`${pupil.gradeCode}:${pupil.streamCode}`)!.id;
-
-        for (const subjectCode of core) {
-          const subjectId = ref.subjects.get(subjectCode);
-          if (!subjectId) continue;
-
-          let caPercent: number;
-          let examPercent: number;
-
-          if (run.historical) {
-            // No assessment detail last year, so the mark is derived from the
-            // pupil's stable aptitude — through the SAME mapping
-            // `05-assessment` uses, less a few points because they were a year
-            // younger. Deriving it differently gave last year a long tail of
-            // 12% means that this year never produces, which reads as a data
-            // error rather than as history.
-            const r = rng(`hist:${pupil.admissionNo}:${subjectCode}`);
-            const apt = assessment.subjectAptitude(pupil.admissionNo, subjectCode);
-            const fraction = 0.35 + apt * 0.6 + (r() - 0.5) * 0.08;
-            const pct = Math.round(Math.max(20, Math.min(98, fraction * 100 - 3)));
-            caPercent = pct;
-            examPercent = pct;
-          } else {
-            caPercent = markIndex.get(`${term.id}|${pupil.id}|${subjectCode}|ca`) ?? 0;
-            examPercent = markIndex.get(`${term.id}|${pupil.id}|${subjectCode}|exam`) ?? 0;
-            if (caPercent === 0 && examPercent === 0) continue; // nothing approved
-          }
-
-          // Nursery is observation-only, so the single record is the result.
-          const finalPercent = descriptor
-            ? caPercent
-            : Math.round((caPercent * 0.4 + examPercent * 0.6) * 100) / 100;
-          const band = bandFor(system, finalPercent);
-          const points = descriptor ? null : plePoints(finalPercent);
-          if (points !== null) aggregate += points;
-          if (!descriptor && finalPercent >= 50) passed += 1;
-
+      const termRows: Array<Record<string, unknown>> = [];
+      for (const st of output.students) {
+        const position = { classId: cls.id, sectionId: sectionOf.get(st.studentProfileId) ?? null, gradeLevelId: gradeLevel.id, termId: term.id };
+        for (const sub of st.subjects) {
           subjectRows.push({
             organizationId: O,
             resultSetId: resultSet.id,
-            studentProfileId: pupil.id,
-            subjectId,
-            classId: cls.id,
-            sectionId,
-            gradeLevelId: gradeLevel.id,
-            termId: term.id,
-            caScore: D(caPercent.toFixed(3)),
-            examScore: descriptor ? null : D(examPercent.toFixed(3)),
-            finalPercent: D(finalPercent.toFixed(3)),
-            grade: band.grade,
-            gradePoint: descriptor ? null : D(band.gpa ?? 0),
-            points: points === null ? null : points,
-            componentBreakdown: descriptor
-              ? [{ observation: caPercent }]
-              : [{ ca: caPercent, exam: examPercent, weights: { ca: 40, exam: 60 } }],
+            studentProfileId: st.studentProfileId,
+            subjectId: sub.subjectId,
+            ...position,
+            caScore: sub.caScore ?? null,
+            examScore: sub.examScore ?? null,
+            finalPercent: sub.finalPercent ?? null,
+            grade: sub.grade,
+            gradePoint: sub.gradePoint ?? null,
+            points: sub.points ?? null,
+            subjectRank: sub.subjectRank ?? null,
+            componentBreakdown: sub.componentBreakdown as unknown as Prisma.InputJsonValue,
           });
-          total += finalPercent;
-          counted += 1;
         }
-
-        if (counted === 0) continue;
         termRows.push({
-          pupilId: pupil.id,
-          mean: Math.round((total / counted) * 100) / 100,
-          aggregate,
-          subjectsPassed: passed,
-          sectionId,
-        });
-      }
-
-      subjectResults += subjectRows.length;
-      await createManyChunked(prisma.studentSubjectResult as never, subjectRows as never[], 1000);
-
-      // Positions, once every mean is known. Nursery is not ranked.
-      const ranked = [...termRows].sort((a, b) => b.mean - a.mean);
-      const rankOf = new Map(ranked.map((row, i) => [row.pupilId, i + 1]));
-
-      await createManyChunked(
-        prisma.studentTermResult as never,
-        termRows.map((row) => ({
           organizationId: O,
           resultSetId: resultSet.id,
-          studentProfileId: row.pupilId,
-          classId: cls.id,
-          sectionId: row.sectionId,
-          gradeLevelId: gradeLevel.id,
-          termId: term.id,
-          meanPercent: D(row.mean.toFixed(3)),
-          gpa: descriptor ? null : D((row.mean / 25).toFixed(2)),
-          aggregate: descriptor ? null : row.aggregate,
-          division: descriptor ? null : isP7 ? pleDivision(row.aggregate) : null,
-          subjectsCount: core.length,
-          eligible: descriptor ? true : row.subjectsPassed >= Math.ceil(core.length / 2),
-          promotionRecommendation: descriptor
-            ? 'promote'
-            : row.subjectsPassed >= Math.ceil(core.length / 2)
-              ? 'promote'
-              : row.mean >= 35
-                ? 'review'
-                : 'repeat',
-          // Descriptor systems report no position.
-          classRank: descriptor ? null : (rankOf.get(row.pupilId) ?? null),
-        })) as never[],
-        1000,
-      );
+          studentProfileId: st.studentProfileId,
+          ...position,
+          gpa: st.term.gpa ?? null,
+          aggregate: st.term.aggregate ?? null,
+          division: st.term.division ?? null,
+          meanPercent: st.term.meanPercent ?? null,
+          classRank: st.term.classRank ?? null,
+          subjectsCount: st.term.subjectsCount,
+          eligible: st.term.eligible,
+          promotionRecommendation: st.term.promotionRecommendation,
+        });
+      }
+      subjectResults += subjectRows.length;
+      await createManyChunked(prisma.studentSubjectResult as never, subjectRows as never[], 1000);
+      await createManyChunked(prisma.studentTermResult as never, termRows as never[], 1000);
 
       // ── Report cards ────────────────────────────────────────────────────
-      // Only for the terms a parent would actually have received one for.
-      const cardRows = termRows.map((row) => {
-        const pupil = people.pupils.find((p) => p.id === row.pupilId)!;
-        const rank = rankOf.get(row.pupilId) ?? null;
-        const band = bandFor(system, row.mean);
+      // Only for the terms a parent would actually have received one for. The
+      // card prints from the stored result above; the payload carries the same
+      // headline for the portal, never a figure of its own.
+      const ranked = output.students.filter((x) => x.term.classRank != null).length;
+      const cardRows = output.students.map((st) => {
+        const pupil = people.pupils.find((p) => p.id === st.studentProfileId)!;
+        const mean = st.term.meanPercent != null ? Number(st.term.meanPercent) : 0;
         return {
           organizationId: O,
-          studentProfileId: row.pupilId,
+          studentProfileId: st.studentProfileId,
           termId: term.id,
           generatedAt: term.endDate,
           publishedAt: term.endDate,
-          classTeacherComment: commentFor(row.mean, descriptor, `${pupil.admissionNo}:ct:${term.id}`),
-          principalComment: commentFor(row.mean, descriptor, `${pupil.admissionNo}:hm:${term.id}`),
+          classTeacherComment: commentFor(mean, descriptor, `${pupil.admissionNo}:ct:${term.id}`),
+          principalComment: headComment(mean, descriptor, st.term.division, `${pupil.admissionNo}:hm:${term.id}`),
           payload: {
             student: pupil.name,
             admissionNo: pupil.admissionNo,
@@ -361,14 +340,13 @@ export async function seedResults(
             class: cls.name,
             term: `${term.name}`,
             gradingSystem: system,
-            reporting: descriptor ? 'descriptor' : 'marks',
-            meanPercent: descriptor ? null : row.mean,
-            descriptor: descriptor ? band.grade : null,
-            aggregate: descriptor ? null : row.aggregate,
-            division: descriptor || !isP7 ? null : pleDivision(row.aggregate),
-            position: descriptor ? null : rank,
-            outOf: descriptor ? null : termRows.length,
-            subjects: core.length,
+            descriptorOnly: descriptor,
+            meanPercent: descriptor ? null : mean,
+            aggregate: st.term.aggregate,
+            division: st.term.division,
+            position: st.term.classRank,
+            outOf: st.term.classRank != null ? ranked : null,
+            subjects: st.subjects.length,
           } as Prisma.InputJsonValue,
         };
       });
@@ -429,3 +407,21 @@ function commentFor(mean: number, descriptor: boolean, key: string): string {
 }
 
 export type Results = Awaited<ReturnType<typeof seedResults>>;
+
+/**
+ * The head teacher's comment: shorter than the class teacher's, and read off
+ * the division where the class has one (P4–P7), else the mean.
+ */
+function headComment(mean: number, descriptor: boolean, division: string | null, key: string): string {
+  const r = rng(`head:${key}`);
+  const pools = descriptor
+    ? ['A lovely term. Thank you for your support at home.', 'Good progress. We look forward to next term.']
+    : division === 'I' || (!division && mean >= 80)
+      ? ['Excellent results. Congratulations.', 'Outstanding. Keep shining.']
+      : division === 'II' || (!division && mean >= 65)
+        ? ['Good results. Keep improving.', 'A good term. Aim for the top.']
+        : division === 'III' || (!division && mean >= 50)
+          ? ['Fair results. Work harder next term.', 'There is room to improve. More effort, please.']
+          : ['Must improve. Parents, please follow up closely.', 'Below expectation. The school will support — please work with us.'];
+  return pools[Math.floor(r() * pools.length) % pools.length];
+}

@@ -25,6 +25,8 @@ import { MarkerDirectoryService } from './marker-directory.service';
 import { ReportDocumentService } from './report-document.service';
 import { ExamOperationsController } from './exam-operations.controller';
 import { ReportDocumentController } from './report-document.controller';
+import { TermBoardController } from './term-board.controller';
+import { TermBoardService } from './term-board.service';
 import {
   ExamController,
   ExamScheduleController,
@@ -40,9 +42,12 @@ import {
 import { ExamRegistrationController, ExamVenueController } from './exam-ops.controller';
 import { MarksWorkspaceController } from './marks-workspace.controller';
 import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
+import { FeesModule } from '../fees/fees.module';
 
 @Module({
-  imports: [PlacementLookupModule, AssessmentModule],
+  // FeesModule: the report card's optional fee-balance line reads the ONE
+  // canonical balance (SchoolFinanceQueryService), never a figure of its own.
+  imports: [PlacementLookupModule, AssessmentModule, FeesModule],
   controllers: [
     ExamTypeController,
     ExamController,
@@ -59,8 +64,10 @@ import { PlacementLookupModule } from '../enrollment/placement-lookup.module';
     MarksWorkspaceController,
     ExamOperationsController,
     ReportDocumentController,
+    TermBoardController,
   ],
   providers: [
+    TermBoardService,
     ExamTypeService,
     ExamService,
     ExamScheduleService,

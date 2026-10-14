@@ -10847,8 +10847,9 @@ model SchoolProfile {
   currencyCode                   String              @default("UGX")
   /// School system: 'primary' | 'secondary' | 'mixed' | 'tertiary'.
   educationLevel                 String              @default("mixed")
-  /// Grading scale template key (e.g. 'UCE', 'UACE', 'P7PLE', 'CBC', 'custom').
-  gradingSystem                  String              @default("UCE")
+  /// School-wide fallback grading system ('PLE' | 'UCE' | 'UACE' | 'ECD' | 'generic'). Each programme's
+  /// reporting config overrides it; primary schools default to PLE, never UCE.
+  gradingSystem                  String              @default("PLE")
   /// P5: 'daily' (one register per class per day) or 'period' (per class period,
   /// for subject-teacher secondary schools). Attendance marking honours this.
   attendanceMode                 String              @default("daily")

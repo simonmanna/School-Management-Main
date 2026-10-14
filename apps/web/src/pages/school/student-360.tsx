@@ -730,7 +730,7 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
           <Select value={termId} onValueChange={setTermId}>
             <SelectTrigger className="w-44"><SelectValue placeholder="Select term" /></SelectTrigger>
             <SelectContent>
-              {termList.map((t: any) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              {termList.map((t: any) => <SelectItem key={t.id} value={t.id}>{t.label ?? t.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </CardHeader>
@@ -1178,7 +1178,7 @@ function PlacementDialog({
               <SelectTrigger><SelectValue placeholder="Choose a term" /></SelectTrigger>
               <SelectContent>
                 {terms.map((t: any) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</SelectItem>
+                  <SelectItem key={t.id} value={t.id}>{t.label ?? t.name}{t.isCurrent ? ' (current)' : ''}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

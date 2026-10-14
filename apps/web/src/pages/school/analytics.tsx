@@ -50,7 +50,7 @@ export function SchoolAnalyticsPage() {
         <label className={lbl}>
           <span className={lblText}>Term</span>
           <select className={sel} value={termId} onChange={(e) => { setTermId(e.target.value); setRosterId(''); setResultSetId(''); setExamId(''); }}>
-            <option value="">Select term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <option value="">Select term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
           </select>
         </label>
         <label className={lbl}>

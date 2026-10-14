@@ -280,7 +280,7 @@ export function SchoolStudentAdmitPage({ mode }: { mode: Mode }) {
                 <Select
                   value={form.termId ?? ''}
                   onChange={(v) => set('termId', v)}
-                  options={[['', isRegister ? 'Choose term' : 'Current term'], ...(terms?.data ?? []).map((t) => [t.id, t.isCurrent ? `${t.name} (current)` : t.name] as [string, string])]}
+                  options={[['', isRegister ? 'Choose term' : 'Current term'], ...(terms?.data ?? []).map((t) => [t.id, t.isCurrent ? `${t.label ?? t.name} (current)` : (t.label ?? t.name)] as [string, string])]}
                 />
               </Field>
               <Field label="Class" required>

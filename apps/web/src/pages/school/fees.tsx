@@ -110,7 +110,7 @@ function BillingTab() {
           <Label className="text-xs">Term</Label>
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}>
             <option value="">Select term…</option>
-            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
+            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}{t.isCurrent ? ' (current)' : ''}</option>)}
           </select>
         </div>
         <div className="space-y-1">

@@ -106,6 +106,14 @@ export interface ResultInput {
   roundingMode: RoundingModeName;
   decimalPlaces: number;
   rankOn: RankOn;
+  /**
+   * PLE only: the subjects whose points make the aggregate, named by the
+   * programme (four, e.g. English, Mathematics, Science, Social Studies for
+   * P4–P7). An empty list means this cohort has no aggregate and no division —
+   * lower primary by default. Omitted = the legacy `SubjectInput.isCore` pool,
+   * kept only for the golden suite; the result run always passes a list.
+   */
+  aggregateSubjectIds?: string[];
   students: StudentInput[];
 }
 
@@ -491,7 +499,20 @@ export function computeTerm(subjectResults: SubjectResult[], subjects: SubjectIn
     return { subjectId: r.subjectId, points: r.points, isCompulsory: meta?.isCompulsory, isPrincipal: meta?.isPrincipal, isCore: meta?.isCore };
   });
 
-  if (input.gradingSystem === 'PLE') {
+  if (input.gradingSystem === 'PLE' && input.aggregateSubjectIds?.length === 0) {
+    // No aggregate configured for this programme: marks, grades and (if the
+    // school ranks) a position — never an "Ungraded" division.
+  } else if (input.gradingSystem === 'PLE' && input.aggregateSubjectIds) {
+    const wanted = new Set(input.aggregateSubjectIds);
+    const pool = pointsBySubject.map((p) => ({ ...p, isCore: wanted.has(p.subjectId) }));
+    const sat = pool.filter((p) => p.isCore && p.points != null).length;
+    const agg = computePLEAggregate(pool);
+    // Every named subject must have a result; a missing paper is no aggregate,
+    // not a flatteringly small one.
+    eligible = sat === wanted.size;
+    aggregate = eligible ? agg.best4Aggregate : null;
+    division = divisionPLE(agg.best4Aggregate, eligible);
+  } else if (input.gradingSystem === 'PLE') {
     const agg = computePLEAggregate(pointsBySubject);
     aggregate = agg.best4Aggregate;
     eligible = agg.eligible;

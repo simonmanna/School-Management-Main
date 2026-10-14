@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, GraduationCap, Layers, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Eye, GraduationCap, Layers, Loader2, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { notify } from '@/lib/notify';
-import { useAcademicYears, useTerminology } from '@/features/school/api';
+import { useAcademicYears, useSubjects, useTerminology } from '@/features/school/api';
+import { ProgrammeReportingDialog, reportingSummary } from './programme-reporting';
 import {
   errorMessage,
   STAGE_LABEL,
@@ -91,6 +92,9 @@ function ProgrammesTab() {
   const [viewing, setViewing] = useState<Programme | null>(null);
   const [deleting, setDeleting] = useState<Programme | null>(null);
   const [creating, setCreating] = useState(false);
+  const [grading, setGrading] = useState<Programme | null>(null);
+  const { data: subjects } = useSubjects();
+  const subjectCode = (id: string) => (subjects?.data ?? []).find((s: any) => s.id === id)?.code ?? '?';
 
   const confirmDelete = async () => {
     if (!deleting) return;
@@ -134,6 +138,7 @@ function ProgrammesTab() {
         </Button>
       </div>
       <CreateProgrammeDialog open={creating} onOpenChange={setCreating} />
+      <ProgrammeReportingDialog programme={grading} onOpenChange={(open) => !open && setGrading(null)} />
 
       {unlinked.length > 0 && (
         <p className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
@@ -151,6 +156,7 @@ function ProgrammesTab() {
                 <TableHead>Stage</TableHead>
                 <TableHead>Authority</TableHead>
                 <TableHead>Grades</TableHead>
+                <TableHead>Graded as</TableHead>
                 <TableHead>In use</TableHead>
                 <TableHead className="w-[1%] text-right">Actions</TableHead>
               </TableRow>
@@ -158,12 +164,12 @@ function ProgrammesTab() {
             <TableBody>
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
+                  <TableCell colSpan={7} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
                 </TableRow>
               )}
               {!isLoading && (programmes ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                     No programmes yet.
                   </TableCell>
                 </TableRow>
@@ -181,11 +187,15 @@ function ProgrammesTab() {
                       ? gradesOf(p).join(', ')
                       : <span className="text-muted-foreground">Not linked</span>}
                   </TableCell>
+                  <TableCell className="text-sm">{reportingSummary(p, subjectCode)}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {p._count ? `${p._count.cohorts} classes · ${p._count.enrollments} learners` : '—'}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setGrading(p)}>
+                        <SlidersHorizontal className="mr-1 h-4 w-4" /> Grading
+                      </Button>
                       <Button size="sm" variant="ghost" onClick={() => setViewing(p)}>
                         <Eye className="mr-1 h-4 w-4" /> View
                       </Button>

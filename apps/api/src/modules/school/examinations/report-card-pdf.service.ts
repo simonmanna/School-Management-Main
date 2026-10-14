@@ -3,12 +3,14 @@ import { bucketOf } from '../attendance/attendance-rate';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
-import { ReportCardTemplateService } from './report-card-template.service';
+import { ReportCardTemplateService, bandsOfSnapshot } from './report-card-template.service';
 import { ReportCardSettingsService } from './report-card-settings.service';
 import { GradingService, type GradeBand } from './grading.service';
 import { ResultRunService } from '../assessment/result-run.service';
 import type { ColumnItem } from './report-card-settings.schema';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { isDescriptorSystem } from '../assessment/result-computation';
+import { SchoolFinanceQueryService } from '../fees/school-finance-query.service';
 
 /**
  * ReportCardPdfService — renders a student's report card to PDF.
@@ -51,6 +53,12 @@ interface RenderModel {
     footer?: string[];
   };
   stats: { gpa?: number; rank?: number; classSize?: number; meanPercent?: number; division?: string | null; aggregate?: string | null };
+  /** Descriptor (nursery) card: no marks, points, position, aggregate or division. */
+  descriptor: boolean;
+  /** First day of the following term, when the school has entered it. */
+  nextTermStart: Date | null;
+  /** Outstanding fee balance, only when the school's card design asks for it. */
+  feesBalance: number | null;
   comments: { classTeacher?: string | null; headTeacher?: string | null; competency?: string | null };
   attendance: { present: number; absent: number; late: number; total: number };
   gradeBands: GradeBand[];
@@ -68,6 +76,7 @@ export class ReportCardPdfService {
     private readonly grading: GradingService,
     private readonly results: ResultRunService,
     private readonly placements: PlacementLookupService,
+    private readonly finance: SchoolFinanceQueryService,
   ) {}
 
   async generatePdf(reportCardId: string): Promise<Buffer> {
@@ -113,35 +122,42 @@ export class ReportCardPdfService {
       this.settingsService.get(),
     ]);
 
-    // Prefer the layout frozen into the payload; rebuild only for cards that
-    // predate the template upgrade.
-    //
-    // A rebuild MUST be handed the published result spine, exactly as
-    // `ReportCardService.generate` does. Calling `buildLayout` without it left
-    // `spineSubjects` empty, which sent every rebuilt card down the legacy
-    // GradeEntry path — so a re-rendered PDF could disagree with the card the
-    // parent was shown. Since B6, `buildLayout` reads ONLY the spine, so a
-    // rebuild with no published result falls through to the live-spine view
-    // rather than to GradeEntry.
+    // ONE source of truth: when the term has a released result, every figure
+    // on the card — grades, points, aggregate, division, position, class size,
+    // the grading key — comes from that stored result and the scale snapshotted
+    // with it. Recomputing any of it (from subject names, or from today's scale)
+    // once printed two different divisions on one card, and a nursery card on
+    // the P7 scale. A frozen payload is used only where nothing was released.
     const stored: any = card.payload ?? {};
-    const spine = stored?.sections
-      ? null
-      : await this.results.latestPublished(card.termId, card.studentProfileId).catch(() => null);
-    const layout = stored?.sections
-      ? {
-          system: stored.system ?? undefined,
-          columnHeaders: stored.columnHeaders ?? [],
-          sections: stored.sections ?? [],
-          summary: stored.summary ?? [],
-          eligible: stored.eligible,
-          footer: stored.footer,
-        }
-      : (await this.templates.buildLayout(card.studentProfileId, card.termId, spine)).layout;
+    const spine = await this.results.latestPublished(card.termId, card.studentProfileId).catch(() => null);
+    const system: string =
+      spine?.resultSet.gradingSystem ?? stored.gradingSystem ?? stored.system ?? school?.gradingSystem ?? 'PLE';
+    const layout = spine
+      ? (await this.templates.buildLayout(card.studentProfileId, card.termId, spine, system)).layout
+      : stored?.sections
+        ? {
+            system: stored.system ?? system,
+            columnHeaders: stored.columnHeaders ?? [],
+            sections: stored.sections ?? [],
+            summary: stored.summary ?? [],
+            eligible: stored.eligible,
+            footer: stored.footer,
+          }
+        : (await this.templates.buildLayout(card.studentProfileId, card.termId, null, system)).layout;
 
-    const [attendance, gradeBands] = await Promise.all([
+    const snapshotBands = spine ? bandsOfSnapshot(spine.resultSet.gradingScaleSnapshot) : [];
+    const [attendance, gradeBands, classSize, nextTermStart, feesBalance] = await Promise.all([
       this.loadAttendance(card.studentProfileId, term?.startDate, term?.endDate),
-      this.grading.bandsFor(school?.gradingSystem).catch(() => [] as GradeBand[]),
+      snapshotBands.length
+        ? Promise.resolve(snapshotBands)
+        : this.grading.bandsFor(system).catch(() => [] as GradeBand[]),
+      spine?.term.classRank != null
+        ? this.prisma.client.studentTermResult.count({ where: { resultSetId: spine.resultSet.id, classRank: { not: null } } })
+        : Promise.resolve(null),
+      this.nextTermStart(term),
+      settings?.showFeesBalance ? this.feesBalance(card.studentProfileId) : Promise.resolve(null),
     ]);
+    const descriptor = isDescriptorSystem(String(layout.system ?? system));
 
     return {
       settings: settings as Record<string, any>,
@@ -170,13 +186,26 @@ export class ReportCardPdfService {
         academicYear: (term as any)?.academicYear?.name ?? undefined,
       },
       layout,
-      stats: {
-        gpa: stored?.gpa ?? undefined,
-        rank: stored?.rank ?? undefined,
-        meanPercent: stored?.meanPercent ?? undefined,
-        division: stored?.division ?? null,
-        aggregate: this.aggregateFromSummary(layout.summary),
-      },
+      stats: spine
+        ? {
+            gpa: descriptor || spine.term.gpa == null ? undefined : Number(spine.term.gpa),
+            rank: spine.term.classRank ?? undefined,
+            classSize: classSize ?? undefined,
+            meanPercent: descriptor || spine.term.meanPercent == null ? undefined : Number(spine.term.meanPercent),
+            division: descriptor ? null : spine.term.division ?? null,
+            aggregate: descriptor || spine.term.aggregate == null ? null : String(spine.term.aggregate),
+          }
+        : {
+            // A card with no released result is a preview: marks and grades, no
+            // position, aggregate or division — those only exist on a release.
+            gpa: descriptor ? undefined : stored?.gpa ?? undefined,
+            meanPercent: descriptor ? undefined : stored?.meanPercent ?? undefined,
+            division: null,
+            aggregate: null,
+          },
+      descriptor,
+      nextTermStart,
+      feesBalance,
       comments: {
         classTeacher: card.classTeacherComment ? String(card.classTeacherComment) : null,
         headTeacher: card.principalComment ? String(card.principalComment) : null,
@@ -233,10 +262,28 @@ export class ReportCardPdfService {
     return entries.map(([id, level]) => `${byId.get(id) ?? id}: ${level}`).join('   •   ');
   }
 
-  /** UCE/UACE aggregates arrive as a summary row; surface it as a stat. */
-  private aggregateFromSummary(summary: Array<{ label: string; value: string }>): string | null {
-    const hit = (summary ?? []).find((s) => /aggregate/i.test(s.label));
-    return hit ? hit.value : null;
+  /** First day of the term after this one (any year), or null if not yet entered. */
+  private async nextTermStart(term: { endDate?: Date | null } | null): Promise<Date | null> {
+    if (!term?.endDate) return null;
+    const next = await this.prisma.client.term.findFirst({
+      where: { startDate: { gt: term.endDate }, deletedAt: null },
+      orderBy: { startDate: 'asc' },
+      select: { startDate: true },
+    });
+    return next?.startDate ?? null;
+  }
+
+  /**
+   * The canonical outstanding balance (decision: shown only when the school's
+   * card design enables it). The figure alone — no ledger detail reaches an
+   * academic document, and it never feeds a grade or a promotion.
+   */
+  private async feesBalance(studentProfileId: string): Promise<number | null> {
+    try {
+      return (await this.finance.studentBalance(studentProfileId)).balance;
+    } catch {
+      return null;
+    }
   }
 
   // ── Rendering ──────────────────────────────────────────────────────────
@@ -534,12 +581,29 @@ export class ReportCardPdfService {
       meanScore: m.stats.meanPercent != null ? `${Number(m.stats.meanPercent).toFixed(1)}%` : null,
       aggregate: m.stats.aggregate,
       division: m.stats.division,
-      feesBalance: null,
+      feesBalance: m.feesBalance != null ? fmtMoney(m.feesBalance) : null,
     };
     const blank = String(s.emptyCellPlaceholder || '—');
-    return items
+    // A figure the result did not produce is left OFF the card, not printed as
+    // "—": an unranked class has no position, lower primary has no division by
+    // default, a nursery card has none of them (decisions 1, 2, 6).
+    const omitWhenEmpty = new Set(['classRank', 'classSize', 'meanScore', 'aggregate', 'division', 'feesBalance']);
+    const descriptorHidden = new Set(['classRank', 'classSize', 'meanScore', 'aggregate', 'division']);
+    const shown = items
       .filter((i) => i.enabled)
-      .map((i) => ({ label: i.label, value: values[i.key] ? String(values[i.key]) : blank }));
+      .filter((i) => !(m.descriptor && descriptorHidden.has(i.key)))
+      .filter((i) => !(omitWhenEmpty.has(i.key) && !values[i.key]));
+    // "Position 3 out of 41" is how a Ugandan card states it; the separate
+    // class-size field is then redundant.
+    const combined = shown.some((i) => i.key === 'classRank') && !!values.classSize;
+    return shown
+      .filter((i) => !(combined && i.key === 'classSize'))
+      .map((i) => ({
+        label: i.label,
+        value: combined && i.key === 'classRank'
+          ? `${values.classRank} out of ${values.classSize}`
+          : values[i.key] ? String(values[i.key]) : blank,
+      }));
   }
 
   // ── Marks table ────────────────────────────────────────────────────────
@@ -617,7 +681,8 @@ export class ReportCardPdfService {
       doc.font(fonts.italic).fontSize(fs).fillColor(hex(s.labelColor, '#64748b'))
         .text('No subjects recorded for this term.', left, doc.y + 4, { width });
       doc.y += fs + 6;
-    } else if (s.showTotalsRow) {
+    } else if (s.showTotalsRow && !m.descriptor) {
+      // A nursery card has nothing to total.
       this.drawTotalsRow(c, cols, examTypes, rowH, fs);
     }
     doc.moveDown(0.4 * c.gap);
@@ -662,7 +727,11 @@ export class ReportCardPdfService {
   /** Enabled table columns, in order, with `scores` expanded per exam type. */
   private resolveTableColumns(c: Ctx, examTypes: string[]): TableCol[] {
     const { s, width } = c;
-    const items = itemsOf(s.tableColumns).filter((i) => i.enabled);
+    // A nursery card describes; it has no marks, totals, points or positions.
+    const descriptorHidden = new Set(['scores', 'outOf', 'total', 'percent', 'points', 'position']);
+    const items = itemsOf(s.tableColumns)
+      .filter((i) => i.enabled)
+      .filter((i) => !(c.m.descriptor && descriptorHidden.has(i.key)));
     type Spec = { key: string; label: string; align: 'left' | 'center' | 'right'; weight: number };
     const specs: Spec[] = [];
 
@@ -672,7 +741,7 @@ export class ReportCardPdfService {
         for (const t of examTypes) specs.push({ key: `score:${t}`, label: t, align: 'center', weight: 1 });
         if (examTypes.length === 0) specs.push({ key: 'score:none', label: item.label, align: 'center', weight: 1 });
       } else if (item.key === 'subject') {
-        specs.push({ key: 'subject', label: item.label, align: 'left', weight: num(s.subjectColumnWidth, 28) / 100 * -1 });
+        specs.push({ key: 'subject', label: c.m.descriptor && /^subject$/i.test(item.label) ? 'Learning area' : item.label, align: 'left', weight: num(s.subjectColumnWidth, 28) / 100 * -1 });
       } else if (item.key === 'remark') {
         specs.push({ key: 'remark', label: item.label, align: 'left', weight: num(s.remarkColumnWidth, 20) / 100 * -1 });
       } else if (item.key === 'serial') {
@@ -744,8 +813,13 @@ export class ReportCardPdfService {
     const { doc, s, fonts, m, left, width } = c;
     const stats: Array<{ label: string; value: string }> = [...(m.layout.summary ?? [])];
     if (m.stats.meanPercent != null) stats.unshift({ label: 'Mean Score', value: `${Number(m.stats.meanPercent).toFixed(1)}%` });
-    if (m.stats.gpa != null) stats.unshift({ label: 'GPA', value: Number(m.stats.gpa).toFixed(2) });
-    if (m.stats.rank != null) stats.unshift({ label: 'Position', value: String(m.stats.rank) });
+    // Primary (PLE-graded) and nursery cards carry no GPA — a Ugandan primary
+    // report states marks, grades, aggregate, division and position.
+    const gpaApplies = !['PLE', 'ECD'].includes(String(m.layout.system ?? ''));
+    if (gpaApplies && m.stats.gpa != null) stats.unshift({ label: 'GPA', value: Number(m.stats.gpa).toFixed(2) });
+    if (m.stats.rank != null) {
+      stats.unshift({ label: 'Position', value: m.stats.classSize ? `${m.stats.rank} out of ${m.stats.classSize}` : String(m.stats.rank) });
+    }
     if (stats.length === 0 && !m.layout.eligible) return;
 
     this.ensureSpace(c, 60);
@@ -924,7 +998,7 @@ export class ReportCardPdfService {
     doc.font(fonts.bold).fontSize(fs - 1).fillColor(hex(s.labelColor, '#64748b'))
       .text(cased('Outstanding Balance', s.headingCase), left + 4, y + 5, { width: tw(width * 0.5), lineBreak: false });
     doc.font(fonts.regular).fillColor(hex(s.valueColor, '#0f172a'))
-      .text('__________________', left + width * 0.5, y + 5, { width: tw(width * 0.5 - 8), align: 'right', lineBreak: false });
+      .text(c.m.feesBalance != null ? fmtMoney(c.m.feesBalance) : '__________________', left + width * 0.5, y + 5, { width: tw(width * 0.5 - 8), align: 'right', lineBreak: false });
     doc.y = y + rowH;
     doc.moveDown(0.4 * c.gap);
   }
@@ -988,7 +1062,7 @@ export class ReportCardPdfService {
     this.sectionTitle(c, String(s.nextTermTitle || 'NEXT TERM'));
     const fs = num(s.baseFontSize, 9.5);
     doc.font(fonts.regular).fontSize(fs).fillColor(hex(s.valueColor, '#0f172a'))
-      .text('Next term begins: ______________________', left, doc.y, { width });
+      .text(`Next term begins: ${c.m.nextTermStart ? fmtDate(c.m.nextTermStart) : '______________________'}`, left, doc.y, { width });
     if (note) {
       doc.font(fonts.italic).fontSize(fs - 1).fillColor(hex(s.labelColor, '#64748b'))
         .text(note, left, doc.y + 2, { width });
@@ -1181,6 +1255,11 @@ function cased(text: string, mode: unknown): string {
 
 function titleCase(text: string): string {
   return String(text ?? '').replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+
+/** Whole shillings with thousands separators, e.g. "UGX 1,250,000". */
+function fmtMoney(n: number): string {
+  return `UGX ${Math.round(n).toLocaleString('en-UG')}`;
 }
 
 function fmtDate(d?: Date | string | null): string {

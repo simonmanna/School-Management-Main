@@ -435,6 +435,6 @@ export class GradebookService {
       where: { organizationId: this.org },
       select: { gradingSystem: true },
     });
-    return profile?.gradingSystem ?? 'UCE';
+    return profile?.gradingSystem ?? 'PLE';
   }
 }

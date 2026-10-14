@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
@@ -130,6 +130,7 @@ export class ProgrammeService {
 
   async create(dto: CreateProgrammeDto) {
     const organizationId = this.tenant.organizationId;
+    await this.assertReportingConfig(dto.config);
     return this.prisma.client.$transaction(async (tx: any) => {
       const programme = await tx.academicProgramme.create({
         data: {
@@ -159,6 +160,7 @@ export class ProgrammeService {
   async update(id: string, dto: UpdateProgrammeDto) {
     const organizationId = this.tenant.organizationId;
     const before = await this.get(id);
+    if (dto.config !== undefined) await this.assertReportingConfig(dto.config);
     return this.prisma.client.$transaction(async (tx: any) => {
       await tx.academicProgramme.updateMany({
         where: { id },
@@ -183,6 +185,41 @@ export class ProgrammeService {
       });
       return tx.academicProgramme.findFirst({ where: { id } });
     });
+  }
+
+  /**
+   * The reporting part of a programme's config — its grading profile — must be
+   * something the result run can honour. Refused here, at save time, rather
+   * than discovered when a term's results are worked out:
+   *   - a known grading system and ranking;
+   *   - aggregate subjects only on a PLE profile, and then exactly four distinct
+   *     subjects that exist (PLE aggregates four papers, never more or fewer).
+   */
+  private async assertReportingConfig(config: unknown): Promise<void> {
+    if (config == null) return;
+    const c = config as Record<string, unknown>;
+    const SYSTEMS = ['ECD', 'PLE', 'generic', 'UCE', 'UACE', 'CBC'];
+    const RANKINGS = ['none', 'aggregate', 'meanPercent', 'gpa'];
+    if (c.gradingSystem !== undefined && !SYSTEMS.includes(String(c.gradingSystem))) {
+      throw new BadRequestException(`Unknown grading system "${String(c.gradingSystem)}".`);
+    }
+    if (c.rankOn !== undefined && !RANKINGS.includes(String(c.rankOn))) {
+      throw new BadRequestException(`Unknown ranking "${String(c.rankOn)}".`);
+    }
+    const ids = c.aggregateSubjectIds;
+    if (ids === undefined || ids === null) return;
+    if (!Array.isArray(ids) || ids.some((x) => typeof x !== 'string')) {
+      throw new BadRequestException('Aggregate subjects must be a list of subject ids.');
+    }
+    if (ids.length === 0) return;
+    const system = c.gradingSystem === undefined ? 'PLE' : String(c.gradingSystem);
+    if (system !== 'PLE') throw new BadRequestException('Only a PLE-graded programme has aggregate subjects.');
+    const distinct = new Set(ids as string[]);
+    if (distinct.size !== 4) {
+      throw new BadRequestException('Choose exactly four different subjects for the aggregate (e.g. English, Mathematics, Science, Social Studies).');
+    }
+    const found = await this.prisma.client.subject.count({ where: { id: { in: [...distinct] }, deletedAt: null } });
+    if (found !== 4) throw new BadRequestException('One of the aggregate subjects no longer exists.');
   }
 
   /**

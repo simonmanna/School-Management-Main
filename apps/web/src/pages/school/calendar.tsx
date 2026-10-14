@@ -136,7 +136,7 @@ export function SchoolCalendarPage() {
           <Label className="text-xs">Term</Label>
           <select value={termId} onChange={(e) => setTermId(e.target.value)} className="h-9 rounded-md border bg-background px-2 text-sm">
             <option value="">All</option>
-            {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
           </select>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -233,7 +233,7 @@ export function SchoolCalendarPage() {
                   <Label>Term</Label>
                   <select value={form.termId ?? ''} onChange={(e) => setForm({ ...form, termId: e.target.value })} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
                     <option value="">None</option>
-                    {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {(terms?.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
                   </select>
                 </div>
               </div>

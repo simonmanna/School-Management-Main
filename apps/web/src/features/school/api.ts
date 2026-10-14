@@ -62,7 +62,18 @@ export function normalizeStudent<T extends Partial<Student>>(s: T): T {
 }
 
 export interface AcademicYear { id: string; name: string; startDate: string; endDate: string; isCurrent: boolean; status?: 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED' }
-export interface Term { id: string; academicYearId: string; name: string; isCurrent: boolean; startDate?: string; endDate?: string }
+export interface Term {
+  id: string;
+  academicYearId: string;
+  name: string;
+  isCurrent: boolean;
+  startDate?: string;
+  endDate?: string;
+  academicYear?: { id: string; name: string } | null;
+  /** "2026 · Term 3" — every picker shows this, never the bare name, which
+   *  repeats once per year (review A8). Filled in by `useTerms`. */
+  label?: string;
+}
 export interface SchoolClass { id: string; name: string; gradeLevelId: string; campusId?: string | null; capacity?: number | null; allowsStreams?: boolean; isActive?: boolean; displayOrder?: number; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null }
 export interface Section { id: string; classId: string; name: string; capacity?: number | null; classTeacherId?: string | null; classTeacher?: { id: string; name: string; employeeNo: string } | null; schoolClass?: { id: string; name: string; homeroomTeacher?: { id: string; partner?: { name: string } | null; employeeNo: string } | null } | null }
 
@@ -315,10 +326,27 @@ export function useAcademicYears() {
   });
 }
 
+/** "2026 · Term 3": a term's name alone repeats once per academic year. */
+export function termLabel(t: Pick<Term, 'name' | 'academicYear'> & { label?: string }): string {
+  return t.label ?? (t.academicYear?.name ? `${t.academicYear.name} · ${t.name}` : t.name);
+}
+
+/**
+ * Every term, newest first, each with its `label` ("2026 · Term 3"). Pickers
+ * used to list "Term 3, Term 2, Term 1" once per year, in database order, so
+ * the first "Term 3" could be next year's (review A8).
+ */
 export function useTerms() {
   return useQuery({
     queryKey: ['school', 'terms'],
-    queryFn: async () => (await api.get<Paginated<Term>>(`${S}/terms`, { params: { pageSize: 100 } })).data,
+    queryFn: async () => {
+      const page = (await api.get<Paginated<Term>>(`${S}/terms`, { params: { pageSize: 100 } })).data;
+      const at = (t: Term) => (t.startDate ? new Date(t.startDate).getTime() : 0);
+      const data = [...page.data]
+        .sort((a, b) => at(b) - at(a))
+        .map((t) => ({ ...t, label: termLabel(t) }));
+      return { ...page, data };
+    },
   });
 }
 
@@ -5251,6 +5279,47 @@ export function useTeacherPortal(teacherPartnerId: string | undefined) {
 
 /* ── P0-A Report card comments ─────────────────────────────────────────────── */
 
+/** One pupil on the comment grid, with the released headline to write against. */
+export interface ReportCommentRow {
+  studentProfileId: string;
+  name: string | null;
+  admissionNo: string | null;
+  released: boolean;
+  gradingSystem: string | null;
+  meanPercent: number | null;
+  aggregate: number | null;
+  division: string | null;
+  position: number | null;
+  classTeacherComment: string | null;
+  principalComment: string | null;
+  cardPublished: boolean;
+  /** May the caller write THIS pupil's class-teacher comment (own stream only for a stream teacher). */
+  classCommentEditable?: boolean;
+}
+export interface ReportCommentSheet { canWriteClass: boolean; canWriteHead: boolean; rows: ReportCommentRow[] }
+
+export function useReportCommentSheet(scope: { classId?: string; termId?: string; sectionId?: string }) {
+  return useQuery({
+    queryKey: ['school', 'report-comments', scope.classId, scope.termId, scope.sectionId ?? ''],
+    enabled: !!scope.classId && !!scope.termId,
+    queryFn: async () =>
+      (await api.get<ReportCommentSheet>(`${RC}/comments`, {
+        params: { classId: scope.classId, termId: scope.termId, sectionId: scope.sectionId || undefined },
+      })).data,
+  });
+}
+
+export function useSaveReportComments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      termId: string;
+      items: Array<{ studentProfileId: string; classTeacherComment?: string; principalComment?: string }>;
+    }) => (await api.post<{ saved: number; refused: Array<{ studentProfileId: string; reason: string }> }>(`${RC}/comments`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'report-comments'] }),
+  });
+}
+
 export function useUpdateReportCardComment() {
   const qc = useQueryClient();
   return useMutation({
@@ -7381,6 +7450,99 @@ export function usePolicyComponents(policyId?: string) {
   });
 }
 
+/* ───────────────────── Term board (review A15) ───────────────────── */
+
+export interface TermBoardClass {
+  classId: string;
+  className: string;
+  level: string | null;
+  stage: string | null;
+  pupils: number;
+  classList: { rosterId: string; frozen: boolean; members: number } | null;
+  exams: Array<{ examId: string; name: string; papers: number; expected: number; entered: number; approved: number; locked: number }>;
+  results: { resultSetId: string; status: string; revision: number } | null;
+  reportCards: { pupils: number; built: number; released: number; classTeacherComments: number; headComments: number };
+}
+export interface TermBoard { term: { id: string; name: string }; classes: TermBoardClass[] }
+export interface TermBoardOutcome { done: number; total: number; outcomes: Array<{ classId: string; className: string; ok: boolean; detail: string }> }
+
+export function useTermBoard(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'term-board', termId],
+    enabled: !!termId,
+    queryFn: async () => (await api.get<TermBoard>(`${S}/term-board`, { params: { termId } })).data,
+  });
+}
+
+export function useTermBoardAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { action: 'class-lists' | 'compute' | 'publish' | 'build-cards' | 'release-cards'; termId: string; classIds?: string[] }) =>
+      (await api.post<TermBoardOutcome>(`${S}/term-board/${dto.action}`, { termId: dto.termId, classIds: dto.classIds })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'term-board'] });
+      qc.invalidateQueries({ queryKey: ['school', 'results'] });
+      qc.invalidateQueries({ queryKey: ['school', 'rosters'] });
+    },
+  });
+}
+
+/* ───────────────────── Teacher allocation grid (review A7) ───────────────────── */
+
+export interface AllocationRow {
+  classId: string;
+  className: string;
+  sectionId: string | null;
+  sectionName: string | null;
+  classTeacherId: string | null;
+  cells: Record<string, { teacherPartnerId: string | null; inherited: boolean }>;
+}
+export interface AllocationLevel {
+  levelId: string | null;
+  levelName: string;
+  stage: string | null;
+  subjects: Array<{ id: string; code: string; name: string }>;
+  rows: AllocationRow[];
+}
+export interface AllocationMatrix {
+  term: { id: string; name: string; academicYearId: string };
+  levels: AllocationLevel[];
+  staff: Array<{ id: string; name: string; employeeNo: string }>;
+}
+
+export function useAllocationMatrix(termId?: string) {
+  return useQuery({
+    queryKey: ['school', 'teaching-allocation', termId],
+    enabled: !!termId,
+    queryFn: async () => (await api.get<AllocationMatrix>(`${S}/teaching-allocation`, { params: { termId } })).data,
+  });
+}
+
+export function useSaveAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      termId: string;
+      cells?: Array<{ classId: string; sectionId: string | null; subjectId: string; teacherPartnerId: string | null }>;
+      classTeachers?: Array<{ classId: string; sectionId: string | null; staffProfileId: string | null }>;
+    }) => (await api.post<AllocationMatrix>(`${S}/teaching-allocation`, dto)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['school', 'teaching-allocation'] });
+      qc.invalidateQueries({ queryKey: ['school', 'classes'] });
+      qc.invalidateQueries({ queryKey: ['school', 'sections'] });
+    },
+  });
+}
+
+export function useCopyAllocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { fromTermId: string; toTermId: string }) =>
+      (await api.post<{ copied: number; kept: number }>(`${S}/teaching-allocation/copy`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'teaching-allocation'] }),
+  });
+}
+
 /* ───────────────────── Teacher workspace (P5) ───────────────────── */
 
 export interface TeacherOverview {
@@ -7390,7 +7552,10 @@ export interface TeacherOverview {
   dueSoon: Array<{ assessmentId: string; title: string; subject: string; classId: string; dueAt: string | null; overdue: boolean }>;
   awaitingApproval: number;
   returnedToMe: Array<{ studentAssessmentId: string; assessmentId: string; title: string; subject: string }>;
-  examPapers: Array<{ examScheduleId: string; examName: string; subject: string; classId: string; entered: number; total: number }>;
+  examPapers: Array<{
+    examScheduleId: string; examId?: string; subjectId?: string; termId?: string | null;
+    examName: string; subject: string; classId: string; entered: number; total: number;
+  }>;
   lessonPlans: { draft: number; submitted: number; approved: number };
 }
 

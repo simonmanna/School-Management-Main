@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TeachingAllocationService } from './teaching-allocation.service';
 import {
   CurriculumService,
   TeacherAssignmentService,
@@ -16,6 +17,7 @@ import {
 import {
   CurriculumController,
   TeacherAssignmentController,
+  TeachingAllocationController,
   TimetableController,
 } from './academics.controller';
 import { TimetableAdvancedController } from './timetable-advanced.controller';
@@ -31,6 +33,7 @@ import {
   controllers: [
     CurriculumController,
     TeacherAssignmentController,
+    TeachingAllocationController,
     TimetableController,
     TimetableAdvancedController,
     CompetencyController,
@@ -41,6 +44,7 @@ import {
   providers: [
     CurriculumService,
     TeacherAssignmentService,
+    TeachingAllocationService,
     TimetableService,
     TimetableAdvancedService,
     TeacherCoverService,

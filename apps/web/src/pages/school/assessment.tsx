@@ -149,7 +149,7 @@ export function SchoolAssessmentPage() {
               <Input aria-label="Weighting name" placeholder="Name, e.g. Primary 40/60" value={name} onChange={(e) => setName(e.target.value)} />
               <select aria-label="Term" className={select} value={termId} onChange={(e) => setTermId(e.target.value)}>
                 <option value="">All terms</option>
-                {terms?.data.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                {terms?.data.map((t) => <option key={t.id} value={t.id}>{t.label ?? t.name}</option>)}
               </select>
               <select aria-label="Class" className={select} value={classId} onChange={(e) => setClassId(e.target.value)}>
                 <option value="">All classes</option>

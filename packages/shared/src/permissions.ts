@@ -469,6 +469,11 @@ export const PERMISSIONS = {
     // and recommending a promotion is not deciding one.
     manageReportDocuments: 'school:reports:documents:write',
     publishReportDocuments: 'school:reports:documents:publish',
+    // Report-card comments. The class teacher writes the class teacher's
+    // comment for their own class (data scope narrows it); the head teacher's
+    // comment is its own grant, so a class teacher can never write it.
+    writeReportComments: 'school:reports:comment',
+    writeHeadComments: 'school:reports:comment:head',
     decidePromotion: 'school:promotion:decide',
     applyPromotion: 'school:promotion:apply',
     // ── Statutory workflows (Phase 6). A national submission leaves the school
@@ -981,6 +986,8 @@ export const PERMISSION_META: Record<string, PermissionMeta> = {
   'school:fees:writeoff': { label: 'Write off fees', description: 'Forgive a fee debt entirely.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
   'school:fees:period:close': { label: 'Close fee period', description: 'Lock a billing period to further changes.', group: 'School', subgroup: 'Fees & Finance', risk: 'high' },
   'school:lessonplans:approve': { label: 'Approve lesson plans', description: 'Sign off lesson plans.', group: 'School', subgroup: 'Teaching', risk: 'high' },
+  'school:reports:comment': { label: 'Write class teacher comments', description: 'Write the class teacher’s comment on report cards — own classes only for a class-scoped role.', group: 'School', subgroup: 'Results' },
+  'school:reports:comment:head': { label: 'Write head teacher comments', description: 'Write the head teacher’s comment on report cards.', group: 'School', subgroup: 'Results' },
   'role:create': { label: 'Create role', description: 'Define a new role.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
   'role:update': { label: 'Edit role', description: 'Change a role\'s permissions/scope.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
   'role:delete': { label: 'Delete role', description: 'Remove a role.', group: 'Administration', subgroup: 'RBAC', risk: 'high' },
@@ -1208,6 +1215,10 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       // document that goes home and the decision to move a learner up a class
       // are theirs, and so is signing off a national return.
       'school:reports:documents:publish',
+      // The head teacher's comment is theirs; they may also complete a class
+      // teacher's comment for a class without one.
+      'school:reports:comment',
+      'school:reports:comment:head',
       'school:promotion:decide',
       'school:promotion:apply',
       'school:admissions:read',
@@ -1429,6 +1440,40 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:incidents:read',
       // ADR-032 P2: health history of their own pupils (data scope limits it).
       'school:medical:read',
+      // The class teacher's comment on each report card (own classes only).
+      'school:reports:comment',
+    ],
+  },
+  {
+    // The adult in a nursery room: the Class Teacher's own-class authority,
+    // plus handing a child over at the end of the day to someone on the
+    // collection list. Observations are recorded as assessments of kind
+    // "observation" against the nursery learning areas; there is no exam.
+    name: 'Nursery Teacher',
+    description: 'Runs a nursery class: register, care log, observations, collection at the gate and report comments — own class only.',
+    dataScope: 'class',
+    permissions: [
+      'school:read',
+      'school:attendance:own',
+      'school:attendance:status:write',
+      'school:grades:own',
+      'school:assignments:write',
+      'school:assignments:grade',
+      'school:lessonplans:own',
+      'school:timetable:own',
+      'school:courses:teach',
+      'school:documents:read',
+      'school:communicate',
+      'school:portal:teacher',
+      'school:portal:self',
+      'hr:self',
+      'school:reports:read',
+      'school:carelog:write',
+      'school:incidents:write',
+      'school:incidents:read',
+      'school:medical:read',
+      'school:pickup:release',
+      'school:reports:comment',
     ],
   },
 
@@ -1459,6 +1504,48 @@ export const SCHOOL_ROLE_PRESETS: readonly RolePreset[] = [
       'school:analytics:export',
       // Report centre (ADR-017). New grants do not reach existing tenants by
       // themselves — Role.permissions is stored data. See scripts/backfill-report-permissions.ts.
+      'school:reports:read',
+      'school:reports:export',
+      'school:reports:saved:write',
+    ],
+  },
+  {
+    // The academic manager of a Ugandan primary school: subjects and classes,
+    // the timetable and teacher allocation, exams and how they count, checking
+    // and approving marks, working out results, building report cards and
+    // reviewing lesson plans. Never enters marks (no grades:write), so the
+    // approval it holds is not self-approval; releasing results to families and
+    // deciding promotions stay with the Head Teacher.
+    name: 'Director of Studies',
+    description: 'Runs the academic year: subjects, allocation, exams, mark approval, results and report cards. Does not enter marks or release results.',
+    dataScope: 'school',
+    permissions: [
+      'school:read',
+      'school:foundation:write',
+      'school:programmes:write',
+      'school:courses:write',
+      'school:courses:enrol',
+      'school:lessonplans:write',
+      'school:lessonplans:review',
+      'school:lessonplans:approve',
+      'school:assessments:write',
+      'school:exams:write',
+      'school:exams:operate',
+      'school:exams:custody',
+      'school:exams:allocate',
+      'school:grades:approve',
+      'school:marks:moderate',
+      'school:results:compute',
+      'school:results:approve',
+      'school:reports:documents:write',
+      'school:reports:comment',
+      'school:statutory:read',
+      'school:candidates:write',
+      'school:analytics:read',
+      'school:analytics:export',
+      'school:attendance:write',
+      'school:lms:read',
+      'hr:self',
       'school:reports:read',
       'school:reports:export',
       'school:reports:saved:write',

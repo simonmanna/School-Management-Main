@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Circle } from 'lucide-react';
 import {
-  useAssessmentPolicies, useCourseOfferings, useGradingScales, useRosters, useTerms,
+  useAssessmentPolicies, useCourseOfferings, useGradingScales, useRosters, useTeacherAssignments, useTerms,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -14,6 +14,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 export function AssessmentSetupChecklist({ termId }: { termId?: string }) {
   const { data: terms } = useTerms();
   const { data: offerings } = useCourseOfferings(termId || undefined);
+  // Allocation lives on the Teacher Allocation grid (TeacherAssignment);
+  // course offerings are the advanced route. Either counts.
+  const { data: assignments } = useTeacherAssignments();
   const { data: policies } = useAssessmentPolicies();
   const { data: scales } = useGradingScales();
   const { data: rosters } = useRosters();
@@ -26,9 +29,9 @@ export function AssessmentSetupChecklist({ termId }: { termId?: string }) {
       to: '/school/management/terms',
     },
     {
-      done: (offerings ?? []).length > 0,
+      done: (offerings ?? []).length > 0 || (assignments ?? []).some((a: any) => !termId || a.termId === termId),
       label: 'Teachers allocated to classes and subjects',
-      to: '/school/course-offerings',
+      to: '/school/teaching-allocation',
     },
     {
       done: (policies?.data ?? []).some((p) => !!p.publishedAt),
@@ -48,7 +51,7 @@ export function AssessmentSetupChecklist({ termId }: { termId?: string }) {
   ];
 
   // Only render once everything has loaded, so the card doesn't flash.
-  if (!terms || !offerings || !policies || !scales || !rosters) return null;
+  if (!terms || !offerings || !assignments || !policies || !scales || !rosters) return null;
   if (steps.every((s) => s.done)) return null;
 
   const left = steps.filter((s) => !s.done).length;

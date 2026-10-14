@@ -122,7 +122,7 @@ export function SchoolAssessmentsPage() {
           <Picker label="Year" value={yearId} onChange={setYearId} className="min-w-0"
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} />
           <Picker label="Term" value={termId} onChange={setTermId} className="min-w-0"
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} />
           <Picker label="Class" value={classId} onChange={setClassId} className="min-w-0"
             options={classList.map((c) => ({ value: c.id, label: c.name }))} />
           <Picker label="Subject" value={subjectId} onChange={setSubjectId} placeholder="All subjects" className="min-w-0"

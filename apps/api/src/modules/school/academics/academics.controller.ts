@@ -4,6 +4,8 @@ import { EmployeeIdentityService } from '../../../kernel/auth/employee-identity.
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { RequireOwnerOrPermission } from '../../../kernel/auth/guards/require-owner-or-permission.decorator';
+import { TeachingAllocationService } from './teaching-allocation.service';
+import { CopyAllocationDto, SaveAllocationDto } from './teaching-allocation.dto';
 import {
   CurriculumService,
   TeacherAssignmentService,
@@ -78,6 +80,34 @@ export class CurriculumController {
   @RequirePermissions(PERMISSIONS.school.manageFoundation)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
+  }
+}
+
+/**
+ * The allocation grid (review A7): who teaches each class/stream each subject
+ * this term, and who is each class's class teacher.
+ */
+@Controller('school/teaching-allocation')
+export class TeachingAllocationController {
+  constructor(private readonly service: TeachingAllocationService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  matrix(@Query('termId') termId: string) {
+    if (!termId) throw new BadRequestException('termId is required');
+    return this.service.matrix(termId);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  save(@Body() dto: SaveAllocationDto) {
+    return this.service.save(dto);
+  }
+
+  @Post('copy')
+  @RequirePermissions(PERMISSIONS.school.manageFoundation)
+  copy(@Body() dto: CopyAllocationDto) {
+    return this.service.copy(dto);
   }
 }
 

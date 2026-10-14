@@ -29,6 +29,8 @@ function makeService(card: Record<string, unknown>) {
     { recordInTx: jest.fn() } as any,
     {} as any,
     {} as any,
+    {} as any,
+    {} as any,
   );
   return { service, tx };
 }

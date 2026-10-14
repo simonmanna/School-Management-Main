@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, Check, ChevronLeft, ChevronRight, ClipboardList,
   FileSpreadsheet, Loader2, Lock, Search, Unlock,
@@ -21,6 +21,8 @@ import { OfflineBanner } from './_components/offline-banner';
 import { useAuthStore } from '@/stores/auth.store';
 import { PERMISSIONS } from '@erp/shared';
 import { ContextBar } from './_components/context-bar';
+import { useTeacherOverview } from '@/features/school/api';
+import { useMyStaffIdentity } from '@/features/hr/api';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 const NON_SCORING = ['absent', 'exempt', 'excused', 'malpractice'];
@@ -45,6 +47,36 @@ export function SchoolEnterMarksPage() {
   const [subjectId, setSubjectId] = useStickyState('subjectId');
   const [streamId, setStreamId] = useStickyState('streamId');
 
+  // A paper opened from My Teaching arrives with exam, class and subject (and
+  // term) chosen, so the teacher lands on the sheet, not on five pickers.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const exam = params.get('exam');
+    if (!exam) return;
+    const term = params.get('term');
+    if (term) {
+      setTermId(term);
+      const t = (terms?.data ?? []).find((x) => x.id === term);
+      if (t) setYearId(t.academicYearId);
+    }
+    setExamId(exam);
+    if (params.get('class')) setClassId(params.get('class')!);
+    if (params.get('subject')) setSubjectId(params.get('subject')!);
+    setStreamId('');
+    setParams({}, { replace: true });
+  }, [params, terms]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A teacher who enters only their own papers (`grades:own`) is offered only
+  // their own classes and subjects — the whole school's list led straight to a
+  // sheet the API refuses, shown as a blank page (review A9).
+  const canEnterAny = useAuthStore((s) => s.hasPermission(PERMISSIONS.school.enterGrades) || s.hasPermission(PERMISSIONS.school.manageExams));
+  const { data: me } = useMyStaffIdentity();
+  const { data: overview } = useTeacherOverview(!canEnterAny ? me?.staffProfileId ?? undefined : undefined);
+  const mine = useMemo(
+    () => (canEnterAny ? null : new Set((overview?.classes ?? []).map((c) => `${c.classId}:${c.subjectId}`))),
+    [canEnterAny, overview],
+  );
+
   const yearList = years?.data ?? [];
   const termList = useMemo(
     () => (terms?.data ?? []).filter((t) => !yearId || t.academicYearId === yearId),
@@ -59,18 +91,30 @@ export function SchoolEnterMarksPage() {
   // Only classes that actually sit this exam — picking one that doesn't is a dead end.
   const { data: coverage } = useExamCoverage(examId || undefined);
   const examClasses = useMemo(
-    () => (coverage?.classes ?? []).filter((c) => c.applied),
-    [coverage],
+    () => (coverage?.classes ?? [])
+      .filter((c) => c.applied)
+      .filter((c) => !mine || [...mine].some((k) => k.startsWith(`${c.classId}:`))),
+    [coverage, mine],
   );
   useDefaulted(classId, setClassId, examClasses[0]?.classId);
+  // A remembered class this caller cannot enter (or that does not sit this
+  // exam) is replaced, never left to load a refused sheet.
+  useEffect(() => {
+    if (coverage && classId && !examClasses.some((c) => c.classId === classId)) setClassId(examClasses[0]?.classId ?? '');
+  }, [coverage, classId, examClasses, setClassId]);
 
   const { data: subjects } = useClassSubjects(classId || undefined);
   const paperSubjects = useMemo(() => {
     const papers = examClasses.find((c) => c.classId === classId)?.subjects ?? [];
-    if (papers.length > 0) return papers.map((p) => ({ id: p.subjectId, name: p.subjectName, code: p.subjectCode }));
-    return (subjects ?? []).map((s) => ({ id: s.id, name: s.name, code: s.code }));
-  }, [examClasses, classId, subjects]);
+    const all = papers.length > 0
+      ? papers.map((p) => ({ id: p.subjectId, name: p.subjectName, code: p.subjectCode }))
+      : (subjects ?? []).map((s) => ({ id: s.id, name: s.name, code: s.code }));
+    return mine ? all.filter((s) => mine.has(`${classId}:${s.id}`)) : all;
+  }, [examClasses, classId, subjects, mine]);
   useDefaulted(subjectId, setSubjectId, paperSubjects[0]?.id);
+  useEffect(() => {
+    if (classId && subjectId && paperSubjects.length && !paperSubjects.some((s) => s.id === subjectId)) setSubjectId(paperSubjects[0].id);
+  }, [classId, subjectId, paperSubjects, setSubjectId]);
 
   const { data: streamList } = useClassSubdivisions(classId || undefined);
 
@@ -272,7 +316,7 @@ export function SchoolEnterMarksPage() {
           <Picker label="Year" value={yearId} onChange={(v) => { setYearId(v); setTermId(''); setExamId(''); }}
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} className="min-w-[120px]" />
           <Picker label="Term" value={termId} onChange={(v) => { setTermId(v); setExamId(''); }}
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} className="min-w-[120px]" />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} className="min-w-[120px]" />
           <Picker label="Exam" value={examId} onChange={(v) => { setExamId(v); setClassId(''); setSubjectId(''); }}
             options={(exams ?? []).map((e) => ({ value: e.id, label: e.name }))} className="min-w-[170px]" />
           <Picker label="Class" value={classId} onChange={(v) => { setClassId(v); setSubjectId(''); setStreamId(''); }}

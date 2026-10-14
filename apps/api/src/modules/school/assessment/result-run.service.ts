@@ -9,6 +9,7 @@ import { EventBus } from '../../../kernel/events/event-bus';
 import { EVENTS } from '@erp/shared';
 import { AssessmentPolicyService } from './assessment-config.service';
 import { resolveScale, type ResolvedScale } from './grade-bands';
+import { reportingPolicy } from './reporting-policy';
 import { isCompulsorySubject, isSubsidiarySubject, isPleCoreSubject } from './subject-roles';
 import {
   computeResultSet,
@@ -42,7 +43,12 @@ const APPROVAL_FREE_PARTICIPATION = ['exempt', 'excused', 'absent', 'malpractice
 
 const sha = (v: unknown): string => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
 
-type Reporting = { gradingSystem: string; rankOn: ResultInput['rankOn'] };
+type Reporting = {
+  gradingSystem: string;
+  rankOn: ResultInput['rankOn'];
+  /** PLE: the subjects whose points make the aggregate ([] = no aggregate). */
+  aggregateSubjectIds?: string[];
+};
 
 /**
  * The result spine's engine (A3). `compute` projects a frozen roster's approved
@@ -156,7 +162,7 @@ export class ResultRunService {
           roundingMode: 'half_up',
           gradingSystem: reporting.gradingSystem,
           gradingScaleSnapshot: { bands: scale.bands, bandRounding: scale.rounding, scaleId: scale.scaleId } as any,
-          rankingPolicySnapshot: { rankOn: input.rankOn } as any,
+          rankingPolicySnapshot: { rankOn: input.rankOn, aggregateSubjectIds: input.aggregateSubjectIds ?? null } as any,
           inputChecksum,
           outputChecksum,
           studentCount: output.students.length,
@@ -278,6 +284,7 @@ export class ResultRunService {
       roundingMode: 'half_up',
       decimalPlaces: 2,
       rankOn: reporting.rankOn,
+      aggregateSubjectIds: reporting.aggregateSubjectIds,
       students,
     };
     let output: ResultOutput;
@@ -783,21 +790,35 @@ export class ResultRunService {
    */
   private async resolveReporting(db: any, roster: any, termId: string): Promise<Reporting> {
     const profile = await db.schoolProfile.findFirst({ where: {} });
-    const schoolSystem = (profile?.gradingSystem ?? 'UCE') as string;
-    const byAggregate = (system: string): ResultInput['rankOn'] =>
-      ['PLE', 'UCE', 'UACE'].includes(system) ? 'aggregate' : 'gpa';
-    const reportingOf = (programme: any | null): Reporting => {
-      const config = (programme?.config ?? {}) as { gradingSystem?: string; rankOn?: string };
-      const stageDefault = programme?.stage === 'PRE_PRIMARY';
-      const gradingSystem = config.gradingSystem ?? (stageDefault ? 'ECD' : schoolSystem);
-      const rankOn = (config.rankOn as ResultInput['rankOn'] | undefined)
-        ?? (stageDefault ? 'none' : byAggregate(gradingSystem));
-      return { gradingSystem, rankOn };
+    const schoolSystem = (profile?.gradingSystem ?? 'PLE') as string;
+
+    // Programme templates name aggregate subjects by CODE (ids are not known
+    // when a template is installed); resolve them once for the whole roster.
+    const programmes = await this.programmesFor(db, roster, termId);
+    const policies = (programmes.length ? programmes : [null]).map((p) => reportingPolicy(p, schoolSystem));
+    const codes = [...new Set(policies.flatMap((p) => p.aggregateSubjectCodes))];
+    const idByCode = new Map<string, string>(
+      codes.length
+        ? (await db.subject.findMany({ where: { code: { in: codes }, deletedAt: null }, select: { id: true, code: true } }))
+            .map((s: any) => [s.code, s.id])
+        : [],
+    );
+    const toReporting = (p: ReturnType<typeof reportingPolicy>): Reporting => {
+      if (p.gradingSystem !== 'PLE') return { gradingSystem: p.gradingSystem, rankOn: p.rankOn };
+      const missing = p.aggregateSubjectCodes.filter((c) => !idByCode.has(c));
+      if (missing.length) {
+        throw new BadRequestException({
+          code: 'AGGREGATE_SUBJECTS_UNKNOWN',
+          message: `The programme counts ${missing.join(', ')} towards the aggregate, but no subject has that code. Fix the subject codes or the programme's aggregate subjects.`,
+        });
+      }
+      const ids = [...new Set([...p.aggregateSubjectIds, ...p.aggregateSubjectCodes.map((c) => idByCode.get(c) as string)])].sort();
+      return { gradingSystem: p.gradingSystem, rankOn: p.rankOn, aggregateSubjectIds: ids };
     };
 
-    const programmes = await this.programmesFor(db, roster, termId);
-    if (programmes.length <= 1) return reportingOf(programmes[0] ?? null);
-    const distinct = new Map(programmes.map((p) => [JSON.stringify(reportingOf(p)), reportingOf(p)]));
+    const reportings = policies.map(toReporting);
+    if (reportings.length <= 1) return reportings[0];
+    const distinct = new Map(reportings.map((r) => [JSON.stringify(r), r]));
     if (distinct.size > 1) {
       throw new BadRequestException({
         code: 'MIXED_REPORTING',
@@ -883,7 +904,7 @@ export class ResultRunService {
       ? await db.subject.findMany({ where: { id: { in: subjectIds as string[] } } })
       : [];
     const subjectMeta = new Map(subjectRows.map((x: any) => [x.id, x]));
-    const system = (await db.schoolProfile.findFirst({ select: { gradingSystem: true } }))?.gradingSystem ?? 'UCE';
+    const system = (await db.schoolProfile.findFirst({ select: { gradingSystem: true } }))?.gradingSystem ?? 'PLE';
     const programmeOf = await this.programmeIdsFor(db, studentIds, termId);
 
     // Exam paper → exam type. A weighting component can name the exam type it

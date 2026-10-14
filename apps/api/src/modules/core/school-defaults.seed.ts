@@ -40,6 +40,61 @@ const NURSERY_CONFIG = {
 };
 
 /**
+ * Lower primary (P1–P3): D1–F9 grades per subject, but no aggregate, no
+ * division and no position until the school turns them on (owner decision 1).
+ * A school that does print a P1–P3 aggregate names its four subjects here.
+ */
+const LOWER_PRIMARY_CONFIG = {
+  gradingSystem: 'PLE',
+  rankOn: 'none',
+  aggregateSubjectCodes: [] as string[],
+};
+
+/**
+ * Upper primary (P4–P7): the PLE aggregate over the four examinable subjects,
+ * named by code (the subjects below), ranked on that aggregate.
+ */
+const UPPER_PRIMARY_CONFIG = {
+  gradingSystem: 'PLE',
+  rankOn: 'aggregate',
+  aggregateSubjectCodes: ['ENG', 'MTC', 'SCI', 'SST'],
+};
+
+/**
+ * Starting subjects and learning areas, by level (`null` = taught at any
+ * level). NCDC-shaped and ordinary editable rows: a school renames, adds or
+ * retires them. Codes matter — the upper-primary aggregate names ENG, MTC, SCI
+ * and SST. Verify nursery learning areas against the current NCDC framework.
+ */
+const SUBJECTS: Array<{ code: string; name: string; level: 'PRE' | 'PL' | 'PU' | null; order: number }> = [
+  { code: 'ECD-REL', name: 'Relating with Others', level: 'PRE', order: 1 },
+  { code: 'ECD-HLT', name: 'Health Habits', level: 'PRE', order: 2 },
+  { code: 'ECD-ENV', name: 'Interacting with the Environment', level: 'PRE', order: 3 },
+  { code: 'ECD-COM', name: 'Communication', level: 'PRE', order: 4 },
+  { code: 'ECD-NUM', name: 'Mathematical Concepts', level: 'PRE', order: 5 },
+  { code: 'LIT1', name: 'Literacy I', level: 'PL', order: 10 },
+  { code: 'LIT2', name: 'Literacy II', level: 'PL', order: 11 },
+  { code: 'ENG', name: 'English', level: null, order: 20 },
+  { code: 'MTC', name: 'Mathematics', level: null, order: 21 },
+  { code: 'SCI', name: 'Science', level: 'PU', order: 22 },
+  { code: 'SST', name: 'Social Studies', level: 'PU', order: 23 },
+  { code: 'RE', name: 'Religious Education', level: null, order: 30 },
+  { code: 'LL', name: 'Local Language', level: null, order: 31 },
+];
+
+/**
+ * The term's three sittings, plus the P7 mock. `weight` is display-only — what
+ * counts towards a term result is the Assessment Weighting, which names these
+ * exam types. End of Term is the final sitting.
+ */
+const EXAM_TYPES = [
+  { name: 'Beginning of Term (BOT)', weight: 0, isFinal: false },
+  { name: 'Mid Term (MOT)', weight: 0, isFinal: false },
+  { name: 'End of Term (EOT)', weight: 100, isFinal: true },
+  { name: 'Mock', weight: 0, isFinal: false },
+];
+
+/**
  * Nursery descriptors. The levels a nursery teacher actually reports in, held as
  * an ordinary GradingScale so the school can reword them. Not `isDefault`: the
  * primary scale stays the school default, and `resolveBands` prefers the scale
@@ -113,7 +168,8 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
         stage: l.stage,
         isActive: true,
         effectiveFrom: new Date('2000-01-01'),
-        config: l.stage === 'PRE_PRIMARY' ? NURSERY_CONFIG : {},
+        config:
+          l.stage === 'PRE_PRIMARY' ? NURSERY_CONFIG : l.stage === 'PRIMARY_LOWER' ? LOWER_PRIMARY_CONFIG : UPPER_PRIMARY_CONFIG,
       },
     });
     const level = await db.academicLevel.create({
@@ -153,6 +209,22 @@ export async function seedSchoolDefaults(db: Db, organizationId: string): Promis
     });
     next = grade.id;
   }
+
+  await db.subject.createMany({
+    data: SUBJECTS.map((s) => ({
+      organizationId,
+      code: s.code,
+      name: s.name,
+      isCore: true,
+      displayOrder: s.order,
+      academicLevelId: s.level ? levelIds.get(s.level) ?? null : null,
+    })),
+    skipDuplicates: true,
+  });
+  await db.examType.createMany({
+    data: EXAM_TYPES.map((t) => ({ organizationId, ...t })),
+    skipDuplicates: true,
+  });
 
   await db.attendanceStatusConfig.createMany({
     data: ATTENDANCE.map((a) => ({ organizationId, ...a })),

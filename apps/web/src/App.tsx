@@ -85,6 +85,9 @@ import SchoolReportsPage from '@/pages/school/reports';
 import RunReportPage from '@/pages/school/reports/run';
 import { SchoolReportCardsPage } from '@/pages/school/report-cards';
 import { SchoolReportCardSettingsPage } from '@/pages/school/report-card-settings';
+import { SchoolReportCommentsPage } from '@/pages/school/report-comments';
+import { SchoolTeachingAllocationPage } from '@/pages/school/teaching-allocation';
+import { SchoolTermBoardPage } from '@/pages/school/term-board';
 import { SchoolPromotionPage } from '@/pages/school/promotion';
 import { SchoolEnrollmentWorkspacePage } from '@/pages/school/enrollment/workspace';
 import { SchoolProgrammesPage } from '@/pages/school/enrollment/programmes';
@@ -582,6 +585,9 @@ export function App() {
           <Route path="/school/reports/*" element={<RunReportPage />} />
           <Route path="/school/report-cards" element={<SchoolReportCardsPage />} />
           <Route path="/school/report-card-settings" element={<SchoolReportCardSettingsPage />} />
+          <Route path="/school/report-comments" element={<SchoolReportCommentsPage />} />
+          <Route path="/school/teaching-allocation" element={<SchoolTeachingAllocationPage />} />
+          <Route path="/school/term-board" element={<SchoolTermBoardPage />} />
           <Route path="/school/promotion" element={<SchoolPromotionPage />} />
           <Route path="/school/enrollment" element={<SchoolEnrollmentWorkspacePage />} />
           <Route path="/school/enrollment/programmes" element={<SchoolProgrammesPage />} />
@@ -610,7 +616,7 @@ export function App() {
           <Route path="/school/management/student-categories" element={<SchoolStudentCategoriesPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
-          <Route path="/school/teaching-load" element={<Navigate to="/school/course-offerings" replace />} />
+          <Route path="/school/teaching-load" element={<Navigate to="/school/teaching-allocation" replace />} />
           <Route path="/school/teacher-cover" element={<SchoolTeacherCoverPage />} />
           <Route path="/school/management/calendar" element={<Navigate to="/school/timetable/calendar" replace />} />
           <Route path="/school/timetable/calendar" element={<SchoolCalendarPage />} />

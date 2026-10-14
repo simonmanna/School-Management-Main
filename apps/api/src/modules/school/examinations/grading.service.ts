@@ -42,17 +42,10 @@ export interface GradeBand {
 
 export type GradingSystem = 'PLE' | 'UCE' | 'UACE' | 'CBC' | 'ECD' | 'generic';
 
-/**
- * The four subjects a PLE aggregate is built from. Matched by name (and code)
- * the same way `computeUCEAggregate` already identifies English and Maths,
- * because a report card carries subject names, not ids.
- */
-const PLE_CORE: ReadonlyArray<{ key: string; test: RegExp }> = [
-  { key: 'english', test: /english/i },
-  { key: 'mathematics', test: /math/i },
-  { key: 'science', test: /science/i },
-  { key: 'social', test: /social|sst/i },
-];
+// The PLE aggregate is not recomputed here. Which subjects make it is a
+// programme setting applied by the result run (`result-computation.ts`), and a
+// report card prints the stored aggregate — a name match here once made the
+// card and Term Results disagree.
 
 @Injectable()
 export class GradingService {
@@ -99,7 +92,7 @@ export class GradingService {
   private async scaleFor(system: string | null) {
     if (!system) {
       const profile = await this.prisma.client.schoolProfile.findFirst({ select: { gradingSystem: true } });
-      system = profile?.gradingSystem ?? 'UCE';
+      system = profile?.gradingSystem ?? 'PLE';
     }
     return resolveScale(this.prisma.client, system);
   }
@@ -144,42 +137,7 @@ export class GradingService {
     };
   }
 
-  // ── PLE aggregate (Uganda Primary Leaving Examination) ─────────────────
-
-  /**
-   * PLE aggregate: the sum of the four core subject points — English,
-   * Mathematics, Science and Social Studies — each graded D1..F9 (1..9).
-   * Range 4 (four D1s) to 36 (four F9s); lower is better.
-   *
-   * Unlike UCE this is NOT "best N of however many were sat": the four are
-   * fixed, and a candidate missing one has no aggregate at all rather than a
-   * flatteringly small one. That is why `eligible` is false unless all four
-   * are present.
-   */
-  computePLEAggregate(subjects: Array<{ subject: string; subjectCode?: string; points: number | null }>): {
-    core: Array<{ key: string; subject: string; points: number }>;
-    best4Aggregate: number;
-    missing: string[];
-    f9Count: number;
-    eligible: boolean;
-  } {
-    const core: Array<{ key: string; subject: string; points: number }> = [];
-    const missing: string[] = [];
-
-    for (const want of PLE_CORE) {
-      const hit = subjects.find(
-        (s) => s.points != null && (want.test.test(s.subject) || want.test.test(s.subjectCode ?? '')),
-      );
-      if (hit) core.push({ key: want.key, subject: hit.subject, points: hit.points as number });
-      else missing.push(want.key);
-    }
-
-    const best4Aggregate = core.reduce((sum, s) => sum + s.points, 0);
-    const f9Count = core.filter((s) => s.points === 9).length;
-
-    return { core, best4Aggregate, missing, f9Count, eligible: missing.length === 0 };
-  }
-
+  // ── PLE division (Uganda Primary Leaving Examination) ──────────────────
   /**
    * Classic PLE division bands over the four-subject aggregate (min 4, max 36).
    * A candidate who did not sit all four core papers is Ungraded.

@@ -197,7 +197,7 @@ export function SchoolReportCardsPage() {
                 <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}>
                   <option value="">Select…</option>
                   {(terms?.data ?? []).map((t: any) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
+                    <option key={t.id} value={t.id}>{t.label ?? t.name}</option>
                   ))}
                 </select>
               </div>
@@ -247,7 +247,7 @@ export function SchoolReportCardsPage() {
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}>
             <option value="">Select…</option>
             {(terms?.data ?? []).map((t: any) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+              <option key={t.id} value={t.id}>{t.label ?? t.name}</option>
             ))}
           </select>
         </div>

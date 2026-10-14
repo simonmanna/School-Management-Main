@@ -151,7 +151,7 @@ export function SchoolExamResultsPage() {
           <Picker label="Year" value={yearId} onChange={(v) => { setYearId(v); setTermId(''); setExamId(''); }}
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} className="min-w-[130px]" />
           <Picker label="Term" value={termId} onChange={(v) => { setTermId(v); setExamId(''); }}
-            options={termList.map((t) => ({ value: t.id, label: t.name }))} className="min-w-[130px]" />
+            options={termList.map((t) => ({ value: t.id, label: (t.label ?? t.name) }))} className="min-w-[130px]" />
           <Picker label="Exam" value={examId} onChange={(v) => { setExamId(v); setClassId(''); }}
             options={(exams ?? []).map((e) => ({ value: e.id, label: e.name }))} className="min-w-[190px]" />
           <Picker label="Class" value={classId} onChange={(v) => { setClassId(v); setStreamId(''); }}

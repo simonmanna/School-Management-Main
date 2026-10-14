@@ -66,7 +66,7 @@ export interface DemoStaff {
 const LEADERSHIP = [
   { key: 'head', first: 'Emmanuel', last: 'Ssempijja', title: 'Head Teacher', role: 'Head Teacher', login: true },
   { key: 'deputy', first: 'Grace', last: 'Nakato', title: 'Deputy Head Teacher', role: 'Deputy Head', login: true },
-  { key: 'dos', first: 'Robert', last: 'Byaruhanga', title: 'Director of Studies', role: 'Exams Officer', login: true },
+  { key: 'dos', first: 'Robert', last: 'Byaruhanga', title: 'Director of Studies', role: 'Director of Studies', login: true },
   { key: 'bursar', first: 'Patrick', last: 'Okello', title: 'Bursar', role: 'Bursar', login: true },
   { key: 'registrar', first: 'Sarah', last: 'Nabirye', title: 'Registrar', role: 'Registrar', login: true },
 ].map((l) => ({ ...l, ...(SCHOOL.leadership?.[l.key as keyof NonNullable<typeof SCHOOL.leadership>] ?? {}) }));
