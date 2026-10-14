@@ -209,6 +209,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/front-desk', label: 'Visitors', icon: DoorOpen, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/phone-calls', label: 'Phone Calls', icon: Phone, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/complaints', label: 'Complaints', icon: AlertTriangle, permission: PERMISSIONS.school.manageFoundation },
+      // Managers who never work the desk still read its reports.
+      { to: '/school/front-desk-reports', label: 'Reports', icon: FileBarChart, permission: [PERMISSIONS.school.manageFoundation, PERMISSIONS.school.readReports] },
       // "Applications" used to appear here AND under Admissions, so the starting
       // point of the school's single most important workflow was ambiguous.
       // Admissions owns it; the front desk reaches it from there.

@@ -79,6 +79,7 @@ import { FrontDeskPage } from '@/pages/school/front-desk';
 import { SchoolEarlyYearsPage } from '@/pages/school/early-years';
 import { PhoneCallsPage } from '@/pages/school/phone-calls';
 import { ComplaintsPage } from '@/pages/school/complaints';
+import { FrontDeskReportsPage } from '@/pages/school/front-desk-reports';
 import { SchoolStaff360Page } from '@/pages/school/staff-360';
 import SchoolReportsPage from '@/pages/school/reports';
 import RunReportPage from '@/pages/school/reports/run';
@@ -629,6 +630,7 @@ export function App() {
           <Route path="/school/early-years" element={<SchoolEarlyYearsPage />} />
           <Route path="/school/phone-calls" element={<PhoneCallsPage />} />
           <Route path="/school/complaints" element={<ComplaintsPage />} />
+          <Route path="/school/front-desk-reports" element={<FrontDeskReportsPage />} />
           <Route path="/school/staff/:id" element={<SchoolStaff360Page />} />
           <Route path="/school/staff/:id/edit" element={<SchoolStaff360Page />} />
           <Route path="/school/management/policies" element={<SchoolPoliciesPage />} />

@@ -5964,6 +5964,66 @@ export function useDeleteComplaint() {
   return useMutation({ mutationFn: async (id: string) => (await api.delete(`${CP}/${id}`)).data, onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'complaints'] }) });
 }
 
+/* ───────────────────────── Frontdesk reports ───────────────────────── */
+export type FrontDeskReportGroupBy = 'day' | 'week' | 'month';
+export interface FrontDeskReportFilters {
+  from: string;
+  to: string;
+  groupBy: FrontDeskReportGroupBy;
+  visitorStatus?: 'in' | 'out' | 'expected';
+  direction?: CallDirection;
+  callStatus?: CallStatus;
+  category?: ComplaintCategory;
+  priority?: ComplaintPriority;
+  complaintStatus?: ComplaintStatus;
+}
+export interface FrontDeskCountRow { key: string; count: number }
+export interface FrontDeskHourRow { hour: number; count: number }
+export interface FrontDeskReport {
+  range: { from: string; to: string; groupBy: FrontDeskReportGroupBy; tzOffset: number; days: number };
+  thresholds: { overstayHours: number; complaintSlaDays: number };
+  truncated: boolean;
+  previous: { from: string; visitors: number; calls: number; missedCalls: number; complaints: number };
+  visitors: {
+    total: number; checkedOut: number; stillIn: number; expected: number;
+    uniqueVisitors: number; repeatVisitors: number;
+    avgStayMin: number | null; medianStayMin: number | null; peakHour: number | null;
+    byPurpose: FrontDeskCountRow[]; byPersonVisited: FrontDeskCountRow[]; topVisitors: FrontDeskCountRow[]; byStatus: FrontDeskCountRow[];
+    byHour: FrontDeskHourRow[]; byWeekday: { day: string; count: number }[]; stayBuckets: FrontDeskCountRow[];
+    overstays: { id: string; visitorName: string; personVisited: string | null; checkInAt: string; hoursIn: number }[];
+  };
+  calls: {
+    total: number; inbound: number; outbound: number; completed: number; missed: number; voicemail: number; scheduled: number;
+    missedInboundRate: number; answerRate: number; avgDurationSec: number | null; totalTalkSec: number; peakHour: number | null;
+    byStatus: FrontDeskCountRow[]; byDirection: FrontDeskCountRow[]; bySubject: FrontDeskCountRow[]; byOutcome: FrontDeskCountRow[]; topContacts: FrontDeskCountRow[];
+    byHour: (FrontDeskHourRow & { inbound: number; outbound: number; missed: number })[]; byWeekday: { day: string; count: number }[];
+  };
+  complaints: {
+    total: number; open: number; resolved: number; escalated: number; urgentOpen: number; unassignedOpen: number;
+    resolutionRate: number; avgResolutionHours: number | null; medianResolutionHours: number | null; overdueCount: number;
+    byCategory: FrontDeskCountRow[]; byStatus: FrontDeskCountRow[]; byPriority: FrontDeskCountRow[]; aging: FrontDeskCountRow[];
+    categoryPerformance: { key: string; total: number; resolved: number; resolutionRate: number; avgResolutionHours: number | null }[];
+    overdue: { id: string; subject: string; category: ComplaintCategory; priority: ComplaintPriority; status: ComplaintStatus; receivedAt: string; ageDays: number }[];
+  };
+  trend: { period: string; visitors: number; calls: number; missedCalls: number; complaints: number; resolvedComplaints: number }[];
+  rows: {
+    visitors: { id: string; visitorName: string; phone: string | null; purpose: string | null; personVisited: string | null; status: string; checkInAt: string; checkOutAt: string | null }[];
+    calls: { id: string; direction: CallDirection; contactName: string; phone: string; subject: string | null; outcome: string | null; durationSec: number | null; status: CallStatus; callAt: string }[];
+    complaints: { id: string; category: ComplaintCategory; subject: string; status: ComplaintStatus; priority: ComplaintPriority; assignedToId: string | null; receivedAt: string; resolvedAt: string | null }[];
+  };
+}
+
+export function useFrontDeskReport(filters: FrontDeskReportFilters) {
+  // Buckets by the viewer's local day; the server shifts by this offset.
+  const tzOffset = new Date().getTimezoneOffset();
+  const params = Object.fromEntries(Object.entries({ ...filters, tzOffset }).filter(([, v]) => v !== undefined && v !== ''));
+  return useQuery({
+    queryKey: ['school', 'front-desk-report', params],
+    queryFn: async () => (await api.get<FrontDeskReport>(`${S}/front-desk-reports/summary`, { params })).data,
+    placeholderData: (prev) => prev,
+  });
+}
+
 /* ───────────────────────── LMS (Lesson Planning + Basic LMS) ───────────────────────── */
 /* Phases 1-5: Course Offering, Lesson Plans, Templates, Scheduled Lessons,
    Discussions, Homework, Evidence/Mastery, Reporting. Backend controller: /school/lp */
