@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { GraduationCap, Layers, Loader2, Sparkles } from 'lucide-react';
+import { Eye, GraduationCap, Layers, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,11 +21,15 @@ import { useAcademicYears, useTerminology } from '@/features/school/api';
 import {
   errorMessage,
   STAGE_LABEL,
+  type Programme,
+  type ProgrammeStage,
   useClassCohorts,
+  useCreateProgramme,
+  useDeleteProgramme,
   useGenerateCohorts,
+  useAcademicLevels,
   useGradeLevels,
   useProgrammes,
-  useSeedUgandaProgrammes,
   useUpdateCohort,
 } from '@/features/school/enrollment-api';
 import { NONE } from './_shared';
@@ -74,44 +87,53 @@ export function SchoolProgrammesPage() {
 function ProgrammesTab() {
   const { data: programmes, isLoading } = useProgrammes(true);
   const { data: gradeLevels } = useGradeLevels();
-  const seed = useSeedUgandaProgrammes();
+  const remove = useDeleteProgramme();
+  const [viewing, setViewing] = useState<Programme | null>(null);
+  const [deleting, setDeleting] = useState<Programme | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const runSeed = async () => {
+  const confirmDelete = async () => {
+    if (!deleting) return;
     try {
-      const res = await seed.mutateAsync({ linkGradeLevels: true });
-      notify.success(
-        `Programmes ready: ${res.created.length} created, ${res.updated.length} updated.` +
-          (res.unmatchedGrades.length ? ` No grade level found for ${res.unmatchedGrades.join(', ')}.` : ''),
-      );
+      await remove.mutateAsync(deleting.id);
+      notify.success(`${deleting.name} deleted.`);
+      setDeleting(null);
     } catch (err) {
-      notify.error(errorMessage(err, 'Could not install the programme templates.'));
+      notify.error(errorMessage(err, 'Could not delete this programme.'));
     }
   };
 
+  // A grade reaches its programme through its academic level (ADR-028):
+  // gradeLevel → academicLevel → defaultProgramme. The API returns each
+  // programme's `defaultForLevels`; the level list carries the grades.
+  const { data: academicLevels } = useAcademicLevels();
+  const gradesByProgramme = useMemo(() => {
+    const gradesByLevel = new Map((academicLevels ?? []).map((l) => [l.id, l.gradeLevels ?? []]));
+    return new Map(
+      (programmes ?? []).map((p) => [
+        p.id,
+        (p.defaultForLevels ?? [])
+          .flatMap((l) => gradesByLevel.get(l.id) ?? [])
+          .sort((a, b) => a.order - b.order),
+      ]),
+    );
+  }, [academicLevels, programmes]);
+  const gradesOf = (p: Programme) => (gradesByProgramme.get(p.id) ?? []).map((g) => g.name);
+
   const unlinked = useMemo(() => {
-    if (!gradeLevels || !programmes) return [];
-    const linked = new Set(programmes.flatMap((p) => (p.gradeLevels ?? []).map((g) => g.gradeLevelId)));
+    if (!gradeLevels || !programmes || !academicLevels) return [];
+    const linked = new Set([...gradesByProgramme.values()].flat().map((g) => g.id));
     return gradeLevels.filter((g) => !linked.has(g.id));
-  }, [gradeLevels, programmes]);
+  }, [gradeLevels, programmes, academicLevels, gradesByProgramme]);
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Uganda programme templates</CardTitle>
-          <CardDescription>
-            Installs Lower Primary, Upper Primary, Lower Secondary and Advanced Secondary with their NCDC/UNEB defaults
-            and links each to the matching grade levels (P1…S6). Safe to run more than once — it tops up rather than
-            duplicating, and never overwrites a grouping choice you have already made.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={runSeed} disabled={seed.isPending}>
-            {seed.isPending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1.5 h-4 w-4" />}
-            Install / refresh templates
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="flex justify-end">
+        <Button onClick={() => setCreating(true)}>
+          <Plus className="mr-1.5 h-4 w-4" /> New programme
+        </Button>
+      </div>
+      <CreateProgrammeDialog open={creating} onOpenChange={setCreating} />
 
       {unlinked.length > 0 && (
         <p className="rounded-md bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
@@ -130,18 +152,19 @@ function ProgrammesTab() {
                 <TableHead>Authority</TableHead>
                 <TableHead>Grades</TableHead>
                 <TableHead>In use</TableHead>
+                <TableHead className="w-[1%] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
+                  <TableCell colSpan={6} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></TableCell>
                 </TableRow>
               )}
               {!isLoading && (programmes ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                    No programmes yet. Install the Uganda templates above to get started.
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                    No programmes yet.
                   </TableCell>
                 </TableRow>
               )}
@@ -154,15 +177,22 @@ function ProgrammesTab() {
                   <TableCell>{STAGE_LABEL[p.stage]}</TableCell>
                   <TableCell className="text-muted-foreground">{p.curriculumAuthority ?? '—'}</TableCell>
                   <TableCell>
-                    {(p.gradeLevels ?? []).length
-                      ? (p.gradeLevels ?? [])
-                          .map((g) => g.gradeLevel?.name)
-                          .filter(Boolean)
-                          .join(', ')
+                    {gradesOf(p).length
+                      ? gradesOf(p).join(', ')
                       : <span className="text-muted-foreground">Not linked</span>}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {p._count ? `${p._count.cohorts} classes · ${p._count.enrollments} learners` : '—'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => setViewing(p)}>
+                        <Eye className="mr-1 h-4 w-4" /> View
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDeleting(p)}>
+                        <Trash2 className="mr-1 h-4 w-4" /> Delete
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -170,7 +200,163 @@ function ProgrammesTab() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!viewing} onOpenChange={(open) => !open && setViewing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{viewing?.name}</DialogTitle>
+            {viewing?.description && <DialogDescription>{viewing.description}</DialogDescription>}
+          </DialogHeader>
+          {viewing && (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+              <dt className="text-muted-foreground">Code</dt><dd>{viewing.code}</dd>
+              <dt className="text-muted-foreground">Stage</dt><dd>{STAGE_LABEL[viewing.stage]}</dd>
+              <dt className="text-muted-foreground">Authority</dt><dd>{viewing.curriculumAuthority ?? '—'}</dd>
+              <dt className="text-muted-foreground">Status</dt>
+              <dd><Badge variant={viewing.isActive ? 'secondary' : 'outline'}>{viewing.isActive ? 'Active' : 'Inactive'}</Badge></dd>
+              <dt className="text-muted-foreground">Effective</dt>
+              <dd>
+                {new Date(viewing.effectiveFrom).toLocaleDateString()}
+                {' → '}
+                {viewing.effectiveTo ? new Date(viewing.effectiveTo).toLocaleDateString() : 'open'}
+              </dd>
+              <dt className="text-muted-foreground">Grades</dt>
+              <dd>{gradesOf(viewing).join(', ') || '—'}</dd>
+              <dt className="text-muted-foreground">Default for</dt>
+              <dd>{(viewing.defaultForLevels ?? []).map((l) => l.name).join(', ') || '—'}</dd>
+              <dt className="text-muted-foreground">In use</dt>
+              <dd>{viewing._count ? `${viewing._count.cohorts} classes · ${viewing._count.enrollments} learners` : '—'}</dd>
+            </dl>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete programme</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete <span className="font-medium">{deleting?.name}</span>? This cannot be undone. A programme that
+              already has classes or learners cannot be deleted — deactivate it instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmDelete(); }}
+              disabled={remove.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {remove.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+const EMPTY_PROGRAMME = {
+  code: '',
+  name: '',
+  stage: 'OTHER' as ProgrammeStage,
+  curriculumAuthority: '',
+  description: '',
+  effectiveFrom: new Date().toISOString().slice(0, 10),
+};
+
+/**
+ * New programme. Grades are not picked here: a grade reaches its programme
+ * through its academic level's default programme (ADR-028), set on the level.
+ */
+function CreateProgrammeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const create = useCreateProgramme();
+  const [form, setForm] = useState(EMPTY_PROGRAMME);
+  const set = <K extends keyof typeof EMPTY_PROGRAMME>(key: K, value: (typeof EMPTY_PROGRAMME)[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  useEffect(() => {
+    if (open) setForm(EMPTY_PROGRAMME);
+  }, [open]);
+
+  const canSave = form.code.trim() !== '' && form.name.trim() !== '' && !create.isPending;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    try {
+      await create.mutateAsync({
+        code: form.code.trim().toUpperCase(),
+        name: form.name.trim(),
+        stage: form.stage,
+        curriculumAuthority: form.curriculumAuthority.trim() || undefined,
+        description: form.description.trim() || undefined,
+        effectiveFrom: form.effectiveFrom || undefined,
+      });
+      notify.success(`${form.name.trim()} created.`);
+      onOpenChange(false);
+    } catch (err) {
+      notify.error(errorMessage(err, 'Could not create the programme.'));
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New programme</DialogTitle>
+          <DialogDescription>
+            Link it to grades afterwards by making it the default programme of an academic level.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="programme-code">Code *</Label>
+              <Input id="programme-code" value={form.code} placeholder="e.g. LOWER_PRIMARY"
+                onChange={(e) => set('code', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="programme-name">Name *</Label>
+              <Input id="programme-name" value={form.name} placeholder="e.g. Lower Primary (P1–P3)"
+                onChange={(e) => set('name', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Stage</Label>
+              <Select value={form.stage} onValueChange={(v) => set('stage', v as ProgrammeStage)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(STAGE_LABEL) as ProgrammeStage[]).map((s) => (
+                    <SelectItem key={s} value={s}>{STAGE_LABEL[s]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="programme-authority">Curriculum authority</Label>
+              <Input id="programme-authority" value={form.curriculumAuthority} placeholder="e.g. NCDC"
+                onChange={(e) => set('curriculumAuthority', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="programme-from">Effective from</Label>
+              <Input id="programme-from" type="date" value={form.effectiveFrom}
+                onChange={(e) => set('effectiveFrom', e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="programme-description">Description</Label>
+            <Textarea id="programme-description" rows={3} value={form.description}
+              onChange={(e) => set('description', e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={!canSave}>
+              {create.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />} Create programme
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

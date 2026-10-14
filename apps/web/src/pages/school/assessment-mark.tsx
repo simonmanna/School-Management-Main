@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, Lock, Send } from 'lucide-react';
 import { PERMISSIONS } from '@erp/shared';
-import { useBoardSheet, useSubmitAssessmentMarks, KIND_LABEL } from '@/features/school/api';
+import { useBoardSheet, useSubmitAssessmentMarks, KIND_LABEL, assessmentStatusLabel } from '@/features/school/api';
 import { useAssessmentLifecycle } from '@/features/school/assessment-phase4-api';
 import { useAuthStore } from '@/stores/auth.store';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,7 +29,7 @@ export function SchoolAssessmentMarkPage() {
   if (!sheet) return <p className="py-10 text-center">Assessment not found.</p>;
   const a = sheet.assessment;
   async function action(name: string) {
-    try { await lifecycle.mutateAsync({ id: a.id, action: name, expectedVersion: a.version }); notify.success(`Assessment ${name.replaceAll('_', ' ')} action completed`); void refetch(); }
+    try { await lifecycle.mutateAsync({ id: a.id, action: name, expectedVersion: a.version }); notify.success(ACTION_DONE[name] ?? 'Done'); void refetch(); }
     catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not complete this action'); }
   }
   async function onSubmit() {
@@ -37,12 +37,20 @@ export function SchoolAssessmentMarkPage() {
     catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not submit these marks'); }
   }
   return <div className="space-y-4">
-    <Link to={`/school/assessments${a.courseOfferingId ? `?courseOfferingId=${a.courseOfferingId}` : ''}`} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" />Assessment Board</Link>
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="mb-2 flex flex-wrap gap-2"><Badge variant="outline">{KIND_LABEL[a.kind] ?? a.kind}</Badge><Badge variant="secondary">{a.status}</Badge>{a.rosterFrozen && <Badge variant="outline"><Lock className="mr-1 h-3 w-3" />Frozen roster · {sheet.total} learners</Badge>}{sheet.approvalStatus === 'approved' && <Badge variant="outline" className="text-emerald-700"><CheckCircle2 className="mr-1 h-3 w-3" />Approved</Badge>}</div><h1 className="text-2xl font-semibold">{a.title}</h1><p className="text-sm text-muted-foreground">{a.courseName ?? `${a.subject.name} · ${a.class.name}`} · {a.maxScore} points{a.dueAt ? ` · due ${new Date(a.dueAt).toLocaleString()}` : ''}</p></div>
-    {(canManage || canRelease) && <div className="flex flex-wrap gap-2">{canManage && ['draft', 'scheduled'].includes(a.status) && <Button disabled={lifecycle.isPending || !a.rosterFrozen} onClick={() => void action('publish')}><Send className="mr-2 h-4 w-4" />Publish assessment</Button>}{canManage && a.status === 'published' && <Button variant="outline" disabled={lifecycle.isPending} onClick={() => void action('open')}>Open submissions</Button>}{canManage && ['published', 'open'].includes(a.status) && <Button variant="outline" disabled={lifecycle.isPending} onClick={() => void action('close')}>Close submissions</Button>}{canRelease && sheet.approvalStatus === 'approved' && <><Button variant="outline" disabled={lifecycle.isPending || !!a.feedbackReleaseAt} onClick={() => void action('release_feedback')}>{a.feedbackReleaseAt ? 'Feedback released' : 'Release feedback'}</Button><Button variant="outline" disabled={lifecycle.isPending || !!a.marksReleaseAt} onClick={() => void action('release_marks')}>{a.marksReleaseAt ? 'Marks released' : 'Release marks'}</Button></>}</div>}</div>
-    <p className="rounded-lg border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">{a.component ? `Counts toward ${a.component.name} (${a.component.weight}%).` : 'Formative assessment — not attached to a term-result weighting component.'} Feedback: {a.feedbackReleaseAt ? 'released' : 'hidden'} · Marks: {a.marksReleaseAt ? 'released' : 'hidden'}.</p>
+    <Link to={`/school/assessments${a.courseOfferingId ? `?courseOfferingId=${a.courseOfferingId}` : ''}`} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" />Assessments</Link>
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="mb-2 flex flex-wrap gap-2"><Badge variant="outline">{KIND_LABEL[a.kind] ?? a.kind}</Badge><Badge variant="secondary">{assessmentStatusLabel(a.status)}</Badge>{a.rosterFrozen && <Badge variant="outline"><Lock className="mr-1 h-3 w-3" />Class list locked · {sheet.total} pupils</Badge>}{sheet.approvalStatus === 'approved' && <Badge variant="outline" className="text-emerald-700"><CheckCircle2 className="mr-1 h-3 w-3" />Approved</Badge>}</div><h1 className="text-2xl font-semibold">{a.title}</h1><p className="text-sm text-muted-foreground">{a.courseName ?? `${a.subject.name} · ${a.class.name}`} · {a.maxScore} points{a.dueAt ? ` · due ${new Date(a.dueAt).toLocaleString()}` : ''}</p></div>
+    {(canManage || canRelease) && <div className="flex flex-wrap gap-2">{canManage && ['draft', 'scheduled'].includes(a.status) && <div className="flex flex-col items-end gap-1"><Button disabled={lifecycle.isPending || !a.rosterFrozen} title={a.rosterFrozen ? undefined : 'Lock the class list first'} onClick={() => void action('publish')}><Send className="mr-2 h-4 w-4" />Publish assessment</Button>{!a.rosterFrozen && <p className="max-w-xs text-right text-xs text-muted-foreground">Can't publish yet: the list of pupils it is for isn't locked. The academic office locks it under Class Lists &amp; Rubrics.</p>}</div>}{canManage && a.status === 'published' && <Button variant="outline" disabled={lifecycle.isPending} onClick={() => void action('open')}>Open submissions</Button>}{canManage && ['published', 'open'].includes(a.status) && <Button variant="outline" disabled={lifecycle.isPending} onClick={() => void action('close')}>Close submissions</Button>}{canRelease && sheet.approvalStatus === 'approved' && <><Button variant="outline" disabled={lifecycle.isPending || !!a.feedbackReleaseAt} onClick={() => void action('release_feedback')}>{a.feedbackReleaseAt ? 'Feedback released' : 'Release feedback'}</Button><Button variant="outline" disabled={lifecycle.isPending || !!a.marksReleaseAt} onClick={() => void action('release_marks')}>{a.marksReleaseAt ? 'Marks released' : 'Release marks'}</Button></>}</div>}</div>
+    <p className="rounded-lg border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">{a.component ? `Counts toward ${a.component.name} (${a.component.weight}% of the term result).` : 'Practice only — does not count toward the term result.'} Pupils and parents can see: feedback {a.feedbackReleaseAt ? 'yes' : 'not yet'} · marks {a.marksReleaseAt ? 'yes' : 'not yet'}.</p>
     {canReconcile && (!a.courseOfferingId || !a.rosterId) && <AssessmentContextRepair sheet={sheet} onSaved={() => void refetch()} />}
     <Tabs defaultValue="markbook"><TabsList><TabsTrigger value="markbook">Markbook</TabsTrigger>{a.assignmentId && <TabsTrigger value="inbox">Submissions & rubric</TabsTrigger>}</TabsList><TabsContent value="markbook"><Card><CardContent className="p-4"><ProductionMarkbook key={a.id} sheet={sheet} onSaved={() => void refetch()} onSubmit={onSubmit} submitting={submit.isPending} onEvidence={setEvidenceId} /></CardContent></Card></TabsContent>{a.assignmentId && <TabsContent value="inbox"><AssignmentInbox sheet={sheet} onSaved={() => void refetch()} /></TabsContent>}</Tabs>
     {evidenceId && <LearnerEvidenceDialog assessmentId={a.id} studentId={evidenceId} name={sheet.students.find((s) => s.studentProfileId === evidenceId)?.name ?? 'Learner'} onClose={() => setEvidenceId(null)} />}
   </div>;
 }
+
+const ACTION_DONE: Record<string, string> = {
+  publish: 'Assessment published',
+  open: 'Submissions opened',
+  close: 'Submissions closed',
+  release_feedback: 'Feedback released to pupils and parents',
+  release_marks: 'Marks released to pupils and parents',
+};

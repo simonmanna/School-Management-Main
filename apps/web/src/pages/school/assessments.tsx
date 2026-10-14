@@ -17,6 +17,7 @@ import { useMyStaffIdentity } from '@/features/hr/api';
 import { useAuthStore } from '@/stores/auth.store';
 import { EmptyState, Picker, Progress, fmtDate, useDefaulted, useStickyState } from './_components/exam-workflow';
 import { CreateAssessmentDialog } from './_components/assessment-form';
+import { AssessmentSetupChecklist } from './_components/assessment-setup-checklist';
 
 /**
  * Assessments — where a teacher starts.
@@ -102,9 +103,9 @@ export function SchoolAssessmentsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Assessment Board</h1>
+          <h1 className="text-2xl font-semibold">Assessments</h1>
           <p className="text-sm text-muted-foreground">
-            One workflow for coursework, exams and observations — from frozen roster to approved, released marks.
+            Every test, homework, project and exam for a class — create it, mark it, send the marks for approval.
           </p>
         </div>
         <Button onClick={() => setCreating(true)}>
@@ -112,16 +113,26 @@ export function SchoolAssessmentsPage() {
         </Button>
       </div>
 
+      {/* The academic office sees what is still missing before marks count. */}
+      {seesAllClasses && <AssessmentSetupChecklist termId={termId || undefined} />}
+
+      {/* Every filter in one row: where (year → subject), then stage and kind. */}
       <Card>
-        <CardContent className="flex flex-wrap gap-3 p-3">
-          <Picker label="Year" value={yearId} onChange={setYearId}
+        <CardContent className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3 lg:grid-cols-6">
+          <Picker label="Year" value={yearId} onChange={setYearId} className="min-w-0"
             options={yearList.map((y) => ({ value: y.id, label: y.name }))} />
-          <Picker label="Term" value={termId} onChange={setTermId}
+          <Picker label="Term" value={termId} onChange={setTermId} className="min-w-0"
             options={termList.map((t) => ({ value: t.id, label: t.name }))} />
-          <Picker label="Class" value={classId} onChange={setClassId}
+          <Picker label="Class" value={classId} onChange={setClassId} className="min-w-0"
             options={classList.map((c) => ({ value: c.id, label: c.name }))} />
-          <Picker label="Subject" value={subjectId} onChange={setSubjectId} placeholder="All subjects"
+          <Picker label="Subject" value={subjectId} onChange={setSubjectId} placeholder="All subjects" className="min-w-0"
             options={(subjects ?? []).map((s) => ({ value: s.id, label: s.name }))} />
+          <Picker label="Status" value={stage} onChange={(v) => setFilter('status', v)} className="min-w-0"
+            placeholder={`All (${counts.all ?? 0})`}
+            options={BOARD_STAGES.map((st) => ({ value: st, label: `${STAGE_LABEL[st]} (${counts[st] ?? 0})` }))} />
+          <Picker label="Kind" value={kind} onChange={(v) => setFilter('kind', v)} className="min-w-0"
+            placeholder="Any kind"
+            options={ASSESSMENT_KINDS.map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }))} />
         </CardContent>
       </Card>
 
@@ -155,20 +166,6 @@ export function SchoolAssessmentsPage() {
         </Card>
       )}
 
-      {/* Stage filter, then kind. Two rails, because they answer different questions. */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <FilterChip active={!stage} label={`All (${counts.all ?? 0})`} onClick={() => setFilter('status', '')} />
-        {BOARD_STAGES.map((s) => (
-          <FilterChip key={s} active={stage === s} label={`${STAGE_LABEL[s]} (${counts[s] ?? 0})`}
-            onClick={() => setFilter('status', stage === s ? '' : s)} />
-        ))}
-        <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <FilterChip active={!kind} label="Any kind" onClick={() => setFilter('kind', '')} />
-        {ASSESSMENT_KINDS.map((k) => (
-          <FilterChip key={k} active={kind === k} label={KIND_LABEL[k] ?? k}
-            onClick={() => setFilter('kind', kind === k ? '' : k)} />
-        ))}
-      </div>
 
       {isLoading ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
@@ -243,22 +240,6 @@ export function SchoolAssessmentsPage() {
         />
       )}
     </div>
-  );
-}
-
-function FilterChip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={[
-        'rounded-full border px-2.5 py-1 text-xs transition',
-        active ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent',
-      ].join(' ')}
-    >
-      {label}
-    </button>
   );
 }
 

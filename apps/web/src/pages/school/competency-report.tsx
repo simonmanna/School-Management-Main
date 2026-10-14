@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { GraduationCap } from 'lucide-react';
 import {
-  useStudents, useTerms, useOutcomeAchievements, useTranscript,
+  useStudents, useTerms, useSubjects, useOutcomeAchievements, useTranscript,
 } from '@/features/school/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,12 +17,16 @@ export function SchoolCompetencyReportPage() {
   const [termId, setTermId] = useState('');
   const { data: achievements } = useOutcomeAchievements(studentId || undefined, termId || undefined);
   const { data: transcript } = useTranscript(studentId || undefined);
+  const { data: subjects } = useSubjects();
+  const termName = (id: string) => (terms?.data ?? []).find((t: any) => t.id === id)?.name ?? 'Term';
+  const subjectName = (id: string) => (subjects?.data ?? []).find((x: any) => x.id === id)?.name ?? '—';
+  const transcriptTerms: any[] = (transcript as any)?.payload?.terms ?? [];
 
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Competency & Annual Reports</h1>
-        <p className="text-sm text-muted-foreground">P2-B: competency outcomes per student (CBC strands) plus the cumulative transcript for annual reporting.</p>
+        <h1 className="text-xl font-semibold">Competency &amp; Annual</h1>
+        <p className="text-sm text-muted-foreground">A pupil's learning outcomes for a term, and their results across every term for annual reporting.</p>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -59,10 +64,36 @@ export function SchoolCompetencyReportPage() {
         <Card>
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><GraduationCap className="h-4 w-4" /> Cumulative transcript (annual)</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {((transcript as any)?.payload?.terms ?? []).length > 0 ? (
-              <pre className="max-h-96 overflow-auto rounded bg-muted/40 p-3 text-xs">{JSON.stringify((transcript as any).payload, null, 2)}</pre>
+            {transcriptTerms.length > 0 ? (
+              <div className="space-y-3">
+                {(transcript as any)?.payload?.cumulativeGpa != null && (
+                  <p className="text-sm">Overall GPA: <span className="font-semibold">{(transcript as any).payload.cumulativeGpa}</span></p>
+                )}
+                {transcriptTerms.map((t) => (
+                  <div key={t.termId} className="rounded border p-2 text-sm">
+                    <p className="font-medium">
+                      {termName(t.termId)}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        {t.meanPercent != null ? `average ${t.meanPercent}%` : ''}
+                        {t.classRank != null ? ` · position ${t.classRank}` : ''}
+                        {t.division ? ` · division ${t.division}` : ''}
+                        {t.aggregate != null ? ` · aggregate ${t.aggregate}` : ''}
+                      </span>
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {(t.subjects ?? []).map((sub: any) => (
+                        <Badge key={sub.subjectId} variant="secondary">
+                          {subjectName(sub.subjectId)}: {sub.grade ?? '—'}{sub.finalPercent != null ? ` (${sub.finalPercent}%)` : ''}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No cumulative transcript built yet. Build one from the Certification page.</p>
+              <p className="text-sm text-muted-foreground">
+                No transcript built yet. Build one on <Link to="/school/certification" className="underline">Certificates &amp; Transcripts</Link>.
+              </p>
             )}
           </CardContent>
         </Card>

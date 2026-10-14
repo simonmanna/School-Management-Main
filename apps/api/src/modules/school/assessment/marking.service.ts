@@ -75,6 +75,40 @@ export class MarkingService {
     await this.dataScope.assertOwnsStaffRecord(assessment.teacherPartnerId);
   }
 
+  /**
+   * May this caller enter marks on an exam paper (class + subject)?
+   *
+   * The exam marksheet is keyed by paper, not by a minted assessment, and the
+   * teacher's "Exam papers to enter" list is built from `TeacherAssignment`. An
+   * owner-scoped teacher may enter a paper for a (class, subject) they are
+   * assigned to — by teaching allocation or by a live course-offering seat.
+   * Entry only: locking and approval stay on their own grants.
+   */
+  async assertMayEnterExamPaper(classId: string, subjectId: string): Promise<void> {
+    const perms: string[] = this.tenant.store?.permissions ?? [];
+    if (perms.includes(PERMISSIONS.school.enterGrades) || perms.includes('*')) return;
+    if (!perms.includes(PERMISSIONS.school.ownGrades)) throw new ForbiddenException('Mark entry permission is required');
+    const teacherPartnerId = await this.employeeIdentity.staffProfileIdForCaller();
+    if (!teacherPartnerId) throw new ForbiddenException('Your login is not linked to a staff record');
+    const organizationId = this.tenant.organizationId;
+    const assigned = await this.prisma.client.teacherAssignment.findFirst({
+      where: { organizationId, teacherPartnerId, classId, subjectId },
+      select: { id: true },
+    });
+    if (assigned) return;
+    const now = new Date();
+    const seat = await this.prisma.client.courseOfferingTeacher.findFirst({
+      where: {
+        teacherPartnerId,
+        effectiveFrom: { lte: now },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+        courseOffering: { organizationId, subjectId, classCohort: { classId } },
+      },
+      select: { id: true },
+    });
+    if (!seat) throw new ForbiddenException('You may only enter marks for classes and subjects you teach');
+  }
+
   /** Course allocation, including effective-dated team teachers and substitutes. */
   async assertMayTeachOffering(courseOfferingId: string): Promise<void> {
     const perms: string[] = this.tenant.store?.permissions ?? [];

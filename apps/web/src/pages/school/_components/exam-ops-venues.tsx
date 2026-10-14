@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus, Armchair, UserCheck } from 'lucide-react';
 import {
-  useClasses, useExams, useExamVenues, useCreateExamVenue, useExamRegistrations,
+  useClasses, useExamVenues, useCreateExamVenue, useExamRegistrations,
   useRegisterClass, useAllocateSeats, useUpdateRegistration,
   useInvigilators, useCreateInvigilator, useAssignInvigilator, useUnassignInvigilator, useInvigilatorsBySchedule,
   useExamSchedules, useQuestionPapersBySchedule, useCreateQuestionPaper,
@@ -10,14 +10,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
+import { apiMessage, selectClass as sel } from './exam-ops-shared';
 
-const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
+/**
+ * Exam-day logistics — venues and seating, invigilators, and the content of
+ * each question paper. These used to be a separate "Exam Operations" page
+ * (`/school/exam-ops`) beside "Examination operations": two near-identical
+ * names for one exams-office job. They are now tabs of the one console, driven
+ * by the examination chosen there.
+ */
 
-export function SchoolExamOpsPage() {
-  const { data: exams } = useExams();
-  const [examId, setExamId] = useState('');
+/** Venues, class registration, seat allocation and the hall plan. */
+export function ExamVenuesPanel({ examId }: { examId: string }) {
   const { data: venues } = useExamVenues();
   const createVenue = useCreateExamVenue();
   const { data: regs } = useExamRegistrations(examId || undefined);
@@ -28,34 +33,18 @@ export function SchoolExamOpsPage() {
   const [vName, setVName] = useState('');
   const [vCap, setVCap] = useState('');
   const [venueId, setVenueId] = useState('');
-
   return (
-    <div className="space-y-4 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">Exam Operations</h1>
-        <p className="text-sm text-muted-foreground">Exam rooms, who sits which paper, seating and clashes, invigilators, and question papers.</p>
-      </div>
-      <Tabs defaultValue="seating">
-        <TabsList>
-          <TabsTrigger value="seating">Venues &amp; seating</TabsTrigger>
-          <TabsTrigger value="invigilators">Invigilators</TabsTrigger>
-          <TabsTrigger value="papers">Question papers</TabsTrigger>
-        </TabsList>
-        <TabsContent value="seating" className="pt-4"><SeatingTab
-          exams={exams} examId={examId} setExamId={setExamId} venues={venues} createVenue={createVenue}
-          setVName={setVName} vName={vName} setVCap={setVCap} vCap={vCap} venueId={venueId} setVenueId={setVenueId}
-          allocate={allocate} classes={classes} registerClass={registerClass} regs={regs} updateReg={updateReg}
-        /></TabsContent>
-        <TabsContent value="invigilators" className="pt-4"><InvigilatorTab examId={examId} /></TabsContent>
-        <TabsContent value="papers" className="pt-4"><QuestionPaperTab examId={examId} /></TabsContent>
-      </Tabs>
-    </div>
+    <SeatingTab
+      examId={examId} venues={venues} createVenue={createVenue}
+      setVName={setVName} vName={vName} setVCap={setVCap} vCap={vCap} venueId={venueId} setVenueId={setVenueId}
+      allocate={allocate} classes={classes} registerClass={registerClass} regs={regs} updateReg={updateReg}
+    />
   );
 }
 
 /* ── Seating (original) ── */
 function SeatingTab(props: any) {
-  const { exams, examId, setExamId, venues, createVenue, setVName, vName, setVCap, vCap, venueId, setVenueId, allocate, classes, registerClass, regs, updateReg } = props;
+  const { examId, venues, createVenue, setVName, vName, setVCap, vCap, venueId, setVenueId, allocate, classes, registerClass, regs, updateReg } = props;
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card>
@@ -64,26 +53,23 @@ function SeatingTab(props: any) {
           {(venues?.data ?? []).map((v: any) => <div key={v.id} className="rounded border p-2 text-sm">{v.name} {v.capacity ? <span className="text-muted-foreground">· cap {v.capacity}</span> : null} {v.isActive ? <Badge>active</Badge> : <Badge variant="secondary">off</Badge>}</div>)}
           <Input placeholder="Venue name" value={vName} onChange={(e) => setVName(e.target.value)} />
           <Input type="number" placeholder="Capacity" className="w-28" value={vCap} onChange={(e) => setVCap(e.target.value)} />
-          <Button size="sm" disabled={!vName || createVenue.isPending} onClick={async () => { await createVenue.mutateAsync({ name: vName, capacity: vCap ? Number(vCap) : undefined }); setVName(''); setVCap(''); notify.success('Venue added'); }}><Plus className="h-4 w-4" /> Add venue</Button>
+          <Button size="sm" disabled={!vName || createVenue.isPending} onClick={async () => { try { await createVenue.mutateAsync({ name: vName, capacity: vCap ? Number(vCap) : undefined }); setVName(''); setVCap(''); notify.success('Venue added'); } catch (e) { notify.error('Could not add the venue', { description: apiMessage(e, 'Try again.') }); } }}><Plus className="h-4 w-4" /> Add venue</Button>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Select exam</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Register &amp; seat candidates</CardTitle></CardHeader>
         <CardContent className="space-y-2">
-          <select className={sel} value={examId} onChange={(e) => setExamId(e.target.value)}>
-            <option value="">Exam…</option>{(exams?.data ?? []).map((e: any) => <option key={e.id} value={e.id}>{e.name} · {e.status}</option>)}
-          </select>
           {examId && (
             <div className="space-y-2">
               <select className={sel} value={venueId} onChange={(e) => setVenueId(e.target.value)}>
                 <option value="">Venue for seating…</option>{(venues?.data ?? []).map((v: any) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
-              <Button size="sm" className="w-full" disabled={allocate.isPending} onClick={async () => { try { await allocate.mutateAsync({ examId, venueId }); notify.success('Seats allocated (clash-checked)'); } catch { notify.error('Allocation failed — venue clash?'); } }}><Armchair className="h-4 w-4" /> Allocate seats</Button>
+              <Button size="sm" className="w-full" disabled={allocate.isPending} onClick={async () => { try { await allocate.mutateAsync({ examId, venueId }); notify.success('Seats allocated (clash-checked)'); } catch (e) { notify.error('Could not allocate seats', { description: apiMessage(e, 'Check the venue capacity and for clashes.') }); } }}><Armchair className="h-4 w-4" /> Allocate seats</Button>
             </div>
           )}
           {classes?.data && (
-            <select className={sel} onChange={async (e) => { if (e.target.value) { try { await registerClass.mutateAsync({ examId, classId: e.target.value }); notify.success('Class registered'); } catch { notify.error('Register failed'); } } }}>
+            <select className={sel} onChange={async (e) => { if (e.target.value) { try { await registerClass.mutateAsync({ examId, classId: e.target.value }); notify.success('Class registered'); } catch (err) { notify.error('Could not register the class', { description: apiMessage(err, 'Try again.') }); } } }}>
               <option value="">Register whole class…</option>{(classes.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
@@ -105,7 +91,7 @@ function SeatingTab(props: any) {
               </div>
             </div>
           ))}
-          {(regs ?? []).length === 0 && <p className="text-sm text-muted-foreground">Select an exam to see candidates.</p>}
+          {(regs ?? []).length === 0 && <p className="text-sm text-muted-foreground">No candidates yet — register a whole class here.</p>}
         </CardContent>
       </Card>
       {examId && <HallPlan regs={regs} venues={venues} />}
@@ -155,7 +141,7 @@ function HallPlan({ regs, venues }: { regs: any[]; venues: any }) {
 }
 
 /* ── P0-B Invigilators ── */
-function InvigilatorTab({ examId }: { examId: string }) {
+export function ExamInvigilatorsPanel({ examId }: { examId: string }) {
   const { data: invigilators } = useInvigilators();
   const createInv = useCreateInvigilator();
   const { data: schedules } = useExamSchedules();
@@ -183,14 +169,14 @@ function InvigilatorTab({ examId }: { examId: string }) {
         <CardHeader><CardTitle className="text-base">Assign to a sitting</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <select className={sel} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
-            <option value="">Exam schedule sitting…</option>{mySchedules.map((s: any) => <option key={s.id} value={s.id}>{s.subject?.name ?? s.subjectId?.slice(0, 6)} · {s.date} {s.startTime}</option>)}
+            <option value="">Choose a paper sitting…</option>{mySchedules.map((s: any) => <option key={s.id} value={s.id}>{s.subject?.name ?? s.subjectId?.slice(0, 6)} · {s.date} {s.startTime}</option>)}
           </select>
           {scheduleId && (
             <>
               <select className={sel} value={invId} onChange={(e) => setInvId(e.target.value)}>
                 <option value="">Invigilator…</option>{(invigilators?.data ?? []).filter((i: any) => i.isActive).map((i: any) => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
-              <Button size="sm" disabled={!invId || assign.isPending} onClick={async () => { try { await assign.mutateAsync({ examScheduleId: scheduleId, invigilatorId: invId }); setInvId(''); notify.success('Assigned (clash-checked)'); } catch { notify.error('Assign failed — invigilator clash?'); } }}><UserCheck className="h-4 w-4" /> Assign</Button>
+              <Button size="sm" disabled={!invId || assign.isPending} onClick={async () => { try { await assign.mutateAsync({ examScheduleId: scheduleId, invigilatorId: invId }); setInvId(''); notify.success('Assigned (clash-checked)'); } catch (e) { notify.error('Could not assign the invigilator', { description: apiMessage(e, 'They may already be invigilating at that time.') }); } }}><UserCheck className="h-4 w-4" /> Assign</Button>
               <div className="space-y-1 pt-2">
                 {(assigned ?? []).map((a: any) => (
                   <div key={a.id} className="flex items-center justify-between rounded border p-1.5 text-xs">
@@ -209,7 +195,7 @@ function InvigilatorTab({ examId }: { examId: string }) {
 }
 
 /* ── P2-A Traditional question papers ── */
-function QuestionPaperTab({ examId }: { examId: string }) {
+export function ExamPaperContentPanel({ examId }: { examId: string }) {
   const { data: schedules } = useExamSchedules();
   const [scheduleId, setScheduleId] = useState('');
   const { data: papers } = useQuestionPapersBySchedule(scheduleId || undefined);
@@ -226,19 +212,27 @@ function QuestionPaperTab({ examId }: { examId: string }) {
         <CardHeader><CardTitle className="text-base">Question papers</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <select className={sel} value={scheduleId} onChange={(e) => setScheduleId(e.target.value)}>
-            <option value="">Exam schedule sitting…</option>{mySchedules.map((s: any) => <option key={s.id} value={s.id}>{s.subject?.name ?? s.subjectId?.slice(0, 6)} · {s.date} {s.startTime}</option>)}
+            <option value="">Choose a paper sitting…</option>{mySchedules.map((s: any) => <option key={s.id} value={s.id}>{s.subject?.name ?? s.subjectId?.slice(0, 6)} · {s.date} {s.startTime}</option>)}
           </select>
           {scheduleId && (
             <>
               <Input placeholder="Paper title" value={title} onChange={(e) => setTitle(e.target.value)} />
               <select className={sel} value={kind} onChange={(e) => setKind(e.target.value)}>
-                {['theory', 'practical', 'alternative_to_practical', 'oral'].map((k) => <option key={k} value={k}>{k}</option>)}
+                {PAPER_KINDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
-              <textarea className={sel + ' h-20'} placeholder={"Questions, one per line, e.g. 1. Solve the equation"} value={qText} onChange={(e) => setQText(e.target.value)} />
+              <textarea className={sel + ' h-20'} placeholder={"One question per line, marks in brackets, e.g.\nSolve 2x + 3 = 7 (5)"} value={qText} onChange={(e) => setQText(e.target.value)} />
               <Button size="sm" disabled={!title || createPaper.isPending} onClick={async () => {
-                const questions = qText.split('\n').map((line, i) => ({ number: i + 1, text: line.trim(), marks: 0 })).filter((q) => q.text);
-                await createPaper.mutateAsync({ examScheduleId: scheduleId, title, paperKind: kind, questions });
-                setTitle(''); setQText(''); notify.success('Question paper saved');
+                const questions = qText.split('\n').map((l) => l.trim()).filter(Boolean).map((line, i) => {
+                  // "Solve for x (5)" or "Solve for x (5 marks)" carries the question's marks.
+                  const m = line.match(/\((\d+)\s*(?:marks?)?\)\s*$/i);
+                  return { number: i + 1, text: m ? line.slice(0, m.index).trim() : line, marks: m ? Number(m[1]) : 0 };
+                });
+                try {
+                  await createPaper.mutateAsync({ examScheduleId: scheduleId, title, paperKind: kind, questions });
+                  setTitle(''); setQText(''); notify.success('Question paper saved');
+                } catch (e) {
+                  notify.error('Could not save the paper', { description: apiMessage(e, 'Try again.') });
+                }
               }}><Plus className="h-4 w-4" /> Save paper</Button>
             </>
           )}
@@ -249,7 +243,7 @@ function QuestionPaperTab({ examId }: { examId: string }) {
         <CardContent className="space-y-1">
           {(papers ?? []).map((p: any) => (
             <div key={p.id} className="rounded border p-2 text-sm">
-              <div className="font-medium">{p.title} <Badge variant="secondary">{p.paperKind}</Badge></div>
+              <div className="font-medium">{p.title} <Badge variant="secondary">{PAPER_KINDS.find(([k]) => k === p.paperKind)?.[1] ?? p.paperKind}</Badge></div>
               <div className="text-xs text-muted-foreground">{(p.questions ?? []).length} questions · {p.totalMarks} marks</div>
             </div>
           ))}
@@ -259,3 +253,10 @@ function QuestionPaperTab({ examId }: { examId: string }) {
     </div>
   );
 }
+
+const PAPER_KINDS: Array<[string, string]> = [
+  ['theory', 'Theory'],
+  ['practical', 'Practical'],
+  ['alternative_to_practical', 'Alternative to practical'],
+  ['oral', 'Oral'],
+];

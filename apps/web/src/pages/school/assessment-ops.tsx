@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 import { AssessmentReconciliation } from './_components/assessment-reconciliation';
+import { ConfirmButton } from './_components/confirm-button';
 
 const sel = 'w-full rounded-md border bg-card px-3 py-2 text-sm';
 
@@ -20,19 +21,19 @@ export function SchoolAssessmentOpsPage() {
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Class lists, rubrics & assignments</h1>
-        <p className="text-sm text-muted-foreground">Fix the list of pupils a term’s results are worked out against, keep marking rubrics, and set assignments for a whole class.</p>
+        <h1 className="text-xl font-semibold">Class Lists &amp; Rubrics</h1>
+        <p className="text-sm text-muted-foreground">Lock the list of pupils each class's term results are worked out against, and keep the rubrics teachers mark with.</p>
       </div>
       <Tabs defaultValue="rosters">
         <TabsList>
           <TabsTrigger value="rosters">Class lists</TabsTrigger>
           <TabsTrigger value="rubrics">Rubrics</TabsTrigger>
-          <TabsTrigger value="assign">Assignments</TabsTrigger>
-          <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
+          {/* One-off data repair for assessments migrated from the old homework
+              and gradebook screens. Kept reachable, but last and plainly named. */}
+          <TabsTrigger value="reconciliation">Migration repair</TabsTrigger>
         </TabsList>
         <TabsContent value="rosters" className="pt-4"><RostersTab /></TabsContent>
         <TabsContent value="rubrics" className="pt-4"><RubricsTab/></TabsContent>
-        <TabsContent value="assign" className="pt-4"><AssignTab/></TabsContent>
         <TabsContent value="reconciliation" className="pt-4"><AssessmentReconciliation /></TabsContent>
       </Tabs>
     </div>
@@ -55,29 +56,56 @@ function RostersTab() {
   const removeMember = useRemoveRosterMember();
   const { data: students } = useStudents({ pageSize: 200 });
   const [addStudent, setAddStudent] = useState('');
+  const selected = (rosters?.data ?? []).find((r) => r.id === rosterId);
+  const locked = !!selected?.frozenAt;
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader><CardTitle className="text-base">Cohorts</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">Class lists</CardTitle></CardHeader>
         <CardContent className="space-y-2">
+          {(rosters?.data ?? []).length === 0 && (
+            <p className="text-sm text-muted-foreground">No class lists yet. Each class needs one, locked, before its term results can be worked out.</p>
+          )}
           {(rosters?.data ?? []).map((r) => (
             <button key={r.id} className="flex w-full items-center justify-between rounded border p-2 text-sm text-left hover:bg-accent" onClick={() => setRosterId(r.id)}>
-              <span>{r.name ?? `${r.scopeType} ${r.classId?.slice(0,6)}`} <Badge variant="secondary">{r.frozenAt ? 'Frozen' : 'Draft'}</Badge></span>
-              <span className="text-xs text-muted-foreground">{(r as any).memberCount ?? (r as any).members?.length ?? 0} members</span>
+              <span>{r.name ?? `${(classes?.data ?? []).find((c) => c.id === r.classId)?.name ?? 'Whole grade'} · ${(terms?.data ?? []).find((t) => t.id === r.termId)?.name ?? ''}`} <Badge variant="secondary">{r.frozenAt ? 'Locked' : 'Draft'}</Badge></span>
+              <span className="text-xs text-muted-foreground">{(r as any).memberCount ?? (r as any).members?.length ?? 0} pupils</span>
             </button>
           ))}
           <select className={sel} value={termId} onChange={(e) => setTermId(e.target.value)}><option value="">Term…</option>{(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class (scope)…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}><option value="">Class…</option>{(classes?.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           <Input placeholder="Name this class list" value={name} onChange={(e) => setName(e.target.value)} />
-          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => { const saved: any = await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined }); setName(''); if (saved?.id) setRosterId(saved.id); notify.success('Class list saved', { description: 'Lock it before working out results, so the list cannot change underneath them.' }); }}> <Plus className="h-4 w-4" /> Save class list</Button>
+          <Button size="sm" disabled={!termId || capture.isPending} onClick={async () => {
+            try {
+              const saved: any = await capture.mutateAsync({ termId, classId: classId||undefined, scopeType: classId ? 'class' : 'grade', name: name||undefined });
+              setName(''); if (saved?.id) setRosterId(saved.id);
+              notify.success('Class list saved', { description: 'Lock it before working out results, so the list cannot change underneath them.' });
+            } catch (e: any) {
+              notify.error('Could not save the class list', { description: e?.response?.data?.message ?? 'Try again.' });
+            }
+          }}> <Plus className="h-4 w-4" /> Save class list</Button>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Members</CardTitle>
-          {rosterId && <Button size="sm" variant="ghost" disabled={freeze.isPending} onClick={() => freeze.mutate(rosterId, { onSuccess: () => notify.success('Class list locked', { description: 'It can now be used to work out results.' }), onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Could not lock this class list') })}><Lock className="h-4 w-4" /> Freeze</Button>}
+          <CardTitle className="text-base">Pupils on this list</CardTitle>
+          {rosterId && !locked && (
+            <ConfirmButton
+              variant="ghost"
+              disabled={freeze.isPending}
+              title="Lock this class list?"
+              description="Term results are worked out against a locked list, so it can't change underneath them. Check every pupil is on it first: a locked list can't be edited."
+              confirmLabel="Lock list"
+              onConfirm={() => freeze.mutate(rosterId, {
+                onSuccess: () => notify.success('Class list locked', { description: 'It can now be used to work out results.' }),
+                onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Could not lock this class list'),
+              })}
+            >
+              <Lock className="h-4 w-4" /> Lock list
+            </ConfirmButton>
+          )}
         </CardHeader>
         <CardContent className="space-y-2">
           {(members ?? []).map((m) => (
@@ -85,20 +113,32 @@ function RostersTab() {
               <span>{m.name} <span className="font-mono text-xs text-muted-foreground">{m.admissionNo ?? ''}</span></span>
               <div className="flex gap-1">
                 <Badge variant="secondary">{m.status}</Badge>
-                <Button size="sm" variant="ghost" onClick={() => removeMember.mutate({ rosterId: rosterId!, studentProfileId: m.studentProfileId })}>×</Button>
+                {!locked && (
+                  <Button
+                    size="sm" variant="ghost" aria-label={`Remove ${m.name}`}
+                    onClick={() => removeMember.mutate(
+                      { rosterId: rosterId!, studentProfileId: m.studentProfileId },
+                      { onError: (e: any) => notify.error(e?.response?.data?.message ?? 'Could not remove this pupil') },
+                    )}
+                  >×</Button>
+                )}
               </div>
             </div>
           ))}
-          {rosterId && (
+          {rosterId && !locked && (
             <div className="flex gap-2">
               <select className={sel} value={addStudent} onChange={(e) => setAddStudent(e.target.value)}>
                 <option value="">Add student…</option>
                 {(students?.data ?? []).filter((s) => !(members ?? []).some((m) => m.studentProfileId === s.id)).map((s) => <option key={s.id} value={s.id}>{s.partner?.name} · {s.admissionNo}</option>)}
               </select>
-              <Button size="sm" disabled={!addStudent} onClick={async () => { await addMember.mutateAsync({ rosterId: rosterId!, studentProfileId: addStudent }); setAddStudent(''); notify.success('Added'); }}>Add</Button>
+              <Button size="sm" disabled={!addStudent} onClick={async () => {
+                try { await addMember.mutateAsync({ rosterId: rosterId!, studentProfileId: addStudent }); setAddStudent(''); notify.success('Pupil added'); }
+                catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not add this pupil'); }
+              }}>Add</Button>
             </div>
           )}
-          {!rosterId && <p className="text-sm text-muted-foreground">Select a roster to manage members.</p>}
+          {locked && <p className="text-xs text-muted-foreground">Locked: this list is used for term results and can't be changed.</p>}
+          {!rosterId && <p className="text-sm text-muted-foreground">Choose a class list on the left to see its pupils.</p>}
         </CardContent>
       </Card>
     </div>
@@ -244,6 +284,3 @@ function RubricsTab() {
     </div>
   );
 }
-
-/* ── Assignments ── */
-function AssignTab() { return <Card><CardContent className="p-6"><p className="mb-4 text-sm text-muted-foreground">Assignments, homework and rubric marking now use the unified Assessment Board.</p><Button asChild><a href="/school/assessments?new=1">Create an assessment</a></Button></CardContent></Card>; }

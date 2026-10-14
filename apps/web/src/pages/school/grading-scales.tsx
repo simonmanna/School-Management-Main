@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, Trash2, Save } from 'lucide-react';
 import {
   useGradingScales, useCreateGradingScale, useUpdateGradingScale, useDeleteGradingScale,
@@ -10,8 +11,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
+import { ConfirmButton } from './_components/confirm-button';
 
 const emptyBand = (): GradingBand => ({ min: 0, max: 100, grade: '', gpa: 0, remark: '' });
+
+/** A new band starts above the current top band, so adding one is never instantly invalid. */
+const nextBand = (bands: GradingBand[]): GradingBand => {
+  if (!bands.length) return emptyBand();
+  const top = Math.max(...bands.map((b) => b.min));
+  return { min: Math.min(top + 10, 100), max: 100, grade: '', gpa: 0, remark: '' };
+};
 
 export function SchoolGradingScalePage() {
   const { data: scales, isLoading } = useGradingScales();
@@ -46,19 +55,34 @@ export function SchoolGradingScalePage() {
     } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Save failed'); }
   };
 
-  const weightsValid = (() => {
-    const sorted = [...bands].sort((a, b) => b.min - a.min);
-    for (let i = 0; i < sorted.length - 1; i++) {
-      if (sorted[i].min <= sorted[i + 1].max) return false; // overlap / non-contiguous
-    }
-    return bands.length > 0 && bands.every((b) => b.grade);
+  // The same rules the server applies (validateBands): a band is chosen by the
+  // highest Min % not above the score, so bands only need distinct starting
+  // points, a grade each, and a bottom band starting at 0. Max % is for
+  // display; 70–80 followed by 80–100 is fine.
+  const bandErrors = (() => {
+    const errors: string[] = [];
+    if (!bands.length) return ['Add at least one band.'];
+    const mins = bands.map((b) => b.min);
+    if (new Set(mins).size !== mins.length) errors.push('Two bands start at the same Min %.');
+    if (bands.some((b) => !b.grade)) errors.push('Every band needs a grade.');
+    if (Math.min(...mins) > 0) errors.push(`The lowest band starts at ${Math.min(...mins)}%, so lower scores would get no grade — start it at 0.`);
+    return errors;
   })();
+  const weightsValid = bandErrors.length === 0;
+  const sortedMins = [...bands.map((b) => b.min)].sort((a, b) => a - b);
+  const runsTo = (min: number) => {
+    const next = sortedMins.find((m) => m > min);
+    return next === undefined ? '100%' : `just under ${next}%`;
+  };
 
   return (
     <div className="space-y-4 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Grading Scales & Boundaries</h1>
-        <p className="text-sm text-muted-foreground">Define grade bands (min–max %, letter, GPA). The default scale drives grade computation.</p>
+        <h1 className="text-xl font-semibold">Grading Scales</h1>
+        <p className="text-sm text-muted-foreground">
+          Grade bands (from–to %, grade, points) that turn a percentage into a grade. The default scale for each system is the one used.
+          How much each kind of work counts is set in <Link to="/school/assessment" className="underline">Assessment Weighting</Link>.
+        </p>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -66,17 +90,30 @@ export function SchoolGradingScalePage() {
           <CardHeader><CardTitle className="text-base">Scales</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-            {(scales ?? []).length === 0 && !isLoading && <p className="text-sm text-muted-foreground">No scales yet.</p>}
+            {(scales ?? []).length === 0 && !isLoading && (
+              <p className="text-sm text-muted-foreground">No scales yet. Without a default scale for your system, results can't be given grades — create one with “New scale”.</p>
+            )}
             {(scales ?? []).map((s: GradingScale) => (
               <div key={s.id} className="flex items-center justify-between rounded border p-2 text-sm">
                 <div>
                   <span className="font-medium">{s.name}</span>
-                  {s.isDefault && <Badge className="ml-2">default</Badge>}
-                  <div className="text-xs text-muted-foreground">{s.bands?.length ?? 0} bands</div>
+                  {s.isDefault && <Badge className="ml-2">Default</Badge>}
+                  <div className="text-xs text-muted-foreground">{s.bands?.length ?? 0} bands{s.system ? ` · ${s.system}` : ''}</div>
                 </div>
                 <div className="flex gap-1">
                   <Button size="sm" variant="ghost" onClick={() => startEdit(s)}>Edit</Button>
-                  <Button size="sm" variant="ghost" onClick={() => remove.mutate(s.id)}><Trash2 className="h-4 w-4" /></Button>
+                  <ConfirmButton
+                    variant="ghost" destructive
+                    title={`Delete “${s.name}”?`}
+                    description={s.isDefault ? 'This is a default scale. Results for its system will have no grades until another scale is made the default.' : 'The scale and its bands will be removed.'}
+                    confirmLabel="Delete"
+                    onConfirm={async () => {
+                      try { await remove.mutateAsync(s.id); notify.success('Scale deleted'); }
+                      catch (e: any) { notify.error(e?.response?.data?.message ?? 'Could not delete the scale'); }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </ConfirmButton>
                 </div>
               </div>
             ))}
@@ -113,7 +150,7 @@ export function SchoolGradingScalePage() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-xs font-medium text-muted-foreground">Bands — each band runs from its Min % up to the next band's Min %. The lowest band must start at 0.</div>
+                <div className="text-xs font-medium text-muted-foreground">Bands — a score gets the band with the highest Min % at or below it. The lowest band must start at 0.</div>
                 {bands.map((b, i) => (
                   <div key={i} className="flex flex-wrap items-end gap-2 rounded border p-2">
                     <div className="space-y-1"><Label className="text-xs">Min %</Label><Input type="number" className="w-20" value={b.min} onChange={(e) => setBand(i, { min: Number(e.target.value) })} /></div>
@@ -121,13 +158,14 @@ export function SchoolGradingScalePage() {
                     <div className="space-y-1"><Label className="text-xs">Grade</Label><Input className="w-16" value={b.grade} onChange={(e) => setBand(i, { grade: e.target.value })} placeholder="A" /></div>
                     <div className="space-y-1"><Label className="text-xs">GPA</Label><Input type="number" step="0.1" className="w-20" value={b.gpa} onChange={(e) => setBand(i, { gpa: Number(e.target.value) })} /></div>
                     <div className="space-y-1"><Label className="text-xs">Remark</Label><Input className="w-32" value={b.remark ?? ''} onChange={(e) => setBand(i, { remark: e.target.value })} placeholder="Distinction" /></div>
+                    <p className="w-full text-xs text-muted-foreground">Scores from {b.min}% to {runsTo(b.min)} get {b.grade || 'this grade'}.</p>
                     <Button size="sm" variant="ghost" onClick={() => setBands((arr) => arr.filter((_, idx) => idx !== i))}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 ))}
-                <Button size="sm" variant="outline" onClick={() => setBands((arr) => [...arr, emptyBand()])}><Plus className="h-4 w-4" /> Add band</Button>
+                <Button size="sm" variant="outline" onClick={() => setBands((arr) => [...arr, nextBand(arr)])}><Plus className="h-4 w-4" /> Add band</Button>
               </div>
 
-              {!weightsValid && <p className="text-xs text-rose-600">Bands must have grades and non-overlapping ranges.</p>}
+              {!weightsValid && <ul className="list-disc pl-4 text-xs text-rose-600">{bandErrors.map((e) => <li key={e}>{e}</li>)}</ul>}
               <div className="flex gap-2">
                 <Button size="sm" disabled={!weightsValid || create.isPending || update.isPending} onClick={save}><Save className="h-4 w-4" /> Save</Button>
                 <Button size="sm" variant="ghost" onClick={() => { setEditing(null); setName(''); setBands([]); }}>Cancel</Button>

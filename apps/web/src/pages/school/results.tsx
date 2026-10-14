@@ -18,6 +18,9 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 import { WorkflowSteps } from './_components/exam-workflow';
+import { ConfirmButton } from './_components/confirm-button';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 import {
   ReadinessChecklist, recommendationLabel, rosterLabel, statusLabel, summarise,
   type Conflict,
@@ -65,6 +68,16 @@ export function SchoolResultsPage() {
   const [reason, setReason] = useState('');
   const [rejectNote, setRejectNote] = useState<Record<string, string>>({});
 
+  // The page opens for anyone holding ONE step of the results desk (Head
+  // Teacher approves and releases; the Exams Officer computes). Each action is
+  // shown only to whoever holds its own grant, so nobody meets a button the
+  // API will refuse.
+  const has = useAuthStore((s) => s.hasPermission);
+  const canCompute = has(PERMISSIONS.school.computeResults);
+  const canPublish = has(PERMISSIONS.school.publishResults);
+  const canAmend = has(PERMISSIONS.school.amendResults);
+  const canApprove = has(PERMISSIONS.school.approveResults);
+
   const termName = (terms?.data ?? []).find((t) => t.id === termId)?.name;
 
   // Pupil names for the blocker list. The gate returns ids; the result set we
@@ -101,7 +114,7 @@ export function SchoolResultsPage() {
       <div className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold">End of term results{termName ? ` — ${termName}` : ''}</h1>
+            <h1 className="text-xl font-semibold">Term Results{termName ? ` — ${termName}` : ''}</h1>
             <p className="text-sm text-muted-foreground">
               Work out each pupil’s results from approved marks, check what is outstanding, release them, then issue report cards and decide promotions.
             </p>
@@ -128,7 +141,7 @@ export function SchoolResultsPage() {
 
           {/* ── Runs: compute, check, release ── */}
           <TabsContent value="runs" className="space-y-4 pt-4">
-            <Card>
+            {canCompute && <Card>
               <CardHeader><CardTitle className="text-base">Work out results</CardTitle></CardHeader>
               <CardContent className="flex flex-wrap items-end gap-3">
                 <select className={`${selectClass} w-64`} value={rosterId} onChange={(e) => setRosterId(e.target.value)}>
@@ -171,7 +184,7 @@ export function SchoolResultsPage() {
                   </p>
                 )}
               </CardContent>
-            </Card>
+            </Card>}
 
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
@@ -208,23 +221,30 @@ export function SchoolResultsPage() {
                           <Button size="sm" variant="ghost" onClick={() => setParam('tab', 'documents')}>
                             <FileText className="h-4 w-4" /> Report cards
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={lock.isPending}
-                            onClick={async () => {
-                              await lock.mutateAsync(detail.resultSet.id);
-                              notify.success('Results marked final', { description: 'They can no longer be changed, only amended on the record.' });
-                            }}
-                          >
-                            <Lock className="h-4 w-4" /> Mark final
-                          </Button>
+                          {canPublish && (
+                            <ConfirmButton
+                              variant="ghost"
+                              disabled={lock.isPending}
+                              title="Mark these results final?"
+                              description="Final results can never be recomputed. Any later correction has to go through an approved change request, which is kept on the record."
+                              confirmLabel="Mark final"
+                              onConfirm={async () => {
+                                try {
+                                  await lock.mutateAsync(detail.resultSet.id);
+                                  notify.success('Results marked final', { description: 'They can no longer be changed, only amended on the record.' });
+                                } catch (e) {
+                                  notify.error('Could not mark these results final', { description: apiMessage(e, 'Try again.') });
+                                }
+                              }}
+                            >
+                              <Lock className="h-4 w-4" /> Mark final
+                            </ConfirmButton>
+                          )}
                         </>
                       )}
-                      {!published && (
+                      {!published && canPublish && (
                         <Button
                           size="sm"
-                          variant="ghost"
                           disabled={publish.isPending || !readiness?.ready}
                           onClick={() => doPublish(detail.resultSet.id)}
                           title={readiness && !readiness.ready ? 'Clear the items listed below first' : 'Release these results to parents'}
@@ -278,7 +298,8 @@ export function SchoolResultsPage() {
                           </table>
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      {/* A change request only exists for released results. */}
+                      {published && canAmend && <div className="flex gap-2">
                         <Input placeholder="Why are these results being changed?" value={reason} onChange={(e) => setReason(e.target.value)} />
                         <Button
                           size="sm" variant="ghost"
@@ -295,7 +316,7 @@ export function SchoolResultsPage() {
                         >
                           <Send className="h-4 w-4" /> Request change
                         </Button>
-                      </div>
+                      </div>}
                     </>
                   ) : <p className="text-sm text-muted-foreground">Pick a version on the left to see it.</p>}
                 </CardContent>
@@ -337,10 +358,13 @@ export function SchoolResultsPage() {
                   <div key={a.id} className="rounded border p-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-medium">{a.reason}</span>
-                      <Badge variant={a.status === 'applied' ? 'default' : 'secondary'}>{a.status}</Badge>
+                      <Badge variant={a.status === 'applied' ? 'default' : 'secondary'}>{AMENDMENT_STATUS[a.status] ?? a.status}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground">Requested {fmtDateTime(a.createdAt)}</p>
-                    {a.status === 'requested' && (
+                    {a.status === 'requested' && !canApprove && (
+                      <p className="mt-1 text-xs text-muted-foreground">Waiting for the head teacher or deputy to decide.</p>
+                    )}
+                    {a.status === 'requested' && canApprove && (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <Button
                           size="sm" variant="outline" disabled={approveAmd.isPending}
@@ -387,3 +411,10 @@ export function SchoolResultsPage() {
     </div>
   );
 }
+
+const AMENDMENT_STATUS: Record<string, string> = {
+  requested: 'Waiting for a decision',
+  approved: 'Approved',
+  applied: 'Approved and recomputed',
+  rejected: 'Refused',
+};

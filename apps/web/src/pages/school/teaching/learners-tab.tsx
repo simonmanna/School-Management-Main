@@ -27,9 +27,9 @@ export function LearnersTab({ offeringId }: { offeringId: string }) {
 
   const filtered = learners.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()));
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading the roster…</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading pupils…</p>;
   if (learners.length === 0) {
-    return <EmptyState title="No learners on this course" hint="Sync the roster from the course offering screen to bring the class in." />;
+    return <EmptyState title="No pupils on this course yet" hint="The academic office brings the class in from Academic Management › Teaching Allocation." />;
   }
 
   return (
@@ -55,8 +55,8 @@ export function LearnersTab({ offeringId }: { offeringId: string }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {learner.status !== 'ENROLLED' && <Badge variant="outline">{learner.status}</Badge>}
-                  <Badge variant="secondary">{learner.source.toLowerCase()}</Badge>
+                  {learner.status !== 'ENROLLED' && <Badge variant="outline">{String(learner.status).toLowerCase().replaceAll('_', ' ')}</Badge>}
+                  <Badge variant="secondary">{String(learner.source).toLowerCase().replaceAll('_', ' ')}</Badge>
                   <Badge variant={learner.attendancePct !== null && learner.attendancePct < 75 ? 'destructive' : 'outline'}>
                     {learner.attendancePct === null ? 'No register' : `${learner.attendancePct}% attendance`}
                   </Badge>

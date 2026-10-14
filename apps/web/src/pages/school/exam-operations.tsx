@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Undo2, ShieldCheck, ClipboardList, Users, FileLock2, PenLine, Scale, AlertTriangle } from 'lucide-react';
-import { useExams } from '@/features/school/api';
+import { ArrowRight, Undo2, ShieldCheck, ClipboardList, Users, FileLock2, PenLine, Scale, AlertTriangle, MapPin, UserCheck, FileText } from 'lucide-react';
+import { useExams, useTerms } from '@/features/school/api';
+import { useWorkingTerm } from '@/features/school/working-term';
 import {
   useExamGate, useExamOpsOverview, useExamTransition,
   type ExamLifecycleState,
@@ -20,6 +21,7 @@ import { ExamCandidatesPanel, ExamPapersPanel } from './_components/exam-ops-set
 import { ExamRegisterPanel, ExamIncidentsPanel } from './_components/exam-ops-session';
 import { ExamCustodyPanel } from './_components/exam-ops-custody';
 import { ExamMarkingPanel } from './_components/exam-ops-marking';
+import { ExamInvigilatorsPanel, ExamPaperContentPanel, ExamVenuesPanel } from './_components/exam-ops-venues';
 
 /**
  * Phase 5 — the examination operations console.
@@ -32,7 +34,11 @@ import { ExamMarkingPanel } from './_components/exam-ops-marking';
 export function SchoolExamOperationsPage() {
   const [params, setParams] = useSearchParams();
   const { data: exams } = useExams();
+  const { data: terms } = useTerms();
+  // The picker used to list every examination the school ever created.
+  const [termId, setTermId] = useWorkingTerm();
   const examId = params.get('exam') ?? '';
+  const termExams = (exams?.data ?? []).filter((e: { termId?: string; id: string }) => !termId || e.termId === termId || e.id === examId);
   const tab = params.get('tab') ?? 'overview';
   const paperId = params.get('paper') ?? '';
 
@@ -77,25 +83,35 @@ export function SchoolExamOperationsPage() {
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Examination operations</h1>
+          <h1 className="text-xl font-semibold">Run an Examination</h1>
           <p className="text-sm text-muted-foreground">
-            Run one examination end to end — papers, candidates, question-paper custody, the register, marking and moderation.
+            Run one examination end to end — papers, venues and seating, invigilators, candidates, question papers, the register, marking and moderation.
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <select className={`${selectClass} w-72`} value={examId} onChange={(e) => setParam('exam', e.target.value)}>
+        <div className="flex flex-wrap items-end gap-2">
+          <select aria-label="Term" className={`${selectClass} w-44`} value={termId} onChange={(e) => setTermId(e.target.value)}>
+            <option value="">All terms</option>
+            {(terms?.data ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <select aria-label="Examination" className={`${selectClass} w-72`} value={examId} onChange={(e) => setParam('exam', e.target.value)}>
             <option value="">Choose an examination…</option>
-            {(exams?.data ?? []).map((e: { id: string; name: string; status: string }) => (
+            {termExams.map((e: { id: string; name: string }) => (
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
           <Button asChild variant="outline" size="sm">
-            <Link to="/school/exam-workspace">Set up an examination</Link>
+            <Link to="/school/exam-workspace">Exams &amp; Papers</Link>
           </Button>
         </div>
       </div>
 
-      {!examId && <Empty>Choose an examination above to open its operations console.</Empty>}
+      {!examId && (
+        <Empty>
+          {termExams.length
+            ? 'Choose an examination above to run it.'
+            : 'No examinations for this term yet. Create one under Exams & Papers, then come back here to run it.'}
+        </Empty>
+      )}
       {examId && isLoading && <Empty>Loading…</Empty>}
 
       {overview && (
@@ -163,8 +179,11 @@ export function SchoolExamOperationsPage() {
           <Tabs value={tab} onValueChange={(v) => setParam('tab', v)}>
             <TabsList className="flex-wrap">
               <TabsTrigger value="overview"><ClipboardList className="mr-1 h-4 w-4" /> Papers</TabsTrigger>
+              <TabsTrigger value="venues"><MapPin className="mr-1 h-4 w-4" /> Venues &amp; seating</TabsTrigger>
               <TabsTrigger value="candidates"><Users className="mr-1 h-4 w-4" /> Candidates</TabsTrigger>
-              <TabsTrigger value="custody"><FileLock2 className="mr-1 h-4 w-4" /> Question papers</TabsTrigger>
+              <TabsTrigger value="invigilators"><UserCheck className="mr-1 h-4 w-4" /> Invigilators</TabsTrigger>
+              <TabsTrigger value="content"><FileText className="mr-1 h-4 w-4" /> Paper content</TabsTrigger>
+              <TabsTrigger value="custody"><FileLock2 className="mr-1 h-4 w-4" /> Paper custody</TabsTrigger>
               <TabsTrigger value="register"><ShieldCheck className="mr-1 h-4 w-4" /> Register</TabsTrigger>
               <TabsTrigger value="incidents"><AlertTriangle className="mr-1 h-4 w-4" /> Incidents &amp; arrangements</TabsTrigger>
               <TabsTrigger value="marking"><PenLine className="mr-1 h-4 w-4" /> Marking</TabsTrigger>
@@ -173,6 +192,15 @@ export function SchoolExamOperationsPage() {
 
             <TabsContent value="overview" className="pt-4">
               <ExamPapersPanel overview={overview} onOpenPaper={(id, to) => { setParam('paper', id); setParam('tab', to); }} />
+            </TabsContent>
+            <TabsContent value="venues" className="pt-4">
+              <ExamVenuesPanel examId={overview.exam.id} />
+            </TabsContent>
+            <TabsContent value="invigilators" className="pt-4">
+              <ExamInvigilatorsPanel examId={overview.exam.id} />
+            </TabsContent>
+            <TabsContent value="content" className="pt-4">
+              <ExamPaperContentPanel examId={overview.exam.id} />
             </TabsContent>
             <TabsContent value="candidates" className="pt-4">
               <ExamCandidatesPanel overview={overview} />

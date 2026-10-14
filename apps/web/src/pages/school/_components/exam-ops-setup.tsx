@@ -285,7 +285,7 @@ export function ExamCandidatesPanel({ overview }: { overview: ExamOpsOverview })
           ) : (
             <Empty>
               <Users className="mx-auto mb-2 h-5 w-5" />
-              No candidates registered yet. Register a class from <strong>Exam Operations → Venues &amp; seating</strong>.
+              No candidates registered yet. Register a class on the <strong>Venues &amp; seating</strong> tab.
             </Empty>
           )}
         </CardContent>

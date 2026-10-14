@@ -67,6 +67,8 @@ export interface Programme {
   isActive: boolean;
   config: Record<string, unknown>;
   gradeLevels?: Array<{ id: string; gradeLevelId: string; gradeLevel?: { id: string; name: string; order: number } }>;
+  /** Academic levels whose default programme this is (ADR-028). */
+  defaultForLevels?: Array<{ id: string; code: string; name: string }>;
   _count?: { cohorts: number; enrollments: number };
 }
 
@@ -261,6 +263,15 @@ export function useUpdateProgramme() {
   return useMutation({
     mutationFn: async ({ id, ...dto }: { id: string } & Record<string, unknown>) =>
       (await api.patch(`${S}/programmes/${id}`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'programmes'] }),
+  });
+}
+
+/** Refused by the API (409) while the programme has classes, enrolments, offerings or policies. */
+export function useDeleteProgramme() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => (await api.delete(`${S}/programmes/${id}`)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'programmes'] }),
   });
 }

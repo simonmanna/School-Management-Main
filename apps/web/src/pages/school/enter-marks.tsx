@@ -18,6 +18,8 @@ import {
   EmptyState, Picker, Progress, WorkflowSteps, selectClass, useDefaulted, useStickyState,
 } from './_components/exam-workflow';
 import { OfflineBanner } from './_components/offline-banner';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 import { ContextBar } from './_components/context-bar';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
@@ -81,6 +83,9 @@ export function SchoolEnterMarksPage() {
   const { data: sheet, isLoading, refetch } = useMarkSheet(sheetParams);
   const saveMark = useSaveMark();
   const lock = useLockMarks();
+  // Locking a paper is exams-office work (`school:exams:write`); a teacher
+  // entering their own marks never sees the button the API would refuse.
+  const canLock = useAuthStore((s) => s.hasPermission(PERMISSIONS.school.manageExams));
 
   const [values, setValues] = useState<Record<string, string>>({});
   const [states, setStates] = useState<Record<string, SaveState>>({});
@@ -323,9 +328,11 @@ export function SchoolEnterMarksPage() {
                     Next subject <ChevronRight className="h-4 w-4" />
                   </Button>
                 </div>
-                <Button size="sm" variant={locked ? 'default' : 'outline'} onClick={toggleLock} disabled={lock.isPending}>
-                  {locked ? <><Unlock className="h-4 w-4" /> Unlock</> : <><Lock className="h-4 w-4" /> Lock paper</>}
-                </Button>
+                {canLock && (
+                  <Button size="sm" variant={locked ? 'default' : 'outline'} onClick={toggleLock} disabled={lock.isPending}>
+                    {locked ? <><Unlock className="h-4 w-4" /> Unlock</> : <><Lock className="h-4 w-4" /> Lock paper</>}
+                  </Button>
+                )}
                 <Button size="sm" variant="ghost" onClick={() => navigate('/school/exam-results')}>
                   <FileSpreadsheet className="h-4 w-4" /> Results
                 </Button>

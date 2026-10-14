@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useCourseAssessments, useCourseLearners } from '@/features/school/teaching-api';
+import { assessmentStatusLabel, kindLabel } from '@/features/school/api';
 import { EmptyState, Progress } from '../_components/exam-workflow';
 
 /**
@@ -57,10 +58,10 @@ export function MarkbookTab({ offeringId }: { offeringId: string }) {
                 {assessments.map((a: any) => (
                   <tr key={a.id} className="border-b last:border-0">
                     <td className="py-2 pr-3">{a.title}</td>
-                    <td className="py-2 pr-3 text-muted-foreground">{String(a.kind).toLowerCase()}</td>
+                    <td className="py-2 pr-3 text-muted-foreground">{kindLabel(a.kind)}</td>
                     <td className="py-2 pr-3"><Progress done={a.marked ?? 0} total={a.learners ?? 0} /></td>
                     <td className="py-2 pr-3 tabular-nums text-muted-foreground">{a.approved ?? 0}</td>
-                    <td className="py-2 pr-3"><Badge variant="secondary">{a.status}</Badge></td>
+                    <td className="py-2 pr-3"><Badge variant="secondary">{assessmentStatusLabel(a.status)}</Badge></td>
                     <td className="py-2 text-right">
                       <Button size="sm" variant="outline" onClick={() => navigate(`/school/assessments/${a.id}/mark`)}>
                         Enter marks

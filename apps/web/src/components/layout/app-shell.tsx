@@ -196,10 +196,31 @@ interface NavSection {
 const flagEnabled = (flag?: string): boolean =>
   !flag || (import.meta.env as Record<string, string | undefined>)[flag] === 'true';
 
+/** Holding ANY marking or approval grant: the people the teaching screens are for. */
+const TEACHING_ACCESS = [
+  PERMISSIONS.school.ownGrades,
+  PERMISSIONS.school.enterGrades,
+  PERMISSIONS.school.gradeAssignments,
+  PERMISSIONS.school.manageAssessments,
+  PERMISSIONS.school.approveGrades,
+] as const;
+
+/** Any one step of the term-results desk opens it; each action checks its own grant. */
+const RESULTS_ACCESS = [
+  PERMISSIONS.school.computeResults,
+  PERMISSIONS.school.approveResults,
+  PERMISSIONS.school.publishResults,
+  PERMISSIONS.school.amendResults,
+  PERMISSIONS.school.decidePromotion,
+  PERMISSIONS.school.applyPromotion,
+  PERMISSIONS.school.publishReportDocuments,
+] as const;
+
 const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, flag: 'VITE_ENABLE_SCHOOL' },
     ],
   },
   {
@@ -279,53 +300,63 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/school/course-offerings', label: 'Teaching Allocation', icon: Users, permission: PERMISSIONS.school.manageCourses },
       { to: '/school/teacher-cover', label: 'Teacher Cover', icon: CalendarX2, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/roles', label: 'Roles & Permissions', icon: ShieldCheck, permission: PERMISSIONS.role.read },
+      // Assessment setup — done once a term by the academic office, before any
+      // marking counts. It used to sit under Teaching & Assessment among the
+      // teacher's daily screens.
+      { to: '/school/assessment', label: 'Assessment Weighting', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Assessment setup' },
+      { to: '/school/grading-scales', label: 'Grading Scales', icon: Calculator, permission: PERMISSIONS.school.manageAssessments, group: 'Assessment setup' },
+      { to: '/school/assessment-ops', label: 'Class Lists & Rubrics', icon: ClipboardList, permission: PERMISSIONS.school.manageAssessments, group: 'Assessment setup' },
     ],
   },
   {
-    // Assessments leads, because that is what a teacher came here to do. Kind
-    // (CAT, homework, project, practical, exam) is a filter inside it, not a
-    // separate menu item — the four numbered exam steps and "Homework & Tasks"
-    // used to be siblings of the gradebook, which forced a teacher to decide
-    // which subsystem they were in before they could mark anybody.
-    title: 'Teaching & Assessment',
+    // Teaching — the teacher's daily work, in the order they do it. Kind (CAT,
+    // homework, project, practical, exam) is a filter inside Assessments, not a
+    // separate menu item. Gated on holding SOME marking/approval grant rather
+    // than plain `school:read`, so librarians, nurses and wardens no longer get
+    // a gradebook in their menu (the API still scopes what each role sees).
+    title: 'Teaching',
     icon: BookText,
     flag: 'VITE_ENABLE_SCHOOL',
     items: [
-      { to: '/school/teaching', label: 'My Teaching', icon: ClipboardCheck, permission: PERMISSIONS.school.read },
-      { to: '/school/assessments', label: 'Assessments', icon: ClipboardList, permission: PERMISSIONS.school.read },
-      { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: PERMISSIONS.school.enterGrades },
-      { to: '/school/approvals', label: 'Approvals', icon: ShieldCheck, permission: PERMISSIONS.school.approveGrades },
-
-      { to: '/school/cbt', label: 'CBT / Quizzes', icon: FileQuestion, permission: PERMISSIONS.school.authorCbt, group: 'Tools' },
-
-      { to: '/school/assessment', label: 'Assessment Structure', icon: Target, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
-      { to: '/school/grading-scales', label: 'Grading Scales', icon: Calculator, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
-      { to: '/school/assessment-ops', label: 'Cohorts & Rubrics', icon: ClipboardList, permission: PERMISSIONS.school.manageAssessments, group: 'Setup' },
-
-      // Examinations keeps its own cockpit — scheduling papers across classes,
-      // venues and seating are real exams-office work. It is no longer where
-      // marking begins, which is why it sits below Assessments rather than
-      // above it as a numbered wizard.
-      // Marking has ONE owner in the sidebar: the Gradebook above. Exam mark
-      // entry is the same job reached from a scheduled paper, so it is linked
-      // from Exam Scheduling rather than presented as a rival destination.
-      { to: '/school/exam-workspace', label: 'Exam Scheduling', icon: CalendarDays, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
-      { to: '/school/exam-operations', label: 'Run an Examination', icon: ShieldCheck, permission: PERMISSIONS.school.runExamOperations, group: 'Examinations' },
-      { to: '/school/exam-ops', label: 'Venues, Seating & Papers', icon: MapPin, permission: PERMISSIONS.school.manageExams, group: 'Examinations' },
+      { to: '/school/teaching', label: 'My Teaching', icon: ClipboardCheck, permission: TEACHING_ACCESS },
+      { to: '/school/assessments', label: 'Assessments', icon: ClipboardList, permission: TEACHING_ACCESS },
+      { to: '/school/gradebook', label: 'Gradebook', icon: BookText, permission: TEACHING_ACCESS },
+      { to: '/school/approvals', label: 'Approve Marks', icon: ShieldCheck, permission: PERMISSIONS.school.approveGrades },
+      { to: '/school/cbt', label: 'Quizzes (CBT)', icon: FileQuestion, permission: [PERMISSIONS.school.authorCbt, PERMISSIONS.school.manageQuestionBank] },
+    ],
+  },
+  {
+    // Exams — the exams office. Setting an exam up, running it (venues,
+    // seating, invigilators, custody, register, marking, moderation — one
+    // console; the old separate "Venues, Seating & Papers" page is a tab of it
+    // now), the provisional mark sheets, and what goes to UNEB.
+    title: 'Exams',
+    icon: FileQuestion,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/exam-workspace', label: 'Exams & Papers', icon: CalendarDays, permission: PERMISSIONS.school.manageExams },
+      { to: '/school/exam-operations', label: 'Run an Examination', icon: ShieldCheck, permission: PERMISSIONS.school.runExamOperations },
+      // Marking itself has ONE owner (Gradebook / the mark sheet reached from a
+      // paper). This is the per-exam class sheet: provisional until release.
+      { to: '/school/exam-results', label: 'Exam Mark Sheets', icon: BarChart3, permission: [...TEACHING_ACCESS, PERMISSIONS.school.manageExams] },
       // Phase 6 — what the school sends to UNEB, and whether it can yet.
-      { to: '/school/statutory', label: 'National Submissions', icon: FileSpreadsheet, permission: PERMISSIONS.school.readStatutory, group: 'Examinations' },
-
-      // Release has ONE owner. "Report Cards" and "Results & Reports" both looked
-      // like the place a term is published from, and only one of them goes through
-      // the immutable ResultSet the portal is served from. Computing and publishing
-      // leads; the documents that fall out of it follow.
-      { to: '/school/results', label: 'Compute & Publish Results', icon: GitBranch, permission: PERMISSIONS.school.computeResults, group: 'Results' },
-      { to: '/school/report-cards', label: 'Report Documents', icon: FileText, permission: PERMISSIONS.school.manageExams, group: 'Results' },
-      { to: '/school/exam-results', label: 'Exam Results', icon: BarChart3, permission: PERMISSIONS.school.read, group: 'Results' },
-      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: PERMISSIONS.school.read, group: 'Results' },
-      { to: '/school/certification', label: 'Certification', icon: FileBadge, permission: PERMISSIONS.school.read, group: 'Results' },
-      { to: '/school/reports', label: 'Report Centre', icon: BarChart3, permission: PERMISSIONS.school.readReports, group: 'Results' },
-      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams, group: 'Results' },
+      { to: '/school/statutory', label: 'National Submissions', icon: FileSpreadsheet, permission: PERMISSIONS.school.readStatutory },
+    ],
+  },
+  {
+    // Results & Reports — release has ONE owner: Term Results computes and
+    // releases the immutable ResultSet the portal is served from. Each step on
+    // it (compute, approve, release, amend, promote, issue documents) is its
+    // own grant, so the page opens for ANY of them and gates each action.
+    title: 'Results & Reports',
+    icon: FileBadge,
+    flag: 'VITE_ENABLE_SCHOOL',
+    items: [
+      { to: '/school/results', label: 'Term Results', icon: GitBranch, permission: RESULTS_ACCESS },
+      { to: '/school/report-cards', label: 'Report Cards', icon: FileText, permission: [PERMISSIONS.school.manageExams, PERMISSIONS.school.computeResults, PERMISSIONS.school.publishResults, PERMISSIONS.school.publishReportDocuments] },
+      { to: '/school/report-card-settings', label: 'Report Card Design', icon: SlidersHorizontal, permission: PERMISSIONS.school.manageExams },
+      { to: '/school/competency-report', label: 'Competency & Annual', icon: GraduationCap, permission: [...TEACHING_ACCESS, PERMISSIONS.school.issueCertificates] },
+      { to: '/school/certification', label: 'Certificates & Transcripts', icon: FileBadge, permission: [PERMISSIONS.school.issueCertificates, PERMISSIONS.school.revokeCertificates, PERMISSIONS.school.manageExams, PERMISSIONS.school.approveGrades] },
     ],
   },
   {
@@ -355,7 +386,7 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     // Curriculum & Lessons — the teaching half of the old LMS section, now that
-    // homework and the teacher dashboard have moved into Teaching & Assessment.
+    // homework and the teacher dashboard have moved into Teaching.
     // Every item carries a permission guard (they previously had none).
     title: 'Academics',
     icon: Presentation,

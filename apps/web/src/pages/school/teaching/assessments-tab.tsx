@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useCourseAssessments, useCourseCoverage } from '@/features/school/teaching-api';
+import { assessmentStatusLabel, kindLabel } from '@/features/school/api';
 import { EmptyState, Progress, fmtDate } from '../_components/exam-workflow';
 
 const OUTCOME_TONE: Record<string, string> = {
@@ -48,12 +49,12 @@ export function AssessmentsTab({ offeringId }: { offeringId: string }) {
               <div className="min-w-0">
                 <div className="truncate font-medium">{a.title}</div>
                 <div className="text-xs text-muted-foreground">
-                  {String(a.kind).toLowerCase()} · max {String(a.maxScore)}{a.dueAt ? ` · due ${fmtDate(a.dueAt)}` : ''}
+                  {kindLabel(a.kind)} · out of {String(a.maxScore)}{a.dueAt ? ` · due ${fmtDate(a.dueAt)}` : ''}
                 </div>
               </div>
               <div className="ml-2 flex shrink-0 items-center gap-3">
                 <Progress done={a.marked ?? 0} total={a.learners ?? 0} />
-                <Badge variant="secondary">{a.status}</Badge>
+                <Badge variant="secondary">{assessmentStatusLabel(a.status)}</Badge>
               </div>
             </button>
           ))}

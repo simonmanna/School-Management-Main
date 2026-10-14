@@ -217,21 +217,25 @@ export class GradingScaleController {
     return this.service.findOne(id);
   }
 
+  // Grading scales are assessment setup, edited from Academic Management ›
+  // Assessment setup alongside the weighting policy. They were gated on
+  // `exams:write`, so the Deputy Head — who owns that setup and holds
+  // `assessments:write` — could open the page and have every save refused.
   @Post()
-  @RequirePermissions(PERMISSIONS.school.manageExams)
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
   create(@Body() dto: CreateGradingScaleDto) {
     return this.service.create(dto as any);
   }
 
   @Patch(':id')
-  @RequirePermissions(PERMISSIONS.school.manageExams)
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
   update(@Param('id') id: string, @Body() dto: UpdateGradingScaleDto) {
     return this.service.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @RequirePermissions(PERMISSIONS.school.manageExams)
+  @RequirePermissions(PERMISSIONS.school.manageAssessments)
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }

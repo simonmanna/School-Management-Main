@@ -82,6 +82,7 @@ function makeService(overrides: Record<string, any> = {}) {
     // placements seeded it takes the ADR-027 compat fallback onto the projection,
     // so these specs exercise the path production takes for un-backfilled schools.
     new PlacementLookupService({ client } as any),
+    { assertMayEnterExamPaper: jest.fn().mockResolvedValue(undefined) } as any,
   );
   return { service, client, grades: (service as any).grades };
 }

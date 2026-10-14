@@ -165,7 +165,7 @@ export function ProductionMarkbook({ sheet, onSaved, onSubmit, submitting, onEvi
     </div>
     {storageError && <p role="alert" className="rounded border border-destructive p-3 text-sm text-destructive">This browser could not preserve a local draft. Keep this page open until the server confirms your save.</p>}
     {recovered && <p className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">A draft from your previous session was recovered. Review it, then save or retry it. Nothing has been submitted for approval.</p>}
-    {globalLocked && <p className="text-sm text-muted-foreground">{!a.rosterFrozen ? 'This legacy assessment needs a frozen roster before new marks can be entered.' : ['draft', 'scheduled'].includes(a.status) ? 'Publish the assessment before entering marks.' : 'This assessment is read-only.'}</p>}
+    {globalLocked && <p className="text-sm text-muted-foreground">{!a.rosterFrozen ? "Marks can't be entered yet: the list of pupils this assessment is for isn't locked. The academic office locks it under Class Lists & Rubrics." : ['draft', 'scheduled'].includes(a.status) ? 'Publish the assessment before entering marks.' : 'This assessment is read-only.'}</p>}
     {sheet.approvalStatus === 'rejected' && <p role="alert" className="rounded border border-destructive/40 bg-destructive/5 p-3 text-sm">Returned for correction: {baseline.find((s) => s.rejectionReason)?.rejectionReason ?? 'Review the marks and resubmit.'}</p>}
     <div className="flex flex-wrap gap-2">
       <Input className="max-w-xs" aria-label="Find a learner" placeholder="Find a learner…" value={search} onChange={(e) => setSearch(e.target.value)} />

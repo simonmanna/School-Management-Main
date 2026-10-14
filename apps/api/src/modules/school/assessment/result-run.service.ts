@@ -886,6 +886,24 @@ export class ResultRunService {
     const system = (await db.schoolProfile.findFirst({ select: { gradingSystem: true } }))?.gradingSystem ?? 'UCE';
     const programmeOf = await this.programmeIdsFor(db, studentIds, termId);
 
+    // Exam paper → exam type. A weighting component can name the exam type it
+    // takes ("Mid-term 30%", "End of term 70%"). The bridge is applied HERE,
+    // against the policy that governs this learner and subject, rather than
+    // trusting the componentId stamped when the paper's column was minted: that
+    // stamp predates (or belongs to an older revision of) the policy, and
+    // without it two exam components left exam marks counting nowhere.
+    const examScheduleIds = [...new Set(rows
+      .filter((r: any) => r.assessment.sourceType === 'exam_session' && r.assessment.sourceRef)
+      .map((r: any) => r.assessment.sourceRef as string))];
+    const examTypeOf = new Map<string, string>();
+    if (examScheduleIds.length) {
+      const schedules = await db.examSchedule.findMany({
+        where: { id: { in: examScheduleIds } },
+        select: { id: true, exam: { select: { examTypeId: true } } },
+      });
+      for (const sc of schedules as any[]) if (sc.exam?.examTypeId) examTypeOf.set(sc.id, sc.exam.examTypeId);
+    }
+
     const students: StudentInput[] = [];
     const sortedMembers = [...roster.members].sort((a: any, b: any) => String(a.studentProfileId).localeCompare(String(b.studentProfileId)));
     for (const m of sortedMembers) {
@@ -910,7 +928,7 @@ export class ResultRunService {
         });
         const assessments: AssessmentDatum[] = saRows
           .map((r: any) => ({
-            componentId: r.assessment.componentId,
+            componentId: bridgedComponentId(r.assessment, policy?.components, examTypeOf),
             kind: kindOf(r.assessment),
             effectiveScore: r.effectiveScore == null ? null : String(r.effectiveScore),
             maxScore: String(r.maxScore),
@@ -956,4 +974,21 @@ export class ResultRunService {
     }
     return { students, contributing: rows };
   }
+}
+
+/**
+ * The component an assessment counts toward under the governing policy: the
+ * component bound to its exam type when the policy names one, otherwise the
+ * component recorded on the assessment.
+ */
+export function bridgedComponentId(
+  assessment: { componentId?: string | null; sourceType?: string | null; sourceRef?: string | null },
+  components: Array<{ id: string; examTypeId?: string | null }> | undefined,
+  examTypeOf: Map<string, string>,
+): string | null {
+  const examTypeId = assessment.sourceType === 'exam_session' && assessment.sourceRef
+    ? examTypeOf.get(assessment.sourceRef)
+    : undefined;
+  const bridged = examTypeId ? (components ?? []).find((c) => c.examTypeId === examTypeId) : undefined;
+  return bridged?.id ?? assessment.componentId ?? null;
 }

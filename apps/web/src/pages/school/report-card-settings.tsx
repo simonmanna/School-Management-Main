@@ -233,7 +233,7 @@ export function SchoolReportCardSettingsPage() {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
-            Report Card Studio
+            Report Card Design
             {dirty && <Badge variant="secondary">{dirtyKeys.length} unsaved</Badge>}
             {!dirty && saved.presetKey && <Badge variant="outline" className="capitalize">{saved.presetKey}</Badge>}
           </h1>

@@ -45,9 +45,9 @@ const DOMAIN_META: Record<string, { label: string; icon: typeof Users }> = {
 /** Related screens that show the same data with charts the runner cannot draw. */
 const RELATED_SCREENS: Array<{ to: string; label: string; note: string }> = [
   { to: '/school/analytics', label: 'Academic analytics', note: 'Charted trends and distributions' },
-  { to: '/school/attendance-report', label: 'Attendance dashboard', note: 'Charted attendance over time' },
-  { to: '/school/enrollment-summary', label: 'Enrolment summary', note: 'Boarding and day breakdown' },
-  { to: '/school/admissions-analytics', label: 'Admissions funnel', note: 'Stage-by-stage conversion' },
+  { to: '/school/attendance/report', label: 'Attendance dashboard', note: 'Charted attendance over time' },
+  { to: '/school/admissions/enrollment-summary', label: 'Enrolment summary', note: 'Boarding and day breakdown' },
+  { to: '/school/admissions/analytics', label: 'Admissions funnel', note: 'Stage-by-stage conversion' },
   { to: '/school/report-cards', label: 'Report cards', note: 'Printable pupil report cards' },
 ];
 
@@ -100,7 +100,7 @@ export default function SchoolReportsPage() {
   return (
     <div className="space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">Reports</h1>
+        <h1 className="text-2xl font-semibold">Report Centre</h1>
         <p className="text-sm text-muted-foreground">
           {isLoading ? 'Loading…' : `${catalog?.length ?? 0} report(s) available to you.`}
         </p>
@@ -118,8 +118,8 @@ export default function SchoolReportsPage() {
 
       {error && (
         <Card className="border-destructive/40 bg-destructive/5 p-4 text-sm">
-          Could not load the report catalogue. You may not have the
-          <code className="mx-1">school:reports:read</code> permission yet.
+          Could not load the report catalogue. Your role may not include
+          “Read school reports” yet — ask an administrator to add it under Roles &amp; Permissions.
         </Card>
       )}
 

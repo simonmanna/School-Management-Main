@@ -9,7 +9,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { notify } from '@/lib/notify';
-import { EmptyState, Picker, WorkflowSteps, useDefaulted, useStickyState } from './_components/exam-workflow';
+import { EmptyState, Picker, useDefaulted, useStickyState } from './_components/exam-workflow';
+import { ConfirmButton } from './_components/confirm-button';
 
 /**
  * Approvals — the head of department's screen.
@@ -46,10 +47,7 @@ export function SchoolApprovalsPage() {
   const act = useApproveAssessmentMarks();
   const rows = data?.rows ?? [];
 
-  async function decide(row: ApprovalRow, action: 'approve' | 'reject') {
-    const reason = action === 'reject'
-      ? window.prompt(`Send "${row.title}" back to ${row.submittedBy ?? 'the teacher'}. Why?`) ?? undefined
-      : undefined;
+  async function decide(row: ApprovalRow, action: 'approve' | 'reject', reason?: string) {
     if (action === 'reject' && !reason) return;
     try {
       const res: any = await act.mutateAsync({ assessmentId: row.assessmentId, action, reason });
@@ -77,12 +75,11 @@ export function SchoolApprovalsPage() {
     <div className="space-y-4">
       <div className="space-y-3">
         <div>
-          <h1 className="text-2xl font-semibold">Approve marks</h1>
+          <h1 className="text-2xl font-semibold">Approve Marks</h1>
           <p className="text-sm text-muted-foreground">
             Marks teachers have submitted, waiting on you. Approving lets them go into the term result.
           </p>
         </div>
-        <WorkflowSteps current={4} />
       </div>
 
       <Card>
@@ -143,9 +140,17 @@ export function SchoolApprovalsPage() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1.5">
-                      <Button size="sm" variant="ghost" disabled={act.isPending} onClick={() => decide(r, 'reject')}>
+                      <ConfirmButton
+                        variant="ghost"
+                        disabled={act.isPending}
+                        title={`Return “${r.title}” for correction?`}
+                        description={`${r.submittedBy ?? 'The teacher'} will see it under “Returned to me” on My Teaching, with your reason, and can correct and resubmit.`}
+                        reasonLabel="What needs correcting?"
+                        confirmLabel="Return"
+                        onConfirm={(reason) => decide(r, 'reject', reason)}
+                      >
                         <Undo2 className="mr-1 h-3.5 w-3.5" /> Return
-                      </Button>
+                      </ConfirmButton>
                       <Button size="sm" disabled={act.isPending} onClick={() => decide(r, 'approve')}>
                         <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Approve
                       </Button>

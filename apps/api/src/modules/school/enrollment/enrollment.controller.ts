@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseInterceptors } from '@nestjs/common';
 import { DataScopeService } from '../../../kernel/auth/data-scope.service';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { IdempotencyInterceptor } from '../../../kernel/idempotency/idempotency.interceptor';
@@ -59,6 +59,13 @@ export class ProgrammeController {
   @RequirePermissions(PERMISSIONS.school.manageProgrammes)
   update(@Param('id') id: string, @Body() dto: UpdateProgrammeDto) {
     return this.service.update(id, dto);
+  }
+
+  /** Only a programme with no classes, enrolments or course offerings. */
+  @Delete(':id')
+  @RequirePermissions(PERMISSIONS.school.manageProgrammes)
+  remove(@Param('id') id: string) {
+    return this.service.remove(id);
   }
 
   /** Install the four Uganda NCDC/UNEB programme templates. Idempotent. */

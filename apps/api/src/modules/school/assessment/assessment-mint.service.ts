@@ -50,8 +50,18 @@ export class AssessmentMintService {
     });
     if (existing) return existing;
 
+    // A first guess only — result computation re-binds exam papers to the
+    // governing policy's component by exam type (`bridgedComponentId`). Never
+    // take a component from a draft, retired or deleted policy.
     const component = schedule.exam.examTypeId
-      ? await tx.assessmentComponent.findFirst({ where: { examTypeId: schedule.exam.examTypeId } })
+      ? await tx.assessmentComponent.findFirst({
+          where: {
+            examTypeId: schedule.exam.examTypeId,
+            deletedAt: null,
+            policy: { organizationId: this.org, isActive: true, deletedAt: null, publishedAt: { not: null } },
+          },
+          orderBy: { policy: { revision: 'desc' } },
+        })
       : null;
 
     return tx.assessment.create({

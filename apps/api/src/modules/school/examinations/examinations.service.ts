@@ -612,9 +612,23 @@ export class ReportCardService {
       const card = await tx.reportCard.findFirst({ where: { id } });
       if (!card) throw new NotFoundException(`ReportCard ${id} not found`);
       if (publish) await this.assertPinnedToPublishedResult(tx, card);
+      const now = new Date();
       await tx.reportCard.updateMany({
         where: { id },
-        data: { publishedAt: publish ? new Date() : null },
+        data: { publishedAt: publish ? now : null },
+      });
+      // Keep the provenance record in step. Releasing from Term Results already
+      // publishes the card (ReportDocumentService.publish); releasing here used
+      // to leave the document saying "issued, not released" while the family
+      // could already read the card. Void and superseded documents stay as they
+      // are — they are history, not the current release.
+      await tx.reportDocument.updateMany({
+        where: publish
+          ? { reportCardId: id, status: { in: ['draft', 'generated'] } }
+          : { reportCardId: id, status: 'published' },
+        data: publish
+          ? { status: 'published', publishedAt: now, publishedById: this.tenant.userId ?? null }
+          : { status: 'generated', publishedAt: null, publishedById: null },
       });
       await this.audit.recordInTx(tx, {
         entity: 'ReportCard',

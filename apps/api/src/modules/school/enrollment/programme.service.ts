@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AuditService } from '../../../kernel/audit/audit.service';
@@ -182,6 +182,40 @@ export class ProgrammeService {
         newValues: dto as any,
       });
       return tx.academicProgramme.findFirst({ where: { id } });
+    });
+  }
+
+  /**
+   * Delete a programme nothing depends on. A programme that already has
+   * classes, enrolments or course offerings is history — deactivate it instead.
+   * Academic levels that defaulted to it fall back to none (FK is SetNull).
+   */
+  async remove(id: string) {
+    const before = await this.get(id);
+    // AssessmentPolicy holds programmeId without a relation, so it is checked
+    // here rather than left dangling.
+    const [cohorts, enrollments, courseOfferings, policies] = await Promise.all([
+      this.prisma.client.classCohort.count({ where: { programmeId: id } }),
+      this.prisma.client.studentEnrollment.count({ where: { programmeId: id } }),
+      this.prisma.client.courseOffering.count({ where: { programmeId: id } }),
+      this.prisma.client.assessmentPolicy.count({ where: { programmeId: id, deletedAt: null } }),
+    ]);
+    if (cohorts + enrollments + courseOfferings + policies > 0) {
+      throw new ConflictException(
+        `${before.name} is in use (${cohorts} class(es), ${enrollments} enrolment(s), ` +
+          `${courseOfferings} course offering(s), ${policies} assessment polic(ies)). ` +
+          'Deactivate it instead of deleting it.',
+      );
+    }
+    return this.prisma.client.$transaction(async (tx: any) => {
+      await tx.academicProgramme.deleteMany({ where: { id } });
+      await this.audit.recordInTx(tx, {
+        entity: 'AcademicProgramme',
+        entityId: id,
+        action: 'delete',
+        oldValues: { code: before.code, name: before.name, stage: before.stage },
+      });
+      return { id, deleted: true };
     });
   }
 

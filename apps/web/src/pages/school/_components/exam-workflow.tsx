@@ -21,12 +21,19 @@ export const STEPS = [
   { n: 2, label: 'Choose classes', to: '/school/exam-workspace/classes' },
   { n: 3, label: 'Enter marks', to: '/school/enter-marks' },
   { n: 4, label: 'Approve marks', to: '/school/approvals' },
-  { n: 5, label: 'Results', to: '/school/results' },
+  { n: 5, label: 'Term results', to: '/school/results' },
   { n: 6, label: 'Report cards', to: '/school/report-cards' },
-  { n: 7, label: 'Promote', to: '/school/promotion' },
+  // Promotion is decided against the released results, on their Promotion tab.
+  { n: 7, label: 'Promote', to: '/school/results?tab=promotion' },
 ] as const;
 
 export type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+/** Carry the current filters onto a step link that may already have a query. */
+function withSearch(to: string, search: string) {
+  if (!search) return to;
+  return to.includes('?') ? `${to}&${search.slice(1)}` : `${to}${search}`;
+}
 
 /** The numbered rail across the top of every step. */
 export function WorkflowSteps({ current }: { current: StepNumber }) {
@@ -38,7 +45,7 @@ export function WorkflowSteps({ current }: { current: StepNumber }) {
         return (
           <div key={s.n} className="flex items-center">
             <Link
-              to={`${s.to}${search}`}
+              to={withSearch(s.to, search)}
               aria-current={state === 'current' ? 'step' : undefined}
               className={[
                 'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition',

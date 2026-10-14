@@ -4802,7 +4802,7 @@ export function useAddRosterMember() {
 export function useRemoveRosterMember() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: { rosterId: string; studentProfileId: string }) => (await api.post(`${RO}/${v.rosterId}/members/${v.studentProfileId}`, {}).then(() => null)),
+    mutationFn: async (v: { rosterId: string; studentProfileId: string }) => (await api.delete(`${RO}/${v.rosterId}/members/${v.studentProfileId}`).then(() => null)),
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'roster-members', v.rosterId] }),
   });
 }
@@ -7315,8 +7315,8 @@ export function useLmsRepairOrphans() {
 
 /* ───────────────────── Gradebook (class × term × subject spreadsheet) ─────────────────────
  * One weighted total per student, computed by the same kernel the ResultSet
- * and report card use. Columns are Assessment rows; only manual columns are
- * editable here (exam/assignment/quiz marks live on their own screens).
+ * and report card use. Columns are Assessment rows. Read-only: marks are
+ * entered on the Assessment Board (the old gradebook writes answer 410).
  * ------------------------------------------------------------------------- */
 
 export interface GradebookColumn {
@@ -7372,49 +7372,6 @@ export function useGradebookSheet(params: { classId?: string; termId?: string; s
   });
 }
 
-export function useGradebookCell() {
-  return useMutation({
-    mutationFn: async (dto: { studentProfileId: string; assessmentId: string; marks?: number | null; participation?: string; expectedVersion?: number }) =>
-      (await api.post(`${S}/gradebook/cell`, dto)).data,
-  });
-}
-
-export function useCreateGradebookColumn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (dto: { classId: string; termId: string; subjectId: string; title: string; maxScore?: number; componentId?: string; dueAt?: string }) =>
-      (await api.post(`${S}/gradebook/column`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
-  });
-}
-
-export function useUpdateGradebookColumn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, ...dto }: { id: string; title?: string; maxScore?: number; componentId?: string | null; hiddenFromStudents?: boolean; dueAt?: string | null }) =>
-      (await api.patch(`${S}/gradebook/column/${id}`, dto)).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
-  });
-}
-
-export function useDeleteGradebookColumn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, force }: { id: string; force?: boolean }) =>
-      (await api.delete(`${S}/gradebook/column/${id}`, { params: force ? { force: 'true' } : {} })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
-  });
-}
-
-export function useLockGradebookColumn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, locked }: { id: string; locked: boolean }) =>
-      (await api.post(`${S}/gradebook/column/${id}/lock`, { locked })).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'gradebook'] }),
-  });
-}
-
 /* Weighting-policy components — for the "add column → attach to component" picker. */
 export function usePolicyComponents(policyId?: string) {
   return useQuery({
@@ -7442,6 +7399,9 @@ export function useTeacherOverview(teacherPartnerId?: string) {
     queryKey: ['school', 'teaching', teacherPartnerId],
     enabled: !!teacherPartnerId,
     queryFn: async () => (await api.get<TeacherOverview>(`${S}/portals/teaching/${teacherPartnerId}`)).data,
+    // The workspace tiles are a live to-do count: keep them fresh.
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -7461,6 +7421,22 @@ export const KIND_LABEL: Record<string, string> = {
   cat: 'CAT', homework: 'Homework', project: 'Project', practical: 'Practical',
   exam: 'Exam', oral: 'Oral', classwork: 'Classwork', attendance: 'Attendance',
   assignment: 'Assignment', quiz: 'Quiz', observation: 'Observation', activity_of_integration: 'Activity of Integration',
+};
+
+/** Plain words for `AssessmentStatus` (the assessment's own lifecycle). */
+export const ASSESSMENT_STATUS_LABEL: Record<string, string> = {
+  draft: 'Draft', scheduled: 'Scheduled', published: 'Published', open: 'Taking submissions',
+  closed: 'Submissions closed', grading: 'Being marked', graded: 'Marked', archived: 'Archived',
+};
+
+/** Kind label for a value in any case (the teaching API returns upper-case enums). */
+export const kindLabel = (kind: unknown) => {
+  const k = String(kind ?? '').toLowerCase();
+  return KIND_LABEL[k] ?? k.replaceAll('_', ' ');
+};
+export const assessmentStatusLabel = (status: unknown) => {
+  const s = String(status ?? '').toLowerCase();
+  return ASSESSMENT_STATUS_LABEL[s] ?? s.replaceAll('_', ' ');
 };
 
 export const BOARD_STAGES = ['draft', 'open', 'marking', 'submitted', 'approved', 'returned'] as const;

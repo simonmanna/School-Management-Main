@@ -7,6 +7,7 @@ import { AssessmentMintService } from '../assessment/assessment-mint.service';
 import { GradingService } from './grading.service';
 import type { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './marks-workspace.dto';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { MarkingService } from '../assessment/marking.service';
 
 /** Participation values that mean "resolved, but no numeric mark". */
 const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice']);
@@ -44,6 +45,7 @@ export class MarksWorkspaceService {
     private readonly grading: GradingService,
     private readonly mint: AssessmentMintService,
     private readonly placements: PlacementLookupService,
+    private readonly marking: MarkingService,
   ) {}
 
   /* ─────────────────────────── Step 1: exams ─────────────────────────── */
@@ -385,6 +387,9 @@ export class MarksWorkspaceService {
    * the moment a mark is typed into it.
    */
   async saveMark(dto: SaveMarkDto) {
+    // The route admits `school:read`; ownership is decided here so a teacher
+    // holding `school:grades:own` can enter their own papers (and only those).
+    await this.marking.assertMayEnterExamPaper(dto.classId, dto.subjectId);
     const schedule = await this.ensureSchedule(dto.examId, dto.classId, dto.subjectId, dto.maxMarks);
     const spineLock = await this.prisma.client.assessment.findFirst({
       where: { organizationId: this.tenant.organizationId, sourceType: 'exam_session', sourceRef: schedule.id },

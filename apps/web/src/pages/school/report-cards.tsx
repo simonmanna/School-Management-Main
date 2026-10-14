@@ -154,7 +154,7 @@ export function SchoolReportCardsPage() {
     <div className="space-y-4 p-6">
       <div className="space-y-3">
         <div>
-          <h1 className="text-xl font-semibold">Report cards</h1>
+          <h1 className="text-xl font-semibold">Report Cards</h1>
           <p className="text-sm text-muted-foreground">
             Build report cards from this term’s approved marks, release them to families, and print the class set.
           </p>
@@ -282,8 +282,8 @@ export function SchoolReportCardsPage() {
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm">
           <span className="text-muted-foreground">Once the cards are out:</span>
-          <Button size="sm" variant="outline" onClick={() => navigate('/school/promotion')}>
-            Move pupils up a class <ArrowRight className="h-3.5 w-3.5" />
+          <Button size="sm" variant="outline" onClick={() => navigate('/school/results?tab=promotion')}>
+            Decide promotions <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </CardContent>
       </Card>
@@ -391,7 +391,11 @@ function ReportCardView({
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {card.publishedAt ? <Badge>Published</Badge> : <Badge variant="secondary">Draft</Badge>}
+            {card.publishedAt
+              ? <Badge>Released to family</Badge>
+              : (card.payload as any)?.provenance?.source === 'result_spine'
+                ? <Badge variant="secondary">Ready to release</Badge>
+                : <Badge variant="outline" title="Built from marks before the term results were released. Release the term results, then regenerate the card.">Preview only — can't be released</Badge>}
             <span>Generated {card.generatedAt ? new Date(card.generatedAt).toLocaleString() : '—'}</span>
           </div>
           <div className="flex items-center gap-2">

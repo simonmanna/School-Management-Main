@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { notify } from '@/lib/notify';
 import { currentTerminology } from '@/features/school/api';
 import { Empty, apiMessage, num, selectClass } from './exam-ops-shared';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 
 const OUTCOMES = [
   { value: 'promote', label: 'Promote' },
@@ -44,6 +46,11 @@ export function PromotionDecisionsPanel({
   published: boolean;
   terms: Array<{ id: string; name: string }>;
 }) {
+  // Drawing up (`results:compute`), deciding (`promotion:decide`) and moving
+  // learners (`promotion:apply`) are three different people's jobs.
+  const canPropose = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.computeResults));
+  const canDecide = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.decidePromotion));
+  const canApply = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.applyPromotion));
   const { data: board } = usePromotionBoard(resultSetId || undefined);
   const propose = useProposePromotions();
   const decide = useDecidePromotions();
@@ -97,7 +104,7 @@ export function PromotionDecisionsPanel({
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base flex items-center gap-2"><GraduationCap className="h-4 w-4" /> Promotion</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
+            {canPropose && <Button
               size="sm"
               disabled={!published || propose.isPending}
               title={published ? undefined : 'Release the results first — a decision taken on a draft calculation can change under it'}
@@ -113,13 +120,13 @@ export function PromotionDecisionsPanel({
               }}
             >
               <ListChecks className="h-4 w-4" /> Draw up from these results
-            </Button>
+            </Button>}
             {(board?.rows?.length ?? 0) > 0 && (
               <Button size="sm" variant="outline" asChild>
                 <Link to={`/school/reports/academics.promotion-list?resultSetId=${resultSetId}`}><Printer className="h-4 w-4" /> Promotion list</Link>
               </Button>
             )}
-            <select className={`${selectClass} w-48`} value={toTermId} onChange={(e) => setToTermId(e.target.value)}>
+            {canApply && <><select className={`${selectClass} w-48`} value={toTermId} onChange={(e) => setToTermId(e.target.value)}>
               <option value="">Move into term…</option>
               {terms.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
@@ -140,7 +147,7 @@ export function PromotionDecisionsPanel({
               }}
             >
               <PlayCircle className="h-4 w-4" /> Apply {approved.length} decision(s)
-            </Button>
+            </Button></>}
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -293,7 +300,7 @@ export function PromotionDecisionsPanel({
             </div>
           )}
 
-          {selected.length > 0 && (
+          {canDecide && selected.length > 0 && (
             <div className="flex flex-wrap gap-2 border-t pt-3">
               <Button size="sm" disabled={decide.isPending} onClick={() => submitDecisions('approved', selected)}>
                 Record {selected.length} decision(s)

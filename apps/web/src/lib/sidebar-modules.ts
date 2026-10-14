@@ -14,6 +14,12 @@ export interface SidebarModule {
   key: string;
   /** Must match the `title` of the section in app-shell NAV_SECTIONS. */
   section: string;
+  /**
+   * Further sections the same switch controls. Teaching & Assessment was split
+   * into Teaching / Exams / Results & Reports; one saved toggle still governs
+   * all three so an org that switched it off doesn't see them reappear.
+   */
+  alsoSections?: string[];
   description: string;
   defaultOn: boolean;
 }
@@ -23,7 +29,7 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
   { key: 'studentManagement', section: 'Student Management', description: 'Students, nursery day, categories, promotion, portals', defaultOn: true },
   { key: 'admissions', section: 'Admissions & Enrollment', description: 'Applications, review & enrol, placement', defaultOn: true },
   { key: 'academicManagement', section: 'Academic Management', description: 'Years, terms, classes, subjects, departments', defaultOn: true },
-  { key: 'teachingAssessment', section: 'Teaching & Assessment', description: 'Assessments, gradebook, exams, results', defaultOn: true },
+  { key: 'teachingAssessment', section: 'Teaching', alsoSections: ['Exams', 'Results & Reports'], description: 'Teaching (assessments, gradebook), Exams, Results & Reports', defaultOn: true },
   { key: 'attendances', section: 'Attendances', description: 'Student registers and attendance reports', defaultOn: true },
   { key: 'timetable', section: 'Timetable & Calendar', description: 'Timetables, calendar, events, trips', defaultOn: true },
   { key: 'academics', section: 'Academics', description: 'Curriculum, lesson plans, learning outcomes', defaultOn: true },
@@ -47,7 +53,9 @@ export const SIDEBAR_MODULES: SidebarModule[] = [
 
 export const moduleFeatureKey = (key: string) => `module.${key}`;
 
-const MODULE_BY_SECTION = new Map(SIDEBAR_MODULES.map((m) => [m.section, m]));
+const MODULE_BY_SECTION = new Map(
+  SIDEBAR_MODULES.flatMap((m) => [m.section, ...(m.alsoSections ?? [])].map((section) => [section, m] as const)),
+);
 
 export function isModuleEnabled(features: Record<string, boolean> | undefined, mod: SidebarModule): boolean {
   const saved = features?.[moduleFeatureKey(mod.key)];

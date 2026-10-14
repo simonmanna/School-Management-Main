@@ -77,7 +77,7 @@ export function SchoolStatutoryPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">National submissions</h1>
+        <h1 className="text-2xl font-semibold">National Submissions</h1>
         <p className="text-sm text-muted-foreground">
           Candidate numbers, continuous-assessment readiness and the files the school sends to the board.
         </p>

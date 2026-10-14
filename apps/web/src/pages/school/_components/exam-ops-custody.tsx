@@ -76,7 +76,7 @@ export function ExamCustodyPanel({ examId }: { examId: string }) {
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><FileLock2 className="h-4 w-4" /> Question papers</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
           {!board?.length ? (
-            <Empty>No question papers recorded for this examination yet. Add them in <strong>Exam Operations → Question papers</strong>.</Empty>
+            <Empty>No question papers recorded for this examination yet. Add them on the <strong>Paper content</strong> tab.</Empty>
           ) : (
             <Table>
               <TableHeader>

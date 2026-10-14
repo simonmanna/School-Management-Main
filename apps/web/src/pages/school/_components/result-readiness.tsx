@@ -111,7 +111,7 @@ export function summarise(conflicts: Conflict[], nameById: Map<string, string>) 
       return {
         title: 'An exam paper is still open for marking',
         blurb: `${conflicts[0]?.detail ?? ''} Close the examination, or lock the paper, first.`,
-        cta: { label: 'Examination operations', to: '/school/exam-operations' },
+        cta: { label: 'Run an Examination', to: '/school/exam-operations' },
       };
     // ── Wave 13 gate additions ──
     case 'MISSING_EVIDENCE':

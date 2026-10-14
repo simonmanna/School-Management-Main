@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Download, FileText, Lock, Printer, Unlock,
 } from 'lucide-react';
@@ -121,9 +121,9 @@ export function SchoolExamResultsPage() {
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Results</h1>
+          <h1 className="text-xl font-semibold">Exam Mark Sheets</h1>
           <p className="text-sm text-muted-foreground">
-            Every subject for the class, with totals, grades and positions.
+            One exam, one class: every subject with totals, grades and positions.
           </p>
         </div>
         <div className="flex gap-2 print:hidden">
@@ -137,6 +137,14 @@ export function SchoolExamResultsPage() {
       </div>
 
       <div className="print:hidden"><WorkflowSteps current={3} /></div>
+
+      {/* These numbers are live — they include marks nobody has approved yet,
+          and positions are ranked per exam. The term result parents see comes
+          from Term Results, so say so before anyone quotes a position. */}
+      <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm print:hidden">
+        <strong>Provisional.</strong> This sheet shows marks as entered, including ones not yet approved. Official term
+        results and positions come from <Link to="/school/results" className="font-medium underline">Term Results</Link> once released.
+      </p>
 
       <Card className="print:hidden">
         <CardContent className="flex flex-wrap gap-3 pt-4">

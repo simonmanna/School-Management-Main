@@ -11,6 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { notify } from '@/lib/notify';
 import { Empty, apiMessage, fmtDateTime } from './exam-ops-shared';
+import { useAuthStore } from '@/stores/auth.store';
+import { PERMISSIONS } from '@erp/shared';
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft',
@@ -37,6 +39,10 @@ export function ReportDocumentsPanel({
   resultSetId: string;
   published: boolean;
 }) {
+  // Issuing (`documents:write`) and releasing/withdrawing (`documents:publish`)
+  // are separate grants; show each control only to whoever holds it.
+  const canIssue = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.manageReportDocuments));
+  const canRelease = useAuthStore((st) => st.hasPermission(PERMISSIONS.school.publishReportDocuments));
   const { data: documents } = useReportDocuments({ termId, resultSetId: resultSetId || undefined });
   const generate = useGenerateReportDocuments();
   const publish = usePublishReportDocuments();
@@ -58,7 +64,7 @@ export function ReportDocumentsPanel({
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base flex items-center gap-2"><FileText className="h-4 w-4" /> Report documents</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
+            {canIssue && <><Button
               size="sm"
               disabled={!published || generate.isPending}
               title={published ? undefined : 'Release the results first — a document made from a draft calculation can still change'}
@@ -90,8 +96,8 @@ export function ReportDocumentsPanel({
             >
               <RefreshCw className="h-4 w-4" /> Reissue
             </Button>
-            <Input className="w-56" placeholder="Reason, to reissue" value={reason} onChange={(e) => setReason(e.target.value)} />
-            <Button
+            <Input className="w-56" placeholder="Reason, to reissue" value={reason} onChange={(e) => setReason(e.target.value)} /></>}
+            {canRelease && <Button
               size="sm"
               disabled={!selected.length || publish.isPending}
               onClick={async () => {
@@ -105,7 +111,7 @@ export function ReportDocumentsPanel({
               }}
             >
               <Send className="h-4 w-4" /> Release {selected.length || ''}
-            </Button>
+            </Button>}
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -212,7 +218,7 @@ export function ReportDocumentsPanel({
               </div>
             )}
 
-            {detail.status !== 'void' && detail.status !== 'superseded' && (
+            {canRelease && detail.status !== 'void' && detail.status !== 'superseded' && (
               <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                 <Input className="w-64" placeholder="Reason for withdrawing" value={reason} onChange={(e) => setReason(e.target.value)} />
                 <Button

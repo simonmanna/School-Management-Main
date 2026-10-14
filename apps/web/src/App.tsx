@@ -103,6 +103,7 @@ import { SchoolCampusesPage } from '@/pages/school/campuses';
 import { SchoolSubjectsPage } from '@/pages/school/subjects';
 import { SchoolAssessmentPage } from '@/pages/school/assessment';
 import { SchoolAssessmentsPage } from '@/pages/school/assessments';
+import { SchoolGradebookPage } from '@/pages/school/gradebook';
 import { SchoolClassTeacherPage } from '@/pages/school/class-teacher';
 import { SchoolAssessmentMarkPage } from '@/pages/school/assessment-mark';
 import { SchoolApprovalsPage } from '@/pages/school/approvals';
@@ -115,7 +116,6 @@ import { SchoolTeachingWorkspacePage } from '@/pages/school/teaching/workspace';
 import { SchoolAssessmentOpsPage } from '@/pages/school/assessment-ops';
 import { SchoolResultsPage } from '@/pages/school/results';
 import { SchoolGradingScalePage } from '@/pages/school/grading-scales';
-import { SchoolExamOpsPage } from '@/pages/school/exam-ops';
 import { SchoolExamOperationsPage } from '@/pages/school/exam-operations';
 import { SchoolStatutoryPage } from '@/pages/school/statutory';
 import { SchoolCbtPage } from '@/pages/school/cbt';
@@ -640,7 +640,7 @@ export function App() {
           <Route path="/school/exam-workspace/classes" element={<SchoolExamClassesPage />} />
           <Route path="/school/enter-marks" element={<SchoolEnterMarksPage />} />
           <Route path="/school/exam-results" element={<SchoolExamResultsPage />} />
-          <Route path="/school/gradebook" element={<Navigate to="/school/assessments" replace />} />
+          <Route path="/school/gradebook" element={<SchoolGradebookPage />} />
           <Route path="/school/teaching" element={<SchoolTeachingPage />} />
           <Route path="/school/teaching/:offeringId" element={<SchoolTeachingWorkspacePage />} />
           {/* The unified front door: every kind of assessment in one list, and
@@ -661,10 +661,11 @@ export function App() {
           <Route path="/school/assessment-ops" element={<SchoolAssessmentOpsPage />} />
           <Route path="/school/results" element={<SchoolResultsPage />} />
           <Route path="/school/grading-scales" element={<SchoolGradingScalePage />} />
-          <Route path="/school/exam-ops" element={<SchoolExamOpsPage />} />
           {/* Phase 5: the examination is run from one console — lifecycle,
-              candidates, custody, register, marking and moderation. The older
-              exam-ops screen stays for venue/seating/question-paper setup. */}
+              venues and seating, invigilators, candidates, paper content and
+              custody, register, marking and moderation. The separate exam-ops
+              screen was folded into it; its old URL lands on the venues tab. */}
+          <Route path="/school/exam-ops" element={<Navigate to="/school/exam-operations?tab=venues" replace />} />
           <Route path="/school/exam-operations" element={<SchoolExamOperationsPage />} />
           <Route path="/school/statutory" element={<SchoolStatutoryPage />} />
           <Route path="/school/learning-outcomes" element={<SchoolLearningOutcomesPage />} />

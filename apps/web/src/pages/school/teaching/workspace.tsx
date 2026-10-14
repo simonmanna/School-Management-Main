@@ -66,7 +66,7 @@ export function SchoolTeachingWorkspacePage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-medium">{courseLabel(course)}</div>
-                  <Badge variant="secondary">{course.status}</Badge>
+                  <Badge variant="secondary">{String(course.status).toLowerCase().replaceAll('_', ' ')}</Badge>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">{course.term?.name} · {course.code}</div>
                 <div className="mt-3 flex gap-3 text-xs text-muted-foreground">
@@ -97,7 +97,7 @@ export function SchoolTeachingWorkspacePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {offering && <Badge variant="secondary">{offering.status}</Badge>}
+          {offering && <Badge variant="secondary">{String(offering.status).toLowerCase().replaceAll('_', ' ')}</Badge>}
           {courses.length > 1 && (
             <div className="min-w-[240px]">
               <Picker

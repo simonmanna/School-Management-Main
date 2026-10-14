@@ -1,6 +1,6 @@
 import { schoolTodayNow } from '@/lib/format';
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CalendarDays, ClipboardList, FileSpreadsheet, Plus, Settings2, Users } from 'lucide-react';
 import {
   useAcademicYears, useTerms, useExamTypes, useCreateExamType, useCreateExam,
@@ -53,9 +53,11 @@ export function SchoolExamWorkspacePage() {
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Exams &amp; Marks</h1>
+          <h1 className="text-xl font-semibold">Exams &amp; Papers</h1>
           <p className="text-sm text-muted-foreground">
             Create an exam, choose which classes sit it, enter the marks, then read the results.
+            Venues, seating, invigilators and the exam day itself are run from{' '}
+            <Link to="/school/exam-operations" className="underline">Run an Examination</Link>.
           </p>
         </div>
         <Button onClick={() => setCreating(true)}>
@@ -116,7 +118,6 @@ export function SchoolExamWorkspacePage() {
                       <div className="font-medium">{e.name}</div>
                       <div className="text-xs text-muted-foreground">
                         {e.examTypeName ?? 'Exam'}
-                        {e.weight != null && <> · counts {e.weight}%</>}
                         {e.isFinal && <> · final</>}
                       </div>
                     </td>
@@ -174,8 +175,10 @@ export function SchoolExamWorkspacePage() {
 }
 
 /**
- * Creating an exam needs a type ("Mid-Term", weighted 30%). Rather than send the
+ * Creating an exam needs a type ("Mid-Term", "End of Term"). Rather than send the
  * user to a different page to make one first, the type can be created inline.
+ * How much a type counts is NOT set here: an Assessment Weighting part names
+ * the exam type it takes, and that part's weight is what term results use.
  */
 function NewExamDialog({
   open, termId, onClose, onCreated,
@@ -192,7 +195,6 @@ function NewExamDialog({
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [newType, setNewType] = useState('');
-  const [newWeight, setNewWeight] = useState('30');
   const [addingType, setAddingType] = useState(false);
 
   const types = examTypes?.data ?? [];
@@ -201,7 +203,7 @@ function NewExamDialog({
   async function addType() {
     if (!newType.trim()) return;
     try {
-      const created = await createType.mutateAsync({ name: newType.trim(), weight: Number(newWeight) || 0 });
+      const created = await createType.mutateAsync({ name: newType.trim(), weight: 0 });
       setExamTypeId(created.id);
       setAddingType(false);
       setNewType('');
@@ -255,21 +257,24 @@ function NewExamDialog({
             </div>
             {addingType ? (
               <div className="flex gap-2">
-                <Input placeholder="Type name (e.g. CAT 1)" value={newType} onChange={(e) => setNewType(e.target.value)} />
-                <Input type="number" className="w-24" placeholder="Weight" value={newWeight} onChange={(e) => setNewWeight(e.target.value)} />
+                <Input placeholder="Type name (e.g. End of Term)" value={newType} onChange={(e) => setNewType(e.target.value)} />
                 <Button size="sm" onClick={addType} disabled={!newType.trim() || createType.isPending}>Add</Button>
               </div>
             ) : (
               <select className={selectClass} value={examTypeId} onChange={(e) => setExamTypeId(e.target.value)}>
                 <option value="">Select a type…</option>
                 {types.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name} — counts {Number(t.weight)}%</option>
+                  <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
             )}
             {!addingType && types.length === 0 && (
               <p className="mt-1 text-xs text-amber-600">No exam types yet — add one with “+ New type”.</p>
             )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              How much this exam counts toward the term result is set in{' '}
+              <Link to="/school/assessment" className="underline">Assessment Weighting</Link>.
+            </p>
           </div>
 
           <div>

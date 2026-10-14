@@ -64,8 +64,11 @@ export class MarksWorkspaceController {
     return this.service.sheet({ examId, classId, subjectId, sectionId: sectionId || undefined });
   }
 
+  // Org-wide entry (`grades:write`) OR own-paper entry (`grades:own`): the guard
+  // requires ALL listed permissions, so the either-or is decided in the service
+  // (MarkingService.assertMayEnterExamPaper).
   @Post('entry')
-  @RequirePermissions(PERMISSIONS.school.enterGrades)
+  @RequirePermissions(PERMISSIONS.school.read)
   saveMark(@Body() dto: SaveMarkDto) {
     return this.service.saveMark(dto);
   }
