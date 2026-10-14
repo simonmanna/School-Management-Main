@@ -7,7 +7,8 @@ site on the Contabo VPS) without touching that site beyond two Caddy blocks.
 |---|---|
 | Staff app | https://school-demo.almasiresidence.com |
 | Parent / teacher portal | https://portal-demo.almasiresidence.com |
-| Host | root@169.58.5.88 (`~/.ssh/avida_vps`), files in `/opt/school-demo` |
+| Portal by IP (no DNS needed) | http://169.58.5.88:8095 — `portal-ip` service, plain HTTP |
+| Host | `ssh avida-vps` (Tailscale `100.68.98.67`; public 169.58.5.88:22 is blocked on some networks), files in `/opt/school-demo` |
 | Compose project | `school-demo` (`docker-compose.yml` + `docker-compose.demo.yml`) |
 
 ## How it fits
@@ -97,6 +98,7 @@ docker cp sd-seed-db:/tmp/school-demo.dump .
 1. DNS (Namecheap): A records `school-demo` and `portal-demo` → 169.58.5.88.
 2. Copy to `/opt/school-demo`: `docker-compose.yml`, `docker-compose.demo.yml`,
    `infra/docker/Caddyfile.demo-snippet` (as `Caddyfile.demo-snippet`),
+   `infra/docker/Caddyfile.demo-ip` (as `Caddyfile.demo-ip`),
    `scripts/demo/vps-demo.sh`, `school-demo.dump`, `sd-images.tar.gz`.
 3. `bash vps-demo.sh up` — generates `.env.demo` (mode 600) on first run,
    loads images, creates the roles, restores the dump, starts the stack.

@@ -8,7 +8,7 @@
 #   bash vps-demo.sh down        stop and remove the demo (volumes too); unwire Caddy first
 #
 # Expects next to it: docker-compose.yml, docker-compose.demo.yml,
-# Caddyfile.demo-snippet, school-demo.dump, sd-images.tar.gz (for `up`).
+# Caddyfile.demo-snippet, Caddyfile.demo-ip, school-demo.dump, sd-images.tar.gz (for `up`).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -80,7 +80,7 @@ cmd_up() {
     restore_dump
   fi
   say "API, staff app, portal"
-  "${DC[@]}" up -d --no-build api web portal
+  "${DC[@]}" up -d --no-build api web portal portal-ip
   wait_api
   "${DC[@]}" ps
 }

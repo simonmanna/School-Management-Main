@@ -51,7 +51,8 @@ services:
       LOG_LEVEL: info
       # One proxy hop in front (the host's Caddy).
       TRUST_PROXY: "1"
-      CORS_ORIGINS: ${DEMO_WEB_URL:?set DEMO_WEB_URL},${DEMO_PORTAL_URL:?set DEMO_PORTAL_URL}
+      # DEMO_EXTRA_ORIGINS: the portal-ip origin, e.g. http://169.58.5.88:8095.
+      CORS_ORIGINS: ${DEMO_WEB_URL:?set DEMO_WEB_URL},${DEMO_PORTAL_URL:?set DEMO_PORTAL_URL},${DEMO_EXTRA_ORIGINS:-}
       WEB_URL: ${DEMO_WEB_URL}
       PORTAL_URL: ${DEMO_PORTAL_URL}
       METRICS_TOKEN: ${METRICS_TOKEN:?set METRICS_TOKEN}
@@ -125,6 +126,21 @@ services:
         VITE_ORG_CODE: SUNRISE
         VITE_SCHOOL_NAME: Sunrise Academy (Demo)
         VITE_ENABLE_ADVANCED_LMS: "false"
+
+  # The portal straight on the server's IP over plain HTTP, for when the
+  # portal hostname has no DNS record. The only published port in this stack;
+  # Docker publishes past ufw, so the port is reachable from anywhere. Logins
+  # cross it unencrypted — demo data only. Add its origin to DEMO_EXTRA_ORIGINS.
+  portal-ip:
+    image: caddy:2-alpine
+    container_name: school-demo-portal-ip
+    restart: unless-stopped
+    mem_limit: 64m
+    depends_on: [api, portal]
+    ports:
+      - "${DEMO_PORTAL_IP_PORT:-8095}:80"
+    volumes:
+      - ./Caddyfile.demo-ip:/etc/caddy/Caddyfile:ro
 
   adminer:
     profiles: ["never"]

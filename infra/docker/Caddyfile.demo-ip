@@ -1,0 +1,16 @@
+# Portal over plain HTTP on the server's IP (docker-compose.demo.yml, service
+# portal-ip), for demos without a DNS record. Same routing as the hostname
+# block in Caddyfile.demo-snippet: the bundle calls /api/v1 on its own origin.
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle {
+		reverse_proxy portal:80
+	}
+}
