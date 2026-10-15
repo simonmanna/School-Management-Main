@@ -16,8 +16,7 @@ import { PERMISSIONS } from '@erp/shared';
 import { useMyStaffIdentity } from '@/features/hr/api';
 import { useAuthStore } from '@/stores/auth.store';
 import { EmptyState, Picker, Progress, fmtDate, useDefaulted, useStickyState } from './_components/exam-workflow';
-import { CreateAssessmentDialog } from './_components/assessment-form';
-import { AssessmentSetupChecklist } from './_components/assessment-setup-checklist';
+import { CreateAssessmentDialog, type CreatedAssessmentContext } from './_components/assessment-form';
 
 /**
  * Assessments — where a teacher starts.
@@ -90,6 +89,25 @@ export function SchoolAssessmentsPage() {
   const counts = board?.counts ?? {};
   const policy = board?.policy ?? null;
 
+  /**
+   * Point the board at what was just created.
+   *
+   * The create form chooses a COURSE, which fixes the term, class and subject;
+   * the board filters on its own pickers, which are sticky and were often left
+   * on something else — so a successful create looked like nothing had happened.
+   * The new draft is also never in a stage or kind filter, so both are cleared.
+   */
+  function onCreated(created: CreatedAssessmentContext) {
+    setTermId(created.termId);
+    setClassId(created.classId ?? '');
+    setSubjectId(created.subjectId ?? '');
+    const next = new URLSearchParams(params);
+    next.delete('status');
+    next.delete('kind');
+    next.delete('new');
+    setParams(next, { replace: true });
+  }
+
   async function onSubmit(row: BoardRow) {
     try {
       const res: any = await submit.mutateAsync(row.assessmentId);
@@ -112,9 +130,6 @@ export function SchoolAssessmentsPage() {
           <Plus className="mr-1.5 h-4 w-4" /> New assessment
         </Button>
       </div>
-
-      {/* The academic office sees what is still missing before marks count. */}
-      {seesAllClasses && <AssessmentSetupChecklist termId={termId || undefined} />}
 
       {/* Every filter in one row: where (year → subject), then stage and kind. */}
       <Card>
@@ -236,6 +251,7 @@ export function SchoolAssessmentsPage() {
           classId={classId}
           subjectId={subjectId}
           courseOfferingId={courseOfferingId || undefined}
+          onCreated={onCreated}
           onClose={() => setCreating(false)}
         />
       )}

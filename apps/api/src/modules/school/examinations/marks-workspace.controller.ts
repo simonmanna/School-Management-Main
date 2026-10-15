@@ -3,7 +3,7 @@ import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { MarksWorkspaceService } from './marks-workspace.service';
-import { ApplyClassesDto, LockMarksDto, RemoveClassDto, ResultsSmsDto, SaveMarkDto } from './marks-workspace.dto';
+import { ApplyClassesDto, LockMarksDto, PaperRefDto, RemoveClassDto, ResultsSmsDto, SaveMarkDto } from './marks-workspace.dto';
 import { ExamResultsMessagingService } from './exam-results-messaging.service';
 
 /**
@@ -89,6 +89,14 @@ export class MarksWorkspaceController {
   @RequirePermissions(PERMISSIONS.school.read)
   saveMark(@Body() dto: SaveMarkDto) {
     return this.service.saveMark(dto);
+  }
+
+  // Same either-or as `entry`: whoever may enter the paper may send it for
+  // approval. Approving it is `grades:approve`, on the approvals route.
+  @Post('submit')
+  @RequirePermissions(PERMISSIONS.school.read)
+  submit(@Body() dto: PaperRefDto) {
+    return this.service.submitPaper(dto);
   }
 
   @Get('grid')

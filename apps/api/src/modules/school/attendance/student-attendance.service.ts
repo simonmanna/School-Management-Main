@@ -284,7 +284,16 @@ export class StudentAttendanceService {
     return { from: start, to: end, byDate };
   }
 
-  /** Per-student summary: attendance % over a date range, derived from config flags. */
+  /**
+   * Per-student summary: attendance % over a date range, derived from config flags.
+   *
+   * The day rows come back with the summary (`records`). The profile screen lets
+   * a head teacher open "4 absences" and read which four days they were, and a
+   * second round trip for rows this query has already loaded would only make
+   * the two disagree while it was in flight. Each row carries the bucket the
+   * rate maths put it in, so the screen filters on the server's classification
+   * rather than re-deriving one from the status code.
+   */
   async byStudent(studentProfileId: string, from: Date | string, to: Date | string) {
     // A class teacher reads the attendance of pupils they teach, not the school's.
     await this.dataScope.assertMayReadStudent(studentProfileId);
@@ -294,10 +303,44 @@ export class StudentAttendanceService {
       throw new BadRequestException('Invalid from/to date');
     }
     const [rows, cfg, policy] = await Promise.all([
-      this.prisma.client.studentAttendance.findMany({ where: { studentProfileId, date: { gte: start, lte: end } } }),
+      this.prisma.client.studentAttendance.findMany({
+        where: { studentProfileId, date: { gte: start, lte: end } },
+        orderBy: { date: 'desc' },
+        include: {
+          period: { select: { id: true, name: true } },
+          schoolClass: { select: { id: true, name: true } },
+          section: { select: { id: true, name: true } },
+          statusConfig: { select: { label: true, color: true } },
+        },
+      }),
       this.statusConfig.catalogByCode(),
       loadAttendancePolicy(this.prisma.client),
     ]);
+    // Who took the register — a name, not the user id the column stores.
+    const markerIds = [...new Set(rows.map((r: any) => r.markedById).filter(Boolean) as string[])];
+    const markers = markerIds.length
+      ? await this.prisma.client.user.findMany({
+          where: { id: { in: markerIds } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+    const markerName = new Map(markers.map((u) => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ')]));
+    const records = rows.map((r: any) => ({
+      id: r.id,
+      date: r.date,
+      status: r.status,
+      statusLabel: r.statusConfig?.label ?? cfg[r.status]?.label ?? r.status,
+      statusColor: r.statusConfig?.color ?? cfg[r.status]?.color ?? null,
+      bucket: bucketOf(cfg[r.status], r.status),
+      minutesLate: r.minutesLate ?? 0,
+      earlyDepartureMinutes: r.earlyDepartureMinutes ?? null,
+      reason: r.reason ?? null,
+      periodName: r.period?.name ?? null,
+      className: r.schoolClass?.name ?? null,
+      sectionName: r.section?.name ?? null,
+      markedAt: r.markedAt,
+      markedByName: r.markedById ? markerName.get(r.markedById) ?? null : null,
+    }));
     // Audit F08: one bucket per session, the school's late policy, no clamp.
     const s = summarizeAttendance(countCodes(rows.map((r) => r.status)), cfg, policy);
     return {
@@ -309,6 +352,7 @@ export class StudentAttendanceService {
       denominator: s.denominator,
       attendanceRate: s.rate,
       policyMissing: s.policyMissing,
+      records,
     };
   }
 

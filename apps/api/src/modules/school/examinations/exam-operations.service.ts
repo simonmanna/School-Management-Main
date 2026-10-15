@@ -7,6 +7,7 @@ import { AuditService } from '../../../kernel/audit/audit.service';
 import { EventBus } from '../../../kernel/events/event-bus';
 import type { ExamLifecycleActionDto, FreezeCandidatesDto } from './exam-operations.dto';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
+import { AssessmentMintService } from '../assessment/assessment-mint.service';
 
 /** A blocked transition, named so the exam office can act on it. */
 export interface ExamGateConflict {
@@ -69,6 +70,7 @@ export class ExamOperationsService {
     private readonly audit: AuditService,
     private readonly events: EventBus,
     private readonly placements: PlacementLookupService,
+    private readonly mint: AssessmentMintService,
   ) {}
 
   private get db(): any { return this.prisma.client; }
@@ -348,12 +350,28 @@ export class ExamOperationsService {
         },
       });
 
+      // The sitting has started: the frozen candidate list IS who sat each
+      // paper, so it becomes each paper's class list on the mark sheet. Before
+      // this, the marking gate demanded a roster that nothing in the exam
+      // office could create, and an exam set up in Exams & Papers could never
+      // get past 'in progress'.
+      if (target === 'in_progress' && !backwards) {
+        await this.bindPapersToCandidates(tx, exam);
+      }
+
       // Closing an exam locks every paper's marks. An unlocked paper inside a
-      // closed exam is exactly the gap someone edits a mark through.
+      // closed exam is exactly the gap someone edits a mark through. The lock
+      // that bites is the assessment's (`postMark` checks it); the schedule
+      // column is its legacy mirror.
       if (target === 'closed') {
+        const open = await tx.examSchedule.findMany({ where: { examId }, select: { id: true } });
         await tx.examSchedule.updateMany({
           where: { examId, marksLockedAt: null },
           data: { marksLockedAt: now, marksLockedById: this.tenant.userId ?? null },
+        });
+        await tx.assessment.updateMany({
+          where: { organizationId: this.org, sourceType: 'exam_session', sourceRef: { in: open.map((p: any) => p.id) }, lockedAt: null },
+          data: { lockedAt: now, lockedById: this.tenant.userId ?? null },
         });
       }
 
@@ -369,6 +387,67 @@ export class ExamOperationsService {
       });
       return tx.exam.findFirst({ where: { id: examId } });
     });
+  }
+
+  /**
+   * Give every paper a frozen class list taken from the exam's frozen
+   * candidate list (that paper's class only), and make sure each paper has its
+   * canonical assessment. A paper that already has a list — e.g. one a teacher
+   * submitted from Exams & Papers — keeps it.
+   */
+  private async bindPapersToCandidates(tx: any, exam: any) {
+    if (!exam.activeSnapshotId) return;
+    const entries = await tx.examCandidateEntry.findMany({
+      where: { snapshotId: exam.activeSnapshotId },
+      select: { studentProfileId: true, classId: true, sectionId: true },
+    });
+    const papers = await tx.examSchedule.findMany({ where: { examId: exam.id }, select: { id: true, classId: true, subjectId: true } });
+    for (const p of papers) {
+      const assessment = await this.mint.forExamSchedule(tx, p.id);
+      if (!assessment || assessment.rosterId) continue;
+      const sitting = entries.filter((e: any) => e.classId === p.classId);
+      if (!sitting.length) continue;
+      const now = new Date();
+      const roster = await tx.academicRoster.create({
+        data: {
+          organizationId: this.org,
+          termId: exam.termId,
+          scopeType: 'subject',
+          classId: p.classId,
+          subjectId: p.subjectId,
+          name: 'Exam candidates',
+          source: 'enrollment',
+          capturedById: this.tenant.userId ?? null,
+        },
+      });
+      await tx.academicRosterMember.createMany({
+        data: sitting.map((e: any) => ({
+          organizationId: this.org,
+          rosterId: roster.id,
+          studentProfileId: e.studentProfileId,
+          classId: e.classId,
+          sectionId: e.sectionId ?? null,
+          effectiveFrom: now,
+          joinReason: 'exam_candidate_snapshot',
+        })),
+      });
+      // Frozen after the members go in: the database refuses membership
+      // changes on a frozen list.
+      await tx.academicRoster.updateMany({
+        where: { id: roster.id },
+        data: { frozenAt: now, frozenById: this.tenant.userId ?? null, version: { increment: 1 } },
+      });
+      await tx.assessment.updateMany({
+        where: { id: assessment.id, rosterId: null },
+        data: { rosterId: roster.id, version: { increment: 1 } },
+      });
+      await this.audit.recordInTx(tx, {
+        entity: 'Assessment',
+        entityId: assessment.id,
+        action: 'update',
+        newValues: { action: 'bind_candidate_roster', rosterId: roster.id, snapshotId: exam.activeSnapshotId, members: sitting.length },
+      });
+    }
   }
 
   /** Set the marking mode for one paper. Blocked once scripts are out. */

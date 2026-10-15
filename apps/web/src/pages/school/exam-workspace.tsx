@@ -119,6 +119,9 @@ export function SchoolExamWorkspacePage() {
                       <div className="text-xs text-muted-foreground">
                         {e.examTypeName ?? 'Exam'}
                         {e.isFinal && <> · final</>}
+                        {e.lifecycleState && e.lifecycleState !== 'draft' && (
+                          <> · <span title="Where this exam is in Run an Examination">{LIFECYCLE_LABEL[e.lifecycleState] ?? e.lifecycleState}</span></>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
@@ -131,13 +134,7 @@ export function SchoolExamWorkspacePage() {
                     </td>
                     <td className="px-4 py-3"><Progress done={e.marksEntered} total={e.marksExpected} /></td>
                     <td className="px-4 py-3">
-                      {e.lockedPaperCount > 0 && e.lockedPaperCount === e.paperCount
-                        ? <Badge variant="secondary">Locked</Badge>
-                        : e.marksExpected > 0 && e.marksEntered >= e.marksExpected
-                          ? <Badge className="bg-emerald-600 hover:bg-emerald-600">Complete</Badge>
-                          : e.marksEntered > 0
-                            ? <Badge variant="outline">In progress</Badge>
-                            : <Badge variant="secondary">Not started</Badge>}
+                      <ExamStatus exam={e} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
@@ -306,4 +303,35 @@ function NewExamDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+const LIFECYCLE_LABEL: Record<string, string> = {
+  setup: 'Being set up', scheduled: 'Scheduled', candidates_locked: 'Candidates locked',
+  in_progress: 'Being sat', marking: 'Marking', moderation: 'Moderation',
+  results_ready: 'Results ready', closed: 'Closed', archived: 'Archived',
+};
+
+/**
+ * Where an exam stands, in the order that matters: a closed exam is closed; an
+ * approved paper counts towards results; a paper with the approver is waiting;
+ * otherwise it is about how many marks are in. "Complete" used to be the last
+ * word, which read as done for papers nobody had approved, whose marks were
+ * therefore still not counting.
+ */
+function ExamStatus({ exam: e }: { exam: WorkspaceExam }) {
+  const approved = e.approvedPaperCount ?? 0;
+  const submitted = e.submittedPaperCount ?? 0;
+  if (e.lifecycleState === 'closed' || e.lifecycleState === 'archived') return <Badge variant="secondary">Closed</Badge>;
+  if (e.paperCount > 0 && approved === e.paperCount) return <Badge className="bg-emerald-600 hover:bg-emerald-600">Approved</Badge>;
+  const sub = approved + submitted > 0
+    ? <div className="mt-1 text-xs text-muted-foreground">{approved} approved · {submitted} with approver · {e.paperCount} papers</div>
+    : null;
+  const badge = submitted > 0 && approved + submitted === e.paperCount
+    ? <Badge variant="outline">With approver</Badge>
+    : e.marksExpected > 0 && e.marksEntered >= e.marksExpected
+      ? <Badge variant="outline" className="border-amber-500 text-amber-700">Marks in — submit</Badge>
+      : e.marksEntered > 0
+        ? <Badge variant="outline">In progress</Badge>
+        : <Badge variant="secondary">Not started</Badge>;
+  return <>{badge}{sub}</>;
 }

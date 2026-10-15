@@ -123,8 +123,28 @@ export class ReportDocumentService {
       throw new BadRequestException('Reissuing a report document needs a reason');
     }
 
+    // A reissue (with its stated reason) IS the deliberate act the card's
+    // "unpublish before regenerating" rule asks for. Without this the card
+    // refused to regenerate and every reissue of a released document failed.
+    // The card comes back down only for the regeneration; if that fails it is
+    // put back exactly as it was.
+    const releasedCard = existing
+      ? await this.db.reportCard.findFirst({ where: { studentProfileId, termId: rs.termId, publishedAt: { not: null } } })
+      : null;
+    if (releasedCard) {
+      await this.db.reportCard.updateMany({ where: { id: releasedCard.id }, data: { publishedAt: null } });
+    }
+
     // The card is the rendered content; the document is its provenance record.
-    const card = await this.cards.generate({ studentProfileId, termId: rs.termId } as any);
+    let card: any;
+    try {
+      card = await this.cards.generate({ studentProfileId, termId: rs.termId } as any);
+    } catch (err) {
+      if (releasedCard) {
+        await this.db.reportCard.updateMany({ where: { id: releasedCard.id }, data: { publishedAt: releasedCard.publishedAt } });
+      }
+      throw err;
+    }
     const payload = card?.payload ?? {};
     const checksum = this.checksum(payload);
 
@@ -184,6 +204,24 @@ export class ReportDocumentService {
       const notReady = docs.filter((d: any) => !['draft', 'generated'].includes(d.status));
       if (notReady.length) {
         throw new BadRequestException(`${notReady.length} document(s) are not in a releasable state`);
+      }
+      // Same rule as releasing a card directly: a document may only go out
+      // while the results it was built from are still the released revision.
+      // An amendment publishes a new revision and archives the old one; a
+      // document generated from the old one must be reissued, not released.
+      const setIds = [...new Set(docs.map((d: any) => d.resultSetId).filter(Boolean))];
+      const sets = setIds.length ? await tx.resultSet.findMany({ where: { id: { in: setIds } }, select: { id: true, status: true, revision: true } }) : [];
+      const setById = new Map(sets.map((s: any) => [s.id, s]));
+      const stale = docs.filter((d: any) => {
+        const s: any = d.resultSetId ? setById.get(d.resultSetId) : null;
+        return !s || !['published', 'locked'].includes(s.status) || (d.resultSetRevision != null && s.revision !== d.resultSetRevision);
+      });
+      if (stale.length) {
+        throw new BadRequestException({
+          code: 'RESULTS_NO_LONGER_RELEASED',
+          message: `${stale.length} document(s) were built from results that are no longer the released version. Reissue them from the current results.`,
+          documentIds: stale.map((d: any) => d.id),
+        });
       }
       const now = new Date();
       await tx.reportDocument.updateMany({

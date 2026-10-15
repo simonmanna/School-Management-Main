@@ -208,6 +208,10 @@ export function SchoolExamResultsPage() {
                 <p className="text-sm text-muted-foreground">
                   {grid.classSize} students · {grid.paperCount} subjects
                   {allLocked && <> · <span className="text-muted-foreground">locked</span></>}
+                  {' · '}
+                  <span className={grid.approved ? 'text-emerald-700' : 'text-amber-700'}>
+                    {grid.approvedPaperCount ?? 0} of {grid.paperCount} papers approved
+                  </span>
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3 print:hidden">
@@ -251,8 +255,10 @@ export function SchoolExamResultsPage() {
                     <th className="sticky left-0 z-10 bg-card px-3 py-2">#</th>
                     <th className="sticky left-8 z-10 min-w-[180px] bg-card px-3 py-2">Student</th>
                     {grid.subjects.map((s) => (
-                      <th key={s.subjectId} className="px-2 py-2 text-center" title={`${s.name} (out of ${s.maxMarks})`}>
+                      <th key={s.subjectId} className="px-2 py-2 text-center"
+                        title={`${s.name} (out of ${s.maxMarks}) — ${s.approvalStatus === 'approved' ? 'approved' : s.approvalStatus === 'submitted' ? 'waiting for approval' : s.approvalStatus === 'rejected' ? 'returned to the teacher' : 'not yet submitted'}`}>
                         {s.code || s.name.slice(0, 4).toUpperCase()}
+                        {s.approvalStatus === 'approved' && <span className="ml-0.5 text-emerald-600">✓</span>}
                       </th>
                     ))}
                     <th className="px-3 py-2 text-right">Total</th>

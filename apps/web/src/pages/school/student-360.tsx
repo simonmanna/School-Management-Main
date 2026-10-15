@@ -10,7 +10,10 @@ import {
   useEnrollStudent, useSections, useSectionsForClass, useStudentEnrollments,
   useAcademicYears, useClasses, useAdmissionCycles, useNationalities, useStudentCategories,
   useTerms, useStudentResultSet,
-  type FeeStatement, type Guardian, type PupilEnrollment, useTerminology } from '@/features/school/api';
+  useAssessment, openFeeReceiptPdf,
+  type FeeStatement, type Guardian, type PupilEnrollment, type AttendanceRecord,
+  useTerminology } from '@/features/school/api';
+import { useInvoice, usePayment } from '@/features/invoicing/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,7 +22,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Users, CalendarCheck, Save } from 'lucide-react';
+import {
+  Trash2, Pencil, Plus, Camera, User, GraduationCap, Wallet, HeartPulse, Activity, Users, CalendarCheck, Save,
+  ChevronRight, Printer, Receipt, ClipboardList, CalendarDays, Hash, Home, Flag, BadgeCheck, Cake, School,
+  TrendingUp, Trophy, FileText, Bus, Utensils, BookOpen, Award, Clock, Inbox, Mail, Phone, Sparkles,
+  Eye, ExternalLink, Download,
+} from 'lucide-react';
 import { notify } from '@/lib/notify';
 import { formatClass, formatCurrency } from '@/lib/utils';
 
@@ -29,12 +37,30 @@ const initials = (name?: string) => (name ?? '?').split(' ').map((p) => p[0]).sl
 const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
 
 const STATUS_META: Record<string, string> = {
-  active: 'bg-emerald-100 text-emerald-700',
-  suspended: 'bg-amber-100 text-amber-700',
-  transferred: 'bg-sky-100 text-sky-700',
-  withdrawn: 'bg-rose-100 text-rose-700',
-  alumni: 'bg-slate-100 text-slate-700',
+  active: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
+  suspended: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/25',
+  transferred: 'bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/25',
+  withdrawn: 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/25',
+  alumni: 'bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/25',
 };
+
+/** "11 years 7 months", the way a head teacher reads an age — not a decimal. */
+const ageOf = (dob?: string | null) => {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+  if (now.getDate() < d.getDate()) months -= 1;
+  if (months < 0) return null;
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  return `${y} year${y === 1 ? '' : 's'}${m ? ` ${m} month${m === 1 ? '' : 's'}` : ''}`;
+};
+
+/** The one published term result, whichever shape the portal hands back. */
+const latestResult = (portal?: any) =>
+  Array.isArray(portal?.publishedResults) ? portal.publishedResults[0] : portal?.publishedResults;
 
 const RELIGIONS = ['Christian', 'Muslim', 'Hindu', 'Traditional', 'Other'];
 const ENTRY_STATUSES = ['New entrant', 'Transfer', 'Re-admission', 'Returning'];
@@ -210,53 +236,146 @@ export function SchoolStudent360Page() {
     }
   };
 
-  if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Loading student…</div>;
+  if (isLoading) return <StudentSkeleton />;
   if (!student) return <div className="p-6 text-sm text-muted-foreground">Student not found. <Link className="text-primary underline" to="/school/students">Back to students</Link></div>;
 
   const TABS = [
     { value: 'profile', label: 'Profile', icon: User },
     { value: 'guardians', label: 'Guardians', icon: Users },
     { value: 'academic', label: 'Academic', icon: GraduationCap },
+    { value: 'assessments', label: 'Assessments', icon: ClipboardList },
     { value: 'attendance', label: 'Attendance', icon: CalendarCheck },
     { value: 'financial', label: 'Financial', icon: Wallet },
     { value: 'wellbeing', label: 'Wellbeing', icon: HeartPulse },
     { value: 'engagement', label: 'Engagement', icon: Activity },
   ] as const;
 
-  return (
-    <div className="space-y-4 p-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate('/school/students')}>← Students</Button>
+  const result = latestResult(portal);
+  const rate = typeof attendance?.attendanceRate === 'number' ? attendance.attendanceRate : null;
+  const age = ageOf(student.dateOfBirth as any);
+  const year = (years?.data ?? []).find((y: any) => y.id === (cf.academicYearId ?? ''))?.name;
 
-      {/* Identity header */}
-      <Card>
-        <CardContent className="flex flex-col items-center gap-3 p-5 text-center sm:flex-row sm:text-left">
-          <div className="relative">
-            <div className="h-24 w-24 shrink-0 overflow-hidden rounded-full bg-primary/10 text-primary flex items-center justify-center text-2xl font-semibold">
-              {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials(student.partner?.name)}
+  return (
+    <div className="space-y-5 p-6 print:p-0">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-1 text-xs text-muted-foreground print:hidden">
+        <Link to="/school/students" className="hover:text-foreground">{labels.learnerPlural}</Link>
+        <ChevronRight className="h-3 w-3" />
+        <span className="text-foreground">Student profile</span>
+      </nav>
+
+      {/* ── Identity hero ───────────────────────────────────────────── */}
+      <Card className="overflow-hidden border-primary/15">
+        <div className="relative">
+          {/* Soft brand wash behind the identity block */}
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/12 via-primary/5 to-transparent" />
+          <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+          <CardContent className="relative grid gap-5 p-6 lg:grid-cols-[auto_1fr_auto]">
+            {/* Photo */}
+            <div className="flex justify-center lg:block">
+              <div className="group relative">
+                <div className="h-28 w-28 overflow-hidden rounded-2xl bg-primary/10 text-primary shadow-sm ring-2 ring-primary/20 ring-offset-2 ring-offset-card flex items-center justify-center text-3xl font-semibold">
+                  {photo ? <img src={photo} alt="" className="h-full w-full object-cover" /> : initials(student.partner?.name)}
+                </div>
+                <span
+                  className={`absolute -right-1 -top-1 h-4 w-4 rounded-full border-2 border-card ${
+                    student.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'
+                  }`}
+                  title={student.status}
+                />
+                <button
+                  onClick={() => setPhotoOpen(true)}
+                  className="absolute inset-x-0 -bottom-2 mx-auto flex w-max items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground shadow-md transition hover:brightness-110 print:hidden"
+                >
+                  <Camera className="h-3 w-3" /> Photo
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => setPhotoOpen(true)}
-              className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground shadow flex items-center gap-1"
-            >
-              <Camera className="h-3 w-3" /> Change Photo
-            </button>
-          </div>
-          <div className="flex-1">
-            <h1 className="text-2xl font-semibold">{student.partner?.name}</h1>
-            <p className="font-mono text-xs text-muted-foreground">{student.admissionNo} · ID {student.id.slice(0, 8)}</p>
-            <div className="mt-2 flex flex-wrap justify-center gap-2 text-xs sm:justify-start">
-              <Badge className={STATUS_META[student.status] ?? 'bg-slate-100'}>{student.status}</Badge>
-              {student.currentClass?.name && <Badge variant="secondary">Class {student.currentClass.name}</Badge>}
-              {cf.house && <Badge variant="outline">House {cf.house}</Badge>}
-              {student.residenceType && <Badge variant="outline" className="capitalize">{student.residenceType}</Badge>}
-              {student.gender && <Badge variant="outline" className="capitalize">{student.gender}</Badge>}
+
+            {/* Name, badges, key facts */}
+            <div className="min-w-0 space-y-3 text-center lg:text-left">
+              <div>
+                <h1 className="truncate text-3xl font-semibold tracking-tight">{student.partner?.name}</h1>
+                <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                  {student.admissionNo}{student.partner?.code ? ` · ${student.partner.code}` : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-1.5 lg:justify-start">
+                <Badge variant="outline" className={`capitalize ${STATUS_META[student.status] ?? ''}`}>{student.status}</Badge>
+                {placementLabel !== 'Not placed' && <Badge variant="secondary">{placementLabel}</Badge>}
+                {student.residenceType && <Badge variant="outline" className="capitalize">{student.residenceType}</Badge>}
+                {student.gender && <Badge variant="outline" className="capitalize">{student.gender}</Badge>}
+                {cf.house && <Badge variant="outline">House {cf.house}</Badge>}
+              </div>
+              <div className="grid gap-x-6 gap-y-2 text-left sm:grid-cols-2 xl:grid-cols-3">
+                <MetaChip icon={Hash} label="Admission no." value={student.admissionNo} />
+                <MetaChip icon={Cake} label="Date of birth" value={`${fmtDate(student.dateOfBirth as any)}${age ? ` · ${age}` : ''}`} />
+                <MetaChip icon={School} label={labels.section} value={student.currentSection?.name ?? '—'} />
+                <MetaChip icon={CalendarDays} label="Academic year" value={year ?? '—'} />
+                <MetaChip icon={Flag} label="Nationality" value={(student as any).nationality ?? '—'} />
+                <MetaChip icon={Home} label="Residence" value={student.residenceType ?? '—'} />
+              </div>
             </div>
-          </div>
-        </CardContent>
+
+            {/* Actions */}
+            <div className="flex flex-row flex-wrap justify-center gap-2 lg:w-48 lg:flex-col print:hidden">
+              <Button className="lg:w-full" onClick={() => setTab('profile')}>
+                <Pencil className="mr-2 h-4 w-4" /> Edit profile
+              </Button>
+              <Button variant="outline" className="lg:w-full" onClick={() => window.print()}>
+                <Printer className="mr-2 h-4 w-4" /> Print profile
+              </Button>
+              <Button variant="outline" className="lg:w-full" onClick={() => navigate(`/school/students/${student.id}/ledger`)}>
+                <Receipt className="mr-2 h-4 w-4" /> Fee ledger
+              </Button>
+              <Button variant="outline" className="lg:w-full" onClick={() => setPlacementOpen(true)}>
+                <GraduationCap className="mr-2 h-4 w-4" /> {student.currentClassId ? 'Change class' : 'Place in class'}
+              </Button>
+            </div>
+          </CardContent>
+        </div>
       </Card>
 
-      {/* Tab strip — icon + text, blue underline on active */}
-      <div className="flex flex-wrap gap-1 border-b border-border">
+      {/* ── Headline numbers ────────────────────────────────────────── */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiTile
+          icon={CalendarCheck}
+          label="Attendance · 90 days"
+          value={rate == null ? '—' : `${rate.toFixed(0)}%`}
+          hint={attendance ? `${attendance.present ?? 0} present of ${attendance.total ?? 0}` : 'No register marks yet'}
+          progress={rate}
+          tone={rate == null ? 'slate' : rate >= 90 ? 'emerald' : rate >= 75 ? 'amber' : 'rose'}
+          onClick={() => setTab('attendance')}
+        />
+        <KpiTile
+          icon={TrendingUp}
+          label="Mean score"
+          value={result?.meanPercent != null ? `${Number(result.meanPercent).toFixed(1)}%` : '—'}
+          hint={result ? 'Latest released result' : 'No released results'}
+          progress={result?.meanPercent != null ? Number(result.meanPercent) : null}
+          tone="sky"
+          onClick={() => setTab('academic')}
+        />
+        <KpiTile
+          icon={Trophy}
+          label="Class position"
+          value={result?.classRank != null ? `#${result.classRank}` : '—'}
+          hint={result?.division ? `Division ${result.division}` : result?.promotionRecommendation ? `Recommendation: ${result.promotionRecommendation}` : 'Awaiting results'}
+          tone="violet"
+          onClick={() => setTab('academic')}
+        />
+        <KpiTile
+          icon={Wallet}
+          label="Fee balance"
+          value={statement ? money(statement.balance) : '—'}
+          hint={statement ? `${money(statement.collected)} paid of ${money(statement.totalBilled)}` : 'No statement'}
+          tone={statement && Number(statement.balance) > 0 ? 'rose' : 'emerald'}
+          onClick={() => setTab('financial')}
+        />
+      </div>
+
+      {/* Tab strip — icon + text, brand underline on active */}
+      <div className="sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto border-b border-border bg-background/85 px-1 backdrop-blur scroll-thin print:hidden">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.value;
@@ -264,8 +383,10 @@ export function SchoolStudent360Page() {
             <button
               key={t.value}
               onClick={() => setTab(t.value)}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                active ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+              className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+                active
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'
               }`}
             >
               <Icon className="h-4 w-4" /> {t.label}
@@ -274,6 +395,7 @@ export function SchoolStudent360Page() {
         })}
       </div>
 
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
       <Tabs value={tab} onValueChange={setTab}>
         {/* ───────────────────────── Profile (editable Student Information) ───────────────────────── */}
         <TabsContent value="profile" className="pt-4">
@@ -372,9 +494,9 @@ export function SchoolStudent360Page() {
                   <EditField label="Home address" full>
                     <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="E.g. Plot 5, Kampala Road" />
                   </EditField>
-                  <EditField label="Class and stream">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">{placementLabel}</span>
+                  <EditField label="Class and stream" full>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-md border bg-muted/40 px-2 py-1 text-sm font-medium">{placementLabel}</span>
                       <Button size="sm" variant="outline" onClick={() => setPlacementOpen(true)}>
                         {student.currentClassId ? 'Change placement' : 'Place in a class'}
                       </Button>
@@ -439,9 +561,16 @@ export function SchoolStudent360Page() {
 
         {/* ───────────────────────── Academic ───────────────────────── */}
         <TabsContent value="academic" className="space-y-4 pt-4">
-          <AcademicsTab studentId={student.id} portal={portal} />
-          <AssessmentsTab portal={portal} />
+          <AcademicsTab studentId={student.id} portal={portal} student={student} />
+          <TimetableCard slots={(portal as any)?.timetable} />
           <LibraryTab rows={library} />
+        </TabsContent>
+
+        {/* ───────────────────────── Assessments ───────────────────────── */}
+        <TabsContent value="assessments" className="space-y-4 pt-4">
+          <RecentMarksCard grades={(portal as any)?.grades} />
+          <AssessmentsTab portal={portal} />
+          <CertificatesCard rows={(portal as any)?.certificates} />
         </TabsContent>
 
         {/* ───────────────────────── Attendance ───────────────────────── */}
@@ -469,6 +598,35 @@ export function SchoolStudent360Page() {
           <DocumentsTab docs={documents} />
         </TabsContent>
       </Tabs>
+
+      {/* ── Right rail: the answers a head teacher wants without clicking ── */}
+      <aside className="space-y-4 xl:sticky xl:top-14 xl:self-start print:hidden">
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-sm"><Sparkles className="h-4 w-4 text-primary" /> Quick summary</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <RailRow icon={GraduationCap} label={labels.class} value={placementLabel} tone="sky" />
+            <RailRow icon={Cake} label="Age" value={age ?? '—'} tone="violet" />
+            <RailRow icon={Hash} label="Admission no." value={student.admissionNo} tone="slate" />
+            <RailRow icon={BadgeCheck} label="Status" value={student.status} tone={student.status === 'active' ? 'emerald' : 'slate'} />
+            <RailRow icon={CalendarCheck} label="Attendance" value={rate == null ? '—' : `${rate.toFixed(0)}%`} tone={rate != null && rate < 75 ? 'rose' : 'emerald'} />
+            <RailRow icon={Wallet} label="Balance" value={statement ? money(statement.balance) : '—'} tone={statement && Number(statement.balance) > 0 ? 'rose' : 'emerald'} />
+          </CardContent>
+        </Card>
+
+        <RecentActivityCard activities={activities} statement={statement} library={library} />
+
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-sm">Quick links</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            <RailLink icon={Receipt} label="Fee ledger" onClick={() => navigate(`/school/students/${student.id}/ledger`)} />
+            <RailLink icon={Users} label="Parents / guardians" onClick={() => setTab('guardians')} />
+            <RailLink icon={ClipboardList} label="Assessments" onClick={() => setTab('assessments')} />
+            <RailLink icon={CalendarCheck} label="Attendance" onClick={() => setTab('attendance')} />
+            <RailLink icon={FileText} label="Documents" onClick={() => setTab('engagement')} />
+          </CardContent>
+        </Card>
+      </aside>
+      </div>
 
       {/* Change Photo dialog */}
       <PlacementDialog
@@ -511,6 +669,369 @@ export function SchoolStudent360Page() {
 
 /* ───────────────────────── Shared blocks ───────────────────────── */
 
+type Tone = 'emerald' | 'rose' | 'amber' | 'sky' | 'violet' | 'slate';
+
+const TONE: Record<Tone, { text: string; bg: string; bar: string }> = {
+  emerald: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', bar: 'bg-emerald-500' },
+  rose: { text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', bar: 'bg-rose-500' },
+  amber: { text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10', bar: 'bg-amber-500' },
+  sky: { text: 'text-sky-600 dark:text-sky-400', bg: 'bg-sky-500/10', bar: 'bg-sky-500' },
+  violet: { text: 'text-violet-600 dark:text-violet-400', bg: 'bg-violet-500/10', bar: 'bg-violet-500' },
+  slate: { text: 'text-muted-foreground', bg: 'bg-muted', bar: 'bg-muted-foreground/50' },
+};
+
+/** The page before the pupil has loaded — shaped like the page, not a spinner. */
+function StudentSkeleton() {
+  return (
+    <div className="space-y-5 p-6">
+      <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+      <Card><CardContent className="flex gap-5 p-6">
+        <div className="h-28 w-28 shrink-0 animate-pulse rounded-2xl bg-muted" />
+        <div className="flex-1 space-y-3">
+          <div className="h-7 w-64 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+          <div className="grid gap-2 sm:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-4 animate-pulse rounded bg-muted" />)}
+          </div>
+        </div>
+      </CardContent></Card>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />)}
+      </div>
+    </div>
+  );
+}
+
+function MetaChip({ icon: Icon, label, value }: { icon: any; label: string; value?: string | null }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="truncate text-sm font-medium capitalize">{value || '—'}</div>
+      </div>
+    </div>
+  );
+}
+
+function KpiTile({
+  icon: Icon, label, value, hint, progress, tone = 'slate', onClick,
+}: { icon: any; label: string; value: string; hint?: string; progress?: number | null; tone?: Tone; onClick?: () => void }) {
+  const t = TONE[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group rounded-lg border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-muted-foreground">{label}</div>
+          <div className={`mt-1 text-2xl font-semibold tabular-nums ${t.text}`}>{value}</div>
+        </div>
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${t.bg} ${t.text}`}>
+          <Icon className="h-[18px] w-[18px]" />
+        </span>
+      </div>
+      {progress != null && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className={`h-full rounded-full ${t.bar} transition-all`} style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+        </div>
+      )}
+      {hint && <div className="mt-2 truncate text-xs text-muted-foreground">{hint}</div>}
+    </button>
+  );
+}
+
+function RailRow({ icon: Icon, label, value, tone = 'slate' }: { icon: any; label: string; value: string; tone?: Tone }) {
+  const t = TONE[tone];
+  return (
+    <div className="flex items-center gap-3">
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${t.bg} ${t.text}`}><Icon className="h-4 w-4" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-muted-foreground">{label}</div>
+        <div className="truncate text-sm font-medium capitalize">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function RailLink({ icon: Icon, label, onClick }: { icon: any; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+    >
+      <Icon className="h-4 w-4 text-primary" /> {label}
+      <ChevronRight className="ml-auto h-3.5 w-3.5 opacity-50" />
+    </button>
+  );
+}
+
+/**
+ * One timeline from the records the pupil already has — payments, logged
+ * contact, borrowings. Nothing is invented: an empty rail means an empty file.
+ */
+function RecentActivityCard({ activities, statement, library }: { activities?: any[]; statement?: FeeStatement; library?: any[] }) {
+  const rows = [
+    ...(activities ?? []).map((a) => ({
+      at: a.occurredAt, title: a.title as string,
+      detail: a.type === 'note' ? 'Note' : a.type === 'call' ? 'Call logged' : a.type === 'email' ? 'Message sent' : 'Activity',
+      icon: a.type === 'call' ? Phone : a.type === 'email' ? Mail : ClipboardList, tone: 'violet' as Tone,
+    })),
+    ...((statement?.payments ?? []) as any[]).map((p) => ({
+      at: p.paymentDate, title: `Payment ${money(p.amount)}`, detail: p.paymentNumber ?? 'Fee payment',
+      icon: Wallet, tone: 'emerald' as Tone,
+    })),
+    ...((library ?? []) as any[]).map((b) => ({
+      at: b.borrowedAt, title: b.bookMetadata?.title ?? 'Book borrowed', detail: 'Library',
+      icon: BookOpen, tone: 'sky' as Tone,
+    })),
+  ]
+    .filter((r) => r.at)
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, 6);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-sm"><Clock className="h-4 w-4 text-primary" /> Recent activity</CardTitle></CardHeader>
+      <CardContent>
+        {rows.length === 0 ? <Empty label="Nothing recorded yet." /> : (
+          <ol className="relative space-y-4 border-l border-border pl-5">
+            {rows.map((r, i) => {
+              const Icon = r.icon;
+              const t = TONE[r.tone];
+              return (
+                <li key={i} className="relative">
+                  <span className={`absolute -left-[30px] flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card ${t.text}`}>
+                    <Icon className="h-3 w-3" />
+                  </span>
+                  <div className="text-sm font-medium leading-tight">{r.title}</div>
+                  <div className="text-xs text-muted-foreground">{r.detail} · {fmtDate(r.at)}</div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** The pupil's week, from the class timetable they are placed in. */
+function TimetableCard({ slots }: { slots?: any[] }) {
+  if (!slots || slots.length === 0) {
+    return <Card><CardHeader className="pb-3"><CardTitle className="text-base">Timetable</CardTitle></CardHeader><CardContent><Empty label="No timetable for this pupil's class yet." icon={CalendarDays} /></CardContent></Card>;
+  }
+  const byDay = new Map<number, any[]>();
+  for (const s of slots) {
+    const d = Number(s.dayOfWeek) || 0;
+    byDay.set(d, [...(byDay.get(d) ?? []), s]);
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-3"><CardTitle className="text-base">Weekly timetable</CardTitle></CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {[...byDay.entries()].sort((a, b) => a[0] - b[0]).map(([day, list]) => (
+          <div key={day} className="rounded-lg border bg-muted/30 p-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{DAYS[day] ?? `Day ${day}`}</div>
+            <ul className="space-y-1.5">
+              {list.map((s: any) => (
+                <li key={s.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="truncate">{s.subject?.name ?? 'Lesson'}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{s.period?.name ?? s.period?.startTime ?? ''}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Released marks, newest first — the spine's own figures, never re-derived. */
+function RecentMarksCard({ grades }: { grades?: any[] }) {
+  const rows = grades ?? [];
+  // The assessment a reader asked to see, with this pupil's own mark attached
+  // so the dialog can show the score beside what the assessment was.
+  const [open, setOpen] = useState<AssessmentView | null>(null);
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="h-4 w-4 text-primary" /> Released marks</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? <Empty label="No released marks yet." icon={ClipboardList} /> : (
+          <div className="space-y-2">
+            {rows.map((g: any) => {
+              const pct = g.percentage != null ? Number(g.percentage) : null;
+              const tone: Tone = pct == null ? 'slate' : pct >= 75 ? 'emerald' : pct >= 50 ? 'amber' : 'rose';
+              return (
+                <div key={g.id} className="rounded-lg border p-3 transition hover:border-primary/30 hover:bg-muted/40">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{g.assessment?.title ?? 'Assessment'}</div>
+                      <div className="text-xs text-muted-foreground">{g.subject?.name ?? '—'} · {fmtDate(g.recordedAt)}</div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className={`text-sm font-semibold tabular-nums ${TONE[tone].text}`}>
+                          {g.score ?? '—'}<span className="text-muted-foreground">/{g.maxScore}</span>
+                        </div>
+                        {pct != null && <div className="text-xs text-muted-foreground tabular-nums">{pct.toFixed(0)}%</div>}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 shrink-0 px-2"
+                        onClick={() => setOpen({
+                          assessmentId: g.assessment?.id ?? null,
+                          title: g.assessment?.title ?? 'Assessment',
+                          subject: g.subject?.name ?? null,
+                          score: g.score ?? null,
+                          maxScore: g.maxScore ?? null,
+                          percentage: pct,
+                          recordedAt: g.recordedAt ?? null,
+                        })}
+                      >
+                        <Eye className="mr-1 h-3.5 w-3.5" /> View
+                      </Button>
+                    </div>
+                  </div>
+                  {pct != null && (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div className={`h-full rounded-full ${TONE[tone].bar}`} style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+      <AssessmentDetailDialog view={open} onClose={() => setOpen(null)} />
+    </Card>
+  );
+}
+
+/** What the screen already knows about an assessment, before the fetch. */
+interface AssessmentView {
+  assessmentId: string | null;
+  title: string;
+  subject: string | null;
+  score?: string | number | null;
+  maxScore?: string | number | null;
+  percentage?: number | null;
+  recordedAt?: string | null;
+  dueDate?: string | null;
+  description?: string | null;
+  submissions?: any[];
+}
+
+/**
+ * One assessment in full.
+ *
+ * The list rows carry what the pupil scored; the assessment itself (its
+ * component, weight, window and lifecycle state) is read from the assessment
+ * record, so the dialog shows the school's definition rather than a copy of it
+ * that drifts. Without the read grant the dialog still shows the pupil's mark.
+ */
+function AssessmentDetailDialog({ view, onClose }: { view: AssessmentView | null; onClose: () => void }) {
+  const { data, isLoading } = useAssessment(view?.assessmentId ?? undefined);
+  const a = data as any;
+  const submission = view?.submissions?.[0];
+  return (
+    <Dialog open={!!view} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-primary" /> {view?.title ?? 'Assessment'}
+          </DialogTitle>
+        </DialogHeader>
+        {view && (
+          <div className="space-y-4">
+            {(view.score != null || view.percentage != null) && (
+              <div className="grid grid-cols-3 gap-3">
+                <Stat label="Score" value={view.score != null ? String(view.score) : '—'} />
+                <Stat label="Out of" value={view.maxScore != null ? String(view.maxScore) : (a?.maxScore != null ? String(a.maxScore) : '—')} />
+                <Stat
+                  label="Percent"
+                  value={view.percentage != null ? `${view.percentage.toFixed(0)}%` : '—'}
+                  tone={view.percentage == null ? undefined : view.percentage >= 75 ? 'emerald' : view.percentage >= 50 ? 'amber' : 'rose'}
+                />
+              </div>
+            )}
+
+            <div>
+              <DetailRow label="Subject" value={view.subject ?? '—'} />
+              {view.dueDate && <DetailRow label="Due" value={fmtDate(view.dueDate)} />}
+              {view.recordedAt && <DetailRow label="Marked on" value={fmtDate(view.recordedAt)} />}
+              {isLoading && <DetailRow label="Assessment" value="Loading…" />}
+              {a && (
+                <>
+                  <DetailRow label="Component" value={a.component?.name ?? '—'} />
+                  <DetailRow label="Kind" value={<span className="capitalize">{a.component?.kind ?? a.sourceType ?? '—'}</span>} />
+                  <DetailRow label="Weight in component" value={a.weightInComponent != null ? String(a.weightInComponent) : '—'} />
+                  <DetailRow label="Lifecycle" value={<Badge variant="outline" className="capitalize">{a.status}</Badge>} />
+                  {a.dueAt && !view.dueDate && <DetailRow label="Due" value={fmtDate(a.dueAt)} />}
+                </>
+              )}
+            </div>
+
+            {view.description && (
+              <div>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Instructions</p>
+                <p className="whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-sm">{view.description}</p>
+              </div>
+            )}
+
+            {submission && (
+              <div>
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Submission</p>
+                <div className="rounded-md border p-3 text-sm">
+                  <DetailRow label="Submitted" value={submission.submittedAt ? fmtDate(submission.submittedAt) : 'Not submitted'} />
+                  <DetailRow label="Attempt" value={submission.attemptNo != null ? String(submission.attemptNo) : '—'} />
+                  {submission.score != null && <DetailRow label="Score" value={String(submission.score)} />}
+                  {submission.feedback && <DetailRow label="Feedback" value={submission.feedback} />}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <DialogClose asChild><Button variant="ghost">Close</Button></DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CertificatesCard({ rows }: { rows?: any[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Award className="h-4 w-4 text-primary" /> Certificates</CardTitle></CardHeader>
+      <CardContent>
+        {!rows || rows.length === 0 ? <Empty label="No certificates issued." icon={Award} /> : (
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {rows.map((c: any) => (
+              <li key={c.id} className="rounded-lg border p-3">
+                <div className="text-sm font-medium">{c.title}</div>
+                <div className="text-xs capitalize text-muted-foreground">{(c.type ?? '').replace(/_/g, ' ')} · {fmtDate(c.issuedAt)}</div>
+                {c.serialNumber && <div className="mt-1 font-mono text-[11px] text-muted-foreground">{c.serialNumber}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function EditField({ label, required, full, children }: { label: string; required?: boolean; full?: boolean; children: ReactNode }) {
   return (
     <div className={full ? 'md:col-span-4 space-y-1' : 'space-y-1'}>
@@ -520,11 +1041,14 @@ function EditField({ label, required, full, children }: { label: string; require
   );
 }
 
-function SectionCard({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
+function SectionCard({ title, icon: Icon, actions, children }: { title: string; icon?: any; actions?: ReactNode; children: ReactNode }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-base text-primary">{title}</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">
+          {Icon && <Icon className="h-4 w-4 text-primary" />}
+          {title}
+        </CardTitle>
         {actions && <div className="flex gap-1">{actions}</div>}
       </CardHeader>
       <CardContent>{children}</CardContent>
@@ -534,7 +1058,7 @@ function SectionCard({ title, actions, children }: { title: string; actions?: Re
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-1.5 text-sm last:border-0">
+    <div className="flex items-center justify-between gap-4 border-b border-border/60 py-2 text-sm last:border-0">
       <span className="text-muted-foreground">{label}</span>
       <span className="text-right font-medium capitalize">{value ?? '—'}</span>
     </div>
@@ -693,7 +1217,8 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
     ? formatClass({ className: student.currentClass.name, sectionName: student.currentSection?.name, streamName: student.currentStream?.name })
     : null;
 
-  if (!portal?.publishedResults && !result) {
+  const published = latestResult(portal);
+  if (!published && !result) {
     return (
       <Card>
         <CardContent className="p-6">
@@ -704,14 +1229,14 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
                 <span className="font-medium">{placement}</span>
               </div>
             )}
-            <Empty label="No published results yet — compute & publish a result set first." />
+            <Empty label="No published results yet — compute & publish a result set first." icon={GraduationCap} />
           </div>
         </CardContent>
       </Card>
     );
   }
 
-  const r = result ?? portal?.publishedResults;
+  const r = result ?? published;
   const subjects = (result?.subjects ?? []).map((s: any) => ({
     name: s.subjectName ?? s.subjectId?.slice(0, 6),
     final: s.finalPercent != null ? Number(s.finalPercent) : null,
@@ -729,7 +1254,7 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">Academic results</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><GraduationCap className="h-4 w-4 text-primary" /> Academic results</CardTitle>
           <Select value={termId} onValueChange={setTermId}>
             <SelectTrigger className="w-44"><SelectValue placeholder="Select term" /></SelectTrigger>
             <SelectContent>
@@ -746,21 +1271,29 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
 
           {subjects.length > 0 ? (
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-xs font-medium text-muted-foreground">
-                <tr><th className="px-2 py-1">Subject</th><th className="px-2 py-1 text-right">Final %</th><th className="px-2 py-1 text-center">Grade</th></tr>
+              <thead className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr><th className="px-2 py-1.5">Subject</th><th className="px-2 py-1.5">Score</th><th className="px-2 py-1.5 text-right">Final %</th><th className="px-2 py-1.5 text-center">Grade</th></tr>
               </thead>
               <tbody>
-                {subjects.map((s: any, i: number) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-2 py-1.5">{s.name}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums font-medium">{s.final != null ? `${s.final}%` : '—'}</td>
-                    <td className="px-2 py-1.5 text-center"><Badge variant="outline">{s.grade}</Badge></td>
-                  </tr>
-                ))}
+                {subjects.map((s: any, i: number) => {
+                  const tone: Tone = s.final == null ? 'slate' : s.final >= 75 ? 'emerald' : s.final >= 50 ? 'amber' : 'rose';
+                  return (
+                    <tr key={i} className="border-b last:border-0 hover:bg-muted/40">
+                      <td className="px-2 py-2 font-medium">{s.name}</td>
+                      <td className="w-1/3 px-2 py-2">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className={`h-full rounded-full ${TONE[tone].bar}`} style={{ width: `${Math.max(0, Math.min(100, s.final ?? 0))}%` }} />
+                        </div>
+                      </td>
+                      <td className={`px-2 py-2 text-right font-medium tabular-nums ${TONE[tone].text}`}>{s.final != null ? `${s.final}%` : '—'}</td>
+                      <td className="px-2 py-2 text-center"><Badge variant="outline">{s.grade}</Badge></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           ) : (
-            <Empty label="No subject results for this term yet." />
+            <Empty label="No subject results for this term yet." icon={ClipboardList} />
           )}
         </CardContent>
       </Card>
@@ -769,75 +1302,302 @@ function AcademicsTab({ studentId, portal, student }: { studentId: string; porta
 }
 
 function AssessmentsTab({ portal }: { portal?: any }) {
-  const list = portal?.assignments ?? [];
+  const list: any[] = portal?.assignments ?? [];
+  const now = Date.now();
+  const [open, setOpen] = useState<AssessmentView | null>(null);
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Assignments</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4 text-primary" /> Assignments</CardTitle>
+        {list.length > 0 && <Badge variant="secondary">{list.length}</Badge>}
+      </CardHeader>
       <CardContent>
-        {list.length === 0 && <Empty label="No assignments fanned out to this student yet." />}
-        <ul className="space-y-2 text-sm">
-          {list.map((a: any) => <li key={a.id} className="rounded-md border p-2 flex justify-between"><span>{a.title}</span><Badge variant="outline">{a.status}</Badge></li>)}
-        </ul>
+        {list.length === 0 ? <Empty label="No assignments fanned out to this pupil yet." icon={FileText} /> : (
+          <ul className="space-y-2">
+            {list.map((a) => {
+              const sub = a.submissions?.[0];
+              const due = a.dueDate ?? a.dueAt;
+              const overdue = !sub?.submittedAt && due && new Date(due).getTime() < now;
+              const state = sub?.submittedAt ? 'submitted' : overdue ? 'overdue' : a.status ?? 'open';
+              const tone: Tone = state === 'submitted' ? 'emerald' : state === 'overdue' ? 'rose' : 'sky';
+              return (
+                <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border p-3 transition hover:border-primary/30 hover:bg-muted/40">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{a.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {a.subject?.name ? `${a.subject.name} · ` : ''}{due ? `Due ${fmtDate(due)}` : 'No due date'}
+                      {sub?.score != null ? ` · Scored ${sub.score}/${a.maxScore ?? '—'}` : ''}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge variant="outline" className={`capitalize ${TONE[tone].text} ${TONE[tone].bg} border-transparent`}>{state}</Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={() => setOpen({
+                        assessmentId: a.assessmentId ?? null,
+                        title: a.title,
+                        subject: a.subject?.name ?? null,
+                        maxScore: a.maxScore ?? null,
+                        score: sub?.score ?? null,
+                        percentage: sub?.score != null && Number(a.maxScore) > 0 ? (Number(sub.score) / Number(a.maxScore)) * 100 : null,
+                        dueDate: due ?? null,
+                        description: a.description ?? null,
+                        submissions: a.submissions ?? [],
+                      })}
+                    >
+                      <Eye className="mr-1 h-3.5 w-3.5" /> View
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </CardContent>
+      <AssessmentDetailDialog view={open} onClose={() => setOpen(null)} />
     </Card>
   );
 }
 
+/** A rate as a ring — read at a glance, not counted off a table. */
+function Ring({ value, tone }: { value: number | null; tone: Tone }) {
+  const r = 46;
+  const c = 2 * Math.PI * r;
+  const pct = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <div className="relative h-32 w-32 shrink-0">
+      <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
+        <circle cx="60" cy="60" r={r} fill="none" strokeWidth="10" className="stroke-muted" />
+        <circle
+          cx="60" cy="60" r={r} fill="none" strokeWidth="10" strokeLinecap="round"
+          className={`${TONE[tone].text} transition-all duration-700`} stroke="currentColor"
+          strokeDasharray={c} strokeDashoffset={c - (c * pct) / 100}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className={`text-2xl font-semibold tabular-nums ${TONE[tone].text}`}>{value == null ? '—' : `${value.toFixed(0)}%`}</span>
+        <span className="text-[11px] text-muted-foreground">attendance</span>
+      </div>
+    </div>
+  );
+}
+
+const BUCKET_TONE: Record<string, Tone> = {
+  present: 'emerald', late: 'amber', excused: 'sky', absent: 'rose', other: 'slate',
+};
+
 function AttendanceTab({ summary }: { summary?: any }) {
-  if (!summary) return <Card><CardContent className="p-6"><Empty label="No attendance records in range." /></CardContent></Card>;
+  // Which counter the reader opened. Null = the summary alone.
+  const [bucket, setBucket] = useState<string | null>(null);
+  const [day, setDay] = useState<AttendanceRecord | null>(null);
+  if (!summary) return <Card><CardContent className="p-6"><Empty label="No attendance records in range." icon={CalendarCheck} /></CardContent></Card>;
   const total = summary.total ?? 0;
   const present = summary.present ?? 0;
   const late = summary.late ?? 0;
+  const excused = summary.excused ?? 0;
   const absent = summary.absent ?? 0;
   // Audit F08: the server's one calculation; never re-derived here.
   const rate: number | null = typeof summary.attendanceRate === 'number' ? summary.attendanceRate : null;
+  const tone: Tone = rate == null ? 'slate' : rate >= 90 ? 'emerald' : rate >= 75 ? 'amber' : 'rose';
+  const share = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+  const bars: Array<{ label: string; n: number; tone: Tone }> = [
+    { label: 'Present', n: present, tone: 'emerald' },
+    { label: 'Late', n: late, tone: 'amber' },
+    { label: 'Excused', n: excused, tone: 'sky' },
+    { label: 'Absent', n: absent, tone: 'rose' },
+  ];
+  // The days behind the counters. The server classified each one; the screen
+  // only filters, so a tile and its list can never disagree.
+  const records: AttendanceRecord[] = summary.records ?? [];
+  const count = (b: string) => records.filter((r) => r.bucket === b).length;
+  const toggle = (b: string) => setBucket((cur) => (cur === b ? null : b));
+  const shown = bucket === 'all' ? records : records.filter((r) => r.bucket === bucket);
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Attendance · last 90 days</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-4 gap-3 text-center">
-        <Stat label="Present" value={String(present)} />
-        <Stat label="Late" value={String(late)} />
-        <Stat label="Absent" value={String(absent)} />
-        <Stat label="Rate" value={rate == null ? '—' : `${rate.toFixed(1)}%`} tone={rate == null || rate >= 75 ? 'emerald' : 'rose'} />
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base"><CalendarCheck className="h-4 w-4 text-primary" /> Attendance · last 90 days</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex flex-col items-center gap-6 sm:flex-row">
+          <Ring value={rate} tone={tone} />
+          <div className="w-full space-y-3">
+            {bars.map((b) => (
+              <div key={b.label}>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">{b.label}</span>
+                  <span className="font-medium tabular-nums">{b.n}{total > 0 ? ` · ${share(b.n).toFixed(0)}%` : ''}</span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
+                  <div className={`h-full rounded-full ${TONE[b.tone].bar} transition-all duration-500`} style={{ width: `${share(b.n)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <Stat label="Marked days" value={String(total)} hint={records.length ? 'Show all' : undefined}
+            onClick={records.length ? () => setBucket((b) => (b === 'all' ? null : 'all')) : undefined} active={bucket === 'all'} />
+          <Stat label="Present" value={String(present)} tone="emerald" hint={count('present') ? 'View days' : undefined}
+            onClick={count('present') ? () => toggle('present') : undefined} active={bucket === 'present'} />
+          <Stat label="Late" value={String(late)} tone="amber" hint={count('late') ? 'View days' : undefined}
+            onClick={count('late') ? () => toggle('late') : undefined} active={bucket === 'late'} />
+          <Stat label="Excused" value={String(excused)} tone="sky" hint={count('excused') ? 'View days' : undefined}
+            onClick={count('excused') ? () => toggle('excused') : undefined} active={bucket === 'excused'} />
+          <Stat label="Absent" value={String(absent)} tone="rose" hint={count('absent') ? 'View days' : undefined}
+            onClick={count('absent') ? () => toggle('absent') : undefined} active={bucket === 'absent'} />
+        </div>
+
+        {bucket && (
+          <div className="rounded-lg border">
+            <div className="flex items-center justify-between border-b bg-muted/40 px-3 py-2">
+              <span className="text-sm font-medium capitalize">
+                {bucket === 'all' ? 'All marked days' : `${bucket} days`}
+                <span className="ml-2 text-xs text-muted-foreground">{shown.length} record{shown.length === 1 ? '' : 's'}</span>
+              </span>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setBucket(null)}>Hide</Button>
+            </div>
+            {shown.length === 0 ? (
+              <div className="p-4"><Empty label="No days in this group." icon={CalendarCheck} /></div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto scroll-thin">
+                <table className="w-full text-sm">
+                  <thead className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Session</th><th className="px-3 py-2">Note</th><th className="px-3 py-2 text-right">Action</th></tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((r) => (
+                      <tr key={r.id} className="border-b last:border-0 hover:bg-muted/40">
+                        <td className="px-3 py-2 font-medium">{fmtDate(r.date)}</td>
+                        <td className="px-3 py-2"><AttendanceStatusBadge record={r} /></td>
+                        <td className="px-3 py-2 text-muted-foreground">{r.periodName ?? 'Whole day'}</td>
+                        <td className="max-w-[16rem] truncate px-3 py-2 text-muted-foreground">
+                          {r.reason ?? (r.minutesLate ? `${r.minutesLate} min late` : '-')}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setDay(r)}>
+                            <Eye className="mr-1 h-3.5 w-3.5" /> View
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+          {summary.policyMissing
+            ? 'The rate is hidden until the school chooses how late arrivals count (School settings).'
+            : 'Late arrivals count as the school has set in School settings.'}
+        </p>
       </CardContent>
-      <CardContent className="text-xs text-muted-foreground">
-        Total marked days: {total}.{' '}
-        {summary.policyMissing
-          ? 'The rate is hidden until the school chooses how late arrivals count (School settings).'
-          : 'Late arrivals count as the school has set in School settings.'}
-      </CardContent>
+
+      <AttendanceDayDialog record={day} onClose={() => setDay(null)} />
     </Card>
+  );
+}
+
+/** The register's own status label and colour, not a guess from the code. */
+function AttendanceStatusBadge({ record }: { record: AttendanceRecord }) {
+  const tone = BUCKET_TONE[record.bucket] ?? 'slate';
+  return (
+    <Badge
+      variant="outline"
+      className={`capitalize border-transparent ${TONE[tone].bg} ${TONE[tone].text}`}
+      style={record.statusColor ? { color: record.statusColor, backgroundColor: `${record.statusColor}1a` } : undefined}
+    >
+      {record.statusLabel}
+    </Badge>
+  );
+}
+
+/** One marked session, in full: who marked it, when, and what they wrote. */
+function AttendanceDayDialog({ record, onClose }: { record: AttendanceRecord | null; onClose: () => void }) {
+  return (
+    <Dialog open={!!record} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarCheck className="h-4 w-4 text-primary" />
+            {record ? new Date(record.date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : 'Attendance'}
+          </DialogTitle>
+        </DialogHeader>
+        {record && (
+          <div className="space-y-1">
+            <DetailRow label="Status" value={<AttendanceStatusBadge record={record} />} />
+            <DetailRow label="Session" value={record.periodName ?? 'Whole day'} />
+            <DetailRow label={'Class'} value={[record.className, record.sectionName].filter(Boolean).join(' - ') || '-'} />
+            {record.minutesLate > 0 && <DetailRow label="Minutes late" value={String(record.minutesLate)} />}
+            {record.earlyDepartureMinutes != null && record.earlyDepartureMinutes > 0 && (
+              <DetailRow label="Left early by" value={`${record.earlyDepartureMinutes} min`} />
+            )}
+            <DetailRow label="Reason" value={record.reason ?? '-'} />
+            <DetailRow label="Marked by" value={record.markedByName ?? 'Not recorded'} />
+            <DetailRow label="Marked at" value={new Date(record.markedAt).toLocaleString()} />
+          </div>
+        )}
+        <DialogFooter>
+          <DialogClose asChild><Button variant="ghost">Close</Button></DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function FinancialTab({ statement }: { statement?: FeeStatement }) {
-  if (!statement) return <Card><CardContent className="p-6"><Empty label="No fee statement." /></CardContent></Card>;
+  // Which document the reader asked to see. One at a time: the dialog is the
+  // detail view, so opening a second closes the first.
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  if (!statement) return <Card><CardContent className="p-6"><Empty label="No fee statement." icon={Wallet} /></CardContent></Card>;
+  const billed = Number(statement.totalBilled) || 0;
+  const paid = Number(statement.collected) || 0;
+  const pctPaid = billed > 0 ? Math.max(0, Math.min(100, (paid / billed) * 100)) : 0;
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader><CardTitle className="text-base">Fees summary</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-3 gap-3 text-center">
-          <Stat label="Billed" value={money(statement.totalBilled)} />
-          <Stat label="Paid" value={money(statement.collected)} />
-          <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
+        <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Wallet className="h-4 w-4 text-primary" /> Fees summary</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <Stat label="Billed" value={money(statement.totalBilled)} />
+            <Stat label="Paid" value={money(statement.collected)} tone="emerald" />
+            <Stat label="Balance" value={money(statement.balance)} tone={statement.balance > 0 ? 'rose' : 'emerald'} />
+          </div>
+          <div>
+            <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+              <span>Collected</span><span className="tabular-nums">{pctPaid.toFixed(0)}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-emerald-500 transition-all duration-500" style={{ width: `${pctPaid}%` }} />
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Invoices</CardTitle></CardHeader>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Invoices</CardTitle></CardHeader>
         <CardContent>
-          {statement.invoices.length === 0 && <Empty label="No invoices issued." />}
+          {statement.invoices.length === 0 && <Empty label="No invoices issued." icon={Receipt} />}
           <div className="max-h-80 overflow-y-auto scroll-thin">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Document</th><th className="px-2 py-1">Issue date</th><th className="px-2 py-1">Amount</th><th className="px-2 py-1">Balance</th><th className="px-2 py-1">Status</th></tr></thead>
+              <thead className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground"><tr><th className="px-2 py-1.5">Document</th><th className="px-2 py-1.5">Issue date</th><th className="px-2 py-1.5">Amount</th><th className="px-2 py-1.5">Balance</th><th className="px-2 py-1.5">Status</th><th className="px-2 py-1.5 text-right">Action</th></tr></thead>
               <tbody>
                 {statement.invoices.map((inv: any) => (
-                  <tr key={inv.id} className="border-b last:border-0">
-                    <td className="px-2 py-1">{inv.documentNumber}</td>
-                    <td className="px-2 py-1">{fmtDate(inv.issueDate)}</td>
-                    <td className="px-2 py-1">{money(inv.totalAmount)}</td>
-                    <td className="px-2 py-1">{money(inv.amountResidual)}</td>
-                    <td className="px-2 py-1 capitalize">{inv.paymentStatus}</td>
+                  <tr key={inv.id} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-2 py-1.5 font-medium">{inv.documentNumber}</td>
+                    <td className="px-2 py-1.5">{fmtDate(inv.issueDate)}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{money(inv.totalAmount)}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{money(inv.amountResidual)}</td>
+                    <td className="px-2 py-1.5"><PayStatusBadge status={inv.paymentStatus} /></td>
+                    <td className="px-2 py-1.5 text-right">
+                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setInvoiceId(inv.id)}>
+                        <Eye className="mr-1 h-3.5 w-3.5" /> View
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -847,19 +1607,24 @@ function FinancialTab({ statement }: { statement?: FeeStatement }) {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Payments</CardTitle></CardHeader>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Payments</CardTitle></CardHeader>
         <CardContent>
-          {statement.payments.length === 0 && <Empty label="No payments recorded." />}
+          {statement.payments.length === 0 && <Empty label="No payments recorded." icon={Wallet} />}
           <div className="max-h-80 overflow-y-auto scroll-thin">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Payment</th><th className="px-2 py-1">Date</th><th className="px-2 py-1">Method</th><th className="px-2 py-1">Amount</th></tr></thead>
+              <thead className="border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground"><tr><th className="px-2 py-1.5">Receipt</th><th className="px-2 py-1.5">Date</th><th className="px-2 py-1.5">Method</th><th className="px-2 py-1.5">Amount</th><th className="px-2 py-1.5 text-right">Action</th></tr></thead>
               <tbody>
                 {statement.payments.map((p: any) => (
-                  <tr key={p.id} className="border-b last:border-0">
-                    <td className="px-2 py-1">{p.paymentNumber}</td>
-                    <td className="px-2 py-1">{fmtDate(p.paymentDate)}</td>
-                    <td className="px-2 py-1 capitalize">{p.paymentMethod}</td>
-                    <td className="px-2 py-1">{money(p.amount)}</td>
+                  <tr key={p.id} className="border-b last:border-0 hover:bg-muted/40">
+                    <td className="px-2 py-1.5 font-medium">{p.paymentNumber}</td>
+                    <td className="px-2 py-1.5">{fmtDate(p.paymentDate)}</td>
+                    <td className="px-2 py-1.5 capitalize">{(p.paymentMethod ?? '').replace(/_/g, ' ')}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{money(p.amount)}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setPaymentId(p.id)}>
+                        <Eye className="mr-1 h-3.5 w-3.5" /> View
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -867,7 +1632,178 @@ function FinancialTab({ statement }: { statement?: FeeStatement }) {
           </div>
         </CardContent>
       </Card>
+
+      <InvoiceDetailDialog invoiceId={invoiceId} onClose={() => setInvoiceId(null)} />
+      <PaymentDetailDialog paymentId={paymentId} onClose={() => setPaymentId(null)} />
     </div>
+  );
+}
+
+function PayStatusBadge({ status }: { status?: string | null }) {
+  const code = (status ?? '').toLowerCase();
+  const tone: Tone = code === 'paid' ? 'emerald' : code === 'partial' ? 'amber' : code === 'overdue' ? 'rose' : 'slate';
+  return <Badge variant="outline" className={`capitalize border-transparent ${TONE[tone].bg} ${TONE[tone].text}`}>{status ?? '-'}</Badge>;
+}
+
+/** A row in a detail dialog: label left, value right. */
+function DetailRow({ label, value, mono }: { label: string; value?: ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-border/60 py-1.5 text-sm last:border-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`text-right font-medium ${mono ? 'font-mono text-xs' : ''}`}>{value ?? '-'}</span>
+    </div>
+  );
+}
+
+/**
+ * The invoice behind a statement line.
+ *
+ * The statement carries only the summary columns, so the lines are read from
+ * the invoicing module itself - the same record the bursar's invoice page
+ * shows, never a second copy assembled here. A reader without the invoicing
+ * grant is told so rather than left with an empty dialog.
+ */
+function InvoiceDetailDialog({ invoiceId, onClose }: { invoiceId: string | null; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { data, isLoading, isError } = useInvoice(invoiceId ?? undefined);
+  return (
+    <Dialog open={!!invoiceId} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Receipt className="h-4 w-4 text-primary" /> Invoice {data?.documentNumber ?? ''}
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading && <p className="py-6 text-center text-sm text-muted-foreground">Loading invoice...</p>}
+        {isError && <p className="py-6 text-center text-sm text-muted-foreground">This invoice could not be opened - your account may not have the invoicing permission.</p>}
+        {data && (
+          <div className="space-y-4">
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              <DetailRow label="Document" value={data.documentNumber} />
+              <DetailRow label="Status" value={<PayStatusBadge status={data.paymentStatus} />} />
+              <DetailRow label="Issue date" value={fmtDate(data.issueDate)} />
+              <DetailRow label="Due date" value={fmtDate(data.dueDate)} />
+              <DetailRow label="Billed to" value={data.partner?.name ?? '-'} />
+              <DetailRow label="Payment term" value={data.paymentTermName ?? '-'} />
+            </div>
+
+            <div className="overflow-hidden rounded-lg border">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <tr><th className="px-3 py-2">Line</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Unit</th><th className="px-3 py-2 text-right">Subtotal</th></tr>
+                </thead>
+                <tbody>
+                  {(data.lines ?? []).map((l: any) => (
+                    <tr key={l.id} className="border-b last:border-0">
+                      <td className="px-3 py-2">{l.description}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{Number(l.quantity)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(l.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{money(l.subtotal)}</td>
+                    </tr>
+                  ))}
+                  {(data.lines ?? []).length === 0 && (
+                    <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No lines on this invoice.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label="Total" value={money(data.totalAmount)} />
+              <Stat label="Paid" value={money(data.amountPaid)} tone="emerald" />
+              <Stat label="Balance" value={money(data.amountResidual)} tone={Number(data.amountResidual) > 0 ? 'rose' : 'emerald'} />
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <DialogClose asChild><Button variant="ghost">Close</Button></DialogClose>
+          {invoiceId && (
+            <Button variant="outline" onClick={() => navigate(`/invoices/${invoiceId}`)}>
+              <ExternalLink className="mr-2 h-4 w-4" /> Open full invoice
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The receipt behind a payment line, with the school's own PDF copies. */
+function PaymentDetailDialog({ paymentId, onClose }: { paymentId: string | null; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { data, isLoading, isError } = usePayment(paymentId ?? undefined);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const openPdf = async (format: 'a4' | 'thermal') => {
+    if (!paymentId) return;
+    setPdfBusy(true);
+    try {
+      await openFeeReceiptPdf(paymentId, format);
+    } catch {
+      notify.error('Could not produce the receipt PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+  return (
+    <Dialog open={!!paymentId} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-primary" /> Receipt {data?.paymentNumber ?? ''}
+          </DialogTitle>
+        </DialogHeader>
+        {isLoading && <p className="py-6 text-center text-sm text-muted-foreground">Loading payment...</p>}
+        {isError && <p className="py-6 text-center text-sm text-muted-foreground">This payment could not be opened - your account may not have the payments permission.</p>}
+        {data && (
+          <div className="space-y-4">
+            <div className="grid gap-x-6 sm:grid-cols-2">
+              <DetailRow label="Receipt no." value={data.paymentNumber} />
+              <DetailRow label="Date" value={fmtDate(data.paymentDate)} />
+              <DetailRow label="Method" value={<span className="capitalize">{(data.paymentMethod ?? '').replace(/_/g, ' ')}</span>} />
+              <DetailRow label="Status" value={<span className="capitalize">{data.status}</span>} />
+              <DetailRow label="Paid by" value={data.partner?.name ?? '-'} />
+              <DetailRow label="Reference" value={data.reference ?? '-'} mono />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Stat label="Amount" value={money(data.amount)} tone="emerald" />
+              <Stat label="Allocated" value={money(data.allocatedAmount)} />
+              <Stat label="Unallocated" value={money(data.unallocatedAmount)} tone={Number(data.unallocatedAmount) > 0 ? 'amber' : undefined} />
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Settles</p>
+              {(data.allocations ?? []).length === 0 ? (
+                <Empty label="Not yet allocated to an invoice." icon={Receipt} />
+              ) : (
+                <ul className="space-y-1.5">
+                  {data.allocations.map((a: any) => (
+                    <li key={a.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+                      <span className="font-medium">{a.document?.documentNumber ?? 'Document'}</span>
+                      <span className="tabular-nums">{money(a.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+        <DialogFooter className="flex-wrap gap-2">
+          <DialogClose asChild><Button variant="ghost">Close</Button></DialogClose>
+          <Button variant="outline" disabled={pdfBusy} onClick={() => openPdf('a4')}>
+            <Download className="mr-2 h-4 w-4" /> Receipt PDF
+          </Button>
+          <Button variant="outline" disabled={pdfBusy} onClick={() => openPdf('thermal')}>
+            <Printer className="mr-2 h-4 w-4" /> Thermal
+          </Button>
+          {paymentId && (
+            <Button variant="outline" onClick={() => navigate(`/payments/${paymentId}`)}>
+              <ExternalLink className="mr-2 h-4 w-4" /> Open full record
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -876,7 +1812,7 @@ function DocumentsTab({ docs }: { docs?: any[] }) {
     <Card>
       <CardHeader><CardTitle className="text-base">Documents</CardTitle></CardHeader>
       <CardContent>
-        {!docs || docs.length === 0 ? <Empty label="No documents uploaded." /> :
+        {!docs || docs.length === 0 ? <Empty label="No documents uploaded." icon={FileText} /> :
           <ul className="space-y-2 text-sm">{docs.map((d) => (
             <li key={d.id} className="rounded-md border p-2 flex justify-between"><span>{d.name ?? d.type ?? 'Document'}</span>{d.verified ? <Badge>verified</Badge> : <Badge variant="secondary">pending</Badge>}</li>
           ))}</ul>}
@@ -893,7 +1829,7 @@ function HealthTab({ medical, studentProfileId }: { medical?: any; studentProfil
   useEffect(() => {
     if (medical) { setAllergies((medical.allergies ?? []).join(', ')); setDietary((medical.dietaryRequirements ?? []).join(', ')); }
   }, [medical]);
-  if (!medical) return <Card><CardContent className="p-6"><Empty label="No medical record." /></CardContent></Card>;
+  if (!medical) return <Card><CardHeader className="pb-3"><CardTitle className="text-base">Health</CardTitle></CardHeader><CardContent><Empty label="No medical record." icon={HeartPulse} /></CardContent></Card>;
   const save = async () => {
     try {
       await upsert.mutateAsync({
@@ -940,7 +1876,7 @@ function BehaviorTab({ activities }: { activities?: any[] }) {
     <Card>
       <CardHeader><CardTitle className="text-base">Behaviour & conduct</CardTitle></CardHeader>
       <CardContent>
-        {rows.length === 0 && <Empty label="No behaviour records." />}
+        {rows.length === 0 && <Empty label="No behaviour records." icon={ClipboardList} />}
         <ul className="space-y-2 text-sm">
           {rows.map((a) => (
             <li key={a.id} className="rounded-md border p-2">
@@ -961,7 +1897,7 @@ function CommunicationTab({ activities }: { activities?: any[] }) {
     <Card>
       <CardHeader><CardTitle className="text-base">Communication with guardians</CardTitle></CardHeader>
       <CardContent>
-        {rows.length === 0 && <Empty label="No communication logs." />}
+        {rows.length === 0 && <Empty label="No communication logs." icon={Mail} />}
         <ul className="space-y-2 text-sm">
           {rows.map((a) => (
             <li key={a.id} className="rounded-md border p-2 flex justify-between">
@@ -984,7 +1920,7 @@ function ActivitiesTab({ activities }: { activities?: any[] }) {
     <Card>
       <CardHeader><CardTitle className="text-base">Clubs & co-curricular</CardTitle></CardHeader>
       <CardContent>
-        {rows.length === 0 && <Empty label="No co-curricular activities recorded." />}
+        {rows.length === 0 && <Empty label="No co-curricular activities recorded." icon={Activity} />}
         <ul className="space-y-2 text-sm">
           {rows.map((a) => (
             <li key={a.id} className="rounded-md border p-2 flex justify-between">
@@ -1002,7 +1938,7 @@ function ActivitiesTab({ activities }: { activities?: any[] }) {
 }
 
 function TransportTab({ rows }: { rows?: any[] }) {
-  if (!rows || rows.length === 0) return <Card><CardContent className="p-6"><Empty label="No transport assignment for this student." /></CardContent></Card>;
+  if (!rows || rows.length === 0) return <Card><CardHeader className="pb-3"><CardTitle className="text-base">Transport</CardTitle></CardHeader><CardContent><Empty label="No transport assignment for this pupil." icon={Bus} /></CardContent></Card>;
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Transport</CardTitle></CardHeader>
@@ -1025,7 +1961,7 @@ function TransportTab({ rows }: { rows?: any[] }) {
 }
 
 function MealsTab({ wallet }: { wallet?: any }) {
-  if (!wallet || !wallet.exists) return <Card><CardContent className="p-6"><Empty label="No meal account for this student." /></CardContent></Card>;
+  if (!wallet || !wallet.exists) return <Card><CardHeader className="pb-3"><CardTitle className="text-base">Meals</CardTitle></CardHeader><CardContent><Empty label="No meal account for this pupil." icon={Utensils} /></CardContent></Card>;
   const txns = wallet.transactions ?? [];
   return (
     <Card>
@@ -1053,7 +1989,7 @@ function MealsTab({ wallet }: { wallet?: any }) {
 }
 
 function LibraryTab({ rows }: { rows?: any[] }) {
-  if (!rows || rows.length === 0) return <Card><CardContent className="p-6"><Empty label="No borrowings for this student." /></CardContent></Card>;
+  if (!rows || rows.length === 0) return <Card><CardHeader className="pb-3"><CardTitle className="text-base">Library</CardTitle></CardHeader><CardContent><Empty label="No borrowings for this pupil." icon={BookOpen} /></CardContent></Card>;
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Library — {rows.length} borrowing(s)</CardTitle></CardHeader>
@@ -1075,11 +2011,38 @@ function LibraryTab({ rows }: { rows?: any[] }) {
   );
 }
 
-function Empty({ label }: { label: string }) {
-  return <p className="text-sm text-muted-foreground">{label}</p>;
+function Empty({ label, icon: Icon = Inbox }: { label: string; icon?: any }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 px-4 py-8 text-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><Icon className="h-5 w-5" /></span>
+      <p className="text-sm text-muted-foreground">{label}</p>
+    </div>
+  );
 }
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'rose' | 'emerald' }) {
-  return <div className="rounded-md border p-2"><div className="text-xs text-muted-foreground">{label}</div><div className={`font-semibold ${tone === 'rose' ? 'text-rose-600' : tone === 'emerald' ? 'text-emerald-600' : ''}`}>{value}</div></div>;
+function Stat({ label, value, tone, onClick, active, hint }: {
+  label: string; value: string; tone?: Tone; onClick?: () => void; active?: boolean; hint?: string;
+}) {
+  const t = tone ? TONE[tone] : null;
+  const body = (
+    <>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${t?.text ?? ''}`}>{value}</div>
+      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
+    </>
+  );
+  if (!onClick) return <div className="rounded-lg border bg-muted/30 p-3 text-center">{body}</div>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={!!active}
+      className={`rounded-lg border p-3 text-center transition hover:border-primary/40 hover:bg-muted/60 ${
+        active ? 'border-primary bg-primary/5 ring-1 ring-primary/30' : 'bg-muted/30'
+      }`}
+    >
+      {body}
+    </button>
+  );
 }
 
 /**

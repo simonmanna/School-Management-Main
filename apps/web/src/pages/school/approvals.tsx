@@ -119,7 +119,8 @@ export function SchoolApprovalsPage() {
                 <tr key={r.assessmentId} className="border-t">
                   <td className="px-3 py-2">
                     <Link to={`/school/assessments/${r.assessmentId}/mark`} className="font-medium hover:underline">
-                      {r.subject} — {r.title}
+                      {/* An exam paper's title already starts with its subject. */}
+                      {r.subject && !r.title.startsWith(r.subject) ? `${r.subject} — ${r.title}` : r.title}
                     </Link>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Badge variant="outline">{KIND_LABEL[r.kind] ?? r.kind}</Badge>

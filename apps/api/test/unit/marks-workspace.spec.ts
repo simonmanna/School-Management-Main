@@ -82,7 +82,14 @@ function makeService(overrides: Record<string, any> = {}) {
     // placements seeded it takes the ADR-027 compat fallback onto the projection,
     // so these specs exercise the path production takes for un-backfilled schools.
     new PlacementLookupService({ client } as any),
-    { assertMayEnterExamPaper: jest.fn().mockResolvedValue(undefined) } as any,
+    {
+      assertMayEnterExamPaper: jest.fn().mockResolvedValue(undefined),
+      markingApproval: jest.fn().mockResolvedValue({ updated: 2 }),
+    } as any,
+    {
+      capture: jest.fn().mockResolvedValue({ id: 'roster_paper', members: [{ studentProfileId: 'stu_a' }, { studentProfileId: 'stu_b' }] }),
+      freeze: jest.fn().mockResolvedValue({ id: 'roster_paper' }),
+    } as any,
   );
   return { service, client, grades: (service as any).grades };
 }
@@ -145,6 +152,23 @@ function student(id: string, name: string, extra: Record<string, any> = {}) {
 }
 
 describe('MarksWorkspaceService — marksheet', () => {
+  it('hands out the SPINE row version, the one postMark checks (G3: no 409 loop on reload)', async () => {
+    const { service, client } = makeService();
+    client.studentProfile.findMany.mockResolvedValue([student('s1', 'Achieng Mary'), student('s2', 'Bwire Paul')]);
+    client.examSchedule.findFirst.mockResolvedValue({ id: 'sched_1', maxMarks: 100, marksLockedAt: null });
+    const [paper] = seedSpine(client, [{ scheduleId: 'sched_1', marks: { s1: 70 } }]);
+    (paper.studentAssessments[0] as any).version = 4;
+    // A frozen legacy row with its own, unrelated version must not leak through.
+    client.gradeEntry.findMany.mockResolvedValue([
+      { id: 'ge_1', studentProfileId: 's1', marksObtained: 70, grade: 'B', remarks: null, status: 'draft', version: 1 },
+    ]);
+
+    const sheet = await service.sheet({ examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math' });
+    const byId = Object.fromEntries(sheet.students.map((r) => [r.studentProfileId, r]));
+    expect(byId.s1.version).toBe(4);
+    expect(byId.s2.version).toBe(0);
+  });
+
   it('lists every student in the class, including those with no mark yet', async () => {
     const { service, client } = makeService();
     client.studentProfile.findMany.mockResolvedValue([
@@ -400,6 +424,23 @@ describe('MarksWorkspaceService — results grid', () => {
     expect(byName['Candia Grace'].position).toBeNull(); // unranked, not "last"
   });
 
+  it('G5: a class whose programme ranks nobody (lower primary) gets no positions on the merit list', async () => {
+    const { service, client } = gridService();
+    client.exam.findFirst.mockResolvedValue({ ...EXAM, term: { name: 'Term 1', academicYearId: 'y1' } });
+    client.classCohort = { findFirst: jest.fn().mockResolvedValue({ programme: { stage: 'PRIMARY_LOWER', config: {} } }) };
+    seedSpine(client, [
+      { scheduleId: 'sched_m', marks: { s1: 80, s2: 90 } },
+      { scheduleId: 'sched_e', marks: { s1: 70, s2: 60 } },
+    ]);
+
+    const grid = await service.grid({ examId: 'exam_1', classId: 'class_1' });
+
+    expect(grid.reporting.rankOn).toBe('none');
+    expect(grid.students.every((s) => s.position === null)).toBe(true);
+    // Totals are still shown — only the ranking is withheld.
+    expect(grid.students.find((s) => s.name === 'Achieng Mary')!.total).toBe(150);
+  });
+
   it('a PLE class with aggregate subjects is graded per paper and ranked by aggregate, ties on total', async () => {
     const { service, client } = gridService();
     client.exam.findFirst.mockResolvedValue({ ...EXAM, term: { name: 'Term 1', academicYearId: 'y1' } });
@@ -469,5 +510,83 @@ describe('MarksWorkspaceService — results grid', () => {
 
     expect(mary.cells['sub_math'].participation).toBe('absent');
     expect(mary.cells['sub_math'].marks).toBeNull();
+  });
+});
+
+describe('MarksWorkspaceService — sending a paper for approval', () => {
+  const SCHEDULE = { id: 'sched_1', examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math', exam: { termId: 'term_1' } };
+  const PAPER = { examId: 'exam_1', classId: 'class_1', subjectId: 'sub_math' };
+
+  function paperService(rows: any[], assessment: any = { id: 'asm_1', rosterId: null }) {
+    const ctx = makeService({
+      examSchedule: { findFirst: jest.fn().mockResolvedValue(SCHEDULE), findMany: jest.fn().mockResolvedValue([]) },
+      academicRosterMember: { findMany: jest.fn().mockResolvedValue([{ studentProfileId: 'stu_a' }, { studentProfileId: 'stu_b' }]) },
+      academicRoster: { updateMany: jest.fn().mockResolvedValue({ count: 1 }), findFirst: jest.fn().mockResolvedValue(null) },
+      studentProfile: { findMany: jest.fn().mockResolvedValue([{ admissionNo: 'A2', partner: { name: 'Bwire Paul' } }]), findFirst: jest.fn() },
+      studentAssessment: { findMany: jest.fn().mockResolvedValue(rows) },
+    });
+    (ctx.service as any).mint.forExamSchedule = jest.fn().mockResolvedValue(assessment);
+    ctx.client.assessment.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    return { ...ctx, marking: (ctx.service as any).marking, rosters: (ctx.service as any).rosters };
+  }
+
+  it('binds a frozen paper class list on first submission, then submits the whole paper', async () => {
+    const { service, marking, rosters, client } = paperService([
+      { studentProfileId: 'stu_a', effectiveScore: 70, participation: 'present', approvalStatus: 'draft' },
+      { studentProfileId: 'stu_b', effectiveScore: null, participation: 'absent', approvalStatus: 'draft' },
+    ]);
+    const res = await service.submitPaper(PAPER);
+    expect(rosters.capture).toHaveBeenCalledWith(expect.objectContaining({ scopeType: 'subject', classId: 'class_1', subjectId: 'sub_math', termId: 'term_1' }));
+    expect(rosters.freeze).toHaveBeenCalledWith('roster_paper');
+    expect(client.assessment.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'asm_1', rosterId: null } }));
+    expect(marking.markingApproval).toHaveBeenCalledWith({ assessmentId: 'asm_1', action: 'submit' }, { entryAuthorised: true });
+    expect(res).toEqual({ assessmentId: 'asm_1', rosterId: 'roster_paper', submitted: 2 });
+  });
+
+  it('binds the class term list instead of capturing one, once the Term Board has locked it', async () => {
+    const { service, rosters, client } = paperService([
+      { studentProfileId: 'stu_a', effectiveScore: 70, participation: 'present', approvalStatus: 'draft' },
+      { studentProfileId: 'stu_b', effectiveScore: 61, participation: 'present', approvalStatus: 'draft' },
+    ]);
+    client.academicRoster.findFirst.mockResolvedValue({ id: 'term_list' });
+    const res = await service.submitPaper(PAPER);
+    expect(rosters.capture).not.toHaveBeenCalled();
+    expect(client.assessment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'asm_1', rosterId: null }, data: expect.objectContaining({ rosterId: 'term_list' }) }),
+    );
+    expect(res.rosterId).toBe('term_list');
+  });
+
+  it('refuses a paper with a pupil who has neither a mark nor a reason, and names them', async () => {
+    const { service, marking } = paperService([
+      { studentProfileId: 'stu_a', effectiveScore: 70, participation: 'present', approvalStatus: 'draft' },
+    ]);
+    await expect(service.submitPaper(PAPER)).rejects.toMatchObject({ response: { code: 'PAPER_INCOMPLETE', missing: ['stu_b'] } });
+    expect(marking.markingApproval).not.toHaveBeenCalled();
+  });
+
+  it('resubmits a returned paper (reuses its bound list)', async () => {
+    const { service, marking, rosters } = paperService([
+      { studentProfileId: 'stu_a', effectiveScore: 70, participation: 'present', approvalStatus: 'rejected' },
+      { studentProfileId: 'stu_b', effectiveScore: 55, participation: 'present', approvalStatus: 'draft' },
+    ], { id: 'asm_1', rosterId: 'roster_old' });
+    await service.submitPaper(PAPER);
+    expect(rosters.capture).not.toHaveBeenCalled();
+    expect(marking.markingApproval).toHaveBeenCalledWith({ assessmentId: 'asm_1', action: 'resubmit' }, { entryAuthorised: true });
+  });
+
+  it('refuses to send a paper that is already with the approver', async () => {
+    const { service } = paperService([
+      { studentProfileId: 'stu_a', effectiveScore: 70, participation: 'present', approvalStatus: 'submitted' },
+      { studentProfileId: 'stu_b', effectiveScore: 55, participation: 'present', approvalStatus: 'submitted' },
+    ], { id: 'asm_1', rosterId: 'roster_old' });
+    await expect(service.submitPaper(PAPER)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('enforces the teacher-allocation rule before touching anything', async () => {
+    const { service, marking, rosters } = paperService([]);
+    marking.assertMayEnterExamPaper.mockRejectedValue(new Error('You may only enter marks for classes and subjects you teach'));
+    await expect(service.submitPaper(PAPER)).rejects.toThrow('classes and subjects you teach');
+    expect(rosters.capture).not.toHaveBeenCalled();
   });
 });

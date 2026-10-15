@@ -1,5 +1,5 @@
 import { ScopedToClass } from '../../../kernel/auth/guards/scoped-to-class.decorator';
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res, StreamableFile } from '@nestjs/common';
+import { Body, Controller, Delete, Get, GoneException, HttpCode, Param, Patch, Post, Query, Res, StreamableFile } from '@nestjs/common';
 import { Response } from 'express';
 import { PERMISSIONS } from '@erp/shared';
 import { PaginationDto } from '../../../kernel/common/pagination.dto';
@@ -102,16 +102,19 @@ export class ExamController {
     return this.service.update(id, dto);
   }
 
+  // Retired: these flipped the legacy `status` without the lifecycle, its
+  // gates, or the paper locks, so the two state fields drifted apart. The one
+  // way to move an exam is the lifecycle endpoint, which projects `status`.
   @Post(':id/publish')
   @RequirePermissions(PERMISSIONS.school.manageExams)
-  publish(@Param('id') id: string) {
-    return this.service.publish(id);
+  publish() {
+    throw new GoneException('Move an exam with POST /school/exam-operations/:examId/lifecycle.');
   }
 
   @Post(':id/close')
   @RequirePermissions(PERMISSIONS.school.manageExams)
-  close(@Param('id') id: string) {
-    return this.service.close(id);
+  close() {
+    throw new GoneException('Close an exam with POST /school/exam-operations/:examId/lifecycle (target: closed).');
   }
 
   @Delete(':id')

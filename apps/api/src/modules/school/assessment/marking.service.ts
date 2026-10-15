@@ -553,14 +553,20 @@ export class MarkingService {
    * mirroring the GradeEntry FSM with the same segregation of duty: the person
    * who entered a mark cannot approve it.
    */
-  async markingApproval(dto: MarkingApprovalDto) {
+  async markingApproval(dto: MarkingApprovalDto, opts: { entryAuthorised?: boolean } = {}) {
     const organizationId = this.tenant.organizationId;
     const actorId = this.tenant.userId ?? null;
     // Submitting is the marker's own act and follows the marker's rule. Approve
     // and reject are gated at the controller on `school:grades:approve`, which no
     // teacher role holds — the segregation of duty is that separation, not this
     // check, and this must not be read as authorising it.
-    if (dto.action === 'submit' || dto.action === 'resubmit') {
+    //
+    // `entryAuthorised` is for callers that have ALREADY applied the marker's
+    // rule in a form this method cannot: an exam paper has no owning teacher
+    // (`teacherPartnerId`), so the exam workspace authorises by teaching
+    // allocation (`assertMayEnterExamPaper`) before calling in. It never
+    // reaches approve/reject.
+    if ((dto.action === 'submit' || dto.action === 'resubmit') && !opts.entryAuthorised) {
       await this.assertMayMarkAssessment(dto.assessmentId);
     }
     return this.prisma.client.$transaction(async (tx: any) => {
@@ -581,7 +587,11 @@ export class MarkingService {
         // Resubmit is the second half of the reject loop: marks sent back are
         // `rejected`, and a marker fixing them must be able to send them on
         // again without an admin resetting the row by hand.
-        const from = dto.action === 'resubmit' ? 'rejected' : 'draft';
+        // Either act sends the WHOLE paper: a returned sheet the marker has
+        // corrected usually also carries rows that were never sent (a learner
+        // marked after the return), and leaving those behind as `draft` meant
+        // the paper could never be fully approved.
+        const from = { in: ['draft', 'rejected'] };
         // enteredById is the person who ENTERED the mark and must survive
         // submission. Overwriting it with the submitter collapsed two distinct
         // actors into one field, so a marker whose work someone else submitted

@@ -10,8 +10,8 @@ import { useResultsSmsPreview, useSendResultsSms, type ResultGrid } from '@/feat
 /**
  * "Text results to parents" for one exam and class (review A17, decision 5).
  * Shows exactly what will go — a sample message, how many pupils and guardians
- * — and refuses until every paper is locked, so no family is told a mark that
- * is still being corrected. Guardians who switched results off are skipped.
+ * — and refuses until every paper is approved, so no family is told a mark
+ * that is still being corrected. Guardians who switched results off are skipped.
  */
 export function ResultsSmsButton({ examId, classId, sectionId }: { examId: string; classId: string; sectionId?: string }) {
   const [open, setOpen] = useState(false);
@@ -48,10 +48,10 @@ export function ResultsSmsButton({ examId, classId, sectionId }: { examId: strin
           {isError && <p className="text-sm text-destructive">Couldn’t prepare the messages for this class.</p>}
           {preview && (
             <div className="space-y-3 text-sm">
-              {!preview.locked && (
+              {!preview.approved && (
                 <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-                  {preview.lockedPaperCount} of {preview.paperCount} papers are locked. Lock every paper first, so families only
-                  receive final marks.
+                  {preview.approvedPaperCount} of {preview.paperCount} papers are approved. Every paper must be approved
+                  first, so families only receive final marks.
                 </p>
               )}
               <p>
@@ -68,7 +68,7 @@ export function ResultsSmsButton({ examId, classId, sectionId }: { examId: strin
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button disabled={!preview?.locked || !preview.guardians || send.isPending} onClick={() => void doSend()}>
+            <Button disabled={!preview?.approved || !preview.guardians || send.isPending} onClick={() => void doSend()}>
               {send.isPending ? 'Sending…' : 'Send to parents'}
             </Button>
           </DialogFooter>
@@ -92,6 +92,9 @@ export function PupilSlips({ grid, schoolName, className }: { grid: ResultGrid; 
     <div className="hidden print:block">
       {pupils.map((s) => (
         <section key={s.studentProfileId} className="mb-6 break-inside-avoid border p-4 text-sm" style={{ pageBreakInside: 'avoid' }}>
+          {!grid.approved && (
+            <p className="mb-1 text-center text-xs font-semibold uppercase tracking-wide">Provisional — marks not yet approved</p>
+          )}
           <div className="flex items-baseline justify-between border-b pb-1">
             <strong>{schoolName}</strong>
             <span>{grid.exam.name}{grid.exam.termName ? ` · ${grid.exam.termName}` : ''}</span>

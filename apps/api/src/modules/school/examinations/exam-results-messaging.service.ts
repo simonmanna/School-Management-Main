@@ -13,8 +13,10 @@ import { MarksWorkspaceService } from './marks-workspace.service';
  * Built from the same merit list the DOS prints, so the two never disagree.
  *
  * Safeguards:
- *   - only when every paper for the class is LOCKED — no family is told a mark
- *     that is still being entered or corrected;
+ *   - only when every paper for the class is APPROVED — no family is told a
+ *     mark that is still being entered, corrected or checked. (This used to ask
+ *     only for a lock, which the exams office can set on marks nobody has
+ *     approved, so families were texted provisional marks and positions.);
  *   - only to guardians whose `receivesResults` preference is on;
  *   - one message per pupil per exam (dedupe key), however often it is sent;
  *   - a nursery class (descriptors, no exam marks) is never texted marks.
@@ -33,6 +35,7 @@ export class ExamResultsMessagingService {
     if (grid.reporting?.descriptor) throw new BadRequestException('Nursery classes are reported in descriptors, not exam marks.');
     if (grid.paperCount === 0) throw new BadRequestException('This class does not sit this exam.');
     const locked = grid.lockedPaperCount === grid.paperCount;
+    const approved = grid.approved === true;
     const school = await this.prisma.client.schoolProfile.findFirst({ select: { name: true } });
     const klass = await this.prisma.client.schoolClass.findFirst({ where: { id: dto.classId }, select: { name: true } });
     const ranked = grid.students.filter((s: any) => s.position != null).length;
@@ -58,16 +61,18 @@ export class ExamResultsMessagingService {
           body: `${school?.name ?? 'School'}: ${s.name} ${klass?.name ?? ''} ${grid.exam.name} — ${papers}. ${headline}${position}`.replace(/\s+/g, ' ').trim(),
         };
       });
-    return { grid, locked, messages };
+    return { grid, locked, approved, messages };
   }
 
   /** What would be sent, and to how many guardians — before anything goes. */
   async preview(dto: { examId: string; classId: string; sectionId?: string }) {
-    const { locked, messages, grid } = await this.build(dto);
+    const { locked, approved, messages, grid } = await this.build(dto);
     const recipients = await this.recipients(messages.map((m: any) => m.studentProfileId));
     return {
       locked,
       lockedPaperCount: grid.lockedPaperCount,
+      approved,
+      approvedPaperCount: grid.approvedPaperCount,
       paperCount: grid.paperCount,
       pupils: messages.length,
       guardians: [...recipients.values()].reduce((n, list) => n + list.length, 0),
@@ -77,9 +82,11 @@ export class ExamResultsMessagingService {
   }
 
   async send(dto: { examId: string; classId: string; sectionId?: string }) {
-    const { locked, messages } = await this.build(dto);
-    if (!locked) {
-      throw new BadRequestException('Lock every paper for this class first, so families only receive final marks.');
+    const { approved, messages, grid } = await this.build(dto);
+    if (!approved) {
+      throw new BadRequestException(
+        `Only ${grid.approvedPaperCount} of ${grid.paperCount} papers are approved. Every paper must be approved first, so families only receive final marks.`,
+      );
     }
     const organizationId = this.tenant.organizationId;
     const recipients = await this.recipients(messages.map((m: any) => m.studentProfileId));

@@ -1725,6 +1725,24 @@ export function useDeleteGuardian() {
 
 /* ───────────────────────── Student 360 (per-student reads) ───────────────────────── */
 
+/** One marked session, as the register recorded it. */
+export interface AttendanceRecord {
+  id: string;
+  date: string;
+  status: string;
+  statusLabel: string;
+  statusColor: string | null;
+  /** The bucket the server's rate maths put this session in. */
+  bucket: 'present' | 'late' | 'excused' | 'absent' | 'other';
+  minutesLate: number;
+  earlyDepartureMinutes: number | null;
+  reason: string | null;
+  periodName: string | null;
+  className: string | null;
+  sectionName: string | null;
+  markedAt: string;
+  markedByName: string | null;
+}
 export interface AttendanceSummary {
   total: number;
   present: number;
@@ -1734,6 +1752,8 @@ export interface AttendanceSummary {
   /** Null when it depends on a late policy the school has not chosen (ADR-032 P1). */
   attendanceRate: number | null;
   policyMissing?: boolean;
+  /** The days behind the counters, newest first. */
+  records?: AttendanceRecord[];
 }
 export function useStudentAttendance(studentProfileId: string | undefined, from?: string, to?: string) {
   return useQuery({
@@ -4723,6 +4743,14 @@ export function useCreateAssessment() {
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['school', 'assessments', v.classId, v.termId] }),
   });
 }
+/** One assessment, for a detail view (GET /school/assessments/:id). */
+export function useAssessment(id?: string) {
+  return useQuery({
+    queryKey: ['school', 'assessment', id],
+    enabled: !!id,
+    queryFn: async () => (await api.get<Assessment & Record<string, unknown>>(`${A}/${id}`)).data,
+  });
+}
 export function useAssessmentTransition() {
   const qc = useQueryClient();
   return useMutation({
@@ -6593,6 +6621,11 @@ export interface WorkspaceExam {
   classCount: number;
   paperCount: number;
   lockedPaperCount: number;
+  /** Papers waiting with the approver / fully approved. */
+  submittedPaperCount?: number;
+  approvedPaperCount?: number;
+  /** Run-an-Examination lifecycle state. */
+  lifecycleState?: string;
   marksExpected: number;
   marksEntered: number;
 }
@@ -6634,7 +6667,10 @@ export interface MarkSheetStudent {
   grade: string | null;
   remarks: string | null;
   participation: string;
+  /** Approval state of this learner's mark: draft | submitted | approved | rejected. */
   status: string;
+  /** Why an approver returned the mark, while it is `rejected`. */
+  rejectionReason?: string | null;
   version: number;
 }
 
@@ -6676,7 +6712,7 @@ export interface ResultGridStudent {
 
 export interface ResultGrid {
   exam: { id: string; name: string; termId: string; termName: string | null; examTypeName: string | null };
-  subjects: Array<{ examScheduleId: string; subjectId: string; name: string; code: string; maxMarks: number; locked: boolean }>;
+  subjects: Array<{ examScheduleId: string; subjectId: string; name: string; code: string; maxMarks: number; locked: boolean; approvalStatus?: string }>;
   students: ResultGridStudent[];
   /** How this class is graded — the same profile its term results use. */
   reporting?: { gradingSystem: string; aggregateSubjectIds: string[]; hasAggregate: boolean; descriptor: boolean };
@@ -6686,6 +6722,9 @@ export interface ResultGrid {
   marksEntered: number;
   complete: boolean;
   lockedPaperCount: number;
+  /** Papers whose every mark is approved; `approved` = all of them. */
+  approvedPaperCount: number;
+  approved: boolean;
   paperCount: number;
 }
 
@@ -6761,6 +6800,16 @@ export function useSaveMark() {
   });
 }
 
+/** Send one paper for approval. Every pupil needs a mark or a reason first. */
+export function useSubmitPaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string; subjectId: string }) =>
+      (await api.post<{ assessmentId: string; rosterId: string; submitted: number }>(`${S}/marks/submit`, dto)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'marks'] }),
+  });
+}
+
 export function useResultGrid(params: { examId?: string; classId?: string; sectionId?: string }) {
   const ready = !!params.examId && !!params.classId;
   return useQuery({
@@ -6782,6 +6831,7 @@ export function useLockMarks() {
 /** What an exam-results SMS run would send (review A17). */
 export interface ResultsSmsPreview {
   locked: boolean; lockedPaperCount: number; paperCount: number;
+  approved: boolean; approvedPaperCount: number;
   pupils: number; guardians: number; pupilsWithoutGuardian: number; sample: string | null;
 }
 

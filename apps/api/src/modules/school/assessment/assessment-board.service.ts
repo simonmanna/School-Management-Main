@@ -375,17 +375,23 @@ export class AssessmentBoardService {
         where: { assessmentId: { in: ids }, deletedAt: null },
         select: {
           assessmentId: true, effectiveScore: true, percentage: true,
-          participation: true, approvalStatus: true, enteredById: true,
+          participation: true, approvalStatus: true, enteredById: true, submittedById: true,
         },
       }),
       this.namesOf('subject', [...new Set(assessments.map((a) => a.subjectId))]),
       this.namesOf('schoolClass', [...new Set(assessments.map((a) => a.classId))]),
       this.teacherNames(assessments.map((a) => a.teacherPartnerId).filter(Boolean) as string[]),
     ]);
+    // An exam paper has no owning teacher, so the queue names whoever SENT
+    // it (the submitter's login) rather than showing a blank.
+    const submitters = await this.userNames(
+      rows.filter((r) => r.approvalStatus === 'submitted').map((r) => r.submittedById).filter(Boolean) as string[],
+    );
 
     return {
       rows: assessments.map((a) => {
         const mine = rows.filter((r) => r.assessmentId === a.id);
+        const submitterId = mine.find((r) => r.approvalStatus === 'submitted' && r.submittedById)?.submittedById ?? null;
         const scored = mine.filter((r) => r.percentage !== null);
         const average = scored.length
           ? scored.reduce((s, r) => s + Number(r.percentage), 0) / scored.length
@@ -399,7 +405,10 @@ export class AssessmentBoardService {
           kind: kindOf(a),
           subject: subjects.get(a.subjectId ?? '') ?? '',
           class: classes.get(a.classId ?? '') ?? '',
-          submittedBy: a.teacherPartnerId ? staff.get(a.teacherPartnerId) ?? null : null,
+          submittedBy:
+            (a.teacherPartnerId ? staff.get(a.teacherPartnerId) : undefined) ??
+            (submitterId ? submitters.get(submitterId) : undefined) ??
+            null,
           students: mine.length,
           average: average === null ? null : Math.round(average * 10) / 10,
           missing,
@@ -407,6 +416,18 @@ export class AssessmentBoardService {
         };
       }),
     };
+  }
+
+  private async userNames(ids: string[]) {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Map<string, string>();
+    const users = await this.prisma.client.user.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    return new Map<string, string>(
+      users.map((u: any) => [u.id, [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email]),
+    );
   }
 
   private async teacherNames(ids: string[]) {

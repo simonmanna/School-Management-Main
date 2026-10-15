@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, Check, ChevronLeft, ChevronRight, ClipboardList,
-  FileSpreadsheet, Loader2, Lock, Printer, Search, Unlock, Upload,
+  FileSpreadsheet, Loader2, Lock, Printer, Search, Send, Unlock, Upload,
 } from 'lucide-react';
 import {
   useAcademicYears, useTerms, useClassSubdivisions, useClassSubjects,
-  useWorkspaceExams, useMarkSheet, useSaveMark, useLockMarks, useExamCoverage,
+  useWorkspaceExams, useMarkSheet, useSaveMark, useLockMarks, useExamCoverage, useSubmitPaper,
   type MarkSheetStudent, currentTerminology } from '@/features/school/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,8 @@ import { useMyStaffIdentity } from '@/features/hr/api';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 const NON_SCORING = ['absent', 'exempt', 'excused', 'malpractice'];
+/** Marks in these states are with the approver, or approved: read-only here. */
+const SENT = ['submitted', 'approved'];
 
 /**
  * Step 3 — type the marks.
@@ -127,6 +129,7 @@ export function SchoolEnterMarksPage() {
   const { data: sheet, isLoading, refetch } = useMarkSheet(sheetParams);
   const saveMark = useSaveMark();
   const lock = useLockMarks();
+  const submitPaper = useSubmitPaper();
   // Locking a paper is exams-office work (`school:exams:write`); a teacher
   // entering their own marks never sees the button the API would refuse.
   const canLock = useAuthStore((s) => s.hasPermission(PERMISSIONS.school.manageExams));
@@ -154,6 +157,10 @@ export function SchoolEnterMarksPage() {
     setParticipation(p);
     setGrades(g);
     setStates({});
+    // Versions learned from saves belong to the sheet they were made on. Kept
+    // across a reload, they shadowed the fresh ones and every later edit of the
+    // cell bounced as a conflict.
+    setVersions({});
   }, [sheet]);
 
   const students = useMemo(() => sheet?.students ?? [], [sheet]);
@@ -176,7 +183,7 @@ export function SchoolEnterMarksPage() {
   const subjectIndex = paperSubjects.findIndex((s) => s.id === subjectId);
 
   async function commit(s: MarkSheetStudent, raw: string, part?: string) {
-    if (!examId || !classId || !subjectId || locked) return;
+    if (!examId || !classId || !subjectId || locked || SENT.includes(s.status)) return;
     const id = s.studentProfileId;
     const trimmed = raw.trim();
     const isClear = trimmed === '';
@@ -231,12 +238,16 @@ export function SchoolEnterMarksPage() {
         notify.warning('Saved on this device — no connection', {
           description: 'Marks will be sent automatically when the server is reachable.',
         });
-      } else if (status === 409) {
+      } else if (status === 409 && e?.response?.data?.code === 'MARK_VERSION_CONFLICT') {
         // Someone else edited this paper. Refetching is the fix, and saying so
         // is far more useful than repeating the server's version numbers.
         notify.error(`${s.name}'s mark was changed by someone else`, {
           description: 'Reloading this sheet so you can see the current marks.',
         });
+        void refetch();
+      } else if (status === 409) {
+        // Locked, sent for approval, or approved — a state change, not a rival edit.
+        notify.error(e?.response?.data?.message ?? `${s.name}'s mark can no longer be changed here`);
         void refetch();
       } else {
         notify.error(e?.response?.data?.message ?? `Could not save ${s.name}'s mark`);
@@ -343,7 +354,23 @@ export function SchoolEnterMarksPage() {
     }
   }
 
+  async function sendForApproval() {
+    if (!examId || !classId || !subjectId) return;
+    try {
+      const res = await submitPaper.mutateAsync({ examId, classId, subjectId });
+      notify.success('Paper sent for approval', {
+        description: `${res.submitted} mark(s) are now with the approver and can no longer be edited here.`,
+      });
+      await refetch();
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not send this paper for approval');
+    }
+  }
+
   const ready = !!examId && !!classId && !!subjectId;
+  const paperStatus = sheet?.approvalStatus ?? 'draft';
+  const returned = students.filter((s) => s.status === 'rejected' && s.rejectionReason);
+  const returnReasons = [...new Set(returned.map((s) => s.rejectionReason as string))];
 
   return (
     <>
@@ -429,6 +456,9 @@ export function SchoolEnterMarksPage() {
                     {sheet.class.name} · {sheet.subject.name}
                   </h2>
                   {locked && <Badge variant="secondary"><Lock className="h-3 w-3" /> Locked</Badge>}
+                  {paperStatus === 'submitted' && <Badge variant="secondary">Waiting for approval</Badge>}
+                  {paperStatus === 'approved' && <Badge className="bg-emerald-600 hover:bg-emerald-600">Approved</Badge>}
+                  {paperStatus === 'rejected' && <Badge variant="destructive">Returned</Badge>}
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {sheet.exam.name} · out of {maxMarks}
@@ -464,9 +494,34 @@ export function SchoolEnterMarksPage() {
                 <Button size="sm" variant="ghost" onClick={() => navigate('/school/exam-results')}>
                   <FileSpreadsheet className="h-4 w-4" /> Results
                 </Button>
+                {(paperStatus === 'draft' || paperStatus === 'rejected') && (
+                  <Button size="sm" onClick={sendForApproval} disabled={submitPaper.isPending || entered === 0}
+                    title={streamId ? 'Sends the whole class paper, every stream' : undefined}>
+                    {submitPaper.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {paperStatus === 'rejected' ? 'Resubmit for approval' : 'Submit for approval'}
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
+
+          {paperStatus === 'rejected' && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive" />
+              <div>
+                The approver returned this paper. Correct the marks, then resubmit it.
+                {returnReasons.length > 0 && <div className="mt-1 text-muted-foreground">Reason: {returnReasons.join(' · ')}</div>}
+              </div>
+            </div>
+          )}
+          {(paperStatus === 'submitted' || paperStatus === 'approved') && (
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
+              <Check className="h-4 w-4" />
+              {paperStatus === 'submitted'
+                ? 'These marks are with the approver. They cannot be changed unless the approver returns them.'
+                : 'These marks are approved and count towards term results. Changes now go through a mark adjustment.'}
+            </div>
+          )}
 
           {locked && (
             <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
@@ -531,7 +586,7 @@ export function SchoolEnterMarksPage() {
                                 inputMode="decimal"
                                 min={0}
                                 max={maxMarks}
-                                disabled={locked || NON_SCORING.includes(part)}
+                                disabled={locked || SENT.includes(s.status) || NON_SCORING.includes(part)}
                                 className={[
                                   'h-8 w-20 tabular-nums',
                                   state === 'error' ? 'border-destructive' : '',
@@ -572,7 +627,7 @@ export function SchoolEnterMarksPage() {
                           <td className="px-4 py-1.5">
                             <select
                               className={selectClass + ' h-8 text-xs'}
-                              disabled={locked}
+                              disabled={locked || SENT.includes(s.status)}
                               value={part}
                               onChange={(e) => {
                                 const next = e.target.value;

@@ -20,6 +20,8 @@ import { InvoicingModule } from '../../src/modules/invoicing/invoicing.module';
 import { SchoolModule } from '../../src/modules/school/school.module';
 import { TenantContextService } from '../../src/kernel/tenancy/tenant-context.service';
 import { MarksWorkspaceService } from '../../src/modules/school/examinations/marks-workspace.service';
+import { MarkingService } from '../../src/modules/school/assessment/marking.service';
+import { ExamResultsMessagingService } from '../../src/modules/school/examinations/exam-results-messaging.service';
 import { placeInClass } from './_placement';
 
 describeDb('integration: exam workspace — create → apply → mark → results → lock', () => {
@@ -32,6 +34,8 @@ describeDb('integration: exam workspace — create → apply → mark → result
   let moduleRef: TestingModule;
   let tenant: TenantContextService;
   let marks: MarksWorkspaceService;
+  let marking: MarkingService;
+  let sms: ExamResultsMessagingService;
 
   const organizationId = `org_examws_${Date.now()}`;
   const userId = 'exam_officer_1';
@@ -54,6 +58,15 @@ describeDb('integration: exam workspace — create → apply → mark → result
       },
       fn,
     );
+
+  // A different person, holding approval and nothing else that matters here.
+  const asApprover = <T>(fn: () => Promise<T>): Promise<T> =>
+    tenant.run({ organizationId, userId: 'dos_1', permissions: ['school:read', 'school:grades:approve'] }, fn);
+
+  const paperAssessment = async (subjectId: string) => {
+    const schedule = await raw.examSchedule.findFirst({ where: { examId, classId, subjectId } });
+    return raw.assessment.findFirst({ where: { organizationId, sourceType: 'exam_session', sourceRef: schedule!.id } });
+  };
 
   beforeAll(async () => {
     await raw.$connect();
@@ -121,6 +134,8 @@ describeDb('integration: exam workspace — create → apply → mark → result
 
     tenant = moduleRef.get(TenantContextService);
     marks = moduleRef.get(MarksWorkspaceService);
+    marking = moduleRef.get(MarkingService);
+    sms = moduleRef.get(ExamResultsMessagingService);
   });
 
   afterAll(async () => {
@@ -268,7 +283,7 @@ describeDb('integration: exam workspace — create → apply → mark → result
 
     // Absent in Maths, unmarked in English — no total, and unranked rather than last.
     expect(grace.total).toBeNull();
-    expect(grace.position).toBe(0);
+    expect(grace.position).toBeNull();
     expect(grace.cells[mathsId].participation).toBe('absent');
   });
 
@@ -314,5 +329,107 @@ describeDb('integration: exam workspace — create → apply → mark → result
     // Both counters now use the marksheet's rule.
     expect(row.marksEntered).toBe(6);
     expect(row.examTypeName).toContain('Mid-Term');
+  });
+  it('G3: a mark reloaded from the sheet can be edited again — the sheet hands out the version postMark checks', async () => {
+    const sheet = await asTenant(() => marks.sheet({ examId, classId, subjectId: englishId }));
+    const grace = sheet.students.find((s) => s.studentProfileId === studentIds[2])!;
+    expect(grace.version).toBeGreaterThan(0);
+
+    const saved = await asTenant(() =>
+      marks.saveMark({ examId, classId, subjectId: englishId, studentProfileId: studentIds[2], marks: 57, expectedVersion: grace.version }),
+    );
+    expect(saved.marks).toBe(57);
+
+    // The copy the sheet was loaded with is now stale: a second editor holding it is refused, not silently overwritten.
+    await expect(
+      asTenant(() =>
+        marks.saveMark({ examId, classId, subjectId: englishId, studentProfileId: studentIds[2], marks: 40, expectedVersion: grace.version }),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'MARK_VERSION_CONFLICT' } });
+  });
+
+  it('G1: a workspace paper is submitted with its own frozen class list and reaches the approval queue', async () => {
+    const res = await asTenant(() => marks.submitPaper({ examId, classId, subjectId: mathsId }));
+    expect(res.submitted).toBe(3);
+
+    const assessment = await paperAssessment(mathsId);
+    expect(assessment!.rosterId).toBe(res.rosterId);
+    const roster = await raw.academicRoster.findFirst({ where: { id: res.rosterId }, include: { members: true } });
+    expect(roster!.frozenAt).not.toBeNull();
+    expect(roster!.scopeType).toBe('subject');
+    expect(roster!.members).toHaveLength(3);
+    // The class's TERM list is left for the Term Board to lock.
+    const termList = await raw.academicRoster.count({ where: { organizationId, classId, scopeType: 'class', subjectId: null } });
+    expect(termList).toBe(0);
+
+    const rows = await raw.studentAssessment.findMany({ where: { assessmentId: assessment!.id } });
+    expect(rows.every((r) => r.approvalStatus === 'submitted' && r.submittedById === userId)).toBe(true);
+
+    const sheet = await asTenant(() => marks.sheet({ examId, classId, subjectId: mathsId }));
+    expect(sheet.approvalStatus).toBe('submitted');
+  });
+
+  it('results SMS is refused while any paper is unapproved, even when every paper is locked', async () => {
+    await asTenant(() => marks.setLock({ examId, classId, locked: true }));
+    const preview = await asTenant(() => sms.preview({ examId, classId }));
+    expect(preview.locked).toBe(true);
+    expect(preview.approved).toBe(false);
+    await expect(asTenant(() => sms.send({ examId, classId }))).rejects.toThrow(/approved/);
+    await asTenant(() => marks.setLock({ examId, classId, locked: false }));
+  });
+
+  it('G1: a submitted paper is read-only and cannot be sent twice', async () => {
+    await expect(
+      asTenant(() => marks.saveMark({ examId, classId, subjectId: mathsId, studentProfileId: studentIds[0], marks: 10 })),
+    ).rejects.toThrow(/read-only/i);
+    await expect(asTenant(() => marks.submitPaper({ examId, classId, subjectId: mathsId }))).rejects.toThrow(/waiting for approval/);
+  });
+
+  it('G1: the person who entered and submitted cannot approve; a separate approver can', async () => {
+    const assessment = await paperAssessment(mathsId);
+    await expect(
+      tenant.run({ organizationId, userId, permissions: ['school:read', 'school:grades:approve'] }, () =>
+        marking.markingApproval({ assessmentId: assessment!.id, action: 'approve' } as any),
+      ),
+    ).rejects.toThrow(/segregation of duty/);
+
+    const out = await asApprover(() => marking.markingApproval({ assessmentId: assessment!.id, action: 'approve' } as any));
+    expect(out.updated).toBe(3);
+    const rows = await raw.studentAssessment.findMany({ where: { assessmentId: assessment!.id } });
+    expect(rows.every((r) => r.approvalStatus === 'approved' && r.approvedById === 'dos_1')).toBe(true);
+    await expect(asTenant(() => marks.submitPaper({ examId, classId, subjectId: mathsId }))).rejects.toThrow(/already approved/);
+  });
+
+  it('G1: a returned paper can be corrected and resubmitted whole', async () => {
+    await asTenant(() => marks.submitPaper({ examId, classId, subjectId: englishId }));
+    const assessment = await paperAssessment(englishId);
+    await asApprover(() =>
+      marking.markingApproval({ assessmentId: assessment!.id, action: 'reject', reason: 'Check Candia — 57 looks like a typo' } as any),
+    );
+
+    const sheet = await asTenant(() => marks.sheet({ examId, classId, subjectId: englishId }));
+    expect(sheet.approvalStatus).toBe('rejected');
+    const grace = sheet.students.find((s) => s.studentProfileId === studentIds[2])!;
+    expect(grace.rejectionReason).toMatch(/typo/);
+
+    await asTenant(() =>
+      marks.saveMark({ examId, classId, subjectId: englishId, studentProfileId: studentIds[2], marks: 75, expectedVersion: grace.version }),
+    );
+    const again = await asTenant(() => marks.submitPaper({ examId, classId, subjectId: englishId }));
+    expect(again.submitted).toBe(3);
+    await asApprover(() => marking.markingApproval({ assessmentId: assessment!.id, action: 'approve' } as any));
+    const rows = await raw.studentAssessment.findMany({ where: { assessmentId: assessment!.id } });
+    expect(rows.every((r) => r.approvalStatus === 'approved')).toBe(true);
+  });
+
+  it('once every paper is approved the merit list says so, and results SMS is allowed', async () => {
+    const grid = await asTenant(() => marks.grid({ examId, classId }));
+    expect(grid.approved).toBe(true);
+    expect(grid.approvedPaperCount).toBe(2);
+    expect(grid.subjects.every((s: any) => s.approvalStatus === 'approved')).toBe(true);
+    const preview = await asTenant(() => sms.preview({ examId, classId }));
+    expect(preview.approved).toBe(true);
+    // No guardians are on file in this fixture, so nothing is delivered — but nothing is refused either.
+    await expect(asTenant(() => sms.send({ examId, classId }))).resolves.toMatchObject({ delivered: 0 });
   });
 });
