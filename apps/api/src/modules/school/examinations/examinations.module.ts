@@ -27,6 +27,7 @@ import { ExamOperationsController } from './exam-operations.controller';
 import { ReportDocumentController } from './report-document.controller';
 import { TermBoardController } from './term-board.controller';
 import { TermBoardService } from './term-board.service';
+import { ExamResultsMessagingService } from './exam-results-messaging.service';
 import {
   ExamController,
   ExamScheduleController,
@@ -68,6 +69,7 @@ import { FeesModule } from '../fees/fees.module';
   ],
   providers: [
     TermBoardService,
+    ExamResultsMessagingService,
     ExamTypeService,
     ExamService,
     ExamScheduleService,

@@ -11402,6 +11402,9 @@ model StudentGuardian {
   isPrimary          Boolean   @default(false)
   canPickup          Boolean   @default(true)
   receivesStatements Boolean   @default(true)
+  /// Receives exam and term results by SMS/portal (owner decision 5: the
+  /// guardian's contact preference is respected; on unless switched off).
+  receivesResults    Boolean   @default(true)
   customFields       Json      @default("{}")
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -12873,6 +12876,11 @@ model LessonPlan {
   unitId              String?
   topicId             String?
   subtopic            String?
+  /// Ugandan lesson-plan format (review A18): theme and sub-theme (P1–P3
+  /// thematic curriculum), subject and language competences, methods, lesson
+  /// steps (introduction / development / conclusion), duration, number of pupils
+  /// and the teacher's self-evaluation. One JSON object so schools can extend it.
+  details             Json      @default("{}")
   /// Phase 1 workflow status. Replaces the minimal 'draft'|'published'.
   /// draft | submitted | needs_revision | approved | archived
   ///

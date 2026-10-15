@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, CircleDashed, ClipboardCheck, FileText, Lock, LayoutGrid, Send, Sigma } from 'lucide-react';
+import { CheckCircle2, CircleDashed, ClipboardCheck, FileText, GraduationCap, Lock, LayoutGrid, Send, Sigma } from 'lucide-react';
 import {
   useTermBoard,
   useTermBoardAction,
@@ -23,7 +23,7 @@ import { EmptyState, Picker, useDefaulted, useStickyState } from './_components/
  * Every step goes through the same single-class service and gates as before;
  * the board reports, per class, what happened and why anything was skipped.
  */
-type Action = 'class-lists' | 'compute' | 'publish' | 'build-cards' | 'release-cards';
+type Action = 'class-lists' | 'compute' | 'publish' | 'build-cards' | 'release-cards' | 'propose-promotions';
 
 const ACTIONS: Array<{
   action: Action; label: string; icon: React.ReactNode; permission: string;
@@ -48,6 +48,10 @@ const ACTIONS: Array<{
   {
     action: 'release-cards', label: 'Release report cards', icon: <ClipboardCheck className="h-4 w-4" />, permission: PERMISSIONS.school.publishResults,
     title: 'Release every built report card?', description: 'Families can read them in the portal, and the class sets can be printed.',
+  },
+  {
+    action: 'propose-promotions', label: 'Propose promotions', icon: <GraduationCap className="h-4 w-4" />, permission: PERMISSIONS.school.computeResults,
+    title: 'Draw up the promotion lists?', description: 'Each class gets a promotion list from its released results (Term III at the end of the year). These are proposals: the head teacher decides each pupil on Term Results › Promotion.',
   },
 ];
 

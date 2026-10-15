@@ -54,6 +54,52 @@ export function SchoolAssessmentPage() {
 
   const examTypeName = (id?: string | null) => (examTypes?.data ?? []).find((t) => t.id === id)?.name;
 
+  // One-click starting points used by Ugandan primary schools (review A19). Each
+  // creates a DRAFT whose exam parts name the exam type they take, ready to
+  // check and publish. Exam types are matched by name (BOT/MOT/EOT).
+  const findType = (re: RegExp) => (examTypes?.data ?? []).find((t) => re.test(t.name))?.id;
+  const PRESETS: Array<{ name: string; parts: Array<{ name: string; kind: string; weight: number; type?: RegExp }> }> = [
+    { name: 'End of term exam only', parts: [{ name: 'End of Term (EOT)', kind: 'exam', weight: 100, type: /\bEOT\b|end of term|final/i }] },
+    { name: 'MOT 40% + EOT 60%', parts: [
+      { name: 'Mid Term (MOT)', kind: 'exam', weight: 40, type: /\bMOT\b|mid/i },
+      { name: 'End of Term (EOT)', kind: 'exam', weight: 60, type: /\bEOT\b|end of term|final/i },
+    ] },
+    { name: 'BOT 20% + MOT 30% + EOT 50%', parts: [
+      { name: 'Beginning of Term (BOT)', kind: 'exam', weight: 20, type: /\bBOT\b|beginning/i },
+      { name: 'Mid Term (MOT)', kind: 'exam', weight: 30, type: /\bMOT\b|mid/i },
+      { name: 'End of Term (EOT)', kind: 'exam', weight: 50, type: /\bEOT\b|end of term|final/i },
+    ] },
+    { name: 'Continuous assessment 40% + EOT 60%', parts: [
+      { name: 'Continuous assessment', kind: 'cat', weight: 40 },
+      { name: 'End of Term (EOT)', kind: 'exam', weight: 60, type: /\bEOT\b|end of term|final/i },
+    ] },
+  ];
+  const [presetBusy, setPresetBusy] = useState(false);
+  async function addPreset(preset: (typeof PRESETS)[number]) {
+    const missing = preset.parts.filter((p) => p.type && !findType(p.type));
+    if (missing.length) {
+      notify.error('Add the exam types first', { description: `No exam type matches ${missing.map((m) => m.name).join(', ')}. Create them under Exams & Papers.` });
+      return;
+    }
+    setPresetBusy(true);
+    try {
+      const p = await createPolicy.mutateAsync({ name: preset.name });
+      for (const part of preset.parts) {
+        await createComponent.mutateAsync({
+          policyId: p.id, name: part.name, kind: part.kind, weight: part.weight, countsAbsentAsZero: false,
+          examTypeId: part.type ? findType(part.type) : undefined,
+        });
+      }
+      setPolicyId(p.id);
+      void validate.refetch();
+      notify.success(`Draft "${preset.name}" created`, { description: 'Check the parts, then publish it so results can be worked out.' });
+    } catch (e: any) {
+      notify.error(e?.response?.data?.message ?? 'Could not create the weighting');
+    } finally {
+      setPresetBusy(false);
+    }
+  }
+
   async function addPolicy() {
     try {
       const p = await createPolicy.mutateAsync({ name: name.trim(), termId: termId || undefined, classId: classId || undefined, subjectId: subjectId || undefined, programmeId: programmeId || undefined });
@@ -142,6 +188,17 @@ export function SchoolAssessmentPage() {
                   (leave term, class and subject on “All”).
                 </p>
               )}
+            </div>
+
+            <div className="space-y-2 border-t pt-3">
+              <p className="text-sm font-medium">Start from a common pattern</p>
+              <div className="flex flex-wrap gap-2">
+                {PRESETS.map((preset) => (
+                  <Button key={preset.name} size="sm" variant="outline" disabled={presetBusy} onClick={() => void addPreset(preset)}>
+                    {preset.name}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <fieldset className="space-y-3 border-t pt-3">

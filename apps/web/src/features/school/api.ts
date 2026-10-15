@@ -85,6 +85,7 @@ export interface Guardian {
   isPrimary: boolean;
   canPickup: boolean;
   receivesStatements: boolean;
+  receivesResults?: boolean;
   contact?: { firstName: string; lastName: string | null; email: string | null; phone: string | null } | null;
 }
 
@@ -1682,6 +1683,7 @@ export interface CreateGuardianInput {
   isPrimary?: boolean;
   canPickup?: boolean;
   receivesStatements?: boolean;
+  receivesResults?: boolean;
 }
 
 export function useCreateGuardian() {
@@ -1699,6 +1701,7 @@ export interface UpdateGuardianInput {
   isPrimary?: boolean;
   canPickup?: boolean;
   receivesStatements?: boolean;
+  receivesResults?: boolean;
   guardian?: { firstName?: string; lastName?: string; email?: string; phone?: string };
 }
 export function useUpdateGuardian() {
@@ -6657,19 +6660,27 @@ export interface ResultGridStudent {
   streamId: string | null;
   streamName: string | null;
   sectionId: string | null;
-  cells: Record<string, { marks: number | null; grade: string | null; participation: string }>;
+  cells: Record<string, { marks: number | null; grade: string | null; points?: number | null; participation: string }>;
   subjectsMarked: number;
   total: number | null;
   average: number | null;
   percentage: number | null;
+  /** Overall grade off the average — only where the class has no aggregate. */
   grade: string | null;
-  position: number;
+  /** PLE aggregate over the class's four aggregate subjects (4 best, 36 worst). */
+  aggregate?: number | null;
+  division?: string | null;
+  /** null = not ranked (nursery, or no marks / no aggregate yet). */
+  position: number | null;
 }
 
 export interface ResultGrid {
   exam: { id: string; name: string; termId: string; termName: string | null; examTypeName: string | null };
   subjects: Array<{ examScheduleId: string; subjectId: string; name: string; code: string; maxMarks: number; locked: boolean }>;
   students: ResultGridStudent[];
+  /** How this class is graded — the same profile its term results use. */
+  reporting?: { gradingSystem: string; aggregateSubjectIds: string[]; hasAggregate: boolean; descriptor: boolean };
+  divisionSummary?: Record<string, number>;
   classSize: number;
   marksExpected: number;
   marksEntered: number;
@@ -6765,6 +6776,29 @@ export function useLockMarks() {
     mutationFn: async (dto: { examId: string; classId: string; subjectId?: string; locked: boolean }) =>
       (await api.post<{ updated: number; locked: boolean }>(`${S}/marks/lock`, dto)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['school', 'marks'] }),
+  });
+}
+
+/** What an exam-results SMS run would send (review A17). */
+export interface ResultsSmsPreview {
+  locked: boolean; lockedPaperCount: number; paperCount: number;
+  pupils: number; guardians: number; pupilsWithoutGuardian: number; sample: string | null;
+}
+
+export function useResultsSmsPreview(scope: { examId?: string; classId?: string; sectionId?: string }, enabled: boolean) {
+  return useQuery({
+    queryKey: ['school', 'marks', 'results-sms', scope.examId, scope.classId, scope.sectionId ?? ''],
+    enabled: enabled && !!scope.examId && !!scope.classId,
+    queryFn: async () => (await api.get<ResultsSmsPreview>(`${S}/marks/results-sms`, {
+      params: { examId: scope.examId, classId: scope.classId, sectionId: scope.sectionId || undefined },
+    })).data,
+  });
+}
+
+export function useSendResultsSms() {
+  return useMutation({
+    mutationFn: async (dto: { examId: string; classId: string; sectionId?: string }) =>
+      (await api.post<{ pupils: number; delivered: number }>(`${S}/marks/results-sms`, dto)).data,
   });
 }
 
@@ -7477,7 +7511,7 @@ export function useTermBoard(termId?: string) {
 export function useTermBoardAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { action: 'class-lists' | 'compute' | 'publish' | 'build-cards' | 'release-cards'; termId: string; classIds?: string[] }) =>
+    mutationFn: async (dto: { action: 'class-lists' | 'compute' | 'publish' | 'build-cards' | 'release-cards' | 'propose-promotions'; termId: string; classIds?: string[] }) =>
       (await api.post<TermBoardOutcome>(`${S}/term-board/${dto.action}`, { termId: dto.termId, classIds: dto.classIds })).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['school', 'term-board'] });

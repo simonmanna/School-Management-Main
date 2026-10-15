@@ -8,6 +8,10 @@ import { GradingService } from './grading.service';
 import type { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './marks-workspace.dto';
 import { PlacementLookupService } from '../enrollment/placement-lookup.service';
 import { MarkingService } from '../assessment/marking.service';
+import { Prisma } from '@prisma/client';
+import { bandFor as kernelBand, divisionPLE, isDescriptorSystem } from '../assessment/result-computation';
+import { resolveScale } from '../assessment/grade-bands';
+import { reportingPolicy } from '../assessment/reporting-policy';
 
 /** Participation values that mean "resolved, but no numeric mark". */
 const NON_SCORING = new Set(['absent', 'exempt', 'excused', 'malpractice']);
@@ -549,55 +553,92 @@ export class MarksWorkspaceService {
       if (cell) cell.grade = g.grade ?? null;
     }
 
-    const system = await this.gradingSystem();
+    // The merit list a Ugandan DOS prints after BOT/MOT/EOT (review A10): each
+    // paper's grade and points, then the aggregate over the class's four
+    // aggregate subjects and its division, ranked by aggregate (ties broken on
+    // total marks). The class's grading profile decides - the same
+    // reportingPolicy a result run uses - so a P2 sheet shows grades with no
+    // division, and a nursery sheet descriptors with no position.
+    const reporting = await this.reportingForClass(params.classId, exam.term?.academicYearId ?? null);
+    const scale = await resolveScale(this.prisma.client, reporting.gradingSystem).catch(() => null);
+    const descriptor = isDescriptorSystem(reporting.gradingSystem);
+    const aggregateIds = new Set(reporting.aggregateSubjectIds);
+    const hasAggregate = aggregateIds.size > 0 && reporting.gradingSystem === 'PLE';
+    const bandOf = (pct: number) => (scale ? kernelBand(new Prisma.Decimal(pct), scale.bands, scale.rounding) : null);
 
-    const rows = await Promise.all(
-      students.map(async (s) => {
-        const cells: Record<string, { marks: number | null; grade: string | null; participation: string }> = {};
-        let total = 0;
-        let counted = 0;
-        let maxTotal = 0;
-        for (const sub of subjects) {
-          const g = bySubject.get(sub.subjectId)?.get(s.studentProfileId);
-          const marks = g?.marksObtained != null ? Number(g.marksObtained) : null;
-          cells[sub.subjectId] = {
-            marks,
-            grade: g?.grade ?? null,
-            participation: g?.participation ?? 'present',
-          };
-          if (marks != null) {
-            total += marks;
-            maxTotal += sub.maxMarks;
-            counted += 1;
+    const rows = students.map((s) => {
+      const cells: Record<string, { marks: number | null; grade: string | null; points: number | null; participation: string }> = {};
+      let total = 0;
+      let counted = 0;
+      let maxTotal = 0;
+      let aggregate = 0;
+      let aggregateSat = 0;
+      for (const sub of subjects) {
+        const g = bySubject.get(sub.subjectId)?.get(s.studentProfileId);
+        const marks = g?.marksObtained != null ? Number(g.marksObtained) : null;
+        const band = marks != null && sub.maxMarks > 0 ? bandOf((marks / sub.maxMarks) * 100) : null;
+        const points = band?.points ?? null;
+        cells[sub.subjectId] = {
+          marks,
+          grade: band?.grade ?? g?.grade ?? null,
+          points,
+          participation: g?.participation ?? 'present',
+        };
+        if (marks != null) {
+          total += marks;
+          maxTotal += sub.maxMarks;
+          counted += 1;
+          if (aggregateIds.has(sub.subjectId) && points != null) {
+            aggregate += points;
+            aggregateSat += 1;
           }
         }
-        const average = counted > 0 ? total / counted : null;
-        const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : null;
-        const band = percentage != null ? await this.grading.bandFor(total, maxTotal, system) : null;
-        return {
-          ...s,
-          cells,
-          subjectsMarked: counted,
-          total: counted > 0 ? Number(total.toFixed(2)) : null,
-          average: average != null ? Number(average.toFixed(2)) : null,
-          percentage: percentage != null ? Number(percentage.toFixed(2)) : null,
-          grade: band?.grade ?? null,
-          position: 0,
-        };
-      }),
-    );
-
-    // Position on total, competition-ranked (ties share a position, next rank skips).
-    const ranked = [...rows].filter((r) => r.total != null).sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
-    let lastTotal: number | null = null;
-    let lastPos = 0;
-    ranked.forEach((r, i) => {
-      if (r.total !== lastTotal) {
-        lastPos = i + 1;
-        lastTotal = r.total;
       }
-      r.position = lastPos;
+      const average = counted > 0 ? total / counted : null;
+      const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : null;
+      const complete = hasAggregate && aggregateSat === aggregateIds.size;
+      // An overall grade off the average is not how a Ugandan primary sheet
+      // reads; it is kept only where there is no aggregate to state.
+      const overall = !hasAggregate && percentage != null ? bandOf(percentage) : null;
+      return {
+        ...s,
+        cells,
+        subjectsMarked: counted,
+        total: counted > 0 ? Number(total.toFixed(2)) : null,
+        average: average != null ? Number(average.toFixed(2)) : null,
+        percentage: percentage != null ? Number(percentage.toFixed(2)) : null,
+        grade: overall?.grade ?? null,
+        aggregate: complete ? aggregate : null,
+        division: hasAggregate && counted > 0 ? divisionPLE(aggregate, complete) : null,
+        position: 0 as number | null,
+      };
     });
+
+    // Positions: by aggregate (lower is better), ties broken on total; or on
+    // total where the class has no aggregate. Competition ranking - a full tie
+    // shares a position and the next skips. A nursery sheet has no positions.
+    if (descriptor) {
+      for (const r of rows) r.position = null;
+    } else {
+      const ranked = rows
+        .filter((r) => (hasAggregate ? r.aggregate != null : r.total != null))
+        .sort((a, b) => (hasAggregate ? (a.aggregate ?? 0) - (b.aggregate ?? 0) : 0) || (b.total ?? 0) - (a.total ?? 0));
+      let prevA: number | null = null;
+      let prevT: number | null = null;
+      let pos = 0;
+      ranked.forEach((r, i) => {
+        if (i === 0 || prevA !== r.aggregate || prevT !== r.total) {
+          pos = i + 1;
+          prevA = r.aggregate;
+          prevT = r.total;
+        }
+        r.position = pos;
+      });
+      const inRank = new Set(ranked);
+      for (const r of rows) if (!inRank.has(r)) r.position = null;
+    }
+    const divisionSummary: Record<string, number> = {};
+    for (const r of rows) if (r.division) divisionSummary[r.division] = (divisionSummary[r.division] ?? 0) + 1;
 
     const expected = students.length * subjects.length;
     const done = spineAssessments.reduce(
@@ -613,6 +654,13 @@ export class MarksWorkspaceService {
         examTypeName: exam.examType?.name ?? null,
       },
       subjects,
+      reporting: {
+        gradingSystem: reporting.gradingSystem,
+        aggregateSubjectIds: [...aggregateIds],
+        hasAggregate,
+        descriptor,
+      },
+      divisionSummary,
       students: rows.sort((a, b) => a.name.localeCompare(b.name)),
       classSize: students.length,
       marksExpected: expected,
@@ -798,6 +846,38 @@ export class MarksWorkspaceService {
     if (statuses.includes('draft')) return 'draft';
     if (statuses.includes('submitted')) return 'submitted';
     return 'approved';
+  }
+
+  /**
+   * The class's grading profile for the exam's year, resolved exactly as a
+   * result run resolves it: the class cohort's programme, else the grade's
+   * default programme; aggregate subject codes resolved to ids.
+   */
+  private async reportingForClass(classId: string, academicYearId: string | null) {
+    const db = this.prisma.client as any;
+    const cohort = academicYearId
+      ? await db.classCohort.findFirst({
+          where: { classId, academicYearId },
+          select: { programme: { select: { stage: true, config: true } } },
+        })
+      : null;
+    const programme =
+      cohort?.programme ??
+      (await db.schoolClass.findFirst({
+        where: { id: classId },
+        select: { gradeLevel: { select: { academicLevel: { select: { defaultProgramme: { select: { stage: true, config: true } } } } } } },
+      }))?.gradeLevel?.academicLevel?.defaultProgramme ??
+      null;
+    const policy = reportingPolicy(programme, (await this.gradingSystem()) ?? 'PLE');
+    const codes = policy.aggregateSubjectCodes;
+    const byCode = codes.length
+      ? await db.subject.findMany({ where: { code: { in: codes }, deletedAt: null }, select: { id: true } })
+      : [];
+    return {
+      gradingSystem: policy.gradingSystem,
+      rankOn: policy.rankOn,
+      aggregateSubjectIds: [...new Set([...policy.aggregateSubjectIds, ...byCode.map((s: any) => s.id)])] as string[],
+    };
   }
 
   private async gradingSystem() {

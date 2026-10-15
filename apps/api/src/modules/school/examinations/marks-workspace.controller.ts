@@ -3,7 +3,8 @@ import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { PERMISSIONS } from '@erp/shared';
 import { RequirePermissions } from '../../../kernel/auth/decorators/require-permissions.decorator';
 import { MarksWorkspaceService } from './marks-workspace.service';
-import { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './marks-workspace.dto';
+import { ApplyClassesDto, LockMarksDto, RemoveClassDto, ResultsSmsDto, SaveMarkDto } from './marks-workspace.dto';
+import { ExamResultsMessagingService } from './exam-results-messaging.service';
 
 /**
  * The exam workspace API — four steps, four screens, one endpoint each.
@@ -19,7 +20,24 @@ import { ApplyClassesDto, LockMarksDto, RemoveClassDto, SaveMarkDto } from './ma
  */
 @Controller('school/marks')
 export class MarksWorkspaceController {
-  constructor(private readonly service: MarksWorkspaceService) {}
+  constructor(
+    private readonly service: MarksWorkspaceService,
+    private readonly results: ExamResultsMessagingService,
+  ) {}
+
+  /** What an exam-results SMS run would send for a class, and to how many guardians. */
+  @Get('results-sms')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  resultsSmsPreview(@Query('examId') examId: string, @Query('classId') classId: string, @Query('sectionId') sectionId?: string) {
+    return this.results.preview({ examId, classId, sectionId: sectionId || undefined });
+  }
+
+  /** Text each family the child's marks for a locked exam (guardians who receive results only). */
+  @Post('results-sms')
+  @RequirePermissions(PERMISSIONS.school.manageExams)
+  sendResultsSms(@Body() dto: ResultsSmsDto) {
+    return this.results.send(dto);
+  }
 
   @Get('exams')
   @RequirePermissions(PERMISSIONS.school.read)

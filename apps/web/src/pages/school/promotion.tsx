@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useWorkingTerm } from '@/features/school/working-term';
 import { QueryError } from '@/components/query-state';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   CheckCheck,
@@ -248,6 +248,15 @@ export function SchoolPromotionPage() {
             the next class up. For a whole class or the whole school, use the bulk actions below.
           </p>
         </div>
+        {/* One promotion path (review A16): decisions are made against the
+            released Term III results, with a reason where the head departs from
+            the recommendation; this page applies them and rolls the year over. */}
+        <p className="rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm">
+          <strong>Start from the results.</strong> Decide promotions on{' '}
+          <Link to="/school/results?tab=promotion" className="font-medium underline">Term Results › Promotion</Link>{' '}
+          using the released Term III results — each pupil gets a recommendation, and the head teacher’s decision and reason are kept.
+          Use this page for exceptions (a pupil without results, a transfer) and for the year-end rollover.
+        </p>
         <WorkflowSteps current={7} />
       </div>
 

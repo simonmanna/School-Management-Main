@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -73,4 +74,11 @@ export class LockMarksDto {
   @IsOptional() @IsString() subjectId?: string;
 
   @IsBoolean() locked!: boolean;
+}
+
+/** Text one class's exam results to families (locked papers only). */
+export class ResultsSmsDto {
+  @IsString() @IsNotEmpty() examId!: string;
+  @IsString() @IsNotEmpty() classId!: string;
+  @IsOptional() @IsString() sectionId?: string;
 }

@@ -145,6 +145,7 @@ export class CreateGuardianDto {
   @IsOptional() @IsBoolean() isPrimary?: boolean;
   @IsOptional() @IsBoolean() canPickup?: boolean;
   @IsOptional() @IsBoolean() receivesStatements?: boolean;
+  @IsOptional() @IsBoolean() receivesResults?: boolean;
 }
 
 export class UpdateGuardianDto {
@@ -152,6 +153,7 @@ export class UpdateGuardianDto {
   @IsOptional() @IsBoolean() isPrimary?: boolean;
   @IsOptional() @IsBoolean() canPickup?: boolean;
   @IsOptional() @IsBoolean() receivesStatements?: boolean;
+  @IsOptional() @IsBoolean() receivesResults?: boolean;
 
   /// Editable contact (parent) details — name / email / phone.
   @IsOptional() @ValidateNested() @Type(() => GuardianContactInput)

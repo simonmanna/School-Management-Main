@@ -251,6 +251,7 @@ export class LessonPlanningService {
         unitId: dto.unitId,
         topicId: dto.topicId,
         subtopic: dto.subtopic,
+        details: (dto.details ?? {}) as any,
         workflowStatus: 'draft',
         version: 1,
       },
@@ -398,6 +399,7 @@ export class LessonPlanningService {
         unitId: dto.unitId,
         topicId: dto.topicId,
         subtopic: dto.subtopic,
+        ...(dto.details !== undefined ? { details: dto.details as any } : {}),
         version: nextVersion,
       },
     });

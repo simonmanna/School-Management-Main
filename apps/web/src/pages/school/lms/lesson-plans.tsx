@@ -21,7 +21,14 @@ const EMPTY = {
   title: '', courseOfferingId: '', schemeOfWorkWeekId: '', weekOf: '', topicId: '', subtopic: '',
   objectives: '', materials: '', activities: '', resources: '', assessments: '',
   learningOutcomeIds: [] as string[],
+  details: {} as LessonDetails,
 };
+
+/** The Ugandan lesson-plan format (review A18). */
+interface LessonDetails {
+  theme?: string; subTheme?: string; subjectCompetences?: string; languageCompetences?: string; methods?: string;
+  introduction?: string; development?: string; conclusion?: string; durationMinutes?: number; numberOfPupils?: number; selfEvaluation?: string;
+}
 
 /**
  * Lesson plans.
@@ -61,9 +68,13 @@ export function SchoolLmsLessonPlansPage() {
       resources: '',
       assessments: '',
       learningOutcomeIds: (p.learningOutcomes ?? []).map((o: any) => o.learningOutcomeId),
+      details: (p.details ?? {}) as LessonDetails,
     });
     setTab('edit');
   };
+
+  const setDetail = <K extends keyof LessonDetails>(key: K, value: LessonDetails[K]) =>
+    setDraft((d) => ({ ...d, details: { ...d.details, [key]: value } }));
 
   const save = async () => {
     const payload: any = {
@@ -76,6 +87,7 @@ export function SchoolLmsLessonPlansPage() {
       objectives: draft.objectives || undefined,
       materials: draft.materials || undefined,
       learningOutcomeIds: draft.learningOutcomeIds,
+      details: Object.fromEntries(Object.entries(draft.details).filter(([, v]) => v !== '' && v != null)),
       activities: lines(draft.activities).map((title, sequence) => ({ title, sequence })),
       resources: lines(draft.resources).map((learningResourceId) => ({ learningResourceId })),
       assessments: lines(draft.assessments).map((prompt, sequence) => ({ kind: 'formative', prompt, sequence })),
@@ -208,11 +220,21 @@ export function SchoolLmsLessonPlansPage() {
                 )}
               </div>
 
+              <div><Label>Theme (P1–P3)</Label><Input value={draft.details.theme ?? ''} onChange={(e) => setDetail('theme', e.target.value)} placeholder="e.g. Our home" /></div>
+              <div><Label>Sub-theme</Label><Input value={draft.details.subTheme ?? ''} onChange={(e) => setDetail('subTheme', e.target.value)} /></div>
+              <div><Label>Duration (minutes)</Label><Input type="number" min={5} max={240} value={draft.details.durationMinutes ?? ''} onChange={(e) => setDetail('durationMinutes', e.target.value ? Number(e.target.value) : undefined)} /></div>
+              <div><Label>Number of pupils</Label><Input type="number" min={1} max={200} value={draft.details.numberOfPupils ?? ''} onChange={(e) => setDetail('numberOfPupils', e.target.value ? Number(e.target.value) : undefined)} /></div>
+              <div className="col-span-2"><Label>Subject competences</Label><textarea className={sel + ' h-20 w-full'} value={draft.details.subjectCompetences ?? ''} onChange={(e) => setDetail('subjectCompetences', e.target.value)} placeholder="The learner: …" /></div>
+              <div className="col-span-2"><Label>Language competences</Label><textarea className={sel + ' h-16 w-full'} value={draft.details.languageCompetences ?? ''} onChange={(e) => setDetail('languageCompetences', e.target.value)} placeholder="The learner: reads, spells, uses …" /></div>
               <div className="col-span-2"><Label>Objectives</Label><textarea className={sel + ' h-24 w-full'} value={draft.objectives} onChange={(e) => setDraft({ ...draft, objectives: e.target.value })} /></div>
-              <div className="col-span-2"><Label>Materials</Label><textarea className={sel + ' h-20 w-full'} value={draft.materials} onChange={(e) => setDraft({ ...draft, materials: e.target.value })} /></div>
+              <div className="col-span-2"><Label>Methods</Label><Input value={draft.details.methods ?? ''} onChange={(e) => setDetail('methods', e.target.value)} placeholder="e.g. Discussion, demonstration, guided discovery" /></div>
+              <div className="col-span-2"><Label>Teaching / learning aids</Label><textarea className={sel + ' h-20 w-full'} value={draft.materials} onChange={(e) => setDraft({ ...draft, materials: e.target.value })} /></div>
+              <div className="col-span-2"><Label>Introduction</Label><textarea className={sel + ' h-16 w-full'} value={draft.details.introduction ?? ''} onChange={(e) => setDetail('introduction', e.target.value)} /></div>
+              <div className="col-span-2"><Label>Development (lesson steps)</Label><textarea className={sel + ' h-24 w-full'} value={draft.details.development ?? ''} onChange={(e) => setDetail('development', e.target.value)} /></div>
+              <div className="col-span-2"><Label>Conclusion</Label><textarea className={sel + ' h-16 w-full'} value={draft.details.conclusion ?? ''} onChange={(e) => setDetail('conclusion', e.target.value)} /></div>
               <div className="col-span-2"><Label>Activities (one per line)</Label><textarea className={sel + ' h-20 w-full'} value={draft.activities} onChange={(e) => setDraft({ ...draft, activities: e.target.value })} /></div>
-              <div className="col-span-2"><Label>Resource ids (one per line)</Label><textarea className={sel + ' h-16 w-full'} value={draft.resources} onChange={(e) => setDraft({ ...draft, resources: e.target.value })} /></div>
               <div className="col-span-2"><Label>Formative checks (one per line)</Label><textarea className={sel + ' h-16 w-full'} value={draft.assessments} onChange={(e) => setDraft({ ...draft, assessments: e.target.value })} /></div>
+              <div className="col-span-2"><Label>Self-evaluation (after teaching)</Label><textarea className={sel + ' h-16 w-full'} value={draft.details.selfEvaluation ?? ''} onChange={(e) => setDetail('selfEvaluation', e.target.value)} placeholder="What went well, what to change, who needs support" /></div>
               <div className="col-span-2">
                 <Button disabled={!draft.title || !draft.courseOfferingId || create.isPending || update.isPending} onClick={save}>
                   <Plus className="mr-1 h-4 w-4" />Save plan

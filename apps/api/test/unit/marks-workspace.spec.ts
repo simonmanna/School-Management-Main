@@ -397,7 +397,40 @@ describe('MarksWorkspaceService — results grid', () => {
     expect(byName['Bwire Paul'].position).toBe(2);
 
     expect(byName['Candia Grace'].total).toBeNull();
-    expect(byName['Candia Grace'].position).toBe(0); // unranked, not "last"
+    expect(byName['Candia Grace'].position).toBeNull(); // unranked, not "last"
+  });
+
+  it('a PLE class with aggregate subjects is graded per paper and ranked by aggregate, ties on total', async () => {
+    const { service, client } = gridService();
+    client.exam.findFirst.mockResolvedValue({ ...EXAM, term: { name: 'Term 1', academicYearId: 'y1' } });
+    client.classCohort = {
+      findFirst: jest.fn().mockResolvedValue({ programme: { stage: 'PRIMARY_UPPER', config: { aggregateSubjectIds: ['sub_math', 'sub_eng'] } } }),
+    };
+    client.gradingScale = {
+      findMany: jest.fn().mockResolvedValue([{
+        id: 'ple', name: 'PLE', system: 'PLE', isDefault: true, deletedAt: null, bandRounding: 'none',
+        bands: [
+          { min: 80, max: 100, grade: 'D1', gpa: 4, points: 1 },
+          { min: 60, max: 79.99, grade: 'C3', gpa: 3, points: 3 },
+          { min: 0, max: 59.99, grade: 'F9', gpa: 0, points: 9 },
+        ],
+      }]),
+    };
+    // s1: D1 + C3 = 4 (total 150); s2: D1 + D1 = 2 (total 170); s3: only maths -> no aggregate.
+    seedSpine(client, [
+      { scheduleId: 'sched_m', marks: { s1: 80, s2: 85, s3: 99 } },
+      { scheduleId: 'sched_e', marks: { s1: 70, s2: 85 } },
+    ]);
+
+    const grid: any = await service.grid({ examId: 'exam_1', classId: 'class_1' });
+    const byName = Object.fromEntries(grid.students.map((s: any) => [s.name, s]));
+    expect(grid.reporting.hasAggregate).toBe(true);
+    expect(byName['Achieng Mary'].cells.sub_eng).toMatchObject({ grade: 'C3', points: 3 });
+    expect(byName['Bwire Paul']).toMatchObject({ aggregate: 2, division: 'I', position: 1, grade: null });
+    expect(byName['Achieng Mary']).toMatchObject({ aggregate: 4, division: 'I', position: 2 });
+    // A missing aggregate paper: no aggregate, Ungraded, not ranked above anyone.
+    expect(byName['Candia Grace']).toMatchObject({ aggregate: null, division: 'U', position: null });
+    expect(grid.divisionSummary).toEqual({ I: 2, U: 1 });
   });
 
   it('gives tied students the same position', async () => {

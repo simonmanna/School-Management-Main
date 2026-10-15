@@ -97,7 +97,14 @@ export class LessonPlanPdfService {
         ['Teacher', teacher ?? '—'],
         ['Status', String(plan.workflowStatus ?? 'draft').replace(/_/g, ' ')],
         ['Topic', [plan.subtopic].filter(Boolean).join(' · ') || '—'],
+        ...ugandaFacts(plan.details),
       ]);
+      // The Ugandan format (review A18): competences and methods up front, then
+      // the three lesson steps, and the teacher's self-evaluation at the end.
+      const d = (plan.details ?? {}) as Record<string, unknown>;
+      this.paragraph(doc, w, 'Subject competences', plain(d.subjectCompetences as string));
+      this.paragraph(doc, w, 'Language competences', plain(d.languageCompetences as string));
+      this.paragraph(doc, w, 'Methods', plain(d.methods as string));
 
       // Objectives: the linked first-class ones, else the free-text summary.
       const linked: string[] = (plan.learningObjectives ?? [])
@@ -115,7 +122,10 @@ export class LessonPlanPdfService {
         .filter(Boolean);
       this.bullets(doc, w, 'Learning outcomes', outcomes);
 
-      this.paragraph(doc, w, 'Materials', plain(plan.materials));
+      this.paragraph(doc, w, 'Teaching / learning aids', plain(plan.materials));
+      this.paragraph(doc, w, 'Introduction', plain(d.introduction as string));
+      this.paragraph(doc, w, 'Development', plain(d.development as string));
+      this.paragraph(doc, w, 'Conclusion', plain(d.conclusion as string));
 
       // Activities, in the order they are taught.
       const acts = [...(plan.lessonPlanActivities ?? [])].sort(
@@ -167,6 +177,8 @@ export class LessonPlanPdfService {
         ].filter(Boolean);
         this.bullets(doc, w, 'Reflection', lines);
       }
+
+      this.paragraph(doc, w, 'Self-evaluation', plain((plan.details as any)?.selfEvaluation));
 
       this.signatures(doc, w, plan.lessonPlanReviews ?? []);
     });
@@ -380,6 +392,17 @@ export class LessonPlanPdfService {
     }
     doc.fillColor('#000');
   }
+}
+
+/** Theme, sub-theme, duration and class size, where the plan states them. */
+function ugandaFacts(details: unknown): Array<[string, string]> {
+  const d = (details ?? {}) as Record<string, unknown>;
+  const out: Array<[string, string]> = [];
+  if (d.theme) out.push(['Theme', String(d.theme)]);
+  if (d.subTheme) out.push(['Sub-theme', String(d.subTheme)]);
+  if (d.durationMinutes) out.push(['Duration', `${d.durationMinutes} min`]);
+  if (d.numberOfPupils) out.push(['Pupils', String(d.numberOfPupils)]);
+  return out;
 }
 
 /** Free-text objectives are often one per line; keep that shape in print. */

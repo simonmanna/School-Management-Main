@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
 import { useAuthStore } from '@/stores/auth.store';
+import { SchoolYearQuickStart } from './_components/school-year-quickstart';
 
 type YearStatus = 'PLANNING' | 'ACTIVE' | 'CLOSED' | 'ARCHIVED';
 
@@ -67,6 +68,8 @@ export function SchoolAcademicYearsPage() {
   };
 
   return (
+    <div>
+    <div className="flex justify-end px-6 pt-6"><SchoolYearQuickStart /></div>
     <SimpleCrud
       title="Academic Years"
       subtitle="Define the school's academic years, set the current one, and close a year when it ends."
@@ -74,7 +77,7 @@ export function SchoolAcademicYearsPage() {
       queryKey="academic-years"
       nameField="name"
       fields={[
-        { name: 'name', label: 'Name', placeholder: '2025/2026', required: true },
+        { name: 'name', label: 'Name', placeholder: '2027', required: true },
         { name: 'startDate', label: 'Start Date', type: 'date', required: true },
         { name: 'endDate', label: 'End Date', type: 'date', required: true },
         { name: 'isCurrent', label: 'Current year', type: 'boolean' },
@@ -102,5 +105,6 @@ export function SchoolAcademicYearsPage() {
         ))
       }
     />
+    </div>
   );
 }

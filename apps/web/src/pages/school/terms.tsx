@@ -6,8 +6,8 @@ export function SchoolTermsPage() {
   const yearOpts = (years?.data ?? []).map((y) => ({ value: y.id, label: y.name }));
   return (
     <SimpleCrud
-      title="Terms / Semesters"
-      subtitle="Terms within an academic year (e.g. Term 1, Term 2 or Semester 1)."
+      title="Terms"
+      subtitle="The three terms of each school year. Use “Set up a school year” on Academic Years to create a year and its terms together."
       endpoint="terms"
       queryKey="terms"
       nameField="name"

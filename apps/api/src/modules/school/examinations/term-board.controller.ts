@@ -55,4 +55,11 @@ export class TermBoardController {
   releaseCards(@Body() dto: TermBoardActionDto) {
     return this.service.releaseCards(dto);
   }
+
+  /** Every class's promotion list from its released results — proposals for the head to decide. */
+  @Post('propose-promotions')
+  @RequirePermissions(PERMISSIONS.school.computeResults)
+  proposePromotions(@Body() dto: TermBoardActionDto) {
+    return this.service.proposePromotions(dto);
+  }
 }

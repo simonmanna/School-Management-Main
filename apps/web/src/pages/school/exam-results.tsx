@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Download, FileText, Lock, Printer, Unlock,
 } from 'lucide-react';
 import {
   useAcademicYears, useTerms, useClassSubdivisions, useWorkspaceExams, useExamCoverage,
-  useResultGrid, useLockMarks, type ResultGrid, currentTerminology } from '@/features/school/api';
+  useResultGrid, useLockMarks, useSchoolProfile, type ResultGrid, currentTerminology } from '@/features/school/api';
+import { PupilSlips, ResultsSmsButton } from './_components/exam-results-extras';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -61,7 +62,7 @@ export function SchoolExamResultsPage() {
     const list = [...(grid?.students ?? [])];
     if (sort === 'position') {
       // Unmarked students sink to the bottom rather than claiming position 0.
-      list.sort((a, b) => (a.position || Infinity) - (b.position || Infinity) || a.name.localeCompare(b.name));
+      list.sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.name.localeCompare(b.name));
     } else {
       list.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -84,21 +85,22 @@ export function SchoolExamResultsPage() {
 
   function exportCsv() {
     if (!grid) return;
-    const header = ['#', 'Student', 'Admission no.', ...grid.subjects.map((s) => s.name), 'Total', 'Average', '%', 'Grade', 'Position'];
+    const agg = !!grid.reporting?.hasAggregate;
+    const header = ['#', 'Student', 'Admission no.', ...grid.subjects.flatMap((s) => [s.name, `${s.code || s.name} grade`]), 'Total', 'Average', '%', ...(agg ? ['Aggregate', 'Division'] : ['Grade']), 'Position'];
     const lines = rows.map((r, i) => [
       i + 1,
       r.name,
       r.admissionNo,
-      ...grid.subjects.map((s) => {
+      ...grid.subjects.flatMap((s) => {
         const cell = r.cells[s.subjectId];
-        if (cell?.marks != null) return cell.marks;
-        return cell && cell.participation !== 'present' ? cell.participation.toUpperCase() : '';
+        const mark = cell?.marks != null ? cell.marks : cell && cell.participation !== 'present' ? cell.participation.toUpperCase() : '';
+        return [mark, cell?.grade ?? ''];
       }),
       r.total ?? '',
       r.average ?? '',
       r.percentage ?? '',
-      r.grade ?? '',
-      r.position || '',
+      ...(agg ? [r.aggregate ?? '', r.division ?? ''] : [r.grade ?? '']),
+      r.position ?? '',
     ]);
     const csv = [header, ...lines]
       .map((row) => row.map((v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v))).join(','))
@@ -117,8 +119,24 @@ export function SchoolExamResultsPage() {
 
   const ready = !!examId && !!classId;
 
+  // Printing pupil slips swaps the print layout from the class sheet to one
+  // slip per pupil, then switches back once the print dialog closes.
+  const { data: school } = useSchoolProfile();
+  const [slips, setSlips] = useState(false);
+  useEffect(() => {
+    if (!slips) return;
+    const done = () => setSlips(false);
+    window.addEventListener('afterprint', done);
+    const t = window.setTimeout(() => window.print(), 50);
+    return () => { window.clearTimeout(t); window.removeEventListener('afterprint', done); };
+  }, [slips]);
+
   return (
-    <div className="space-y-4 p-6">
+    <>
+    {slips && grid && (
+      <PupilSlips grid={grid} schoolName={school?.name ?? ''} className={examClasses.find((c) => c.classId === classId)?.className ?? ''} />
+    )}
+    <div className={`space-y-4 p-6 ${slips ? 'print:hidden' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Exam Mark Sheets</h1>
@@ -136,7 +154,7 @@ export function SchoolExamResultsPage() {
         </div>
       </div>
 
-      <div className="print:hidden"><WorkflowSteps current={3} /></div>
+      <div className="print:hidden"><WorkflowSteps current={3} done={{ 1: true, 2: true, 3: !!grid?.complete }} /></div>
 
       {/* These numbers are live — they include marks nobody has approved yet,
           and positions are ranked per exam. The term result parents see comes
@@ -196,6 +214,10 @@ export function SchoolExamResultsPage() {
                 <Progress done={grid.marksEntered} total={grid.marksExpected} />
                 <Button size="sm" variant="outline" onClick={exportCsv}><Download className="h-4 w-4" /> Export CSV</Button>
                 <Button size="sm" variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4" /> Print</Button>
+                <Button size="sm" variant="outline" disabled={!grid.students.some((s) => s.subjectsMarked > 0)} onClick={() => setSlips(true)}>
+                  <Printer className="h-4 w-4" /> Print pupil slips
+                </Button>
+                {!grid.reporting?.descriptor && <ResultsSmsButton examId={examId} classId={classId} sectionId={streamId || undefined} />}
                 <Button size="sm" variant={allLocked ? 'default' : 'outline'} onClick={toggleLockAll} disabled={lock.isPending}>
                   {allLocked ? <><Unlock className="h-4 w-4" /> Unlock marks</> : <><Lock className="h-4 w-4" /> Lock marks</>}
                 </Button>
@@ -235,8 +257,15 @@ export function SchoolExamResultsPage() {
                     ))}
                     <th className="px-3 py-2 text-right">Total</th>
                     <th className="px-3 py-2 text-right">Avg</th>
-                    <th className="px-3 py-2 text-center">Grade</th>
-                    <th className="px-3 py-2 text-right">Pos</th>
+                    {grid.reporting?.hasAggregate ? (
+                      <>
+                        <th className="px-3 py-2 text-right" title="Sum of the four aggregate subjects' points — 4 is best, 36 worst">Agg</th>
+                        <th className="px-3 py-2 text-center">Div</th>
+                      </>
+                    ) : (
+                      <th className="px-3 py-2 text-center">Grade</th>
+                    )}
+                    {!grid.reporting?.descriptor && <th className="px-3 py-2 text-right">Pos</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -254,7 +283,10 @@ export function SchoolExamResultsPage() {
                         return (
                           <td key={s.subjectId} className="px-2 py-1.5 text-center tabular-nums">
                             {cell?.marks != null ? (
-                              <span>{cell.marks}</span>
+                              <span>
+                                {cell.marks}
+                                {cell.grade && <span className="ml-1 text-xs font-medium text-muted-foreground">{cell.grade}</span>}
+                              </span>
                             ) : cell && cell.participation !== 'present' ? (
                               <span className="text-xs uppercase text-muted-foreground">{cell.participation.slice(0, 3)}</span>
                             ) : (
@@ -265,10 +297,21 @@ export function SchoolExamResultsPage() {
                       })}
                       <td className="px-3 py-1.5 text-right font-medium tabular-nums">{r.total ?? '—'}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{r.average ?? '—'}</td>
-                      <td className="px-3 py-1.5 text-center">
-                        {r.grade ? <Badge variant="outline">{r.grade}</Badge> : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-medium tabular-nums">{r.position || '—'}</td>
+                      {grid.reporting?.hasAggregate ? (
+                        <>
+                          <td className="px-3 py-1.5 text-right font-medium tabular-nums">{r.aggregate ?? '—'}</td>
+                          <td className="px-3 py-1.5 text-center">
+                            {r.division ? <Badge variant={r.division === 'U' ? 'outline' : 'secondary'}>{r.division}</Badge> : <span className="text-muted-foreground">—</span>}
+                          </td>
+                        </>
+                      ) : (
+                        <td className="px-3 py-1.5 text-center">
+                          {r.grade ? <Badge variant="outline">{r.grade}</Badge> : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      )}
+                      {!grid.reporting?.descriptor && (
+                        <td className="px-3 py-1.5 text-right font-medium tabular-nums">{r.position ?? '—'}</td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -286,6 +329,7 @@ export function SchoolExamResultsPage() {
         </>
       )}
     </div>
+    </>
   );
 }
 
@@ -297,14 +341,29 @@ function ClassSummary({ grid }: { grid: ResultGrid }) {
   const averages = marked.map((s) => s.percentage ?? 0);
   const mean = averages.reduce((a, b) => a + b, 0) / averages.length;
   const best = marked.reduce((a, b) => ((b.total ?? 0) > (a.total ?? 0) ? b : a));
+  // Top of the class is position 1 where the class is ranked (by aggregate for P4–P7).
+  const top = marked.find((s) => s.position === 1) ?? best;
   const passed = averages.filter((p) => p >= 50).length;
 
+  const divisions = Object.entries(grid.divisionSummary ?? {}).sort(([a], [b]) => a.localeCompare(b));
   return (
+    <div className="space-y-3">
+    {divisions.length > 0 && (
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-2 pt-4 text-sm">
+          <span className="text-muted-foreground">Divisions:</span>
+          {divisions.map(([d, n]) => (
+            <Badge key={d} variant={d === 'U' ? 'outline' : 'secondary'}>{d === 'U' ? 'Ungraded' : `Div ${d}`}: {n}</Badge>
+          ))}
+        </CardContent>
+      </Card>
+    )}
     <div className="grid gap-3 sm:grid-cols-4">
       <SummaryTile label="Students marked" value={`${marked.length} of ${grid.classSize}`} />
       <SummaryTile label="Class average" value={`${mean.toFixed(1)}%`} />
       <SummaryTile label="At or above 50%" value={`${passed} (${Math.round((passed / marked.length) * 100)}%)`} />
-      <SummaryTile label="Top of the class" value={best.name} sub={`${best.total} marks`} />
+      <SummaryTile label="Top of the class" value={top.name} sub={top.aggregate != null ? `Aggregate ${top.aggregate}` : `${top.total} marks`} />
+    </div>
     </div>
   );
 }

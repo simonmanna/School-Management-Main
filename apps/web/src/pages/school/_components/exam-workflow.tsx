@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Check } from 'lucide-react';
+import { PERMISSIONS } from '@erp/shared';
+import { useAuthStore } from '@/stores/auth.store';
 
 /**
  * Shared furniture for the termly academic workflow.
@@ -16,15 +18,19 @@ import { Check } from 'lucide-react';
  * covers the whole term.
  */
 
+/**
+ * Each step names the grants that open its screen; the rail shows a user only
+ * the steps they can take (review A20 — a teacher was shown "Create exam ✓").
+ */
 export const STEPS = [
-  { n: 1, label: 'Create exam', to: '/school/exam-workspace' },
-  { n: 2, label: 'Choose classes', to: '/school/exam-workspace/classes' },
-  { n: 3, label: 'Enter marks', to: '/school/enter-marks' },
-  { n: 4, label: 'Approve marks', to: '/school/approvals' },
-  { n: 5, label: 'Term results', to: '/school/results' },
-  { n: 6, label: 'Report cards', to: '/school/report-cards' },
+  { n: 1, label: 'Create exam', to: '/school/exam-workspace', any: [PERMISSIONS.school.manageExams] },
+  { n: 2, label: 'Choose classes', to: '/school/exam-workspace/classes', any: [PERMISSIONS.school.manageExams] },
+  { n: 3, label: 'Enter marks', to: '/school/enter-marks', any: [PERMISSIONS.school.enterGrades, PERMISSIONS.school.ownGrades, PERMISSIONS.school.manageExams] },
+  { n: 4, label: 'Approve marks', to: '/school/approvals', any: [PERMISSIONS.school.approveGrades] },
+  { n: 5, label: 'Term results', to: '/school/results', any: [PERMISSIONS.school.computeResults, PERMISSIONS.school.approveResults, PERMISSIONS.school.publishResults, PERMISSIONS.school.amendResults, PERMISSIONS.school.decidePromotion] },
+  { n: 6, label: 'Report cards', to: '/school/report-cards', any: [PERMISSIONS.school.manageExams, PERMISSIONS.school.computeResults, PERMISSIONS.school.publishResults, PERMISSIONS.school.publishReportDocuments] },
   // Promotion is decided against the released results, on their Promotion tab.
-  { n: 7, label: 'Promote', to: '/school/results?tab=promotion' },
+  { n: 7, label: 'Promote', to: '/school/results?tab=promotion', any: [PERMISSIONS.school.decidePromotion, PERMISSIONS.school.applyPromotion, PERMISSIONS.school.computeResults] },
 ] as const;
 
 export type StepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -35,13 +41,21 @@ function withSearch(to: string, search: string) {
   return to.includes('?') ? `${to}&${search.slice(1)}` : `${to}${search}`;
 }
 
-/** The numbered rail across the top of every step. */
-export function WorkflowSteps({ current }: { current: StepNumber }) {
+/**
+ * The numbered rail across the top of every step.
+ *
+ * A step is ticked only when the page KNOWS it is finished (`done`) — never
+ * just because it comes earlier in the list, which ticked "Create exam" for an
+ * exam that did not exist yet. Steps the user cannot open are left out.
+ */
+export function WorkflowSteps({ current, done = {} }: { current: StepNumber; done?: Partial<Record<StepNumber, boolean>> }) {
   const { search } = useLocation();
+  const has = useAuthStore((st) => st.hasPermission);
+  const visible = STEPS.filter((s) => s.n === current || s.any.some((p) => has(p)));
   return (
     <nav aria-label="Exam workflow" className="flex flex-wrap items-center gap-1 rounded-lg border bg-card p-1.5">
-      {STEPS.map((s, i) => {
-        const state = s.n < current ? 'done' : s.n === current ? 'current' : 'todo';
+      {visible.map((s, i) => {
+        const state = s.n === current ? 'current' : done[s.n as StepNumber] ? 'done' : 'todo';
         return (
           <div key={s.n} className="flex items-center">
             <Link
@@ -68,7 +82,7 @@ export function WorkflowSteps({ current }: { current: StepNumber }) {
               </span>
               <span className="whitespace-nowrap">{s.label}</span>
             </Link>
-            {i < STEPS.length - 1 && <span aria-hidden className="mx-0.5 h-px w-4 bg-border" />}
+            {i < visible.length - 1 && <span aria-hidden className="mx-0.5 h-px w-4 bg-border" />}
           </div>
         );
       })}

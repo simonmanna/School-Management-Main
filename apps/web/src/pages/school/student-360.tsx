@@ -560,6 +560,7 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
   const [isPrimary, setIsPrimary] = useState(false);
   const [canPickup, setCanPickup] = useState(true);
   const [receivesStatements, setReceivesStatements] = useState(true);
+  const [receivesResults, setReceivesResults] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const openAdd = () => {
@@ -578,6 +579,7 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
     setIsPrimary(g.isPrimary);
     setCanPickup(g.canPickup);
     setReceivesStatements(g.receivesStatements);
+    setReceivesResults(g.receivesResults ?? true);
     setOpen(true);
   };
 
@@ -588,12 +590,12 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
       if (editing) {
         await updateG.mutateAsync({
           id: editing.id, studentProfileId,
-          relationship, isPrimary, canPickup, receivesStatements,
+          relationship, isPrimary, canPickup, receivesStatements, receivesResults,
           guardian: { firstName: firstName.trim(), lastName: lastName.trim() || undefined, email: email.trim() || undefined, phone: phone.trim() || undefined },
         });
       } else {
         await createG.mutateAsync({
-          studentProfileId, relationship, isPrimary, canPickup, receivesStatements,
+          studentProfileId, relationship, isPrimary, canPickup, receivesStatements, receivesResults,
           guardian: { firstName: firstName.trim(), lastName: lastName.trim() || undefined, email: email.trim() || undefined, phone: phone.trim() || undefined },
         });
       }
@@ -619,7 +621,7 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
               <div>
                 <div className="font-medium">{g.contact?.firstName} {g.contact?.lastName ?? ''}</div>
                 <div className="text-xs text-muted-foreground capitalize">
-                  {g.relationship}{g.isPrimary ? ' · primary' : ''}{g.canPickup ? ' · pickup' : ''}{g.receivesStatements ? ' · statements' : ''}
+                  {g.relationship}{g.isPrimary ? ' · primary' : ''}{g.canPickup ? ' · pickup' : ''}{g.receivesStatements ? ' · statements' : ''}{g.receivesResults === false ? ' · no results messages' : ''}
                 </div>
                 <div className="text-xs text-muted-foreground">{g.contact?.phone ?? 'no phone'}{g.contact?.email ? ` · ${g.contact.email}` : ''}</div>
               </div>
@@ -659,6 +661,7 @@ function GuardianManager({ studentProfileId }: { studentProfileId: string }) {
               <label className="flex items-center gap-2"><input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} /> Primary</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={canPickup} onChange={(e) => setCanPickup(e.target.checked)} /> Can pick up</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={receivesStatements} onChange={(e) => setReceivesStatements(e.target.checked)} /> Receives statements</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={receivesResults} onChange={(e) => setReceivesResults(e.target.checked)} /> Receives results (SMS / portal)</label>
             </div>
           </div>
           <DialogFooter>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowRight, Check, ChevronLeft, ChevronRight, ClipboardList,
-  FileSpreadsheet, Loader2, Lock, Search, Unlock,
+  FileSpreadsheet, Loader2, Lock, Printer, Search, Unlock, Upload,
 } from 'lucide-react';
 import {
   useAcademicYears, useTerms, useClassSubdivisions, useClassSubjects,
@@ -277,6 +277,61 @@ export function SchoolEnterMarksPage() {
     })();
   }
 
+  /**
+   * Import a spreadsheet of marks matched by ADMISSION NUMBER, not by row order
+   * (review A21): a sheet sorted differently can no longer shift every mark onto
+   * the wrong child. Columns: admission number and mark (a header row is
+   * recognised); "ABS" / "absent" records an absence. Unmatched rows are listed.
+   */
+  async function importMarks(file: File) {
+    const text = await file.text();
+    const rows = text.split(/\r?\n/).map((l) => l.split(/[,;\t]/).map((c) => c.trim().replace(/^"|"$/g, ''))).filter((r) => r.some(Boolean));
+    if (!rows.length) return;
+    const header = rows[0].map((h) => h.toLowerCase());
+    const hasHeader = header.some((h) => /adm|reg|learner|pupil/.test(h)) && header.some((h) => /mark|score|total/.test(h));
+    const admCol = hasHeader ? header.findIndex((h) => /adm|reg/.test(h)) : 0;
+    const markCol = hasHeader ? header.findIndex((h) => /mark|score|total/.test(h)) : 1;
+    const byAdm = new Map(students.map((s) => [s.admissionNo.trim().toLowerCase(), s]));
+    const targets: Array<{ student: MarkSheetStudent; raw: string; part?: string }> = [];
+    const unmatched: string[] = [];
+    const invalid: string[] = [];
+    for (const r of hasHeader ? rows.slice(1) : rows) {
+      const adm = (r[admCol] ?? '').toLowerCase();
+      const raw = (r[markCol] ?? '').trim();
+      if (!adm) continue;
+      const student = byAdm.get(adm);
+      if (!student) { unmatched.push(r[admCol]); continue; }
+      if (/^(abs|absent)$/i.test(raw)) { targets.push({ student, raw: '', part: 'absent' }); continue; }
+      const n = Number(raw);
+      if (raw === '' || Number.isNaN(n) || n < 0 || n > maxMarks) { invalid.push(`${r[admCol]} (${raw || 'blank'})`); continue; }
+      targets.push({ student, raw });
+    }
+    if (!targets.length) {
+      notify.error('No marks could be matched', { description: unmatched.length ? `Unknown admission numbers: ${unmatched.slice(0, 5).join(', ')}` : 'Use two columns: admission number and mark.' });
+      return;
+    }
+    setValues((v) => ({ ...v, ...Object.fromEntries(targets.map((t) => [t.student.studentProfileId, t.raw])) }));
+    for (const t of targets) {
+      if (t.part) setParticipation((p) => ({ ...p, [t.student.studentProfileId]: t.part! }));
+      await commit(t.student, t.raw, t.part);
+    }
+    const problems = [
+      unmatched.length ? `${unmatched.length} unknown admission number${unmatched.length === 1 ? '' : 's'} (${unmatched.slice(0, 3).join(', ')})` : '',
+      invalid.length ? `${invalid.length} mark${invalid.length === 1 ? '' : 's'} out of range (${invalid.slice(0, 3).join(', ')})` : '',
+    ].filter(Boolean).join('; ');
+    (problems ? notify.warning : notify.success)(`Imported ${targets.length} mark${targets.length === 1 ? '' : 's'}`, problems ? { description: `Skipped: ${problems}.` } : undefined);
+  }
+
+  // A blank score sheet for marking on paper away from a computer.
+  const [blankSheet, setBlankSheet] = useState(false);
+  useEffect(() => {
+    if (!blankSheet) return;
+    const done = () => setBlankSheet(false);
+    window.addEventListener('afterprint', done);
+    const t = window.setTimeout(() => window.print(), 50);
+    return () => { window.clearTimeout(t); window.removeEventListener('afterprint', done); };
+  }, [blankSheet]);
+
   async function toggleLock() {
     if (!examId || !classId || !subjectId) return;
     try {
@@ -291,7 +346,28 @@ export function SchoolEnterMarksPage() {
   const ready = !!examId && !!classId && !!subjectId;
 
   return (
-    <div className="space-y-4 p-6">
+    <>
+    {blankSheet && sheet && (
+      <div className="hidden p-4 text-sm print:block">
+        <h2 className="text-lg font-semibold">{sheet.exam.name} — {sheet.class.name} · {sheet.subject.name}</h2>
+        <p className="mb-2">Out of {maxMarks}. Teacher: ____________________ Date: ____________</p>
+        <table className="w-full border-collapse">
+          <thead><tr>{['No.', 'Pupil', 'Adm. no.', 'Mark', 'Remark'].map((h) => <th key={h} className="border px-2 py-1 text-left">{h}</th>)}</tr></thead>
+          <tbody>
+            {students.map((s, i) => (
+              <tr key={s.studentProfileId}>
+                <td className="border px-2 py-1">{i + 1}</td>
+                <td className="border px-2 py-1">{s.name}</td>
+                <td className="border px-2 py-1">{s.admissionNo}</td>
+                <td className="w-24 border px-2 py-1" />
+                <td className="w-48 border px-2 py-1" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+    <div className={`space-y-4 p-6 ${blankSheet ? 'print:hidden' : ''}`}>
       <div>
         <h1 className="text-xl font-semibold">Enter marks</h1>
         <p className="text-sm text-muted-foreground">
@@ -377,6 +453,14 @@ export function SchoolEnterMarksPage() {
                     {locked ? <><Unlock className="h-4 w-4" /> Unlock</> : <><Lock className="h-4 w-4" /> Lock paper</>}
                   </Button>
                 )}
+                <Button size="sm" variant="outline" onClick={() => setBlankSheet(true)}>
+                  <Printer className="h-4 w-4" /> Blank score sheet
+                </Button>
+                <label className={`inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border px-3 text-sm hover:bg-accent ${locked ? 'pointer-events-none opacity-50' : ''}`}>
+                  <Upload className="h-4 w-4" /> Import marks
+                  <input type="file" accept=".csv,text/csv,text/plain" className="sr-only" disabled={locked}
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importMarks(f); }} />
+                </label>
                 <Button size="sm" variant="ghost" onClick={() => navigate('/school/exam-results')}>
                   <FileSpreadsheet className="h-4 w-4" /> Results
                 </Button>
@@ -412,6 +496,8 @@ export function SchoolEnterMarksPage() {
                   </span>
                 </div>
 
+                {/* Scrolls sideways on a tablet rather than pushing the page wider. */}
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs font-medium text-muted-foreground">
@@ -511,6 +597,7 @@ export function SchoolEnterMarksPage() {
                     })}
                   </tbody>
                 </table>
+                </div>
 
                 {visible.length === 0 && (
                   <p className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -523,7 +610,7 @@ export function SchoolEnterMarksPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 text-sm">
             <span className="text-muted-foreground">
-              Tip: paste a column of marks from a spreadsheet into the first box to fill the whole class.
+              Tip: “Import marks” takes a spreadsheet (CSV) of admission numbers and marks, matched by admission number. Pasting a column fills the boxes in the order shown.
             </span>
             <div className="flex gap-2">
               {subjectIndex >= 0 && subjectIndex < paperSubjects.length - 1 && (
@@ -539,5 +626,6 @@ export function SchoolEnterMarksPage() {
         </>
       )}
     </div>
+    </>
   );
 }

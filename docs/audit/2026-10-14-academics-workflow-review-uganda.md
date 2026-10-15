@@ -439,3 +439,49 @@ Phase 0 plus 1.1–1.3 is the minimum before showing the product to a school as 
 5. **Mid-term reports:** full per-pupil reports, SMS summary only, or both?
 6. **Grading bands:** ship the current 90/80/70/65/60/50/40/35 bands as the default, or a different common school scale? (UNEB does not publish one mark-to-grade table for school tests.)
 7. **DOS vs Deputy:** a separate DOS preset (recommended), or merge into Deputy Head?
+
+---
+
+## 9. Remediation status (2026-10-15)
+
+All of Phases 0–3 that can be done in code are implemented on `main`. A pilot term in a real school (item 3.6) is still to do; it needs the school, not code.
+
+### Findings
+
+| # | Finding | Status | Where |
+|---|---|---|---|
+| A1 | Primary school graded on UCE | **Fixed.** Grading profile per level; school default PLE; migration moved existing primary profiles | `assessment/reporting-policy.ts`, migration `20261014120000_academics_phase0_reporting`, Programmes & Classes › Grading |
+| A2 | No way to write comments | **Fixed.** Report Comments grid with comment bank; `school:reports:comment` (class teacher, own class/stream) and `school:reports:comment:head` | `report-comments.tsx`, `ReportCardService.commentSheet/updateComments` |
+| A3 | Nursery card printed as PLE | **Fixed.** Card reads the result set's system and snapshotted scale; descriptor cards hide marks/points/position | `report-card-pdf.service.ts`, `report-card-template.service.ts` |
+| A4 | Two divisions on one card | **Fixed.** Card prints the stored result only; no name-regex aggregate; regression test: editing a scale after release cannot change a card | `academics-phase0-reporting.spec.ts` |
+| A5 | "Core" tick drove the aggregate | **Fixed.** Aggregate subjects named per programme (exactly four, validated) | `programme.service.ts`, `result-computation.ts` |
+| A6 | P1–P3 "Division U" | **Fixed.** No aggregate unless the school names subjects; demo results now computed by the real kernel | `reporting-policy.ts`, `demo-green-valley/06-results.ts`, `reset-results.ts` |
+| A7 | Allocation was a course lifecycle tool | **Fixed.** Teacher Allocation grid with class teachers and copy-from-last-term; course offerings kept as "Advanced" | `teaching-allocation.tsx`, `TeachingAllocationService` |
+| A8 | Term pickers without the year | **Fixed.** "2026 · Term 3", newest first, everywhere | `useTerms` / `termLabel` |
+| A9 | Teacher Enter marks blank/403 | **Fixed.** Pickers limited to own papers; deep links preselect; exam papers listed per allocated pair | `enter-marks.tsx`, `portals.service.ts` |
+| A10 | Merit list not Ugandan | **Fixed.** Grade per paper, aggregate, division, ranked by aggregate then total, division summary | `marks-workspace.service.ts`, `exam-results.tsx` |
+| A11 | Card blanks / exam columns | **Fixed.** Next term start and (school-enabled) fee balance filled; columns named BOT/MOT/EOT by component | `report-card-pdf.service.ts` |
+| A12 | No DOS role | **Fixed.** Director of Studies and Nursery Teacher presets (existing schools get them by migration) | `packages/shared/src/permissions.ts` |
+| A13 | Menu noise | **Fixed.** Ungated finance/inventory/asset/meal items gated; teachers ~55 → 34 links; Lesson Plans for teachers | `app-shell.tsx` |
+| A14 | Nursery in percentages | **Fixed.** Observation assessments are marked as Confident / Developing / Beginning / Support | `production-markbook.tsx` |
+| A15 | Term-end chores per class | **Fixed.** Term Board: lock lists, work out, release, build/release cards, propose promotions — all classes; lists locked automatically | `term-board.tsx`, `TermBoardService` |
+| A16 | Promotion split; 100-pupil picker | **Fixed.** One path from Term III results (Term Board proposes, head decides); pupil search | `promotion.tsx`, `competency-report.tsx` |
+| A17 | No exam reports/SMS | **Fixed.** Printable pupil slips; results SMS only for locked papers and to guardians with "Receives results" on | `exam-results-extras.tsx`, `ExamResultsMessagingService` |
+| A18 | Lesson plan not Ugandan | **Fixed.** Theme/sub-theme, competences, methods, introduction/development/conclusion, duration, self-evaluation (form and PDF) | `lesson-plans.tsx`, `LessonPlan.details` |
+| A19 | Setup gaps | **Fixed.** New schools get NCDC subjects/learning areas, BOT/MOT/EOT exam types, per-level grading; "Set up a school year"; weighting presets; checklist covers grading, exams, class teachers | `school-defaults.seed.ts`, `school-year-quickstart.tsx`, `assessment.tsx`, `setup-status.service.ts` |
+| A20 | Rail ticked by position | **Fixed.** Ticks only known-done steps; hides steps the user cannot take | `exam-workflow.tsx` |
+| A21 | Paste by row order | **Fixed.** Import marks by admission number (CSV); printable blank score sheet | `enter-marks.tsx` |
+| A22 | Past terms in My courses | **Fixed.** Current term only | `teaching.tsx` |
+
+### Verification
+
+- Unit tests for the new behaviour: `academics-phase0-reporting`, `report-card-comments`, `teaching-allocation`, updated `marks-workspace`; preset, permission and route coverage suites pass.
+- Role journeys against the live demo: `tests/e2e/academics-roles.journey.ts` (teacher, DOS, head teacher, graded-by-level results) — 7/7 pass. Run with `npx tsx --test tests/e2e/academics-roles.journey.ts` (the repo's vitest install cannot start: vite `module-runner` export mismatch).
+- Real PDFs re-checked on Sunrise: Top Class prints descriptors with no points, division or position; P.5 prints a consistent aggregate, division and "position x out of y"; next term date filled.
+- Tablet width (768 px) checked on Teacher Home, Enter marks, Report Comments, Teacher Allocation, Term Board and Exam Mark Sheets: no page-level sideways scroll; the sidebar now starts as the icon rail under 1024 px, and the mark sheet scrolls inside its card.
+
+### Still to do
+
+1. **Pilot term in a real nursery-and-primary school** (3.6), with the time targets in §7 Phase 3. Confirm the defaults in §8 with its academic leadership.
+2. Confirm UNEB division rules (any special conditions) and the school's preferred D1–F9 cut-offs before the first PLE-year release.
+3. SMS delivery needs a configured gateway (Settings › Communication); without one, results messages reach the portal and email only.

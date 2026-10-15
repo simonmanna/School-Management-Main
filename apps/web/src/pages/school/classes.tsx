@@ -7,13 +7,13 @@ export function SchoolClassesPage() {
   const campusOpts = (campuses?.data ?? []).map((c) => ({ value: c.id, label: c.name }));
   return (
     <SimpleCrud
-      title="Classes / Grades"
+      title="Classes"
       subtitle="Classes belong to a grade level and (optionally) a campus."
       endpoint="classes"
       queryKey="classes"
       nameField="name"
       fields={[
-        { name: 'name', label: 'Name', placeholder: 'S1 Red', required: true },
+        { name: 'name', label: 'Name', placeholder: 'P.5', required: true },
         {
           name: 'gradeLevelId',
           label: 'Grade Level',

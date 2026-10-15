@@ -284,8 +284,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       // Foundation / organisation structure — order per product spec.
       { to: '/school/management/academic-years', label: 'Academic Years', icon: CalendarRange, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/terms', label: 'Terms / Semesters', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
-      { to: '/school/management/classes', label: 'Classes / Grades', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/terms', label: 'Terms', icon: CalendarClock, permission: PERMISSIONS.school.manageFoundation },
+      { to: '/school/management/classes', label: 'Classes', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/grades', label: 'Grade Ladder & Levels', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/sections', label: 'Streams / Sections', icon: Layers, permission: PERMISSIONS.school.manageFoundation },
       { to: '/school/management/departments', label: 'Departments', icon: Building2, permission: PERMISSIONS.school.manageFoundation },
@@ -803,8 +803,15 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+  // On a tablet (under 1024 px) the full sidebar left a teacher's mark sheet
+  // under 500 px wide, so it starts as the icon rail there until the user
+  // chooses otherwise; their choice is remembered as before.
   const [userCollapsed, setUserCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { return false; }
+    try {
+      const saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (saved === null) return typeof window !== 'undefined' && window.innerWidth < 1024;
+      return saved === '1';
+    } catch { return false; }
   });
   const onTerminal = location.pathname.startsWith('/pos/terminal');
   // The POS terminal always runs on the icon rail; elsewhere the user's choice sticks.

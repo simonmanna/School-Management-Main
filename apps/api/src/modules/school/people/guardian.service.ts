@@ -103,6 +103,7 @@ export class GuardianService {
             isPrimary: dto.isPrimary ?? false,
             canPickup: dto.canPickup ?? true,
             receivesStatements: dto.receivesStatements ?? true,
+            receivesResults: dto.receivesResults ?? true,
           },
         });
         const restored = await tx.studentGuardian.findFirst({
@@ -128,6 +129,7 @@ export class GuardianService {
           isPrimary: dto.isPrimary ?? false,
           canPickup: dto.canPickup ?? true,
           receivesStatements: dto.receivesStatements ?? true,
+          receivesResults: dto.receivesResults ?? true,
         },
         include: { studentProfile: true },
       });
@@ -167,6 +169,7 @@ export class GuardianService {
       if (dto.isPrimary !== undefined) linkData.isPrimary = dto.isPrimary;
       if (dto.canPickup !== undefined) linkData.canPickup = dto.canPickup;
       if (dto.receivesStatements !== undefined) linkData.receivesStatements = dto.receivesStatements;
+      if (dto.receivesResults !== undefined) linkData.receivesResults = dto.receivesResults;
       if (Object.keys(linkData).length > 0) {
         await tx.studentGuardian.updateMany({ where: { id }, data: linkData });
       }

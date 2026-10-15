@@ -3,6 +3,7 @@ import { PrismaService } from '../../../kernel/prisma/prisma.service';
 import { TenantContextService } from '../../../kernel/tenancy/tenant-context.service';
 import { AcademicRosterService } from '../assessment/roster.service';
 import { ResultRunService } from '../assessment/result-run.service';
+import { PromotionDecisionService } from '../assessment/promotion-decision.service';
 import { ReportCardService } from './examinations.service';
 
 /**
@@ -31,6 +32,7 @@ export class TermBoardService {
     private readonly rosters: AcademicRosterService,
     private readonly results: ResultRunService,
     private readonly cards: ReportCardService,
+    private readonly promotions: PromotionDecisionService,
   ) {}
 
   private async termOf(termId: string) {
@@ -303,6 +305,33 @@ export class TermBoardService {
           classId: c.id, className: c.name, ok: r.notGenerated === 0 && r.awaitingResults === 0,
           detail: `${r.published} released${r.alreadyPublished ? `, ${r.alreadyPublished} already out` : ''}${r.notGenerated ? `, ${r.notGenerated} not built` : ''}${r.awaitingResults ? `, ${r.awaitingResults} awaiting results` : ''}`,
         });
+      } catch (e) {
+        out.push({ classId: c.id, className: c.name, ok: false, detail: (e as Error).message });
+      }
+    }
+    return this.summary(out);
+  }
+
+  /**
+   * Draw up every class's promotion list from its released results (owner
+   * decision 3: Term III results plus review). Proposals only — the head
+   * teacher still decides each pupil, with a reason where they depart from the
+   * recommendation, on Term Results > Promotion.
+   */
+  async proposePromotions(dto: { termId: string; classIds?: string[] }) {
+    await this.termOf(dto.termId);
+    const db = this.prisma.client as any;
+    const out: Outcome[] = [];
+    for (const c of await this.classesFor(dto.termId, dto.classIds)) {
+      const released = await db.resultSet.findFirst({
+        where: { termId: dto.termId, scopeType: 'class', scopeId: c.id, status: { in: ['published', 'locked'] }, deletedAt: null },
+        orderBy: { revision: 'desc' },
+        select: { id: true },
+      });
+      if (!released) { out.push({ classId: c.id, className: c.name, ok: false, detail: 'No released results this term' }); continue; }
+      try {
+        const r = await this.promotions.propose({ resultSetId: released.id });
+        out.push({ classId: c.id, className: c.name, ok: true, detail: `${r.proposed} proposed, ${r.refreshed} refreshed, ${r.untouched} already decided` });
       } catch (e) {
         out.push({ classId: c.id, className: c.name, ok: false, detail: (e as Error).message });
       }

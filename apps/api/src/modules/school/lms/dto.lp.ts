@@ -6,6 +6,8 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -60,6 +62,25 @@ export class LessonPlanDifferentiationDto {
   @IsString() @IsNotEmpty() description!: string;
 }
 
+/**
+ * The Ugandan lesson-plan format (review A18). Every field optional: a P1–P3
+ * plan names a theme and sub-theme, an upper-primary plan a topic; both state
+ * competences, methods and the three lesson steps.
+ */
+export class LessonPlanDetailsDto {
+  @IsOptional() @IsString() @MaxLength(200) theme?: string;
+  @IsOptional() @IsString() @MaxLength(200) subTheme?: string;
+  @IsOptional() @IsString() @MaxLength(4000) subjectCompetences?: string;
+  @IsOptional() @IsString() @MaxLength(4000) languageCompetences?: string;
+  @IsOptional() @IsString() @MaxLength(2000) methods?: string;
+  @IsOptional() @IsString() @MaxLength(4000) introduction?: string;
+  @IsOptional() @IsString() @MaxLength(8000) development?: string;
+  @IsOptional() @IsString() @MaxLength(4000) conclusion?: string;
+  @IsOptional() @IsInt() @Min(5) @Max(240) durationMinutes?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(200) numberOfPupils?: number;
+  @IsOptional() @IsString() @MaxLength(4000) selfEvaluation?: string;
+}
+
 export class CreateLessonPlanDto {
   /**
    * Phase 3: a plan belongs to a teaching context. Subject, class, term and
@@ -88,6 +109,7 @@ export class CreateLessonPlanDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => LessonPlanResourceDto) resources?: LessonPlanResourceDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => LessonPlanAssessmentDto) assessments?: LessonPlanAssessmentDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => LessonPlanDifferentiationDto) differentiation?: LessonPlanDifferentiationDto[];
+  @IsOptional() @ValidateNested() @Type(() => LessonPlanDetailsDto) details?: LessonPlanDetailsDto;
 }
 
 export class UpdateLessonPlanDto {
@@ -105,6 +127,7 @@ export class UpdateLessonPlanDto {
   @IsOptional() @IsString() unitId?: string;
   @IsOptional() @IsString() topicId?: string;
   @IsOptional() @IsString() subtopic?: string;
+  @IsOptional() @ValidateNested() @Type(() => LessonPlanDetailsDto) details?: LessonPlanDetailsDto;
   /** Optimistic concurrency guard — must match current version or 409. */
   @IsInt() @Min(1) version!: number;
 }

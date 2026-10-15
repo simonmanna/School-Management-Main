@@ -11,7 +11,10 @@ const LEVEL_LABEL: Record<string, string> = { not_met: 'Not met', approaching: '
 const LEVEL_COLOR: Record<string, string> = { not_met: 'destructive', approaching: 'secondary', met: 'default', exceeded: 'default' };
 
 export function SchoolCompetencyReportPage() {
-  const { data: students } = useStudents({ pageSize: 100 });
+  // Search the whole school: the picker used to load only the first 100 pupils,
+  // so most of a 700-pupil school could not be reached (review A16).
+  const [search, setSearch] = useState('');
+  const { data: students } = useStudents({ pageSize: 50, ...(search.trim() ? { search: search.trim() } : {}) });
   const { data: terms } = useTerms();
   const [studentId, setStudentId] = useState('');
   const [termId, setTermId] = useState('');
@@ -30,6 +33,10 @@ export function SchoolCompetencyReportPage() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label className="text-xs" htmlFor="cr-search">Find a pupil</label>
+          <input id="cr-search" className="w-56 rounded-md border bg-card px-3 py-2 text-sm" placeholder="Name or admission no." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <div className="min-w-64 space-y-1">
           <label className="text-xs">Student</label>
           <select className="w-full rounded-md border bg-card px-3 py-2 text-sm" value={studentId} onChange={(e) => setStudentId(e.target.value)}>

@@ -14,6 +14,23 @@ interface CellDraft { marks: string; participation: string; comment: string; exp
 interface PendingSave { key: string; rows: DraftMarkRow[] }
 interface LocalDraft { protocol: 1; updatedAt: string; cells: Record<string, CellDraft>; pending: PendingSave | null }
 interface ConflictRow { studentProfileId: string; version?: number; marks?: number | null; participation?: string; comment?: string }
+/**
+ * Observation work (nursery learning areas, P1–P3 checklists) is recorded as a
+ * level, not a number (review A14). Each level stores the middle of its ECD band
+ * as a share of the maximum, so results, approval and the descriptor report
+ * card work exactly as for marks — the teacher just never types a percentage.
+ */
+export const OBSERVATION_LEVELS = [
+  { label: 'Confident', share: 0.9, min: 0.8 },
+  { label: 'Developing', share: 0.7, min: 0.6 },
+  { label: 'Beginning', share: 0.5, min: 0.4 },
+  { label: 'Support', share: 0.25, min: 0 },
+] as const;
+const levelOf = (marks: string, max: number) => {
+  if (marks === '' || !Number.isFinite(Number(marks)) || max <= 0) return '';
+  const share = Number(marks) / max;
+  return OBSERVATION_LEVELS.find((l) => share >= l.min)?.label ?? '';
+};
 const cellOf = (s: BoardSheetStudent): CellDraft => ({ marks: s.marks == null ? '' : String(s.marks), participation: s.participation, comment: s.comment ?? '', expectedVersion: s.version });
 
 /** One explicit-save markbook. Local autosave never submits academic records. */
@@ -40,6 +57,7 @@ export function ProductionMarkbook({ sheet, onSaved, onSubmit, submitting, onEvi
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const busy = useRef(false);
   const a = sheet.assessment;
+  const observation = a.kind === 'observation';
   const globalLocked = !canEnter || a.locked || ['draft', 'scheduled', 'archived'].includes(a.status) || !a.rosterFrozen;
   const rowLocked = (s: BoardSheetStudent) => globalLocked || ['approved', 'submitted'].includes(s.approvalStatus);
 
@@ -173,9 +191,9 @@ export function ProductionMarkbook({ sheet, onSaved, onSubmit, submitting, onEvi
       <Input className="max-w-xs" aria-label="Bulk feedback" placeholder="Comment for selected learners" value={bulkComment} onChange={(e) => setBulkComment(e.target.value)} />
       <Button variant="outline" disabled={!selected.length || !!pending || saving} onClick={() => { for (const s of baseline.filter((r) => selected.includes(r.studentProfileId))) edit(s, { comment: bulkComment }); }}>Apply comment</Button>
     </div>
-    <p className="text-xs text-muted-foreground">Enter/↑/↓ moves between learners. Paste marks, or spreadsheet columns: mark → participation → comment. Blank cells stay blank.</p>
+    <p className="text-xs text-muted-foreground">{observation ? 'Choose the level each child is working at. Confident — on their own; Developing — with a little help; Beginning — with help; Support — needs more time.' : 'Enter/↑/↓ moves between learners. Paste marks, or spreadsheet columns: mark → participation → comment. Blank cells stay blank.'}</p>
     <div className="max-h-[65vh] overflow-auto rounded-lg border"><table className="w-full min-w-[850px] text-sm">
-      <thead className="sticky top-0 z-10 bg-muted"><tr><th className="p-2"><input type="checkbox" aria-label="Select visible learners" checked={visible.length > 0 && visible.every((s) => selected.includes(s.studentProfileId))} onChange={(e) => setSelected(e.target.checked ? visible.filter((s) => !rowLocked(s)).map((s) => s.studentProfileId) : [])} /></th><th className="p-2 text-left">Learner</th><th className="p-2 text-left">Mark / {a.maxScore}</th><th className="p-2 text-left">Participation</th><th className="p-2 text-left">Feedback</th><th className="p-2 text-left">Status</th><th className="p-2"><span className="sr-only">Evidence</span></th></tr></thead>
+      <thead className="sticky top-0 z-10 bg-muted"><tr><th className="p-2"><input type="checkbox" aria-label="Select visible learners" checked={visible.length > 0 && visible.every((s) => selected.includes(s.studentProfileId))} onChange={(e) => setSelected(e.target.checked ? visible.filter((s) => !rowLocked(s)).map((s) => s.studentProfileId) : [])} /></th><th className="p-2 text-left">Learner</th><th className="p-2 text-left">{observation ? 'Level' : <>Mark / {a.maxScore}</>}</th><th className="p-2 text-left">Participation</th><th className="p-2 text-left">Feedback</th><th className="p-2 text-left">Status</th><th className="p-2"><span className="sr-only">Evidence</span></th></tr></thead>
       <tbody>{visible.map((s, index) => {
         const cell = cells[s.studentProfileId] ?? cellOf(s);
         const locked = rowLocked(s) || saving || !!pending;
@@ -183,7 +201,8 @@ export function ProductionMarkbook({ sheet, onSaved, onSubmit, submitting, onEvi
         return <tr key={s.studentProfileId} className={`border-t ${cells[s.studentProfileId] ? 'bg-amber-50/40 dark:bg-amber-950/10' : ''}`}>
           <td className="p-2"><input type="checkbox" aria-label={`Select ${s.name}`} disabled={locked} checked={selected.includes(s.studentProfileId)} onChange={(e) => setSelected((ids) => e.target.checked ? [...ids, s.studentProfileId] : ids.filter((id) => id !== s.studentProfileId))} /></td>
           <td className="p-2"><span className="font-medium">{s.name}</span><div className="text-xs text-muted-foreground">{s.admissionNo}</div></td>
-          <td className="p-2"><input aria-label={`Mark for ${s.name}`} aria-invalid={invalid} ref={(el) => { inputs.current[s.studentProfileId] = el; }} className={`h-9 w-24 rounded border bg-card px-2 tabular-nums disabled:opacity-60 ${invalid ? 'border-destructive' : ''}`} inputMode="decimal" disabled={locked || NO_SCORE.includes(cell.participation)} value={cell.marks} placeholder="—" onChange={(e) => edit(s, { marks: e.target.value })} onPaste={(e) => paste(e, index)} onKeyDown={(e) => { if (['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); const target = visible[index + (e.key === 'ArrowUp' ? -1 : 1)]; if (target) inputs.current[target.studentProfileId]?.focus(); } }} /></td>
+          {observation ? <td className="p-2"><select aria-label={`Level for ${s.name}`} className="h-9 w-36 rounded border bg-card px-2 text-sm disabled:opacity-60" disabled={locked || NO_SCORE.includes(cell.participation)} value={levelOf(cell.marks, a.maxScore)} onChange={(e) => { const level = OBSERVATION_LEVELS.find((l) => l.label === e.target.value); edit(s, { marks: level ? String(Math.round(level.share * a.maxScore * 100) / 100) : '' }); }}><option value="">—</option>{OBSERVATION_LEVELS.map((l) => <option key={l.label} value={l.label}>{l.label}</option>)}</select></td> :
+          <td className="p-2"><input aria-label={`Mark for ${s.name}`} aria-invalid={invalid} ref={(el) => { inputs.current[s.studentProfileId] = el; }} className={`h-9 w-24 rounded border bg-card px-2 tabular-nums disabled:opacity-60 ${invalid ? 'border-destructive' : ''}`} inputMode="decimal" disabled={locked || NO_SCORE.includes(cell.participation)} value={cell.marks} placeholder="—" onChange={(e) => edit(s, { marks: e.target.value })} onPaste={(e) => paste(e, index)} onKeyDown={(e) => { if (['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); const target = visible[index + (e.key === 'ArrowUp' ? -1 : 1)]; if (target) inputs.current[target.studentProfileId]?.focus(); } }} /></td>}
           <td className="p-2"><select aria-label={`Participation for ${s.name}`} className="h-9 rounded border bg-card px-2 text-sm disabled:opacity-60" disabled={locked} value={cell.participation} onChange={(e) => edit(s, { participation: e.target.value })}>{PARTICIPATION_OPTIONS.map((p) => <option key={p} value={p}>{p.replaceAll('_', ' ')}</option>)}</select></td>
           <td className="p-2"><Input aria-label={`Feedback for ${s.name}`} disabled={locked} value={cell.comment} onChange={(e) => edit(s, { comment: e.target.value })} maxLength={4000} /></td>
           <td className="p-2 text-xs text-muted-foreground">{s.approvalStatus === 'approved' && <CheckCircle2 className="mr-1 inline h-3.5 w-3.5 text-emerald-600" />}{cells[s.studentProfileId] ? 'Unsaved draft' : s.approvalStatus}</td>
