@@ -428,12 +428,23 @@ export class StudentService extends BaseCrudService<StudentProfile, CreateStuden
   }
 
   /** Active learners placed in a class now, with their stream. */
-  async listByClass(classId: string) {
-    await this.dataScope?.assertMayReadClass(classId);
+  /**
+   * The class list. `sectionId` narrows it to one stream of that class, so a
+   * teacher takes the register for "P4 West" rather than all of P4. The stream
+   * must belong to the class — otherwise the filter would silently return an
+   * empty roster and look like an empty class.
+   */
+  async listByClass(classId: string, sectionId?: string) {
+    await this.dataScope?.assertMayReadClass(classId, sectionId ?? null);
+    if (sectionId) {
+      const section = await this.prisma.client.section.findFirst({ where: { id: sectionId }, select: { classId: true } });
+      if (!section) throw new NotFoundException('Stream not found');
+      if (section.classId !== classId) throw new BadRequestException('That stream belongs to another class');
+    }
     // A stream-only reader sees their stream of the class, not all of it (D4).
     const scopeWhere = this.dataScope ? await this.dataScope.studentReadWhere() : null;
     const rows = await this.prisma.client.studentProfile.findMany({
-      where: { AND: [{ status: 'active' }, this.placements.studentWhere({ classIds: [classId] }), ...(scopeWhere ? [scopeWhere] : [])] } as any,
+      where: { AND: [{ status: 'active' }, this.placements.studentWhere({ classIds: [classId], ...(sectionId ? { sectionIds: [sectionId] } : {}) }), ...(scopeWhere ? [scopeWhere] : [])] } as any,
       orderBy: { admissionNo: 'asc' },
       include: { partner: true },
     });

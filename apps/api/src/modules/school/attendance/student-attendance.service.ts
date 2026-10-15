@@ -191,11 +191,40 @@ export class StudentAttendanceService {
   }
 
   /** Daily register for a class. */
-  async dailyRegister(classId: string, date: Date | string, periodId?: string) {
+  /**
+   * The learners placed in one stream of a class at any point in a window.
+   *
+   * Registers are filtered by WHO was in the stream, not by the `sectionId`
+   * stored on the attendance row: a register taken for the whole class saves
+   * rows with no section, and those marks still belong to the stream's pupils.
+   * Returns null when no stream is asked for, so callers skip the filter.
+   */
+  private async streamStudentIds(classId: string, sectionId: string | undefined, from: Date, to: Date): Promise<string[] | null> {
+    if (!sectionId) return null;
+    const section = await this.prisma.client.section.findFirst({ where: { id: sectionId }, select: { classId: true } });
+    if (!section) throw new NotFoundException('Stream not found');
+    if (section.classId !== classId) throw new BadRequestException('That stream belongs to another class');
+    const placements = await this.prisma.client.enrollmentPlacement.findMany({
+      where: {
+        sectionId,
+        classCohort: { classId },
+        effectiveFrom: { lt: to },
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: from } }],
+        enrollment: { status: { not: 'CANCELLED' } },
+      },
+      select: { enrollment: { select: { studentProfileId: true } } },
+    });
+    return [...new Set(placements.map((p: any) => p.enrollment.studentProfileId))];
+  }
+
+  async dailyRegister(classId: string, date: Date | string, periodId?: string, sectionId?: string) {
     const d = new Date(date);
+    if (isNaN(d.getTime())) throw new BadRequestException('Invalid date');
+    const dayStart = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const ids = await this.streamStudentIds(classId, sectionId, dayStart, new Date(dayStart.getTime() + 86400000));
     return this.prisma.client.studentAttendance.findMany({
       // P5: null periodId → the daily register; a periodId → that period's register.
-      where: { classId, date: d, periodId: periodId ?? null },
+      where: { classId, date: d, periodId: periodId ?? null, ...(ids ? { studentProfileId: { in: ids } } : {}) },
       include: { studentProfile: { include: { partner: true } }, statusConfig: true },
       orderBy: { studentProfile: { admissionNo: 'asc' } } as any,
     });
@@ -362,7 +391,7 @@ export class StudentAttendanceService {
    * roll-up (`present`/`absent`/`late`) derived from the config flags, and the
    * status catalog so the UI can render labels/colours/columns dynamically.
    */
-  async report(classId: string, startDate: Date | string, endDate: Date | string) {
+  async report(classId: string, startDate: Date | string, endDate: Date | string, sectionId?: string) {
     const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 86400000);
     const end = endDate ? new Date(endDate) : new Date();
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
@@ -370,9 +399,10 @@ export class StudentAttendanceService {
     }
     end.setHours(23, 59, 59, 999);
 
+    const ids = await this.streamStudentIds(classId, sectionId, start, end);
     const [rows, catalog, policy] = await Promise.all([
       this.prisma.client.studentAttendance.findMany({
-        where: { classId, date: { gte: start, lte: end } },
+        where: { classId, date: { gte: start, lte: end }, ...(ids ? { studentProfileId: { in: ids } } : {}) },
         include: { statusConfig: true },
       }),
       this.statusConfig.list(),
@@ -402,6 +432,7 @@ export class StudentAttendanceService {
 
     return {
       classId,
+      sectionId: sectionId ?? null,
       start: start.toISOString(),
       end: end.toISOString(),
       statuses: catalog,

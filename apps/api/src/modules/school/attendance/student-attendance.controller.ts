@@ -66,8 +66,13 @@ export class StudentAttendanceController {
   @Get('register')
   @ScopedToClass('classId')
   @RequirePermissions(PERMISSIONS.school.read)
-  register(@Query('classId') classId: string, @Query('date') date: string, @Query('periodId') periodId?: string) {
-    return this.attendance.dailyRegister(classId, date, periodId || undefined);
+  register(
+    @Query('classId') classId: string,
+    @Query('date') date: string,
+    @Query('periodId') periodId?: string,
+    @Query('sectionId') sectionId?: string,
+  ) {
+    return this.attendance.dailyRegister(classId, date, periodId || undefined, sectionId || undefined);
   }
 
   @Get('weekly')
@@ -96,8 +101,9 @@ export class StudentAttendanceController {
     @Query('classId') classId: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
+    @Query('sectionId') sectionId?: string,
   ) {
-    return this.attendance.report(classId, startDate, endDate);
+    return this.attendance.report(classId, startDate, endDate, sectionId || undefined);
   }
 
   /** Attendance correction (audit-logged). Own class only, unless org-wide. */

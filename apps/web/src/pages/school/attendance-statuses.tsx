@@ -21,6 +21,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { notify } from '@/lib/notify';
+import { attendanceStatusColor } from '@erp/shared';
 
 interface FormState {
   code: string;
@@ -154,13 +155,13 @@ export function SchoolAttendanceStatusesPage() {
                   <td className="px-4 py-2 text-muted-foreground">{i + 1}</td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2">
-                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: r.color }} />
+                      <span className="h-3 w-3 rounded-full" style={{ backgroundColor: attendanceStatusColor(r as any, r.code) }} />
                       <span className="font-medium">{r.label}</span>
                       {r.isDefault && <Badge className="bg-emerald-600 text-white">default</Badge>}
                     </div>
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
-                  <td className="px-4 py-2"><code className="text-xs">{r.color}</code></td>
+                  <td className="px-4 py-2"><code className="text-xs">{attendanceStatusColor(r as any, r.code)}</code></td>
                   <td className="px-4 py-2"><div className="flex flex-wrap gap-1">
                     {flagBadge('Present', r.isPresent)}
                     {flagBadge('Late', r.isLate)}

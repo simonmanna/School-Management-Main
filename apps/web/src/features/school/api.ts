@@ -592,7 +592,7 @@ export interface UpdateAdmissionInput {
   customFields?: Record<string, unknown>;
 }
 
-export function useAdmissions(params: { page?: number; pageSize?: number; search?: string; status?: string } = {}) {
+export function useAdmissions(params: { page?: number; pageSize?: number; search?: string; status?: string; applyingForClassId?: string } = {}) {
   return useQuery({
     queryKey: ['school', 'admissions', params],
     queryFn: async () => (await api.get<Paginated<AdmissionApplication>>(`${S}/admissions`, { params })).data,
@@ -3497,11 +3497,13 @@ export interface RosterStudent {
   partner?: { name: string } | null;
 }
 
-export function useClassRoster(classId: string | undefined) {
+/** The class list, narrowed to one stream of that class when `sectionId` is set. */
+export function useClassRoster(classId: string | undefined, sectionId?: string) {
   return useQuery({
-    queryKey: ['school', 'roster', classId],
+    queryKey: ['school', 'roster', classId, sectionId || 'all'],
     enabled: !!classId,
-    queryFn: async () => (await api.get<RosterStudent[]>(`${S}/students/by-class/${classId}`)).data,
+    queryFn: async () =>
+      (await api.get<RosterStudent[]>(`${S}/students/by-class/${classId}`, { params: { sectionId: sectionId || undefined } })).data,
   });
 }
 
@@ -3522,12 +3524,12 @@ export interface AttendanceRow {
  * of the query key: a daily register and a lesson register are different
  * documents and must never share a cache entry or seed each other's marks.
  */
-export function useAttendanceRegister(classId: string | undefined, date: string | undefined, periodId?: string) {
+export function useAttendanceRegister(classId: string | undefined, date: string | undefined, periodId?: string, sectionId?: string) {
   return useQuery({
-    queryKey: ['school', 'register', classId, date, periodId || 'daily'],
+    queryKey: ['school', 'register', classId, date, periodId || 'daily', sectionId || 'all'],
     enabled: !!classId && !!date,
     queryFn: async () =>
-      (await api.get<AttendanceRow[]>(`${S}/attendance/register`, { params: { classId, date, periodId: periodId || undefined } })).data,
+      (await api.get<AttendanceRow[]>(`${S}/attendance/register`, { params: { classId, date, periodId: periodId || undefined, sectionId: sectionId || undefined } })).data,
   });
 }
 
@@ -3591,17 +3593,19 @@ export interface AttendanceReportRow {
 }
 export interface AttendanceReport {
   classId: string;
+  sectionId?: string | null;
   start: string;
   end: string;
   statuses: AttendanceStatusConfig[];
   summary: { present: number; absent: number; late: number; total: number };
   byDate: AttendanceReportRow[];
 }
-export function useAttendanceReport(classId: string | undefined, start: string | undefined, end: string | undefined) {
+export function useAttendanceReport(classId: string | undefined, start: string | undefined, end: string | undefined, sectionId?: string) {
   return useQuery({
-    queryKey: ['school', 'attendance-report', classId, start, end],
+    queryKey: ['school', 'attendance-report', classId, start, end, sectionId || 'all'],
     enabled: !!classId && !!start && !!end,
-    queryFn: async () => (await api.get<AttendanceReport>(`${S}/attendance/report`, { params: { classId, startDate: start, endDate: end } })).data,
+    queryFn: async () =>
+      (await api.get<AttendanceReport>(`${S}/attendance/report`, { params: { classId, startDate: start, endDate: end, sectionId: sectionId || undefined } })).data,
   });
 }
 

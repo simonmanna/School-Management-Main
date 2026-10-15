@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Save, Clock, ShieldCheck, BarChart3 } from 'lucide-react';
 import {
-  useClasses, useClassRoster, usePeriods,
+  useClasses, useClassRoster, usePeriods, useSectionsForClass,
   useAttendanceRegister, useMarkAttendance, useCorrectAttendance,
   useAttendanceThresholds, useUpsertAttendanceThreshold, useAttendanceWeekly,
   useAttendanceStatuses,
@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { notify } from '@/lib/notify';
 import { useSchoolToday } from '@/lib/format';
-import { pickPresentStatus } from '@erp/shared';
+import { pickPresentStatus, attendanceStatusColor } from '@erp/shared';
 import { enqueue } from '@/features/school/offline-queue';
 import { OfflineBanner } from './_components/offline-banner';
 
@@ -27,6 +27,7 @@ const FALLBACK_STATUSES: AttendanceStatusConfig[] = [
   { id: 'present', organizationId: '', code: 'present', label: 'Present', color: '#16a34a', isDefault: true, sortOrder: 1, isPresent: true, isLate: false, isAbsent: false, createdAt: '', updatedAt: '' },
   { id: 'absent', organizationId: '', code: 'absent', label: 'Absent', color: '#dc2626', isDefault: false, sortOrder: 2, isPresent: false, isLate: false, isAbsent: true, createdAt: '', updatedAt: '' },
   { id: 'late', organizationId: '', code: 'late', label: 'Late', color: '#f59e0b', isDefault: false, sortOrder: 3, isPresent: false, isLate: true, isAbsent: false, createdAt: '', updatedAt: '' },
+  { id: 'excused', organizationId: '', code: 'excused', label: 'Excused', color: '#eab308', isDefault: false, sortOrder: 4, isPresent: false, isLate: false, isAbsent: true, createdAt: '', updatedAt: '' },
 ];
 
 /**
@@ -47,15 +48,30 @@ function useStatusCatalog() {
     [STATUS_LIST],
   );
   const labelOf = (code: string) => STATUS_BY_CODE[code]?.label ?? code;
-  const colorOf = (code: string) => STATUS_BY_CODE[code]?.color ?? '#6b7280';
+  // Each status gets its own hue even when the catalog row has no colour saved
+  // (green present / red absent / amber late / yellow excused) — a selected chip
+  // has to be readable as a status at a glance, not just as a pressed button.
+  const colorOf = (code: string) => attendanceStatusColor(STATUS_BY_CODE[code], code);
   const badgeStyle = (code: string) => ({ backgroundColor: colorOf(code), color: '#fff' });
-  return { STATUS_LIST, STATUS_CODES, STATUS_BY_CODE, labelOf, colorOf, badgeStyle };
+  // A status colour only helps if it is visible at a glance: the selected chip
+  // is filled, the unselected ones are outlined in the same hue, and the row
+  // itself is washed with ~8% of it so a register reads as colour, not text.
+  const tint = (code: string, alpha: string) => {
+    const c = colorOf(code);
+    return /^#[0-9a-f]{6}$/i.test(c) ? `${c}${alpha}` : 'transparent';
+  };
+  const rowStyle = (code?: string) => (code ? { backgroundColor: tint(code, '14') } : undefined);
+  const outlineStyle = (code: string) => ({ color: colorOf(code), borderColor: tint(code, '66'), backgroundColor: tint(code, '0f') });
+  return { STATUS_LIST, STATUS_CODES, STATUS_BY_CODE, labelOf, colorOf, badgeStyle, rowStyle, outlineStyle };
 }
 
 export function SchoolAttendancePage() {
   const [tab, setTab] = useState<'take' | 'correct' | 'thresholds' | 'analytics'>('take');
   const { data: classes } = useClasses();
   const [classId, setClassId] = useState('');
+  // Streams are optional: '' means the whole class (ADR: a school may run a
+  // class with no subdivision at all, and many registers are class-wide).
+  const [sectionId, setSectionId] = useState('');
   const today = useSchoolToday();
   const [date, setDate] = useState(today);
   const [periodId, setPeriodId] = useState('');
@@ -77,10 +93,10 @@ export function SchoolAttendancePage() {
         </TabsList>
         {/* Kept mounted so unsaved register marks survive a look at another tab (R09). */}
         <TabsContent value="take" forceMount className="pt-4 data-[state=inactive]:hidden">
-          <TakeTab classId={classId} setClassId={setClassId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
+          <TakeTab classId={classId} setClassId={setClassId} sectionId={sectionId} setSectionId={setSectionId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
         </TabsContent>
         <TabsContent value="correct" className="pt-4">
-          <CorrectTab classId={classId} setClassId={setClassId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
+          <CorrectTab classId={classId} setClassId={setClassId} sectionId={sectionId} setSectionId={setSectionId} date={date} setDate={setDate} periodId={periodId} setPeriodId={setPeriodId} periods={periods} classes={classes} />
         </TabsContent>
         <TabsContent value="thresholds" className="pt-4">
           <ThresholdsTab classId={classId} setClassId={setClassId} classes={classes} />
@@ -94,20 +110,21 @@ export function SchoolAttendancePage() {
 }
 
 /* ── Take attendance (P0: daily + period, late, early, reasons) ── */
-function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
-  const { STATUS_LIST, STATUS_CODES, labelOf, badgeStyle } = useStatusCatalog();
+function TakeTab({ classId, setClassId, sectionId, setSectionId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
+  const { STATUS_LIST, STATUS_CODES, labelOf, colorOf, badgeStyle, rowStyle, outlineStyle } = useStatusCatalog();
   // R10: "All present" means the status the school flags as present, not the first listed.
   const presentCode = pickPresentStatus(STATUS_LIST)?.code ?? null;
-  const { data: roster } = useClassRoster(classId || undefined);
+  const { data: streams } = useSectionsForClass(classId || undefined);
+  const { data: roster } = useClassRoster(classId || undefined, sectionId || undefined);
   // R01: the selected period is part of the read, not only the write — the
   // daily register and each lesson register are loaded and cached separately.
   const { data: register, isLoading: loadingRegister, isFetching: fetchingRegister } =
-    useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined);
+    useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined, sectionId || undefined);
   const mark = useMarkAttendance();
   const [marks, setMarksState] = useState<Record<string, { status: AttendanceStatus; minutesLate?: number; earlyDepartureMinutes?: number; reason?: string }>>({});
   // R09: unsaved marks belong to one register. A background refetch must not
   // overwrite them, and switching register asks before throwing them away.
-  const registerKey = `${classId}|${date}|${periodId || 'daily'}`;
+  const registerKey = `${classId}|${sectionId || 'all'}|${date}|${periodId || 'daily'}`;
   const [dirty, setDirty] = useState(false);
   const seededKey = useRef<string | null>(null);
   const setMarks = (next: typeof marks) => { setMarksState(next); setDirty(true); };
@@ -143,11 +160,12 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
     for (const s of students) { const m = marks[s.id]; if (m) c[m.status] = (c[m.status] ?? 0) + 1; }
     return c;
   }, [students, marks]);
+  const marked = useMemo(() => students.filter((s: any) => marks[s.id]?.status).length, [students, marks]);
 
   const save = async () => {
     const entries = students.filter((s: any) => marks[s.id]).map((s: any) => ({ studentProfileId: s.id, status: marks[s.id].status, minutesLate: marks[s.id].minutesLate, earlyDepartureMinutes: marks[s.id].earlyDepartureMinutes, reason: marks[s.id].reason }));
     if (entries.length === 0) return notify.error('Mark at least one pupil');
-    const payload = { date, classId, periodId: periodId || undefined, entries };
+    const payload = { date, classId, sectionId: sectionId || undefined, periodId: periodId || undefined, entries };
     try {
       await mark.mutateAsync(payload);
       setDirty(false);
@@ -160,7 +178,7 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
       if (!status || status >= 500) {
         setDirty(false);
         await enqueue({
-          key: `attendance:${classId}:${date}:${periodId || 'daily'}`,
+          key: `attendance:${classId}:${sectionId || 'all'}:${date}:${periodId || 'daily'}`,
           kind: 'attendance',
           endpoint: '/school/attendance/mark',
           payload,
@@ -182,10 +200,18 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label className="text-xs">Class</Label>
-          <select className={sel} value={classId} onChange={(e) => { const v = e.target.value; guarded(() => setClassId(v)); }}>
+          <select className={sel} value={classId} onChange={(e) => { const v = e.target.value; guarded(() => { setClassId(v); setSectionId(''); }); }}>
             <option value="">Select class…</option>{(classes?.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
+        {(streams?.length ?? 0) > 0 && (
+          <div className="space-y-1">
+            <Label className="text-xs">Stream (optional)</Label>
+            <select className={sel} value={sectionId} onChange={(e) => { const v = e.target.value; guarded(() => setSectionId(v)); }}>
+              <option value="">Whole class</option>{(streams ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="space-y-1">
           <Label className="text-xs">Date</Label>
           <input type="date" className={sel} value={date} onChange={(e) => { const v = e.target.value; guarded(() => setDate(v)); }} />
@@ -203,39 +229,67 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
       {!classId && <p className="text-sm text-muted-foreground">Pick a class to load its roster.</p>}
       {classId && (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">{students.length} students ·{' '}
-              {STATUS_CODES.filter((s) => summary[s]).map((s) => <span key={s} className="mr-2">{summary[s]} {labelOf(s).toLowerCase()}</span>)}
-            </CardTitle>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="text-base">
+                {students.length} students
+                {sectionId ? <span className="ml-1 font-normal text-muted-foreground">· {(streams ?? []).find((s: any) => s.id === sectionId)?.name ?? 'stream'}</span> : null}
+              </CardTitle>
+              <span className="text-xs text-muted-foreground">{marked} marked · {students.length - marked} left</span>
+              {STATUS_CODES.filter((s) => summary[s]).map((s) => (
+                <span key={s} className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium" style={outlineStyle(s)}>
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: colorOf(s) }} />
+                  {summary[s]} {labelOf(s).toLowerCase()}
+                </span>
+              ))}
+            </div>
             <div className="flex items-center gap-2">
-              {dirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
+              {dirty && <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">Unsaved changes</span>}
               <Button onClick={save} disabled={mark.isPending || !ready}><Save className="h-4 w-4" /> Save</Button>
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Adm.</th><th className="px-4 py-2">Name</th><th className="px-4 py-2">Status</th><th className="px-4 py-2">Detail</th></tr></thead>
+              <thead className="sticky top-0 z-10 border-b bg-card text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Adm.</th>
+                  <th className="px-4 py-2 font-medium">Name</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Note</th>
+                </tr>
+              </thead>
               <tbody>
                 {students.map((s: any) => {
                   const m = marks[s.id] ?? { status: undefined as any };
                   return (
-                    <tr key={s.id} className="border-b last:border-0">
-                      <td className="px-4 py-2 font-mono text-xs">{s.admissionNo}</td>
-                      <td className="px-4 py-2">{s.partner?.name ?? '—'}</td>
-                      <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUS_LIST.map((st) => (
-                        <button key={st.code} type="button" aria-pressed={m.status === st.code} aria-label={`${st.label} — ${s.partner?.name ?? s.admissionNo}`} disabled={!ready} onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
-                          className={`rounded px-2 py-1 text-xs capitalize ${m.status === st.code ? '' : 'bg-muted text-muted-foreground hover:bg-muted/70'}`} style={m.status === st.code ? badgeStyle(st.code) : undefined}>{st.label}</button>
-                      ))}</div></td>
+                    <tr key={s.id} className="border-b transition-colors last:border-0" style={rowStyle(m.status)}>
+                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{s.admissionNo}</td>
+                      <td className="px-4 py-2 font-medium">{s.partner?.name ?? '—'}</td>
+                      <td className="px-4 py-2"><div className="flex flex-wrap gap-1">{STATUS_LIST.map((st) => {
+                        const on = m.status === st.code;
+                        return (
+                          <button key={st.code} type="button" aria-pressed={on} aria-label={`${st.label} — ${s.partner?.name ?? s.admissionNo}`} disabled={!ready}
+                            onClick={() => setMarks({ ...marks, [s.id]: { ...m, status: st.code } })}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${on ? 'border-transparent shadow-sm' : 'hover:brightness-95'}`}
+                            style={on ? badgeStyle(st.code) : outlineStyle(st.code)}>
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: on ? '#fff' : colorOf(st.code) }} />
+                            {st.label}
+                          </button>
+                        );
+                      })}</div></td>
                       <td className="px-4 py-2">
-                        <div className="flex gap-1">
-                          <Input type="number" placeholder="late min" className="h-8 w-20" value={m.minutesLate ?? ''} onChange={(e) => setMarks({ ...marks, [s.id]: { ...m, minutesLate: Number(e.target.value) || undefined } })} />
-                          <Input type="number" placeholder="left early min" className="h-8 w-20" value={m.earlyDepartureMinutes ?? ''} onChange={(e) => setMarks({ ...marks, [s.id]: { ...m, earlyDepartureMinutes: Number(e.target.value) || undefined } })} />
-                          <Input placeholder="reason" className="h-8 w-32" value={m.reason ?? ''} onChange={(e) => setMarks({ ...marks, [s.id]: { ...m, reason: e.target.value } })} />
-                        </div>
+                        {/* One generic note replaces the old late-minutes / early-minutes /
+                            reason trio: a teacher writes "20 min late" or "left early, sick".
+                            Minutes already stored on the record are carried through untouched. */}
+                        <Input placeholder="Add a note (optional)" className="h-8 w-full min-w-[12rem]" disabled={!ready}
+                          value={m.reason ?? ''} onChange={(e) => setMarks({ ...marks, [s.id]: { ...m, reason: e.target.value || undefined } })} />
                       </td>
                     </tr>
                   );
                 })}
+                {students.length === 0 && (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{sectionId ? 'No pupils placed in this stream.' : 'No pupils on this class roster.'}</td></tr>
+                )}
               </tbody>
             </table>
           </CardContent>
@@ -246,9 +300,10 @@ function TakeTab({ classId, setClassId, date, setDate, periodId, setPeriodId, pe
 }
 
 /* ── Corrections (P0d) ── */
-function CorrectTab({ classId, setClassId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
-  const { STATUS_LIST, labelOf, badgeStyle } = useStatusCatalog();
-  const { data: register } = useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined);
+function CorrectTab({ classId, setClassId, sectionId, setSectionId, date, setDate, periodId, setPeriodId, periods, classes }: any) {
+  const { STATUS_LIST, labelOf, colorOf, badgeStyle, rowStyle } = useStatusCatalog();
+  const { data: streams } = useSectionsForClass(classId || undefined);
+  const { data: register } = useAttendanceRegister(classId || undefined, date || undefined, periodId || undefined, sectionId || undefined);
   const correct = useCorrectAttendance();
   const [target, setTarget] = useState<any>(null);
   const rows = register ?? [];
@@ -265,9 +320,15 @@ function CorrectTab({ classId, setClassId, date, setDate, periodId, setPeriodId,
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1"><Label className="text-xs">Class</Label>
-          <select className={sel} value={classId} onChange={(e) => setClassId(e.target.value)}>
+          <select className={sel} value={classId} onChange={(e) => { setTarget(null); setSectionId(''); setClassId(e.target.value); }}>
             <option value="">Select class…</option>{(classes?.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select></div>
+        {(streams?.length ?? 0) > 0 && (
+          <div className="space-y-1"><Label className="text-xs">Stream (optional)</Label>
+            <select className={sel} value={sectionId} onChange={(e) => { setTarget(null); setSectionId(e.target.value); }}>
+              <option value="">Whole class</option>{(streams ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select></div>
+        )}
         <div className="space-y-1"><Label className="text-xs">Date</Label><input type="date" className={sel} value={date} onChange={(e) => { setTarget(null); setDate(e.target.value); }} /></div>
         <div className="space-y-1"><Label className="text-xs">Register</Label>
           <select className={sel} value={periodId} onChange={(e) => { setTarget(null); setPeriodId(e.target.value); }}>
@@ -279,19 +340,22 @@ function CorrectTab({ classId, setClassId, date, setDate, periodId, setPeriodId,
           <CardHeader><CardTitle className="text-base">Records for {date}</CardTitle></CardHeader>
           <CardContent className="p-0">
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-4 py-2">Student</th><th className="px-4 py-2">Current</th><th className="px-4 py-2">Fix</th></tr></thead>
+              <thead className="sticky top-0 z-10 border-b bg-card text-left text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-4 py-2 font-medium">Student</th><th className="px-4 py-2 font-medium">Current</th><th className="px-4 py-2 font-medium">Note</th><th className="px-4 py-2 font-medium">Fix</th></tr></thead>
               <tbody>
                 {rows.map((r: any) => (
-                  <tr key={r.id} className="border-b last:border-0">
-                    <td className="px-4 py-2">{r.studentProfile?.partner?.name ?? r.studentProfileId?.slice(0, 8)}</td>
+                  <tr key={r.id} className="border-b transition-colors last:border-0" style={rowStyle(r.status)}>
+                    <td className="px-4 py-2 font-medium">{r.studentProfile?.partner?.name ?? r.studentProfileId?.slice(0, 8)}</td>
                     <td className="px-4 py-2"><Badge style={badgeStyle(r.status)}>{labelOf(r.status)}</Badge></td>
+                    <td className="px-4 py-2 text-muted-foreground">{r.reason || '—'}</td>
                     <td className="px-4 py-2">
                       {target?.id === r.id ? (
                         <div className="flex flex-wrap items-center gap-1">
+                          <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: colorOf(target.status) }} />
                           <select className={sel + ' w-40'} value={target.status} onChange={(e) => setTarget({ ...target, status: e.target.value })}>
                             {STATUS_LIST.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
                           </select>
-                          <Input placeholder="note" className="h-8 w-32" value={target.correctionNote ?? ''} onChange={(e) => setTarget({ ...target, correctionNote: e.target.value })} />
+                          <Input placeholder="Note" className="h-8 w-36" value={target.reason ?? ''} onChange={(e) => setTarget({ ...target, reason: e.target.value })} />
+                          <Input placeholder="Why it changed" className="h-8 w-40" value={target.correctionNote ?? ''} onChange={(e) => setTarget({ ...target, correctionNote: e.target.value })} />
                           <Button size="sm" onClick={apply} disabled={correct.isPending}><ShieldCheck className="h-4 w-4" /> Save</Button>
                           <Button size="sm" variant="ghost" onClick={() => setTarget(null)}>Cancel</Button>
                         </div>
@@ -301,7 +365,7 @@ function CorrectTab({ classId, setClassId, date, setDate, periodId, setPeriodId,
                     </td>
                   </tr>
                 ))}
-                {rows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-muted-foreground">No records for this date.</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No records for this date.</td></tr>}
               </tbody>
             </table>
           </CardContent>
@@ -375,13 +439,21 @@ function AnalyticsTab({ classId, setClassId, classes, today }: any) {
           <CardHeader><CardTitle className="text-base">Weekly attendance</CardTitle></CardHeader>
           <CardContent>
             <table className="w-full text-sm">
-              <thead className="border-b text-left text-muted-foreground"><tr><th className="px-2 py-1">Day</th>{series.map((s) => <th key={s} className="px-2 py-1 capitalize" style={{ color: colorOf(s) }}>{labelOf(s)}</th>)}</tr></thead>
+              <thead className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-2 py-1 font-medium">Day</th>{series.map((s) => (
+                <th key={s} className="px-2 py-1 font-medium">
+                  <span className="inline-flex items-center gap-1.5" style={{ color: colorOf(s) }}>
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: colorOf(s) }} />{labelOf(s)}
+                  </span>
+                </th>
+              ))}</tr></thead>
               <tbody>
                 {days.map((d) => {
                   const row = weekly?.byDate?.[d] ?? {};
                   return (<tr key={d} className="border-b last:border-0">
                     <td className="px-2 py-1 font-medium">{new Date(d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</td>
-                    {series.map((s) => <td key={s} className="px-2 py-1">{row[s] ?? 0}</td>)}
+                    {series.map((s) => <td key={s} className="px-2 py-1">{row[s] ? (
+                      <Badge style={{ backgroundColor: colorOf(s), color: '#fff' }}>{row[s]}</Badge>
+                    ) : <span className="text-muted-foreground">0</span>}</td>)}
                   </tr>);
                 })}
               </tbody>

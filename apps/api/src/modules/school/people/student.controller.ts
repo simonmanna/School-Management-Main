@@ -23,8 +23,8 @@ export class StudentController {
 
   @Get('by-class/:classId')
   @RequirePermissions(PERMISSIONS.school.read)
-  byClass(@Param('classId') classId: string) {
-    return this.students.listByClass(classId);
+  byClass(@Param('classId') classId: string, @Query('sectionId') sectionId?: string) {
+    return this.students.listByClass(classId, sectionId || undefined);
   }
 
   @Get(':id')
