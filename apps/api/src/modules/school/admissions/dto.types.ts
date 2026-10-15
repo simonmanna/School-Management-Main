@@ -301,7 +301,10 @@ export class WaiveApplicationFeeDto {
   @IsOptional() @IsString() reason?: string;
 }
 
-/** `GET /school/admissions` — the paged worklist, filterable by status server-side. */
+/** `GET /school/admissions` — the paged worklist, filterable by status and
+ *  applied-for class server-side so a filter reaches every application, not
+ *  only the page currently loaded. */
 export class AdmissionListQueryDto extends PaginationDto {
   @IsOptional() @IsIn(ADMISSION_STATUSES) status?: string;
+  @IsOptional() @IsString() applyingForClassId?: string;
 }

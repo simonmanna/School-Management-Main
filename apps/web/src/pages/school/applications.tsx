@@ -22,7 +22,7 @@ import {
 // Single source of truth for the lifecycle. This page previously carried its own
 // copy of STATUS_META/NEXT_ACTIONS, identical to admissions.tsx and covering only
 // 7 of the 15 backend states.
-import { ACTION_LABELS, NEEDS_REASON, isApplicationLocked, statusMeta } from './_components/admission-status';
+import { ACTION_LABELS, NEEDS_REASON, STATUS_META, isApplicationLocked, statusMeta } from './_components/admission-status';
 import { ListPager } from '@/components/query-state';
 import { Input } from '@/components/ui/input';
 
@@ -51,7 +51,17 @@ export function SchoolApplicationsPage() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  const { data, isLoading } = useAdmissions({ page, pageSize: PAGE_SIZE, search: search.trim() || undefined });
+  // Status and class filters are applied by the API, so they reach every
+  // application rather than only the page currently loaded.
+  const [statusFilter, setStatusFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const { data, isLoading } = useAdmissions({
+    page,
+    pageSize: PAGE_SIZE,
+    search: search.trim() || undefined,
+    status: statusFilter || undefined,
+    applyingForClassId: classFilter || undefined,
+  });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
@@ -107,6 +117,28 @@ export function SchoolApplicationsPage() {
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
+          <select
+            className="rounded-md border bg-card px-3 py-2 text-sm"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by application status"
+          >
+            <option value="">All statuses</option>
+            {Object.keys(STATUS_META).map((s) => (
+              <option key={s} value={s}>{statusMeta(s).label}</option>
+            ))}
+          </select>
+          <select
+            className="rounded-md border bg-card px-3 py-2 text-sm"
+            value={classFilter}
+            onChange={(e) => { setClassFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by applying for class"
+          >
+            <option value="">All classes</option>
+            {(classes?.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
           <Button onClick={() => navigate('/school/applications/new')}>
             <Plus className="h-4 w-4" /> New application
           </Button>
@@ -131,7 +163,7 @@ export function SchoolApplicationsPage() {
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">Loading…</td></tr>
               )}
               {!isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{search ? 'No applications match.' : 'No applications yet. Create the first one.'}</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">{search || statusFilter || classFilter ? 'No applications match.' : 'No applications yet. Create the first one.'}</td></tr>
               )}
               {rows.map((a) => (
                 <tr

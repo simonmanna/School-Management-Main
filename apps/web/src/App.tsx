@@ -136,6 +136,7 @@ import { SchoolGradesLevelsPage } from '@/pages/school/grades-levels';
 import { SchoolSectionsPage } from '@/pages/school/sections';
 import { SchoolSettingsPage } from '@/pages/school/school-settings';
 import { SchoolStudentCategoriesPage } from '@/pages/school/student-categories';
+import { SchoolOverviewPage } from '@/pages/school/overview';
 import { SchoolSubjectsAdminPage } from '@/pages/school/subjects-admin';
 import { SchoolCurriculaPage } from '@/pages/school/curricula';
 import { SchoolTeacherCoverPage } from '@/pages/school/teacher-cover';
@@ -614,6 +615,7 @@ export function App() {
           <Route path="/school/management/streams" element={<Navigate to="/school/management/sections" replace />} />
           <Route path="/school/management/settings" element={<SchoolSettingsPage />} />
           <Route path="/school/management/student-categories" element={<SchoolStudentCategoriesPage />} />
+          <Route path="/school/overview" element={<SchoolOverviewPage />} />
           <Route path="/school/management/subjects" element={<SchoolSubjectsAdminPage />} />
           <Route path="/school/curricula" element={<SchoolCurriculaPage />} />
           <Route path="/school/teaching-load" element={<Navigate to="/school/teaching-allocation" replace />} />

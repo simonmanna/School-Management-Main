@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Pencil, Trash2, CheckCircle2, XCircle, Loader2, Tag } from 'lucide-react';
+import { Plus, Pencil, Trash2, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { notify } from '@/lib/notify';
@@ -29,6 +29,9 @@ export function SchoolStudentCategoriesPage() {
 
   const rows = (data ?? []).slice().sort((a: any, b: any) => a.name.localeCompare(b.name));
 
+  // Adding happens in a dialog opened from the header, so the list stays the
+  // page's only permanent content.
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [editing, setEditing] = useState<{ id: string; name: string; description: string | null } | null>(null);
@@ -41,11 +44,22 @@ export function SchoolStudentCategoriesPage() {
     try {
       await create.mutateAsync({ name: v, description: description.trim() || undefined });
       notify.success('Student category added');
-      setName('');
-      setDescription('');
+      closeAdd();
     } catch (e: any) {
       notify.error(e?.response?.data?.message ?? 'Could not add student category');
     }
+  };
+
+  const openAdd = () => {
+    setName('');
+    setDescription('');
+    setAdding(true);
+  };
+
+  const closeAdd = () => {
+    setAdding(false);
+    setName('');
+    setDescription('');
   };
 
   const startEdit = (r: any) => {
@@ -99,13 +113,22 @@ export function SchoolStudentCategoriesPage() {
             Group students for reporting and fee/sponsorship rules (e.g. Day-Scholar, Boarder, Sponsored, Orphan).
           </p>
         </div>
+        <Button onClick={openAdd} className="gap-1">
+          <Plus className="h-4 w-4" /> Add student category
+        </Button>
       </div>
 
       <div className="rounded-lg border bg-card">
         {isLoading ? (
           <div className="p-6 text-sm text-muted-foreground">Loading…</div>
         ) : rows.length === 0 ? (
-          <div className="p-6 text-sm text-muted-foreground">No student categories yet.</div>
+          <div className="p-6 text-sm text-muted-foreground">
+            No student categories yet.{' '}
+            <button type="button" className="font-medium text-primary underline" onClick={openAdd}>
+              Add the first one
+            </button>
+            .
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -150,24 +173,35 @@ export function SchoolStudentCategoriesPage() {
         )}
       </div>
 
-      <div className="rounded-lg border bg-card p-4">
-        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-          <Tag className="h-4 w-4" /> Add student category
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
-          <div className="space-y-1">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Boarder" />
+      <Dialog open={adding} onOpenChange={(o) => { if (!o) closeAdd(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add student category</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label>Name</Label>
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Boarder"
+                onKeyDown={(e) => { if (e.key === 'Enter') add(); }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
+            </div>
           </div>
-          <div className="space-y-1">
-            <Label>Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional" />
-          </div>
-          <Button onClick={add} disabled={create.isPending} className="gap-1">
-            {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
-          </Button>
-        </div>
-      </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeAdd}>Cancel</Button>
+            <Button onClick={add} disabled={create.isPending || !name.trim()} className="gap-1">
+              {create.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent>

@@ -2372,11 +2372,12 @@ export class AdmissionsService extends BaseCrudService<AdmissionApplication, Cre
    * Eligibility is deliberately NOT included: it hits capacity and documents per
    * application and belongs on the detail view, where the Enroll dialog fetches it.
    */
-  async listWithWorkflow(query: { page?: number; pageSize?: number; search?: string; status?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }) {
+  async listWithWorkflow(query: { page?: number; pageSize?: number; search?: string; status?: string; applyingForClassId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }) {
     const pageNo = Math.max(1, Number(query.page) || DEFAULT_PAGE);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(query.pageSize) || DEFAULT_PAGE_SIZE));
     const where: Record<string, unknown> = {};
     if (query.status) where.status = query.status;
+    if (query.applyingForClassId) where.applyingForClassId = query.applyingForClassId;
     if (query.search) {
       where.OR = this.searchFields.map((field) => ({ [field]: { contains: query.search, mode: 'insensitive' } }));
     }

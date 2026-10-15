@@ -22,7 +22,6 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthStore } from '@/stores/auth.store';
 import { PERMISSIONS } from '@erp/shared';
-import { SetupChecklist } from './_components/SetupChecklist';
 
 // Amount in the school's currency; the tiles used to prefix a literal "UGX"
 // and print two decimals UGX does not have.
@@ -107,16 +106,16 @@ export function SchoolDashboardPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {/* The term heading and the setup checklist moved to
+          Settings → School Overview (/school/overview); this page is the
+          running term's work queue and figures. */}
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {currentTerm ? currentTerm.name : 'This term'} at a glance
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
-          What is waiting on someone, how the term is marked, and where the fees stand.
+          {currentTerm ? `${currentTerm.name} — ` : ''}what is waiting on someone, how the term is marked,
+          and where the fees stand.
         </p>
       </div>
-
-      <SetupChecklist />
 
       {/* ── Work queue ─────────────────────────────────────────────────────
           The dashboard used to be finance and headcount only, so nothing on it

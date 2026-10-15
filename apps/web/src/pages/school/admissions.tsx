@@ -39,6 +39,7 @@ export function SchoolAdmissionsPage() {
   const [offerFor, setOfferFor] = useState<AdmissionApplication | null>(null);
   const [offerForm, setOfferForm] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [classFilter, setClassFilter] = useState<string>('');
   // Decision-reason dialog state (Task 1): replaces the legacy window.prompt.
   const [decision, setDecision] = useState<{ app: AdmissionApplication; action: AdmissionAction } | null>(null);
   const [feeFor, setFeeFor] = useState<AdmissionApplication | null>(null);
@@ -48,7 +49,13 @@ export function SchoolAdmissionsPage() {
   const [search, setSearch] = useState('');
   // Status and search are applied by the API so they reach every application,
   // not only the page that happens to be loaded.
-  const { data, isLoading } = useAdmissions({ page, pageSize: PAGE_SIZE, status: statusFilter || undefined, search: search.trim() || undefined });
+  const { data, isLoading } = useAdmissions({
+    page,
+    pageSize: PAGE_SIZE,
+    status: statusFilter || undefined,
+    applyingForClassId: classFilter || undefined,
+    search: search.trim() || undefined,
+  });
   const { data: years } = useAcademicYears();
   const { data: classes } = useClasses();
   const act = useAdmissionAction();
@@ -167,10 +174,22 @@ export function SchoolAdmissionsPage() {
             className="rounded-md border bg-card px-3 py-2 text-sm"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by application status"
           >
             <option value="">All statuses</option>
             {Object.keys(STATUS_META).map((s) => (
               <option key={s} value={s}>{statusMeta(s).label}</option>
+            ))}
+          </select>
+          <select
+            className="rounded-md border bg-card px-3 py-2 text-sm"
+            value={classFilter}
+            onChange={(e) => { setClassFilter(e.target.value); setPage(1); }}
+            aria-label="Filter by applying for class"
+          >
+            <option value="">All classes</option>
+            {(classes?.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
           <Button onClick={openCreate}>
@@ -200,7 +219,7 @@ export function SchoolAdmissionsPage() {
                 )}
                 {!isLoading && rows.length === 0 && (
                   <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    {statusFilter || search ? 'No applications match.' : 'No applications yet. Create the first one.'}
+                    {statusFilter || classFilter || search ? 'No applications match.' : 'No applications yet. Create the first one.'}
                   </td></tr>
                 )}
                 {rows.map((a) => {

@@ -684,6 +684,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/settings/devices', label: 'Offline devices', icon: Smartphone, permission: PERMISSIONS.organization.read },
       { to: '/settings/company', label: 'Company Settings', icon: Landmark, permission: PERMISSIONS.setting.read },
       { to: '/settings/developer', label: 'Developer Settings', icon: SettingsIcon, permission: PERMISSIONS.setting.read },
+      // Setup state of the school — moved off the dashboard.
+      { to: '/school/overview', label: 'School Overview', icon: LayoutDashboard, permission: PERMISSIONS.school.read },
       // Plain-language walkthrough of the school year and who does what.
       { to: '/school/guide', label: 'How it works', icon: BookOpen, permission: PERMISSIONS.school.read },
     ],
